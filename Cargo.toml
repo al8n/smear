@@ -1,13 +1,15 @@
 [workspace]
 members = [
-  "crates/*"
+  "derive",
+  "smear"
 ]
+resolver = "2"
 
 
 [workspace.package]
 version = "0.0.0"
 edition = "2021"
-repository = "https://github.com/al8n/crates"
-homepage = "https://github.com/al8n/crates"
+repository = "https://github.com/al8n/smear"
+homepage = "https://github.com/al8n/smear"
 license = "Apache-2.0/MIT"
 
