@@ -21,6 +21,13 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let vis = &opts.vis;
   let default = opts.default.unwrap_or(true);
   let possible_names = opts.possible_names();
+  let short = match opts.short() {
+    Some(short) => quote!(::core::option::Option::Some(#short)),
+    None => quote!(::core::option::Option::None),
+  };
+  let long = opts.long();
+  let aliases = &opts.aliases.names;
+
   Ok(quote! {
     #[derive(
       ::core::fmt::Debug,
@@ -70,16 +77,40 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
 
     #[automatically_derived]
-    impl #struct_name {
-      /// Parses from the given directive.
-      #vis fn parse(directive: ::smear::apollo_parser::ast::Directive) -> ::core::result::Result<Self, #diagnostic_name> {
-        if let ::core::option::Option::Some(args) = directive.arguments() {
+    impl ::smear::Diagnosticable for #struct_name {
+      type Error = #diagnostic_name;
+      type Node = ::smear::apollo_parser::ast::Directive;
+
+      fn parse(node: Self::Node) -> Result<Self, Self::Error>
+      where
+        Self: Sized
+      {
+        if let ::core::option::Option::Some(args) = node.arguments() {
           ::core::result::Result::Err(#diagnostic_name(args))
         } else {
           ::core::result::Result::Ok(Self(#default))
         }
       }
 
+      fn possible_names() -> &'static [&'static str] {
+        &[#(#possible_names),*]
+      }
+
+      fn short() -> Option<char> {
+        #short
+      }
+
+      fn long() -> &'static str {
+        #long
+      }
+
+      fn aliases() -> &'static [&'static str] {
+        &[#(#aliases),*]
+      }
+    }
+
+    #[automatically_derived]
+    impl #struct_name { 
       /// Returns the value of the directive.
       #vis const fn get(&self) -> bool {
         self.0
@@ -105,11 +136,6 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
       {
         self.0.then(f)
       }
-
-      /// Returns the possible names of the directive.
-      #vis const fn possible_names() -> &'static [&'static str] {
-        &[#(#possible_names),*]
-      }
     }
 
     #[derive(
@@ -122,7 +148,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     #[automatically_derived]
     impl ::smear::Reporter for #diagnostic_name {
-      #vis fn report<'a, FileId>(&self, file_id: FileId) -> ::smear::codespan_reporting::diagnostic::Diagnostic<FileId>
+      fn report<'a, FileId>(&self, file_id: FileId) -> ::smear::codespan_reporting::diagnostic::Diagnostic<FileId>
       where
         FileId: 'a + ::core::marker::Copy + ::core::cmp::PartialEq
       {
@@ -149,6 +175,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 struct Options {
   ident: Ident,
   vis: Visibility,
+  rename: Option<String>,
   #[darling(default)]
   short: Short,
   #[darling(default)]
@@ -159,8 +186,15 @@ struct Options {
 }
 
 impl Options {
+  fn self_name(&self) -> String {
+    self
+      .rename
+      .clone()
+      .unwrap_or_else(|| self.ident.to_string().to_ascii_lowercase())
+  }
+
   fn validate(&self) -> syn::Result<()> {
-    let name = self.ident.to_string().to_ascii_lowercase();
+    let name = self.self_name();
     self.short.validate(&name)?;
     self.long.validate(&name)?;
     Ok(())
@@ -171,15 +205,14 @@ impl Options {
       .long
       .0
       .clone()
-      .unwrap_or(self.ident.to_string().to_ascii_lowercase())
+      .unwrap_or(self.self_name())
   }
 
   fn short(&self) -> Option<char> {
     self.short.0.as_ref().map(|s| {
       s.unwrap_or_else(|| {
         self
-          .ident
-          .to_string()
+          .self_name()
           .chars()
           .next()
           .unwrap()

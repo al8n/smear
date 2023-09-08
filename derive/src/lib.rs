@@ -1,4 +1,5 @@
 mod aliases;
+mod arguments;
 mod directives;
 mod long;
 mod name;

@@ -1,6 +1,6 @@
 mod db;
 mod diagnostics;
-pub use diagnostics::Reporter;
+pub use diagnostics::*;
 
 pub use apollo_parser;
 pub use codespan_reporting;

@@ -53,6 +53,8 @@ fn test_default() {
 
 #[test]
 fn test_possible_names() {
+  use smear::Diagnosticable;
+
   #[derive(smear::BooleanDirective)]
   #[smear(aliases("a", "ab", "_d", "_1", what, my_alias, good))]
   struct Indexed;
