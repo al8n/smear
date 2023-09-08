@@ -1,14 +1,15 @@
-pub fn add(left: usize, right: usize) -> usize {
-  left + right
-}
+mod aliases;
+mod directives;
+mod long;
+mod name;
+mod short;
+mod utils;
 
-#[cfg(test)]
-mod tests {
-  use super::*;
+#[proc_macro_derive(BooleanDirective, attributes(smear))]
+pub fn boolean_directive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  let input = syn::parse_macro_input!(input as syn::DeriveInput);
 
-  #[test]
-  fn it_works() {
-    let result = add(2, 2);
-    assert_eq!(result, 4);
-  }
+  directives::boolean::derive(input)
+    .unwrap_or_else(|e| e.to_compile_error())
+    .into()
 }

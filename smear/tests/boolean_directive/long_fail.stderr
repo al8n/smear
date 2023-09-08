@@ -1,0 +1,29 @@
+error: The first character of the `long` must be an ASCII alphabetic character or '_': got '6'.
+ --> tests/boolean_directive/long_fail.rs:3:10
+  |
+3 |   long = "6n"
+  |          ^^^^
+
+error: The length of `long` must be larger than 1. If you want single character name, please set `short` instead.
+ --> tests/boolean_directive/long_fail.rs:9:10
+  |
+9 |   long = "i"
+  |          ^^^
+
+error: The `long` cannot be empty.
+  --> tests/boolean_directive/long_fail.rs:16:10
+   |
+16 |   long = ""
+   |          ^^
+
+error: The value of `long` contains an invalid character: '👍(👍:0)'.
+  --> tests/boolean_directive/long_fail.rs:22:10
+   |
+22 |   long = "👍"
+   |          ^^^^
+
+error: The value of `long` contains an invalid character: 'invalid-character(-:7)'.
+  --> tests/boolean_directive/long_fail.rs:28:10
+   |
+28 |   long = "invalid-character"
+   |          ^^^^^^^^^^^^^^^^^^^

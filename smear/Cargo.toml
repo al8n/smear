@@ -7,6 +7,18 @@ homepage.workspace = true
 license.workspace = true
 description = "a placeholder"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+apollo-parser = "0.6"
+codespan-reporting = "0.11"
+smear-derive = { path = "../derive" }
+derive_more = "0.99"
+rowan = "0.15"
+salsa = "0.16"
+strsim = "0.10"
+viewit = "0.1.5"
+uuid = { version = "1.4", features = ["serde", "v4"] }
+ordered-float = { version = "3.9", features = ["std"] }
+thiserror = "1.0.31"
+
+[dev-dependencies]
+trybuild = "1"

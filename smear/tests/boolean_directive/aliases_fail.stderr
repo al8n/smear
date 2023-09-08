@@ -1,0 +1,55 @@
+error: Expected at least one alias, got `aliases()`
+ --> tests/boolean_directive/aliases_fail.rs:1:10
+  |
+1 | #[derive(smear::BooleanDirective)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the derive macro `smear::BooleanDirective` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: Unexpected meta-item format `word`
+ --> tests/boolean_directive/aliases_fail.rs:6:9
+  |
+6 | #[smear(aliases)]
+  |         ^^^^^^^
+
+error: The `alias` cannot be empty.
+  --> tests/boolean_directive/aliases_fail.rs:10:17
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                 ^^
+
+error: The first character of an `alias` attribute cannot be a number.
+  --> tests/boolean_directive/aliases_fail.rs:10:26
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                          ^^^^
+
+error: A single-character `alias` must be an alphabeta: got '_'.
+  --> tests/boolean_directive/aliases_fail.rs:10:32
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                                ^^^
+
+error: A single-character `alias` must be an alphabeta: got '1'.
+  --> tests/boolean_directive/aliases_fail.rs:10:37
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                                     ^^^
+
+error: The value in `alias` contains an invalid character: '👍(👍:0)'.
+  --> tests/boolean_directive/aliases_fail.rs:10:42
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                                          ^^^^
+
+error: Unexpected literal type `int`
+  --> tests/boolean_directive/aliases_fail.rs:10:47
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                                                ^
+
+error: Unexpected literal type `int`
+  --> tests/boolean_directive/aliases_fail.rs:10:50
+   |
+10 | #[smear(aliases("", "a", "1b", "_", "1", "👍", 1, 2))]
+   |                                                   ^
