@@ -16,9 +16,10 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
   opts.validate()?;
 
-  let struct_name = format_ident!("{}Directive", opts.directive_struct_name());
+  let struct_name = format_ident!("{}Argument", opts.argument_struct_name());
   let diagnostic_name = format_ident!("{}Diagnostic", struct_name);
   let vis = &opts.vis;
+  let default = opts.default.unwrap_or(true);
   let possible_names = opts.possible_names();
   let short = match opts.short() {
     Some(short) => quote!(::core::option::Option::Some(#short)),
@@ -57,7 +58,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     #[automatically_derived]
     impl ::core::default::Default for #struct_name {
       fn default() -> Self {
-        Self(false)
+        Self(#default)
       }
     }
 
@@ -78,17 +79,17 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     #[automatically_derived]
     impl ::smear::Diagnosticable for #struct_name {
       type Error = #diagnostic_name;
-      type Node = ::smear::apollo_parser::ast::Directive;
+      type Node = ::smear::apollo_parser::ast::Argument;
 
       fn parse(node: Self::Node) -> Result<Self, Self::Error>
       where
         Self: Sized
       {
-        if let ::core::option::Option::Some(args) = node.arguments() {
-          ::core::result::Result::Err(#diagnostic_name(args))
-        } else {
-          ::core::result::Result::Ok(Self(true))
-        }
+        match node {
+          ::smear::apollo_parser::ast::Value::NullValue(_) => ::core::result::Result::Ok(default),
+          ::smear::apollo_parser::ast::Value::BooleanValue(val) => ::core::result::Result::Ok(val.true_token().is_some()),
+          val => Err(val),
+        }.map_err(#diagnostic_name)
       }
     }
 
@@ -146,7 +147,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     )]
     #[repr(transparent)]
     #[automatically_derived]
-    #vis struct #diagnostic_name(::smear::apollo_parser::ast::Arguments);
+    #vis struct #diagnostic_name(::smear::apollo_parser::ast::Value);
 
     #[automatically_derived]
     impl ::smear::Reporter for #diagnostic_name {
@@ -162,7 +163,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let end: usize = range.end().into();
 
         ::smear::codespan_reporting::diagnostic::Diagnostic::error()
-          .with_message("unexpected arguments")
+          .with_message("unexpected value")
           .with_labels(vec![
             ::smear::codespan_reporting::diagnostic::Label::primary(file_id, start..end)
               .with_message(syn.text()),
@@ -184,6 +185,7 @@ struct Options {
   long: Long,
   #[darling(default)]
   aliases: Aliases,
+  default: Option<bool>,
 }
 
 impl Options {
@@ -191,7 +193,7 @@ impl Options {
     self.ident.to_string().to_ascii_lowercase()
   }
 
-  fn directive_struct_name(&self) -> String {
+  fn argument_struct_name(&self) -> String {
     self
       .rename
       .clone()

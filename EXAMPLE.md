@@ -17,13 +17,24 @@ struct Indexed;
 )]
 struct Fixed;
 
-#[derive(smear_derive::Arg)]
+#[derive(smear_derive::Argument)]
 #[smear(
   short,
-  // default = "list()",
-  value(repea)
+  parser = "path/to/parse_fn",
 )]
 struct Derive;
+
+
+#[derive(smear_derive::ObjectArgument)]
+#[smear(
+  short,
+  fields(
+    foo(U64Parser),
+    bar(),
+  ),
+  parser = "path/to/parse_fn",
+)]
+struct Object;
 
 #[derive(smear_derive::UnitEnum)]
 #[smear(

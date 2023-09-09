@@ -1,2 +1,9 @@
-/target
-/Cargo.lock
+**.vscode/
+**.idea/
+
+**.DS_Store
+
+**target/
+**Cargo.lock
+
+**wip

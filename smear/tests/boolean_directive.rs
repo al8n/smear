@@ -39,13 +39,13 @@ fn test_alias_success() {
 #[test]
 fn test_default() {
   #[derive(smear::BooleanDirective)]
-  #[smear(short, default = false)]
+  #[smear(short)]
   struct IndexedFalse;
 
   assert_eq!(IndexedFalseDirective::default(), false);
 
   #[derive(smear::BooleanDirective)]
-  #[smear(short, default = true)]
+  #[smear(short)]
   struct IndexedTrue;
 
   assert_eq!(IndexedTrueDirective::default(), true);
@@ -53,7 +53,7 @@ fn test_default() {
 
 #[test]
 fn test_possible_names() {
-  use smear::Diagnosticable;
+  use smear::NamedDiagnosticable;
 
   #[derive(smear::BooleanDirective)]
   #[smear(aliases("a", "ab", "_d", "_1", what, my_alias, good))]

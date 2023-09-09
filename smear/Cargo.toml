@@ -7,11 +7,20 @@ homepage.workspace = true
 license.workspace = true
 description = "a placeholder"
 
+[features]
+default = []
+
+decimal = ["dep:rust_decimal"]
+bigdecimal = ["dep:bigdecimal"]
+bigint = ["dep:num-bigint"]
+time = ["humantime", "chrono"]
+
 [dependencies]
 apollo-parser = "0.6"
 codespan-reporting = "0.11"
 smear-derive = { path = "../derive" }
 derive_more = "0.99"
+paste = "1" # remove when concat_idents is stable
 rowan = "0.15"
 salsa = "0.16"
 strsim = "0.10"
@@ -19,6 +28,14 @@ viewit = "0.1.5"
 uuid = { version = "1.4", features = ["serde", "v4"] }
 ordered-float = { version = "3.9", features = ["std"] }
 thiserror = "1.0.31"
+
+# optional dependencies
+num-bigint = { version = "0.4", optional = true }
+bigdecimal = { version = "0.4", optional = true }
+rust_decimal = { version = "1.32", optional = true }
+
+humantime = { version = "2.1", optional = true }
+chrono = { version = "0.4", optional = true }
 
 [dev-dependencies]
 trybuild = "1"
