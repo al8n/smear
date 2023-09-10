@@ -1,8 +1,36 @@
+use codespan_reporting::diagnostic::Diagnostic as CodespanDiagnostic;
+
+pub(crate) enum DiagnosticInner<FileId> {
+  Single(CodespanDiagnostic<FileId>),
+  Multiple(Vec<DiagnosticInner<FileId>>),
+}
+
+pub struct Diagnostic<FileId>(pub(crate) DiagnosticInner<FileId>);
+
+impl<FileId> From<CodespanDiagnostic<FileId>> for Diagnostic<FileId> {
+  fn from(value: CodespanDiagnostic<FileId>) -> Self {
+    Self(DiagnosticInner::Single(value))
+  }
+}
+
+impl<FileId> From<Vec<CodespanDiagnostic<FileId>>> for Diagnostic<FileId> {
+  fn from(value: Vec<CodespanDiagnostic<FileId>>) -> Self {
+    Self(DiagnosticInner::Multiple(
+      value.into_iter().map(DiagnosticInner::Single).collect(),
+    ))
+  }
+}
+
+impl<FileId> From<Vec<Diagnostic<FileId>>> for Diagnostic<FileId> {
+  fn from(value: Vec<Diagnostic<FileId>>) -> Self {
+    Self(DiagnosticInner::Multiple(
+      value.into_iter().map(|d| d.0).collect(),
+    ))
+  }
+}
+
 pub trait Reporter {
-  fn report<'a, FileId>(
-    &self,
-    file_id: FileId,
-  ) -> codespan_reporting::diagnostic::Diagnostic<FileId>
+  fn report<'a, FileId>(&self, file_id: FileId) -> Diagnostic<FileId>
   where
     FileId: 'a + Copy + PartialEq;
 }

@@ -10,10 +10,13 @@ description = "a placeholder"
 [features]
 default = []
 
-decimal = ["dep:rust_decimal"]
-bigdecimal = ["dep:bigdecimal"]
 bigint = ["dep:num-bigint"]
-time = ["humantime", "chrono"]
+bigdecimal = ["dep:bigdecimal"]
+chrono = ["dep:chrono"]
+decimal = ["dep:rust_decimal"]
+humantime = ["dep:humantime"]
+indexmap = ["dep:indexmap"]
+url = ["dep:url"]
 
 [dependencies]
 apollo-parser = "0.6"
@@ -36,6 +39,9 @@ rust_decimal = { version = "1.32", optional = true }
 
 humantime = { version = "2.1", optional = true }
 chrono = { version = "0.4", optional = true }
+
+indexmap = { version = "2", optional = true }
+url = { version = "2.4", optional = true }
 
 [dev-dependencies]
 trybuild = "1"

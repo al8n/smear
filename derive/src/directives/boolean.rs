@@ -150,7 +150,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     #[automatically_derived]
     impl ::smear::Reporter for #diagnostic_name {
-      fn report<'a, FileId>(&self, file_id: FileId) -> ::smear::codespan_reporting::diagnostic::Diagnostic<FileId>
+      fn report<'a, FileId>(&self, file_id: FileId) -> ::smear::Diagnostic<FileId>
       where
         FileId: 'a + ::core::marker::Copy + ::core::cmp::PartialEq
       {
@@ -167,6 +167,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             ::smear::codespan_reporting::diagnostic::Label::primary(file_id, start..end)
               .with_message(syn.text()),
           ])
+          .into()
       }
     }
   })

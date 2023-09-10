@@ -11,7 +11,7 @@ description = "A placeholder"
 proc-macro = true
 
 [dependencies]
-darling = "0.20"
+darling = { version = "0.20", features = ["diagnostics"] }
 heck = "0.4"
 indexmap = "2"
 proc-macro2 = "1"
