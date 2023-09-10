@@ -1,9 +1,6 @@
-mod aliases;
 mod arguments;
 mod directives;
-mod long;
 mod name;
-mod short;
 mod utils;
 
 #[proc_macro_derive(BooleanDirective, attributes(smear))]

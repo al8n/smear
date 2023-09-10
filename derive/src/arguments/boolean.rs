@@ -4,7 +4,7 @@ use proc_macro2::Ident;
 use quote::{format_ident, quote};
 use syn::{DeriveInput, Visibility};
 
-use crate::{aliases::Aliases, long::Long, short::Short};
+use crate::utils::{Aliases, Long, Short};
 
 pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let opts = match Options::from_derive_input(&input) {
