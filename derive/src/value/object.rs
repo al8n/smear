@@ -3,7 +3,7 @@ use darling::{
   FromDeriveInput, FromField, FromMeta, FromVariant,
 };
 use quote::{format_ident, quote, ToTokens};
-use syn::{DeriveInput, Expr, Ident, Path};
+use syn::{DeriveInput, Expr, Field, Ident, Path};
 
 use crate::utils::RenameAll;
 
@@ -23,6 +23,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let field_ident_dirty = format_ident!("{field_ident}_dirty");
         let field_rename = field.rename(object.rename_all);
         fields_name.push(field_rename.clone());
+
         let duplicated_field_error = format!("duplicated field {field_rename}");
         let missing_field_error = format!("field `{field_rename}` is required by {name}");
         let field_ty = &field.ty;
@@ -37,47 +38,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             #field_ident,
           });
 
-          let validator = match &field.validator {
-            Some(p) => {
-              quote! {
-                match #p(&v) {
-                  ::core::result::Result::Ok(_) => {
-                    #field_ident = v;
-                  },
-                  ::core::result::Result::Err(err) => {
-                    errors.push(::smear::value::Error::invalid_value(&val, err));
-                  },
-                }
-              }
-            },
-            None => quote! {
-              #field_ident = v;
-            },
-          };
-
-          match &field.parser {
-            Some(parser_path) => quote! {
-              match #parser_path(val) {
-                ::core::result::Result::Ok(val) => {
-                  let v = ::core::option::Option::Some(val);
-                  #validator
-                },
-                ::core::result::Result::Err(err) => {
-                  errors.push(err);
-                },
-              }
-            },
-            None => quote! {
-              match <#field_ty as ::smear::Diagnosticable>::parse(val) {
-                ::core::result::Result::Ok(val) => {
-                  #field_ident = ::core::option::Option::Some(val);
-                },
-                ::core::result::Result::Err(err) => {
-                  errors.push(err);
-                },
-              }
-            },
-          }
+          field.parser_tokenstream()
         } else {
           fields_null_check.push(quote! {
             if #field_ident.is_none() && !<#field_ty as ::smear::DiagnosticableValue>::nullable() {
@@ -87,6 +48,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
           fields_declaration.push(quote! {
             let mut #field_ident: ::core::option::Option<#field_ty> = ::core::option::Option::None;
+            let mut #field_ident_dirty: bool = false;
           });
 
           fields_init.push(quote! {
@@ -99,46 +61,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             },
           });
 
-          let validator = match &field.validator {
-            Some(p) => {
-              quote! {
-                match #p(&v) {
-                  ::core::result::Result::Ok(_) => {},
-                  ::core::result::Result::Err(err) => {
-                    errors.push(::smear::value::Error::invalid_value(&val, err));
-                  },
-                }
-              }
-            },
-            None => quote! {
-            },
-          };
-
-          match &field.parser {
-            Some(parser_path) => quote! {
-              match #parser_path(&val) {
-                ::core::result::Result::Ok(v) => {
-                  #validator
-                  #field_ident = ::core::option::Option::Some(v);
-                },
-                ::core::result::Result::Err(err) => {
-                  errors.push(err);
-                },
-              }
-            },
-            None => quote! {
-              match <#field_ty as ::smear::Diagnosticable>::parse(&val) {
-                ::core::result::Result::Ok(v) => {
-                  #validator
-
-                  #field_ident = ::core::option::Option::Some(v);
-                },
-                ::core::result::Result::Err(err) => {
-                  errors.push(err);
-                },
-              }
-            },
-          }
+          field.parser_tokenstream()
         };
 
         quote! {
@@ -252,6 +175,59 @@ struct Object {
   ident: Ident,
   data: Data<Variant, FieldDetails>,
   rename_all: Option<RenameAll>,
+}
+
+impl FieldDetails {
+  fn validator_tokenstream(&self) -> proc_macro2::TokenStream {
+    let field_ident = self.ident.as_ref().unwrap();
+    let assign: proc_macro2::TokenStream = if self.default.is_some() {
+      quote! {
+        #field_ident = v;
+      }
+    } else {
+      quote! {
+        #field_ident = ::core::option::Option::Some(v);
+      }
+    };
+
+    match &self.validator {
+      Some(p) => {
+        quote! {
+          match #p(&v) {
+            ::core::result::Result::Ok(_) => {
+              #assign
+            },
+            ::core::result::Result::Err(err) => {
+              errors.push(::smear::value::Error::invalid_value(&val, err));
+            },
+          }
+        }
+      }
+      None => quote! {
+        #assign
+      },
+    }
+  }
+
+  fn parser_tokenstream(&self) -> proc_macro2::TokenStream {
+    let field_ty = &self.ty;
+    let validator = self.validator_tokenstream();
+    let parser = match &self.parser {
+      Some(parser_path) => quote!(#parser_path(&val)),
+      None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)),
+    };
+
+    quote! {
+      match #parser {
+        ::core::result::Result::Ok(v) => {
+          #validator
+        },
+        ::core::result::Result::Err(err) => {
+          errors.push(err);
+        },
+      }
+    }
+  }
 }
 
 #[derive(FromField)]
