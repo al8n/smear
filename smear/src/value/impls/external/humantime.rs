@@ -2,27 +2,26 @@ use super::*;
 use ::humantime::{Duration as HumanDuration, Timestamp};
 use core::time::Duration;
 
-pub fn parse_duration(src: Value) -> Result<Duration, ParseValueError> {
+pub fn parse_duration(src: &Value) -> Result<Duration, Error> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
       s.parse::<HumanDuration>()
         .map(Into::into)
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::StringValue(val))))
+        .map_err(|e| Error::invalid_value(val, e))
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_timestamp(src: Value) -> Result<Timestamp, ParseValueError> {
+pub fn parse_timestamp(src: &Value) -> Result<Timestamp, Error> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse()
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::StringValue(val))))
+      s.parse().map_err(|e| Error::invalid_value(val, e))
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-impl_diagnostic!(Duration::parse_duration?, Timestamp::parse_timestamp?,);
+impl_diagnostic!(Duration::parse_duration, Timestamp::parse_timestamp,);

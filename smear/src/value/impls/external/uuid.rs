@@ -1,15 +1,14 @@
 use super::*;
 use ::uuid::Uuid;
 
-pub fn parse_uuid(src: Value) -> Result<Uuid, ParseValueError> {
+pub fn parse_uuid(src: &Value) -> Result<Uuid, Error> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse()
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::StringValue(val))))
+      s.parse().map_err(|e| Error::invalid_value(val, e))
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-impl_diagnostic!(Uuid::parse_uuid?,);
+impl_diagnostic!(Uuid::parse_uuid);

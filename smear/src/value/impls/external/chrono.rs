@@ -11,14 +11,14 @@ macro_rules! impl_parse {
   ($($ty:ident::$name:ident), +$(,)?) => {
     $(
       paste::paste!{
-        pub fn [<parse_ $name>] (src: Value) -> Result<$ty, ParseValueError> {
+        pub fn [<parse_ $name>] (src: &Value) -> Result<$ty, Error> {
           match src {
             Value::StringValue(val) => {
               let s: String = val.clone().into();
               s.parse()
-                .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::StringValue(val))))
+                .map_err(|e| Error::invalid_value(val, e))
             }
-            val => Err(ParseValueError::UnexpectedValue(val)),
+            val => Err(Error::unexpected_type(val)),
           }
         }
       }
@@ -36,10 +36,10 @@ impl_parse!(
 );
 
 impl_diagnostic!(
-  NaiveDate::parse_naive_date?,
-  NaiveDateTime::parse_naive_date_time?,
-  NaiveTime::parse_naive_time?,
-  Utc::parse_utc?,
-  Local::parse_local?,
-  FixedOffset::parse_fixed_offset?,
+  NaiveDate::parse_naive_date,
+  NaiveDateTime::parse_naive_date_time,
+  NaiveTime::parse_naive_time,
+  Utc::parse_utc,
+  Local::parse_local,
+  FixedOffset::parse_fixed_offset,
 );

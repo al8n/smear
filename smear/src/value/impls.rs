@@ -1,17 +1,18 @@
 use super::*;
+use core::fmt::Display;
 
 macro_rules! impl_parse_from_str {
   ($($ty:ident::$parser:ident), + $(,)?) => {
     $(
       paste::paste!{
-        pub fn [<$parser>] (value: apollo_parser::ast::Value) -> Result<$ty, crate::value::ParseValueError> {
+        pub fn [<$parser>] (value: &apollo_parser::ast::Value) -> Result<$ty, crate::value::Error> {
           match value {
             apollo_parser::ast::Value::StringValue(val) => {
               let s: String = val.clone().into();
               s.parse()
-                .map_err(|e| crate::value::ParseValueError::ParseError(Box::new(e), Box::new(apollo_parser::ast::Value::StringValue(val))))
+                .map_err(|e| crate::value::Error::invalid_value(val, e))
             }
-            val => Err(crate::value::ParseValueError::UnexpectedValue(val)),
+            val => Err(crate::value::Error::unexpected_type(val)),
           }
         }
       }
@@ -22,11 +23,11 @@ macro_rules! impl_parse_from_str {
 macro_rules! impl_diagnostic_inner {
   ($ty:ident::$parser:ident) => {
     impl crate::Diagnosticable for $ty {
-      type Error = crate::value::ParseValueError;
+      type Error = crate::value::Error;
 
       type Node = apollo_parser::ast::Value;
 
-      fn parse(node: Self::Node) -> Result<Self, Self::Error>
+      fn parse(node: &Self::Node) -> Result<Self, Self::Error>
       where
         Self: Sized,
       {
@@ -34,24 +35,7 @@ macro_rules! impl_diagnostic_inner {
       }
     }
 
-    impl crate::Diagnosticable for Option<$ty> {
-      type Error = crate::value::ParseValueError;
-
-      type Node = apollo_parser::ast::Value;
-
-      fn parse(node: Self::Node) -> Result<Self, Self::Error>
-      where
-        Self: Sized,
-      {
-        paste::paste! {
-          [<$parser _ optional>] (node)
-        }
-      }
-    }
-
     impl crate::value::DiagnosticableValue for $ty {}
-
-    impl crate::value::DiagnosticableValue for Option<$ty> {}
   };
 }
 
@@ -61,25 +45,11 @@ macro_rules! impl_diagnostic {
       impl_diagnostic_inner!($ty::$parser);
     )*
   };
-  ($($ty:ident::$parser:ident ?), + $(,)?) => {
-    $(
-      paste::paste! {
-        pub fn [<$parser _ optional>] (src: apollo_parser::ast::Value) -> Result<Option<$ty>, crate::value::ParseValueError> {
-          match src {
-            apollo_parser::ast::Value::NullValue(_) => Ok(None),
-            val => [<$parser>](val).map(Some),
-          }
-        }
-      }
-
-      impl_diagnostic_inner!($ty::$parser);
-    )*
-  };
   (string($($ty:ident::$parser:ident ?), + $(,)?)) => {
     $(
       impl_parse_from_str!($ty::$parser);
 
-      impl_diagnostic!($ty::$parser?);
+      impl_diagnostic!($ty::$parser);
     )*
   }
 }
@@ -100,13 +70,45 @@ impl_diagnostic!(
   f64::parse_float,
 );
 
-impl_diagnostic!(
-  char::parse_char?,
-  bool::parse_boolean?,
-  String::parse_string?,
-);
+impl_diagnostic!(char::parse_char, bool::parse_boolean, String::parse_string,);
 
 mod external;
 pub use external::*;
 mod builtin;
 pub use builtin::*;
+
+impl<T: DiagnosticableValue> DiagnosticableValue for Vec<T> {}
+
+impl<T: DiagnosticableValue> DiagnosticableValue for Option<T> {
+  fn nullable() -> bool {
+    true
+  }
+}
+
+impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
+  type Error = Error;
+
+  type Node = Value;
+
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    match node {
+      Value::NullValue(_) => Ok(None),
+      val => <T as Diagnosticable>::parse(val).map(Some),
+    }
+  }
+}
+
+impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Vec<O> {
+  fn fields() -> &'static [&'static str] {
+    O::fields()
+  }
+}
+
+impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Option<O> {
+  fn fields() -> &'static [&'static str] {
+    O::fields()
+  }
+}

@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
-pub fn parse_hashmap<K, V>(value: Value) -> Result<HashMap<K, V>, ParseValueError>
+pub fn parse_hashmap<K, V>(value: &Value) -> Result<HashMap<K, V>, Error>
 where
   K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
@@ -15,25 +15,21 @@ where
         match (field.name(), field.value()) {
           (None, None) => continue,
           (None, Some(_)) => {
-            errors.push(ParseValueError::ParseError(
-              Box::new("missing key"),
-              Box::new(field),
-            ));
+            errors.push(Error::invalid_value(&field, "missing key"));
           }
           (Some(name), None) => {
-            errors.push(ParseValueError::ParseError(
-              Box::new(format!("{} is missing value", name.text())),
-              Box::new(field),
+            errors.push(Error::invalid_value(
+              &field,
+              format!("{} is missing value", name.text()),
             ));
           }
           (Some(name), Some(val)) => {
-            let key = name.text().to_string().parse::<K>().map_err(|e| {
-              ParseValueError::ParseError(
-                Box::new(format!("fail to parse key: {e}")),
-                Box::new(field),
-              )
-            })?;
-            match V::parse(val) {
+            let key = name
+              .text()
+              .to_string()
+              .parse::<K>()
+              .map_err(|e| Error::invalid_value(&field, format!("fail to parse key: {e}")))?;
+            match V::parse(&val) {
               Ok(val) => {
                 res.insert(key, val);
               }
@@ -47,14 +43,14 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(ParseValueError::Multiple(errors))
+        Err(Error::multiple(value, errors))
       }
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_hashmap_optional<K, V>(value: Value) -> Result<Option<HashMap<K, V>>, ParseValueError>
+pub fn parse_hashmap_optional<K, V>(value: &Value) -> Result<Option<HashMap<K, V>>, Error>
 where
   K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
@@ -66,7 +62,7 @@ where
   }
 }
 
-pub fn parse_hashset<V>(value: Value) -> Result<HashSet<V>, ParseValueError>
+pub fn parse_hashset<V>(value: &Value) -> Result<HashSet<V>, Error>
 where
   V: DiagnosticableValue + core::hash::Hash + Eq,
 {
@@ -75,7 +71,7 @@ where
       let mut errors = Vec::new();
       let mut res = HashSet::new();
       for val in val.values() {
-        match V::parse(val) {
+        match V::parse(&val) {
           Ok(val) => {
             res.insert(val);
           }
@@ -87,14 +83,14 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(ParseValueError::Multiple(errors))
+        Err(Error::multiple(value, errors))
       }
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_hashset_optional<V>(value: Value) -> Result<Option<HashSet<V>>, ParseValueError>
+pub fn parse_hashset_optional<V>(value: &Value) -> Result<Option<HashSet<V>>, Error>
 where
   V: DiagnosticableValue + core::hash::Hash + Eq,
 {
@@ -109,11 +105,11 @@ impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagn
 where
   K::Err: Display + 'static,
 {
-  type Error = ParseValueError;
+  type Error = Error;
 
   type Node = Value;
 
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
@@ -121,46 +117,16 @@ where
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
-  for Option<HashMap<K, V>>
-where
-  K::Err: Display + 'static,
-{
-  type Error = ParseValueError;
-
-  type Node = Value;
-
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_hashmap_optional(node)
-  }
-}
-
 impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for HashSet<V> {
-  type Error = ParseValueError;
+  type Error = Error;
 
   type Node = Value;
 
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
     parse_hashset(node)
-  }
-}
-
-impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for Option<HashSet<V>> {
-  type Error = ParseValueError;
-
-  type Node = Value;
-
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_hashset_optional(node)
   }
 }
 
@@ -171,12 +137,4 @@ where
 {
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> DiagnosticableValue
-  for Option<HashMap<K, V>>
-where
-  K::Err: Display + 'static,
-{
-}
-
 impl<V: DiagnosticableValue + core::hash::Hash + Eq> DiagnosticableValue for HashSet<V> {}
-impl<V: DiagnosticableValue + core::hash::Hash + Eq> DiagnosticableValue for Option<HashSet<V>> {}

@@ -1,25 +1,22 @@
 use super::*;
 use ::bigdecimal::BigDecimal;
 
-pub fn parse_bigdecimal(src: Value) -> Result<BigDecimal, ParseValueError> {
+pub fn parse_bigdecimal(src: &Value) -> Result<BigDecimal, Error> {
   match src {
     Value::FloatValue(val) => {
       let s = val.syntax().text().to_string();
-      s.parse()
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::FloatValue(val))))
+      s.parse().map_err(|e| Error::invalid_value(val, e))
     }
     Value::IntValue(val) => {
       let s = val.syntax().text().to_string();
-      s.parse()
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::IntValue(val))))
+      s.parse().map_err(|e| Error::invalid_value(val, e))
     }
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse()
-        .map_err(|e| ParseValueError::ParseError(Box::new(e), Box::new(Value::StringValue(val))))
+      s.parse().map_err(|e| Error::invalid_value(val, e))
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-impl_diagnostic!(BigDecimal::parse_bigdecimal?,);
+impl_diagnostic!(BigDecimal::parse_bigdecimal,);

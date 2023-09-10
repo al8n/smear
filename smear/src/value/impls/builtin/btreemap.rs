@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn parse_btreemap<K, V>(value: Value) -> Result<BTreeMap<K, V>, ParseValueError>
+pub fn parse_btreemap<K, V>(value: &Value) -> Result<BTreeMap<K, V>, Error>
 where
   K: std::str::FromStr + Eq + Ord,
   K::Err: Display + 'static,
@@ -15,25 +15,21 @@ where
         match (field.name(), field.value()) {
           (None, None) => continue,
           (None, Some(_)) => {
-            errors.push(ParseValueError::ParseError(
-              Box::new("missing key"),
-              Box::new(field),
-            ));
+            errors.push(Error::invalid_value(&field, "missing key"));
           }
           (Some(name), None) => {
-            errors.push(ParseValueError::ParseError(
-              Box::new(format!("{} is missing value", name.text())),
-              Box::new(field),
+            errors.push(Error::invalid_value(
+              &field,
+              format!("{} is missing value", name.text()),
             ));
           }
           (Some(name), Some(val)) => {
-            let key = name.text().to_string().parse::<K>().map_err(|e| {
-              ParseValueError::ParseError(
-                Box::new(format!("fail to parse key: {e}")),
-                Box::new(field),
-              )
-            })?;
-            match V::parse(val) {
+            let key = name
+              .text()
+              .to_string()
+              .parse::<K>()
+              .map_err(|e| Error::invalid_value(&field, format!("fail to parse key: {e}")))?;
+            match V::parse(&val) {
               Ok(val) => {
                 res.insert(key, val);
               }
@@ -47,16 +43,14 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(ParseValueError::Multiple(errors))
+        Err(Error::multiple(value, errors))
       }
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_btreemap_optional<K, V>(
-  value: Value,
-) -> Result<Option<BTreeMap<K, V>>, ParseValueError>
+pub fn parse_btreemap_optional<K, V>(value: &Value) -> Result<Option<BTreeMap<K, V>>, Error>
 where
   K: std::str::FromStr + Eq + Ord,
   K::Err: Display + 'static,
@@ -68,7 +62,7 @@ where
   }
 }
 
-pub fn parse_btreeset<V>(value: Value) -> Result<BTreeSet<V>, ParseValueError>
+pub fn parse_btreeset<V>(value: &Value) -> Result<BTreeSet<V>, Error>
 where
   V: DiagnosticableValue + Eq + Ord,
 {
@@ -77,7 +71,7 @@ where
       let mut errors = Vec::new();
       let mut res = BTreeSet::new();
       for val in val.values() {
-        match V::parse(val) {
+        match V::parse(&val) {
           Ok(val) => {
             res.insert(val);
           }
@@ -89,14 +83,14 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(ParseValueError::Multiple(errors))
+        Err(Error::multiple(value, errors))
       }
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_btreeset_optional<V>(value: Value) -> Result<Option<BTreeSet<V>>, ParseValueError>
+pub fn parse_btreeset_optional<V>(value: &Value) -> Result<Option<BTreeSet<V>>, Error>
 where
   V: DiagnosticableValue + Eq + Ord,
 {
@@ -110,11 +104,11 @@ impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> Diagnosticable for
 where
   K::Err: Display + 'static,
 {
-  type Error = ParseValueError;
+  type Error = Error;
 
   type Node = Value;
 
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
@@ -122,46 +116,16 @@ where
   }
 }
 
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> Diagnosticable
-  for Option<BTreeMap<K, V>>
-where
-  K::Err: Display + 'static,
-{
-  type Error = ParseValueError;
-
-  type Node = Value;
-
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_btreemap_optional(node)
-  }
-}
-
 impl<V: DiagnosticableValue + Eq + Ord> Diagnosticable for BTreeSet<V> {
-  type Error = ParseValueError;
+  type Error = Error;
 
   type Node = Value;
 
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
     parse_btreeset(node)
-  }
-}
-
-impl<V: DiagnosticableValue + Eq + Ord> Diagnosticable for Option<BTreeSet<V>> {
-  type Error = ParseValueError;
-
-  type Node = Value;
-
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_btreeset_optional(node)
   }
 }
 
@@ -170,12 +134,4 @@ impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> DiagnosticableValu
 {
 }
 
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> DiagnosticableValue
-  for Option<BTreeMap<K, V>>
-where
-  K::Err: Display + 'static,
-{
-}
-
 impl<V: DiagnosticableValue + Eq + Ord> DiagnosticableValue for BTreeSet<V> {}
-impl<V: DiagnosticableValue + Eq + Ord> DiagnosticableValue for Option<BTreeSet<V>> {}

@@ -1,12 +1,12 @@
 use super::*;
 
-pub fn parse_vec<T: DiagnosticableValue>(value: Value) -> Result<Vec<T>, ParseValueError> {
+pub fn parse_vec<T: DiagnosticableValue>(value: &Value) -> Result<Vec<T>, Error> {
   match value {
     Value::ListValue(val) => {
       let mut errors = Vec::new();
       let mut res = Vec::new();
       for val in val.values() {
-        match T::parse(val) {
+        match T::parse(&val) {
           Ok(val) => res.push(val),
           Err(err) => errors.push(err),
         }
@@ -14,16 +14,14 @@ pub fn parse_vec<T: DiagnosticableValue>(value: Value) -> Result<Vec<T>, ParseVa
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(ParseValueError::Multiple(errors))
+        Err(Error::multiple(value, errors))
       }
     }
-    val => Err(ParseValueError::UnexpectedValue(val)),
+    val => Err(Error::unexpected_type(val)),
   }
 }
 
-pub fn parse_vec_optional<T: DiagnosticableValue>(
-  value: Value,
-) -> Result<Option<Vec<T>>, ParseValueError> {
+pub fn parse_vec_optional<T: DiagnosticableValue>(value: &Value) -> Result<Option<Vec<T>>, Error> {
   match value {
     Value::NullValue(_) => Ok(None),
     val => parse_vec(val).map(Some),
@@ -31,27 +29,14 @@ pub fn parse_vec_optional<T: DiagnosticableValue>(
 }
 
 impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
-  type Error = ParseValueError;
+  type Error = Error;
 
   type Node = Value;
 
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
     parse_vec(node)
-  }
-}
-
-impl<V: DiagnosticableValue> Diagnosticable for Option<Vec<V>> {
-  type Error = ParseValueError;
-
-  type Node = Value;
-
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_vec_optional(node)
   }
 }

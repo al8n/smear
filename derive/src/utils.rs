@@ -1,9 +1,11 @@
 mod aliases;
 mod long;
+mod name;
 mod short;
 
 pub(crate) use aliases::*;
 pub(crate) use long::*;
+pub(crate) use name::*;
 pub(crate) use short::*;
 
 // Utility function to check if a character is valid

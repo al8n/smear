@@ -42,7 +42,7 @@ pub trait Diagnosticable {
   type Node: apollo_parser::ast::AstNode;
 
   /// Parses from the given directive.
-  fn parse(node: Self::Node) -> Result<Self, Self::Error>
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized;
 }

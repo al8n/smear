@@ -81,7 +81,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
       type Error = #diagnostic_name;
       type Node = ::smear::apollo_parser::ast::Argument;
 
-      fn parse(node: Self::Node) -> Result<Self, Self::Error>
+      fn parse(node: &Self::Node) -> Result<Self, Self::Error>
       where
         Self: Sized
       {
