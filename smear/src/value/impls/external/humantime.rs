@@ -2,25 +2,25 @@ use super::*;
 use ::humantime::{Duration as HumanDuration, Timestamp};
 use core::time::Duration;
 
-pub fn parse_duration(src: &Value) -> Result<Duration, Error> {
+pub fn parse_duration(src: &Value) -> Result<Duration, ValueError> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
       s.parse::<HumanDuration>()
         .map(Into::into)
-        .map_err(|e| Error::invalid_value(val, e))
+        .map_err(|e| ValueError::invalid_value(val, e))
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 
-pub fn parse_timestamp(src: &Value) -> Result<Timestamp, Error> {
+pub fn parse_timestamp(src: &Value) -> Result<Timestamp, ValueError> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse().map_err(|e| Error::invalid_value(val, e))
+      s.parse().map_err(|e| ValueError::invalid_value(val, e))
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 

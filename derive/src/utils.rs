@@ -1,12 +1,19 @@
 mod aliases;
+mod default;
 mod long;
 mod name;
+mod optional;
+mod path;
 mod short;
 
 pub(crate) use aliases::*;
+pub(crate) use default::*;
 pub(crate) use long::*;
 pub(crate) use name::*;
+pub(crate) use optional::*;
+pub(crate) use path::*;
 pub(crate) use short::*;
+
 
 // Utility function to check if a character is valid
 pub(crate) fn is_valid_char(ch: char) -> bool {

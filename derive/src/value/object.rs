@@ -1,15 +1,22 @@
 use darling::{
   ast::{Data, Fields},
-  FromDeriveInput, FromField, FromMeta, FromVariant,
+  FromDeriveInput, FromField, FromVariant,
 };
-use quote::{format_ident, quote, ToTokens};
-use syn::{DeriveInput, Expr, Field, Ident, Path};
+use quote::{format_ident, quote};
+use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Path};
 
-use crate::utils::RenameAll;
+use crate::utils::{DefaultAttribute, PathAttribute, RenameAll};
 
 pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let object: Object = Object::from_derive_input(&input)?;
   let name = &object.ident;
+
+  if !object.generics.params.is_empty() {
+    return syn::Result::Err(syn::Error::new(
+      object.generics.span(),
+      "structs with generics are not supported yet",
+    ));
+  }
 
   let mut fields_declaration = Vec::new();
   let mut fields_null_check = Vec::new();
@@ -42,7 +49,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         } else {
           fields_null_check.push(quote! {
             if #field_ident.is_none() && !<#field_ty as ::smear::DiagnosticableValue>::nullable() {
-              errors.push(::smear::value::Error::missing_object_field(obj, #missing_field_error));
+              errors.push(::smear::error::ValueError::missing_object_field(obj, #missing_field_error));
             }
           });
 
@@ -62,12 +69,12 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
           });
 
           field.parser_tokenstream()
-        };
+        }?;
 
-        quote! {
+        Result::<_, syn::Error>::Ok(quote! {
           #field_rename => {
             if #field_ident_dirty {
-              errors.push(::smear::value::Error::duplicated_object_field(&field, #duplicated_field_error));
+              errors.push(::smear::error::ValueError::duplicated_object_field(&field, #duplicated_field_error));
               continue;
             }
 
@@ -75,9 +82,9 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
             #parser
           },
-        }
+        })
       })
-      .collect(),
+      .collect::<Result<Vec<_>, _>>()?,
     _ => vec![],
   };
 
@@ -85,7 +92,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     const _: () = {
       #[automatically_derived]
       impl ::smear::Diagnosticable for #name {
-        type Error = ::smear::value::Error;
+        type Error = ::smear::error::ValueError;
         type Node = ::smear::apollo_parser::ast::Value;
 
         fn parse(node: &Self::Node) -> ::core::result::Result<Self, Self::Error>
@@ -102,16 +109,16 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 match (field.name(), field.value()) {
                   (::core::option::Option::None, ::core::option::Option::None) => {},
                   (::core::option::Option::None, ::core::option::Option::Some(_)) => {
-                    errors.push(::smear::value::Error::missing_object_field_name(&field));
+                    errors.push(::smear::error::ValueError::missing_object_field_name(&field));
                   },
                   (::core::option::Option::Some(name), ::core::option::Option::None) => {
-                    errors.push(::smear::value::Error::missing_object_value(&field, name.text().as_str()));
+                    errors.push(::smear::error::ValueError::missing_object_value(&field, name.text().as_str()));
                   },
                   (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
                     match name.text().as_str().trim() {
                       #(#field_parsing)*
                       n => {
-                        errors.push(::smear::value::Error::unknown_object_field(&field, ::smear::value::ErrorUnknownField::with_alts(n, [#(#fields_name),*])));
+                        errors.push(::smear::error::ValueError::unknown_object_field(&field, ::smear::error::ErrorUnknownObjectField::with_alts(n, [#(#fields_name),*])));
                       },
                     }
                   },
@@ -121,21 +128,21 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
               #(#fields_null_check)*
 
               if !errors.is_empty() {
-                return ::core::result::Result::Err(::smear::value::Error::multiple(obj, errors));
+                return ::core::result::Result::Err(::smear::error::ValueError::multiple(obj, errors));
               }
 
               ::core::result::Result::Ok(Self {
                 #(#fields_init)*
               })
             }
-            val => ::core::result::Result::Err(::smear::value::Error::unexpected_type(val)),
+            val => ::core::result::Result::Err(::smear::error::ValueError::unexpected_type(val)),
           }
         }
       }
 
       #[automatically_derived]
       impl ::smear::Diagnosticable for ::core::option::Option<#name> {
-        type Error = ::smear::value::Error;
+        type Error = ::smear::error::ValueError;
         type Node = ::smear::apollo_parser::ast::Value;
 
         fn parse(node: &Self::Node) -> ::core::result::Result<Self, Self::Error>
@@ -169,65 +176,20 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   })
 }
 
+#[derive(FromVariant)]
+#[darling(attributes(smear))]
+#[allow(dead_code)]
+struct Variant {
+  fields: Fields<FieldDetails>,
+}
+
 #[derive(FromDeriveInput)]
 #[darling(attributes(smear), supports(struct_named))]
 struct Object {
   ident: Ident,
+  generics: Generics,
   data: Data<Variant, FieldDetails>,
   rename_all: Option<RenameAll>,
-}
-
-impl FieldDetails {
-  fn validator_tokenstream(&self) -> proc_macro2::TokenStream {
-    let field_ident = self.ident.as_ref().unwrap();
-    let assign: proc_macro2::TokenStream = if self.default.is_some() {
-      quote! {
-        #field_ident = v;
-      }
-    } else {
-      quote! {
-        #field_ident = ::core::option::Option::Some(v);
-      }
-    };
-
-    match &self.validator {
-      Some(p) => {
-        quote! {
-          match #p(&v) {
-            ::core::result::Result::Ok(_) => {
-              #assign
-            },
-            ::core::result::Result::Err(err) => {
-              errors.push(::smear::value::Error::invalid_value(&val, err));
-            },
-          }
-        }
-      }
-      None => quote! {
-        #assign
-      },
-    }
-  }
-
-  fn parser_tokenstream(&self) -> proc_macro2::TokenStream {
-    let field_ty = &self.ty;
-    let validator = self.validator_tokenstream();
-    let parser = match &self.parser {
-      Some(parser_path) => quote!(#parser_path(&val)),
-      None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)),
-    };
-
-    quote! {
-      match #parser {
-        ::core::result::Result::Ok(v) => {
-          #validator
-        },
-        ::core::result::Result::Err(err) => {
-          errors.push(err);
-        },
-      }
-    }
-  }
 }
 
 #[derive(FromField)]
@@ -237,8 +199,10 @@ struct FieldDetails {
   ty: syn::Type,
   rename: Option<String>,
   default: Option<DefaultAttribute>,
-  validator: Option<Path>,
-  parser: Option<Path>,
+  #[darling(default)]
+  validator: PathAttribute,
+  #[darling(default)]
+  parser: PathAttribute,
 }
 
 impl FieldDetails {
@@ -250,28 +214,62 @@ impl FieldDetails {
         .unwrap_or(name)
     })
   }
-}
 
-#[derive(FromVariant)]
-#[darling(attributes(smear))]
-#[allow(dead_code)]
-struct Variant {
-  fields: Fields<FieldDetails>,
-}
+  fn validator_tokenstream(&self) -> syn::Result<proc_macro2::TokenStream> {
+    let field_ident = self.ident.as_ref().unwrap();
+    let assign: proc_macro2::TokenStream = if self.default.is_some() {
+      quote! {
+        #field_ident = v;
+      }
+    } else {
+      quote! {
+        #field_ident = ::core::option::Option::Some(v);
+      }
+    };
 
-#[derive(FromMeta)]
-enum DefaultAttribute {
-  None,
-  Expr(Expr),
-  Path(Path),
-}
+    let handle_path = |p: &syn::Path| {
+      quote! {
+        match #p(&v) {
+          ::core::result::Result::Ok(_) => {
+            #assign
+          },
+          ::core::result::Result::Err(err) => {
+            errors.push(::smear::error::ValueError::invalid_value(&val, err));
+          },
+        }
+      }
+    };
 
-impl ToTokens for DefaultAttribute {
-  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-    match self {
-      Self::None => tokens.extend(quote! { ::code::default::Default::default() }),
-      Self::Expr(expr) => tokens.extend(quote! { { #expr } }),
-      Self::Path(p) => tokens.extend(quote! { #p() }),
-    }
+    Ok(match &self.validator {
+      PathAttribute::None => quote! {
+        #assign
+      },
+      PathAttribute::Path(p) => handle_path(p),
+      PathAttribute::Str(p) => {
+        let p = syn::parse_str::<Path>(p)?;
+        handle_path(&p)
+      }
+    })
+  }
+
+  fn parser_tokenstream(&self) -> syn::Result<proc_macro2::TokenStream> {
+    let field_ty = &self.ty;
+    let validator = self.validator_tokenstream()?;
+    let parser = self
+      .parser
+      .to_token_stream_with_default(quote! {&val}, || {
+        Ok(quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)))
+      })?;
+
+    Ok(quote! {
+      match #parser {
+        ::core::result::Result::Ok(v) => {
+          #validator
+        },
+        ::core::result::Result::Err(err) => {
+          errors.push(err);
+        },
+      }
+    })
   }
 }

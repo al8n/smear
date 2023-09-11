@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn parse_vec<T: DiagnosticableValue>(value: &Value) -> Result<Vec<T>, Error> {
+pub fn parse_vec<T: DiagnosticableValue>(value: &Value) -> Result<Vec<T>, ValueError> {
   match value {
     Value::ListValue(val) => {
       let mut errors = Vec::new();
@@ -14,14 +14,14 @@ pub fn parse_vec<T: DiagnosticableValue>(value: &Value) -> Result<Vec<T>, Error>
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(Error::multiple(value, errors))
+        Err(ValueError::multiple(value, errors))
       }
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 
-pub fn parse_vec_optional<T: DiagnosticableValue>(value: &Value) -> Result<Option<Vec<T>>, Error> {
+pub fn parse_vec_optional<T: DiagnosticableValue>(value: &Value) -> Result<Option<Vec<T>>, ValueError> {
   match value {
     Value::NullValue(_) => Ok(None),
     val => parse_vec(val).map(Some),
@@ -29,7 +29,7 @@ pub fn parse_vec_optional<T: DiagnosticableValue>(value: &Value) -> Result<Optio
 }
 
 impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
-  type Error = Error;
+  type Error = ValueError;
 
   type Node = Value;
 

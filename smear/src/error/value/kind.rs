@@ -8,7 +8,7 @@ pub enum ErrorKind {
   DuplicateField(String),
   MissingObjectFieldName,
   MissingObjectField(String),
-  UnknownObjectField(ErrorUnknownField),
+  UnknownObjectField(ErrorUnknownObjectField),
   MissingObjectValue(String),
   UnexpectedType(String),
   InvalidValue(String),
@@ -76,8 +76,8 @@ impl fmt::Display for ErrorKind {
   }
 }
 
-impl From<ErrorUnknownField> for ErrorKind {
-  fn from(err: ErrorUnknownField) -> Self {
+impl From<ErrorUnknownObjectField> for ErrorKind {
+  fn from(err: ErrorUnknownObjectField) -> Self {
     ErrorKind::UnknownObjectField(err)
   }
 }
@@ -88,14 +88,14 @@ impl From<ErrorUnknownField> for ErrorKind {
 // Don't want to publicly commit to ErrorKind supporting equality yet, but
 // not having it makes testing very difficult.
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct ErrorUnknownField {
+pub struct ErrorUnknownObjectField {
   pub(super) name: String,
   pub(super) did_you_mean: Option<String>,
 }
 
-impl ErrorUnknownField {
+impl ErrorUnknownObjectField {
   pub fn new<I: Into<String>>(name: I, did_you_mean: Option<String>) -> Self {
-    ErrorUnknownField {
+    ErrorUnknownObjectField {
       name: name.into(),
       did_you_mean,
     }
@@ -106,23 +106,23 @@ impl ErrorUnknownField {
     T: AsRef<str> + 'a,
     I: IntoIterator<Item = &'a T>,
   {
-    ErrorUnknownField::new(field, crate::utils::did_you_mean(field, alternates))
+    ErrorUnknownObjectField::new(field, crate::utils::did_you_mean(field, alternates))
   }
 }
 
-impl From<String> for ErrorUnknownField {
+impl From<String> for ErrorUnknownObjectField {
   fn from(name: String) -> Self {
-    ErrorUnknownField::new(name, None)
+    ErrorUnknownObjectField::new(name, None)
   }
 }
 
-impl<'a> From<&'a str> for ErrorUnknownField {
+impl<'a> From<&'a str> for ErrorUnknownObjectField {
   fn from(name: &'a str) -> Self {
-    ErrorUnknownField::new(name, None)
+    ErrorUnknownObjectField::new(name, None)
   }
 }
 
-impl fmt::Display for ErrorUnknownField {
+impl fmt::Display for ErrorUnknownObjectField {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     write!(f, "Unknown field: `{}`", self.name)?;
 

@@ -1,7 +1,7 @@
 use super::*;
 use ::indexmap::{IndexMap, IndexSet};
 
-pub fn parse_indexmap<K, V>(value: &Value) -> Result<IndexMap<K, V>, Error>
+pub fn parse_indexmap<K, V>(value: &Value) -> Result<IndexMap<K, V>, ValueError>
 where
   K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
@@ -15,10 +15,10 @@ where
         match (field.name(), field.value()) {
           (None, None) => continue,
           (None, Some(_)) => {
-            errors.push(Error::invalid_value(&field, "missing key"));
+            errors.push(ValueError::invalid_value(&field, "missing key"));
           }
           (Some(name), None) => {
-            errors.push(Error::invalid_value(
+            errors.push(ValueError::invalid_value(
               &field,
               format!("{} is missing value", name.text()),
             ));
@@ -28,7 +28,7 @@ where
               .text()
               .to_string()
               .parse::<K>()
-              .map_err(|e| Error::invalid_value(&field, format!("fail to parse key: {e}")))?;
+              .map_err(|e| ValueError::invalid_value(&field, format!("fail to parse key: {e}")))?;
             match V::parse(&val) {
               Ok(val) => {
                 res.insert(key, val);
@@ -43,10 +43,10 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(Error::multiple(value, errors))
+        Err(ValueError::multiple(value, errors))
       }
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 
@@ -55,7 +55,7 @@ impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagn
 where
   K::Err: Display + 'static,
 {
-  type Error = Error;
+  type Error = ValueError;
 
   type Node = Value;
 
@@ -67,7 +67,7 @@ where
   }
 }
 
-pub fn parse_indexset<V>(value: &Value) -> Result<IndexSet<V>, Error>
+pub fn parse_indexset<V>(value: &Value) -> Result<IndexSet<V>, ValueError>
 where
   V: DiagnosticableValue + core::hash::Hash + Eq,
 {
@@ -88,15 +88,15 @@ where
       if errors.is_empty() {
         Ok(res)
       } else {
-        Err(Error::multiple(value, errors))
+        Err(ValueError::multiple(value, errors))
       }
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 
 impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for IndexSet<V> {
-  type Error = Error;
+  type Error = ValueError;
 
   type Node = Value;
 

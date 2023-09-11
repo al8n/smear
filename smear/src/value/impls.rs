@@ -5,14 +5,14 @@ macro_rules! impl_parse_from_str {
   ($($ty:ident::$parser:ident), + $(,)?) => {
     $(
       paste::paste!{
-        pub fn [<$parser>] (value: &apollo_parser::ast::Value) -> Result<$ty, crate::value::Error> {
+        pub fn [<$parser>] (value: &apollo_parser::ast::Value) -> Result<$ty, crate::error::ValueError> {
           match value {
             apollo_parser::ast::Value::StringValue(val) => {
               let s: String = val.clone().into();
               s.parse()
-                .map_err(|e| crate::value::Error::invalid_value(val, e))
+                .map_err(|e| crate::error::ValueError::invalid_value(val, e))
             }
-            val => Err(crate::value::Error::unexpected_type(val)),
+            val => Err(crate::error::ValueError::unexpected_type(val)),
           }
         }
       }
@@ -23,7 +23,7 @@ macro_rules! impl_parse_from_str {
 macro_rules! impl_diagnostic_inner {
   ($ty:ident::$parser:ident) => {
     impl crate::Diagnosticable for $ty {
-      type Error = crate::value::Error;
+      type Error = crate::error::ValueError;
 
       type Node = apollo_parser::ast::Value;
 
@@ -79,27 +79,21 @@ pub use builtin::*;
 
 impl<T: DiagnosticableValue> DiagnosticableValue for Vec<T> {}
 
-impl<T: DiagnosticableValue> DiagnosticableValue for Option<T> {
-  fn nullable() -> bool {
-    true
-  }
-}
+// impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
+//   type Error = ValueError;
 
-impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
-  type Error = Error;
+//   type Node = Value;
 
-  type Node = Value;
-
-  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    match node {
-      Value::NullValue(_) => Ok(None),
-      val => <T as Diagnosticable>::parse(val).map(Some),
-    }
-  }
-}
+//   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+//   where
+//     Self: Sized,
+//   {
+//     match node {
+//       Value::NullValue(_) => Ok(None),
+//       val => <T as Diagnosticable>::parse(val).map(Some),
+//     }
+//   }
+// }
 
 impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Vec<O> {
   fn fields() -> &'static [&'static str] {
@@ -107,8 +101,8 @@ impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Vec<O> {
   }
 }
 
-impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Option<O> {
-  fn fields() -> &'static [&'static str] {
-    O::fields()
-  }
-}
+// impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Option<O> {
+//   fn fields() -> &'static [&'static str] {
+//     O::fields()
+//   }
+// }

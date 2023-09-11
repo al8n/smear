@@ -52,7 +52,7 @@ pub trait NamedDiagnosticable: Diagnosticable {
   fn possible_names() -> &'static [&'static str];
 
   /// Returns the short name of the node.
-  fn short() -> Option<char>;
+  fn short() -> ::core::option::Option<char>;
 
   /// Returns the long name of the node.
   fn long() -> &'static str;

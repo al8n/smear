@@ -17,24 +17,73 @@ struct Indexed;
 )]
 struct Fixed;
 
-#[derive(smear_derive::Argument)]
+#[derive(smear_derive::Directive)]
 #[smear(
   short,
-  parser = "path/to/parse_fn",
 )]
-struct Derive;
+struct Derive {
+  #[smear(
+    validator = "path/to/validator",
+    parser = "path/to/parser",
+    default,
+    required,
+  )]
+  field1: StringArgument,
+}
 
 
-#[derive(smear_derive::ObjectArgument)]
+#[derive(smear_derive::FieldDefinition)]
 #[smear(
-  short,
-  fields(
-    foo(U64Parser),
-    bar(),
+  rename_all = "xxx"
+)]
+struct Field {
+  #[smear(
+    validator = "path/to/validator",
+    parser = "path/to/parser",
+    default,
+    required,
+  )]
+  d1: FooDirective,
+
+  d2: BarDirective,
+}
+
+#[derive(smear_derive::ObjectDefinition)]
+#[smear(
+  rename_all = "xxx",
+  directives(
+
+  )
+)]
+struct Object {
+  #[smear(name = "xxx", )]
+  f1: FooFieldDefinition,
+}
+
+smear::document! {
+  objects: [{
+    name: FooObjectDefinition,
+    directives: [FooDirective, BarDirective],
+  }],
+  enums: [{
+    name: 
+  }]
+}
+
+#[derive(smear_derive::Document)]
+#[smear(
+  rename_all = "xxx",
+  objects(
+
   ),
-  parser = "path/to/parse_fn",
+  enums(
+
+  ),
 )]
-struct Object;
+struct Object {
+  #[smear(name = "xxx", )]
+  f1: FooFieldDefinition,
+}
 
 #[derive(smear_derive::UnitEnum)]
 #[smear(

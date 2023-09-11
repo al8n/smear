@@ -1,21 +1,21 @@
 use super::*;
 use rust_decimal::Decimal;
 
-pub fn parse_decimal(src: &Value) -> Result<Decimal, Error> {
+pub fn parse_decimal(src: &Value) -> Result<Decimal, ValueError> {
   match src {
     Value::FloatValue(val) => {
       let s = val.syntax().text().to_string();
-      s.parse().map_err(|e| Error::invalid_value(val, e))
+      s.parse().map_err(|e| ValueError::invalid_value(val, e))
     }
     Value::IntValue(val) => {
       let s = val.syntax().text().to_string();
-      s.parse().map_err(|e| Error::invalid_value(val, e))
+      s.parse().map_err(|e| ValueError::invalid_value(val, e))
     }
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse().map_err(|e| Error::invalid_value(val, e))
+      s.parse().map_err(|e| ValueError::invalid_value(val, e))
     }
-    val => Err(Error::unexpected_type(val)),
+    val => Err(ValueError::unexpected_type(val)),
   }
 }
 

@@ -5,41 +5,11 @@ use codespan_reporting::diagnostic::Label;
 use rowan::TextRange;
 
 mod kind;
-pub use kind::ErrorKind;
+pub use kind::{ErrorKind, ErrorUnknownObjectField};
 
 use crate::Reporter;
 
-use self::kind::ErrorUnknownField;
-
-pub enum Style {
-  /// A bug.
-  Bug,
-  /// An error.
-  Error,
-  /// A help message.
-  Help,
-  /// A note.
-  Note,
-  /// A warning.
-  Warning,
-}
-
-impl Style {
-  pub(crate) fn diagnostic<'a, FileId>(&self) -> codespan_reporting::diagnostic::Diagnostic<FileId>
-  where
-    FileId: 'a + Copy + PartialEq,
-  {
-    use codespan_reporting::diagnostic::Diagnostic as CodespanDiagnostic;
-
-    match self {
-      Self::Bug => CodespanDiagnostic::bug(),
-      Self::Error => CodespanDiagnostic::error(),
-      Self::Help => CodespanDiagnostic::help(),
-      Self::Note => CodespanDiagnostic::note(),
-      Self::Warning => CodespanDiagnostic::warning(),
-    }
-  }
-}
+use super::Style;
 
 pub struct Error {
   kind: ErrorKind,
@@ -109,7 +79,7 @@ impl Error {
     )
   }
 
-  pub fn unknown_object_field<T: AstNode>(node: &T, err: ErrorUnknownField) -> Self {
+  pub fn unknown_object_field<T: AstNode>(node: &T, err: ErrorUnknownObjectField) -> Self {
     Self::new(
       ErrorKind::UnknownObjectField(err),
       Style::Error,
