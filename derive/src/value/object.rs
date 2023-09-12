@@ -219,7 +219,7 @@ impl FieldDetails {
     let field_ident = self.ident.as_ref().unwrap();
     let assign: proc_macro2::TokenStream = if self.default.is_some() {
       quote! {
-        #field_ident = v;
+        #field_ident = parsed;
       }
     } else {
       quote! {
@@ -255,15 +255,14 @@ impl FieldDetails {
   fn parser_tokenstream(&self) -> syn::Result<proc_macro2::TokenStream> {
     let field_ty = &self.ty;
     let validator = self.validator_tokenstream()?;
-    let parser = self
-      .parser
-      .to_token_stream_with_default(quote! {&val}, || {
-        Ok(quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)))
-      })?;
+    let parser = match self.parser.path()? {
+      Some(p) => quote!(#p(&val)),
+      None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)), 
+    };
 
     Ok(quote! {
       match #parser {
-        ::core::result::Result::Ok(v) => {
+        ::core::result::Result::Ok(parsed) => {
           #validator
         },
         ::core::result::Result::Err(err) => {

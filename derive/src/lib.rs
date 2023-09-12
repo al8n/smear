@@ -1,6 +1,5 @@
-mod arguments;
 mod definitions;
-mod directives;
+mod directive;
 mod utils;
 mod value;
 
@@ -9,17 +8,7 @@ mod value;
 pub fn directive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
   let input = syn::parse_macro_input!(input as syn::DeriveInput);
 
-  directives::derive(input)
-    .unwrap_or_else(|e| e.to_compile_error())
-    .into()
-}
-
-// ================================= Argument Macros =================================
-#[proc_macro_derive(Argument, attributes(smear))]
-pub fn argument(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-  let input = syn::parse_macro_input!(input as syn::DeriveInput);
-
-  arguments::derive(input)
+  directive::derive(input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
 }
