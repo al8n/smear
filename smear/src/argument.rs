@@ -1,5 +1,8 @@
 use apollo_parser::ast::Argument;
 
-use crate::{NamedDiagnosticable, Diagnosticable, error::ArgumentError};
+use crate::{error::ArgumentError, Diagnosticable, NamedDiagnosticable};
 
-pub trait DiagnosticableArgument: Diagnosticable<Node = Argument, Error = ArgumentError> + NamedDiagnosticable {}
+pub trait DiagnosticableArgument:
+  Diagnosticable<Node = Argument, Error = ArgumentError> + NamedDiagnosticable
+{
+}

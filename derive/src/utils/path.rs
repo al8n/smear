@@ -11,6 +11,10 @@ pub(crate) enum PathAttribute {
 }
 
 impl PathAttribute {
+  pub(crate) fn is_none(&self) -> bool {
+    matches!(self, Self::None)
+  }
+
   pub(crate) fn to_token_stream(
     &self,
     args: impl ToTokens,

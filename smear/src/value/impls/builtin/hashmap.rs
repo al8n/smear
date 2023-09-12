@@ -24,11 +24,10 @@ where
             ));
           }
           (Some(name), Some(val)) => {
-            let key = name
-              .text()
-              .to_string()
-              .parse::<K>()
-              .map_err(|e| ValueError::invalid_value(&field, format!("fail to parse key: {e}")))?;
+            let key =
+              name.text().to_string().parse::<K>().map_err(|e| {
+                ValueError::invalid_value(&field, format!("fail to parse key: {e}"))
+              })?;
             match V::parse(&val) {
               Ok(val) => {
                 res.insert(key, val);

@@ -37,7 +37,9 @@ pub fn parse_char(val: &Value) -> Result<char, ValueError> {
   }
 }
 
-pub fn parse_number<T: std::str::FromStr<Err = ParseIntError>>(val: &Value) -> Result<T, ValueError> {
+pub fn parse_number<T: std::str::FromStr<Err = ParseIntError>>(
+  val: &Value,
+) -> Result<T, ValueError> {
   match val {
     Value::IntValue(val) => val
       .syntax()
@@ -58,7 +60,9 @@ pub fn parse_number_optional<T: std::str::FromStr<Err = ParseIntError>>(
   }
 }
 
-pub fn parse_float<T: std::str::FromStr<Err = ParseFloatError>>(val: &Value) -> Result<T, ValueError> {
+pub fn parse_float<T: std::str::FromStr<Err = ParseFloatError>>(
+  val: &Value,
+) -> Result<T, ValueError> {
   match val {
     Value::FloatValue(val) => val
       .syntax()

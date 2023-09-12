@@ -5,16 +5,22 @@ use darling::{
 use heck::{ToLowerCamelCase, ToPascalCase};
 use indexmap::IndexSet;
 use quote::{format_ident, quote};
-use syn::{DeriveInput, Ident, Visibility, Generics, spanned::Spanned};
+use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
-use crate::{utils::{Aliases, Long, RenameAll, Short}, arguments::ArgumentField};
+use crate::{
+  arguments::ArgumentField,
+  utils::{Aliases, Long, RenameAll, Short},
+};
 
 pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let obj = Directive::from_derive_input(&input)?;
   obj.validate_sdl_variable_name()?;
 
   if !obj.generics.params.is_empty() {
-    return syn::Result::Err(syn::Error::new(obj.generics.span(), "structs with generics are not supported yet"));
+    return syn::Result::Err(syn::Error::new(
+      obj.generics.span(),
+      "structs with generics are not supported yet",
+    ));
   }
 
   let token = match &obj.data {
@@ -27,7 +33,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         } else {
           obj.generate_struct(data)?
         }
-      },
+      }
       Style::Unit => obj.generate_unit()?,
     },
   };
@@ -149,7 +155,8 @@ impl Directive {
       let field_ty = field.ty();
       let field_vis = field.vis();
       arguments.push(field.generate(&long, self.rename_all)?);
-      struct_fields_definitions.push(quote!(#field_vis #field_name_ident: ::core::option::Option<#field_ty>));
+      struct_fields_definitions
+        .push(quote!(#field_vis #field_name_ident: ::core::option::Option<#field_ty>));
     }
 
     Ok(quote! {
@@ -227,14 +234,6 @@ impl Directive {
         ::core::cmp::PartialOrd,
         ::core::cmp::Ord,
         ::core::hash::Hash,
-        ::smear::derive_more::Not,
-        ::smear::derive_more::Display,
-        ::smear::derive_more::BitAnd,
-        ::smear::derive_more::BitOr,
-        ::smear::derive_more::BitXor,
-        ::smear::derive_more::BitAndAssign,
-        ::smear::derive_more::BitOrAssign,
-        ::smear::derive_more::BitXorAssign,
         ::smear::derive_more::From,
         ::smear::derive_more::Into,
         ::smear::derive_more::AsRef,

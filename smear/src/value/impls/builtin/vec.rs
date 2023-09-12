@@ -21,7 +21,9 @@ pub fn parse_vec<T: DiagnosticableValue>(value: &Value) -> Result<Vec<T>, ValueE
   }
 }
 
-pub fn parse_vec_optional<T: DiagnosticableValue>(value: &Value) -> Result<Option<Vec<T>>, ValueError> {
+pub fn parse_vec_optional<T: DiagnosticableValue>(
+  value: &Value,
+) -> Result<Option<Vec<T>>, ValueError> {
   match value {
     Value::NullValue(_) => Ok(None),
     val => parse_vec(val).map(Some),

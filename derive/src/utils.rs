@@ -14,7 +14,6 @@ pub(crate) use optional::*;
 pub(crate) use path::*;
 pub(crate) use short::*;
 
-
 // Utility function to check if a character is valid
 pub(crate) fn is_valid_char(ch: char) -> bool {
   ch.is_ascii_alphabetic() || ch == '_' || ch.is_ascii_digit()

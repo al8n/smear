@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone)]
 // TODO: cleanup variant fields, rather than just leave a String there.
 #[non_exhaustive]
 pub enum ErrorKind {
@@ -40,6 +41,12 @@ impl ErrorKind {
     } else {
       1
     }
+  }
+}
+
+impl fmt::Debug for ErrorKind {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{self}")
   }
 }
 

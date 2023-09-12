@@ -2,7 +2,7 @@ use darling::FromField;
 use indexmap::IndexSet;
 use syn::{Ident, Visibility};
 
-use crate::utils::{Short, Long, Aliases, DefaultAttribute, PathAttribute, RenameAll, Optional};
+use crate::utils::{Aliases, DefaultAttribute, Long, Optional, PathAttribute, RenameAll, Short};
 
 #[derive(FromField)]
 #[darling(attributes(smear))]
@@ -69,7 +69,11 @@ impl ArgumentField {
     suggestions.into_iter().collect()
   }
 
-  pub(crate) fn generate(&self, parent: &str, rename_all: Option<RenameAll>) -> syn::Result<proc_macro2::TokenStream> {
+  pub(crate) fn generate(
+    &self,
+    parent: &str,
+    rename_all: Option<RenameAll>,
+  ) -> syn::Result<proc_macro2::TokenStream> {
     super::ArgumentCodegen {
       ident: self.ident.clone().unwrap(),
       vis: self.vis.clone(),
@@ -77,10 +81,11 @@ impl ArgumentField {
       short: self.short.clone(),
       long: self.long.clone(),
       aliases: self.aliases.clone(),
-      optional: self.optional.clone(),
+      optional: self.optional,
       default: self.default.clone(),
       validator: self.validator.clone(),
       parser: self.parser.clone(),
-    }.generate(parent, rename_all)
+    }
+    .generate(parent, rename_all)
   }
 }

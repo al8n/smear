@@ -1,6 +1,6 @@
 use apollo_parser::ast::{AstNode, Value};
 
-use crate::{Diagnosticable, error::ValueError};
+use crate::{error::ValueError, Diagnosticable};
 
 pub trait DiagnosticableValue: Diagnosticable<Node = Value, Error = ValueError> {
   fn parse_with_default(node: &Self::Node, default: Self) -> Result<Self, Self::Error>

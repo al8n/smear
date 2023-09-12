@@ -1,5 +1,4 @@
-
-#[derive(darling::FromMeta, Clone)]
+#[derive(darling::FromMeta, Clone, Copy)]
 pub(crate) enum Optional {
   None,
   Bool(bool),

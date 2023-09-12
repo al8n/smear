@@ -1,10 +1,7 @@
 use darling::FromDeriveInput;
+use syn::{Generics, Ident, Type, Visibility};
 
-use quote::quote;
-use syn::{Ident, Visibility, Generics, Type};
-
-use crate::utils::{Short, Long, Aliases, DefaultAttribute, PathAttribute, Optional};
-
+use crate::utils::{Aliases, DefaultAttribute, Long, Optional, PathAttribute, Short};
 
 #[derive(FromDeriveInput)]
 #[darling(attributes(smear), supports(struct_newtype, struct_unit))]
@@ -29,12 +26,6 @@ pub(crate) struct Argument {
 
 impl Argument {
   pub(crate) fn generate_unit(&self) -> syn::Result<proc_macro2::TokenStream> {
-    Ok(quote! {
-      
-    })
-  }
-
-  pub(crate) fn generate(&self) -> syn::Result<proc_macro2::TokenStream> {
     super::ArgumentCodegen {
       ident: self.ident.clone(),
       vis: self.vis.clone(),
@@ -42,10 +33,34 @@ impl Argument {
       short: self.short.clone(),
       long: self.long.clone(),
       aliases: self.aliases.clone(),
-      optional: self.optional.clone(),
+      optional: self.optional,
       default: self.default.clone(),
       validator: self.validator.clone(),
       parser: self.parser.clone(),
-    }.generate("", None)
+    }
+    .generate_unit("", None)
+  }
+
+  pub(crate) fn generate(&self) -> syn::Result<proc_macro2::TokenStream> {
+    if !self.generics.params.is_empty() {
+      return Err(syn::Error::new_spanned(
+        &self.generics.params,
+        "generic arguments are not supported",
+      ));
+    }
+
+    super::ArgumentCodegen {
+      ident: self.ident.clone(),
+      vis: self.vis.clone(),
+      ty: self.ty.clone(),
+      short: self.short.clone(),
+      long: self.long.clone(),
+      aliases: self.aliases.clone(),
+      optional: self.optional,
+      default: self.default.clone(),
+      validator: self.validator.clone(),
+      parser: self.parser.clone(),
+    }
+    .generate("", None)
   }
 }

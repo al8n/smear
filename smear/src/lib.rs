@@ -5,8 +5,6 @@ mod db;
 mod diagnostics;
 pub use diagnostics::*;
 
-
-
 pub mod argument;
 pub mod directive;
 pub mod error;

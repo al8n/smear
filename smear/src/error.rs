@@ -8,9 +8,7 @@ pub use directive::{Error as DirectiveError, ErrorKind as DirectiveErrorKind};
 mod value;
 pub use value::{Error as ValueError, ErrorKind as ValueErrorKind, ErrorUnknownObjectField};
 
-
-
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Style {
   /// A bug.
   Bug,

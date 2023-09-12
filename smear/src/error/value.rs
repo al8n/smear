@@ -11,6 +11,7 @@ use crate::Reporter;
 
 use super::Style;
 
+#[derive(Clone)]
 pub struct Error {
   kind: ErrorKind,
   style: Style,
@@ -36,6 +37,13 @@ impl Error {
 
   pub fn len(&self) -> usize {
     self.kind.len()
+  }
+
+  pub(crate) fn to_errors(&self) -> Vec<Error> {
+    match &self.kind {
+      ErrorKind::Multiple(errors) => errors.clone(),
+      _ => vec![self.clone()],
+    }
   }
 
   pub fn invalid_value<T: AstNode>(node: &T, msg: impl core::fmt::Display) -> Self {
@@ -120,6 +128,12 @@ impl Error {
 impl core::fmt::Display for Error {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     write!(f, "{}", self.kind)
+  }
+}
+
+impl core::fmt::Debug for Error {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    write!(f, "{self}")
   }
 }
 
