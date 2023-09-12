@@ -9,7 +9,9 @@ use indexmap::IndexSet;
 use quote::{format_ident, quote};
 use syn::{Data, Ident, Visibility};
 
-use crate::utils::{Aliases, DefaultAttribute, Long, Optional, PathAttribute, RenameAll, Short};
+use crate::utils::{
+  Aliases, Attributes, DefaultAttribute, Long, Optional, PathAttribute, RenameAll, Short,
+};
 
 pub(crate) fn derive(input: syn::DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let argument = Argument::from_derive_input(&input)?;
@@ -27,6 +29,8 @@ struct ArgumentCodegen {
   ident: Ident,
   vis: Visibility,
   ty: syn::Type,
+  struct_attributes: Attributes,
+  field_attributes: Attributes,
   short: Short,
   long: Long,
   aliases: Aliases,
@@ -143,6 +147,7 @@ impl ArgumentCodegen {
       }
     };
 
+    let struct_attrs = &self.struct_attributes;
     Ok(quote! {
       #[derive(
         ::core::fmt::Debug,
@@ -158,7 +163,7 @@ impl ArgumentCodegen {
         ::smear::derive_more::AsRef,
         ::smear::derive_more::AsMut,
       )]
-      #[repr(transparent)]
+      #struct_attrs
       #[automatically_derived]
       #vis struct #struct_name(#ty);
 
@@ -286,9 +291,12 @@ impl ArgumentCodegen {
       },
     };
 
+    let struct_attrs = &self.struct_attributes;
+    let field_attrs = &self.field_attributes;
     let struct_name = self.sdl_argument_struct_name(parent_name, rename_all);
     Ok(quote! {
-      #vis #struct_name(#vis #ty);
+      #struct_attrs
+      #vis #struct_name(#field_attrs #vis #ty);
 
       #[automatically_derived]
       impl ::smear::Diagnosticable for #struct_name {

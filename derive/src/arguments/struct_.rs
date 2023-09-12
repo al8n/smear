@@ -1,7 +1,7 @@
 use darling::FromDeriveInput;
 use syn::{Generics, Ident, Type, Visibility};
 
-use crate::utils::{Aliases, DefaultAttribute, Long, Optional, PathAttribute, Short};
+use crate::utils::{Aliases, Attributes, DefaultAttribute, Long, Optional, PathAttribute, Short};
 
 #[derive(FromDeriveInput)]
 #[darling(attributes(smear), supports(struct_newtype, struct_unit))]
@@ -10,6 +10,8 @@ pub(crate) struct Argument {
   generics: Generics,
   ty: Type,
   vis: Visibility,
+  #[darling(default)]
+  attributes: Attributes,
   #[darling(default)]
   short: Short,
   #[darling(default)]
@@ -30,6 +32,8 @@ impl Argument {
       ident: self.ident.clone(),
       vis: self.vis.clone(),
       ty: self.ty.clone(),
+      struct_attributes: self.attributes.clone(),
+      field_attributes: Default::default(),
       short: self.short.clone(),
       long: self.long.clone(),
       aliases: self.aliases.clone(),
@@ -53,6 +57,8 @@ impl Argument {
       ident: self.ident.clone(),
       vis: self.vis.clone(),
       ty: self.ty.clone(),
+      struct_attributes: self.attributes.clone(),
+      field_attributes: Default::default(),
       short: self.short.clone(),
       long: self.long.clone(),
       aliases: self.aliases.clone(),

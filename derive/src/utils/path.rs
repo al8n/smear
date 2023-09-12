@@ -15,6 +15,14 @@ impl PathAttribute {
     matches!(self, Self::None)
   }
 
+  pub(crate) fn path(&self) -> syn::Result<Option<Path>> {
+    match self {
+      Self::None => Ok(None),
+      Self::Str(s) => syn::parse_str::<Path>(s).map(Some),
+      Self::Path(p) => Ok(Some(p.clone())),
+    }
+  }
+
   pub(crate) fn to_token_stream(
     &self,
     args: impl ToTokens,

@@ -10,6 +10,7 @@ pub(crate) struct ArgumentField {
   ident: Option<Ident>,
   vis: Visibility,
   ty: syn::Type,
+  attributes: crate::utils::Attributes,
   #[darling(default)]
   short: Short,
   #[darling(default)]
@@ -31,6 +32,29 @@ impl ArgumentField {
 
   pub(crate) fn vis(&self) -> &Visibility {
     &self.vis
+  }
+
+  pub(crate) fn attributes(&self) -> &crate::utils::Attributes {
+    &self.attributes
+  }
+
+  pub(crate) fn optional(&self) -> bool {
+    match self.optional {
+      Some(optional) => optional.is_optional(),
+      None => false,
+    }
+  }
+
+  pub(crate) fn default(&self) -> Option<&DefaultAttribute> {
+    self.default.as_ref()
+  }
+
+  pub(crate) fn parser(&self) -> &PathAttribute {
+    &self.parser
+  }
+
+  pub(crate) fn validator(&self) -> &PathAttribute {
+    &self.validator
   }
 
   /// Returns the name of the field as it should appear in the SDL.
@@ -71,6 +95,7 @@ impl ArgumentField {
 
   pub(crate) fn generate(
     &self,
+    attributes: crate::utils::Attributes,
     parent: &str,
     rename_all: Option<RenameAll>,
   ) -> syn::Result<proc_macro2::TokenStream> {
@@ -78,6 +103,8 @@ impl ArgumentField {
       ident: self.ident.clone().unwrap(),
       vis: self.vis.clone(),
       ty: self.ty.clone(),
+      struct_attributes: attributes,
+      field_attributes: self.attributes.clone(),
       short: self.short.clone(),
       long: self.long.clone(),
       aliases: self.aliases.clone(),

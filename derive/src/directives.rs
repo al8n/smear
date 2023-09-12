@@ -9,7 +9,7 @@ use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
 use crate::{
   arguments::ArgumentField,
-  utils::{Aliases, Long, RenameAll, Short},
+  utils::{Aliases, Attributes, DefaultAttribute, Long, RenameAll, Short},
 };
 
 pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
@@ -55,11 +55,14 @@ struct Directive {
   vis: Visibility,
   generics: Generics,
   #[darling(default)]
+  attributes: Attributes,
+  #[darling(default)]
   short: Short,
   #[darling(default)]
   long: Long,
   #[darling(default)]
   aliases: Aliases,
+  default: Option<DefaultAttribute>,
   data: Data<Variant, ArgumentField>,
   rename_all: Option<RenameAll>,
 }
@@ -136,7 +139,7 @@ impl Directive {
     fields: &Fields<ArgumentField>,
   ) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = format_ident!("{}Directive", self.sdl_directive_struct_name());
-    let diagnostic_name = format_ident!("{}Diagnostic", struct_name);
+    let parse_struct_name = format_ident!("{}Parser", struct_name);
     let possible_names = self.possible_names();
     let available_argument_names = self.possible_argument_names(fields);
     let short = match self.short() {
@@ -148,37 +151,302 @@ impl Directive {
     let vis = &self.vis;
 
     let mut struct_fields_definitions = Vec::new();
-    let mut arguments = Vec::new();
+    let mut parse_helper_struct_fields_definitions = Vec::new();
+    let mut parse_helper_struct_fields_default = Vec::new();
+    let mut missing_argument_value_handlers = Vec::new();
+    let mut argument_handlers = Vec::new();
+    let mut required_arguments_name = Vec::new();
+    let mut dirty_checks = Vec::new();
+    let mut converts = Vec::new();
     for field in fields.iter() {
       let field_name = field.sdl_name(self.rename_all);
       let field_name_ident = format_ident!("{field_name}");
-      let field_ty = field.ty();
+      let dirty = format_ident!("{field_name_ident}_dirty");
       let field_vis = field.vis();
-      arguments.push(field.generate(&long, self.rename_all)?);
-      struct_fields_definitions
-        .push(quote!(#field_vis #field_name_ident: ::core::option::Option<#field_ty>));
+      let field_attrs = field.attributes();
+      let field_possible_names = field.possible_names(self.rename_all);
+      let field_parser = field.parser();
+      let field_validator = field.validator();
+      let optional = field.optional();
+      let default_attr = field.default();
+
+      let field_ty = if optional {
+        let ty = field.ty();
+        quote!(::core::option::Option<#ty>)
+      } else {
+        required_arguments_name.push(field_name.clone());
+        let ty = field.ty();
+        quote!(#ty)
+      };
+
+      let (parse_helper_field_ty, default_parse_helper_field, parser, validator, converter) =
+        match (optional, default_attr) {
+          (true, None) => {
+            let parser_fn = match field_parser.path()? {
+              Some(p) => quote!(#p(&val)),
+              None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+            };
+            let parser = quote! {
+              match #parser_fn {
+                ::core::result::Result::Ok(parsed) => {
+                  parser.#field_name_ident = parsed;
+                }
+                ::core::result::Result::Err(err) => {
+                  errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  continue;
+                }
+              }
+            };
+            let validator = match field_validator.path()? {
+              Some(p) => quote! {
+                if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
+                  if let ::core::result::Result::Err(e) = #p(parsed) {
+                    errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  }
+                }
+              },
+              None => quote!(),
+            };
+
+            (
+              quote!(::core::option::Option<#field_ty>),
+              quote!(::core::option::Option::None),
+              parser,
+              validator,
+              quote!(#field_name_ident: parser.#field_name_ident),
+            )
+          }
+          (true, Some(default)) => {
+            let parser_fn = match field_parser.path()? {
+              Some(p) => quote!(#p(&val)),
+              None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+            };
+            let parser = quote! {
+              match #parser_fn {
+                ::core::result::Result::Ok(parsed) => {
+                  parser.#field_name_ident = parsed;
+                }
+                ::core::result::Result::Err(err) => {
+                  errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  continue;
+                }
+              }
+            };
+            let validator = match field_validator.path()? {
+              Some(p) => quote! {
+                if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
+                  if let ::core::result::Result::Err(e) = #p(parsed) {
+                    errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  }
+                }
+              },
+              None => quote!(),
+            };
+
+            (
+              quote!(::core::option::Option<#field_ty>),
+              quote!(::core::option::Option::Some(#default)),
+              parser,
+              validator,
+              quote!(#field_name_ident: parser.#field_name_ident),
+            )
+          }
+          (false, None) => {
+            let parser_fn = match field_parser.path()? {
+              Some(p) => quote!(#p(&val)),
+              None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse(&val)),
+            };
+            let parser = quote! {
+              match #parser_fn {
+                ::core::result::Result::Ok(parsed) => {
+                  parser.#field_name_ident = ::core::option::Option::Some(parsed);
+                }
+                ::core::result::Result::Err(err) => {
+                  errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  continue;
+                }
+              }
+            };
+            let validator = match field_validator.path()? {
+              Some(p) => quote! {
+                if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
+                  if let ::core::result::Result::Err(e) = #p(parsed) {
+                    errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  }
+                }
+              },
+              None => quote! {},
+            };
+            (
+              quote!(::core::option::Option<#field_ty>),
+              quote!(::core::option::Option::None),
+              parser,
+              validator,
+              quote!(#field_name_ident: parser.#field_name_ident.unwrap()),
+            )
+          }
+          (false, Some(default)) => {
+            let parser_fn = match field_parser.path()? {
+              Some(p) => quote!(#p(&val)),
+              None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+            };
+            let parser = quote! {
+              match #parser_fn {
+                ::core::result::Result::Ok(parsed) => {
+                  parser.#field_name_ident = parsed;
+                }
+                ::core::result::Result::Err(err) => {
+                  errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                  continue;
+                }
+              }
+            };
+            let validator = match field_validator.path()? {
+              Some(p) => quote! {
+                if let ::core::result::Result::Err(e) = #p(&parser.#field_name_ident) {
+                  errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+                }
+              },
+              None => quote!(),
+            };
+            (
+              quote!(#field_ty),
+              quote!(#default),
+              parser,
+              validator,
+              quote!(#field_name_ident: parser.#field_name_ident),
+            )
+          }
+        };
+      struct_fields_definitions.push(quote!(
+        #field_attrs
+        #field_vis #field_name_ident: #field_ty,
+      ));
+      parse_helper_struct_fields_definitions.push(quote!(
+        #field_name_ident: #parse_helper_field_ty,
+      ));
+      parse_helper_struct_fields_default.push(quote!(
+        #field_name_ident: #default_parse_helper_field,
+      ));
+      argument_handlers.push(quote! {
+        #(#field_possible_names)|* => {
+          if #dirty {
+            errors.push(::smear::error::DirectiveError::duplicated_argument(&arg));
+            continue;
+          }
+          #dirty = true;
+
+          #parser
+
+          #validator
+        },
+      });
+      missing_argument_value_handlers.push(quote! {
+        #(#field_possible_names)|* => {
+          if !#dirty {
+            #dirty = true;
+          } else {
+            errors.push(::smear::error::DirectiveError::duplicated_argument(&arg));
+          }
+        },
+      });
+      converts.push(converter);
+      if !optional && default_attr.is_none() {
+        dirty_checks.push(quote! {
+          if !#dirty {
+            errors.push(::smear::error::DirectiveError::missing_required_argument(&arg));
+          }
+        });
+      }
     }
 
+    let empty_branch = match &self.default {
+      Some(default) => quote!(::core::result::Result::Ok(#default)),
+      None => {
+        quote!(::core::result::Result::Err(::smear::error::DirectiveError::missing_arguments(&[#(#required_arguments_name),*])))
+      }
+    };
+
+    let attrs = &self.attributes;
     Ok(quote! {
-      #[repr(transparent)]
+      #attrs
       #[automatically_derived]
       #vis struct #struct_name {
-        #(#struct_fields_definitions),*
+        #(#struct_fields_definitions)*
       }
 
       #[automatically_derived]
       impl ::smear::Diagnosticable for #struct_name {
-        type Error = #diagnostic_name;
+        type Error = ::smear::error::DirectiveError;
         type Node = ::smear::apollo_parser::ast::Directive;
 
-        fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+        fn parse(directive: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
           Self: Sized
         {
-          if let ::core::option::Option::Some(args) = node.arguments() {
-            ::core::result::Result::Err(#diagnostic_name(args))
+          struct #parse_struct_name {
+            #(#parse_helper_struct_fields_definitions)*
+          }
+
+          impl ::core::default::Default for #parse_struct_name {
+            fn default() -> Self {
+              Self {
+                #(#parse_helper_struct_fields_default)*
+              }
+            }
+          }
+
+          impl ::core::convert::From<#parse_struct_name> for #struct_name {
+            fn from(parser: #parse_struct_name) -> Self {
+              Self {
+                #(#converts),*
+              }
+            }
+          }
+
+          if let ::core::option::Option::Some(args) = directive.arguments() {
+            let mut parser = #parse_struct_name::default();
+            let mut errors = ::std::vec::Vec::new();
+            for arg in args.arguments() {
+              let arg_name = arg.name();
+              let arg_value = arg.value();
+              match (arg.name(), arg.value()) {
+                (::core::option::Option::None, ::core::option::Option::None) => {
+                  errors.push(::smear::error::ArgumentError::invalid(&arg));
+                },
+                (::core::option::Option::None, ::core::option::Option::Some(_)) => {
+                  errors.push(::smear::error::DirectiveError::missing_argument_name(&arg));
+                },
+                (::core::option::Option::Some(name), ::core::option::Option::None) => {
+                  let name_str = name.text().as_str().trim();
+                  match name_str {
+                    #(#missing_argument_value_handlers)*
+                    name => {
+                      errors.push(::smear::error::ArgumentError::unknown_argument(&arg, name_str, &[#(#available_argument_names),*]));
+                    }
+                  }
+                },
+                (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
+                  let name_str = name.text().as_str().trim();
+                  match name_str {
+                    #(#argument_handlers)*
+                    name => {
+                      ::core::result::Result::Err(::smear::error::ArgumentError::unknown_argument(&arg, name, &[#(#available_argument_names),*]))
+                    }
+                  }
+                },
+              }
+            }
+
+            #(#dirty_checks)*
+
+            if !errors.is_empty() {
+              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(&directive, errors));
+            }
+
+            ::core::result::Result::Ok(::core::convert::From::from(parser))
           } else {
-            ::core::result::Result::Ok(Self(true))
+            #empty_branch
           }
         }
       }
@@ -214,7 +482,6 @@ impl Directive {
 
   fn generate_unit(&self) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = format_ident!("{}Directive", self.sdl_directive_struct_name());
-    let diagnostic_name = format_ident!("{}Diagnostic", struct_name);
     let possible_names = self.possible_names();
     let short = match self.short() {
       Some(short) => quote!(::core::option::Option::Some(#short)),
@@ -266,7 +533,7 @@ impl Directive {
 
       #[automatically_derived]
       impl ::smear::Diagnosticable for #struct_name {
-        type Error = #diagnostic_name;
+        type Error = ::smear::error::DirectiveError;
         type Node = ::smear::apollo_parser::ast::Directive;
 
         fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -274,7 +541,7 @@ impl Directive {
           Self: Sized
         {
           if let ::core::option::Option::Some(args) = node.arguments() {
-            ::core::result::Result::Err(#diagnostic_name(args))
+            ::core::result::Result::Err(::smear::error::DirectiveError::unexpected_arguments(&args))
           } else {
             ::core::result::Result::Ok(Self(true))
           }
@@ -326,37 +593,6 @@ impl Directive {
           F: ::core::ops::FnOnce() -> T,
         {
           self.0.then(f)
-        }
-      }
-
-      #[derive(
-        ::core::fmt::Debug,
-        ::core::clone::Clone,
-      )]
-      #[repr(transparent)]
-      #[automatically_derived]
-      #vis struct #diagnostic_name(::smear::apollo_parser::ast::Arguments);
-
-      #[automatically_derived]
-      impl ::smear::Reporter for #diagnostic_name {
-        fn report<'a, FileId>(&self, file_id: FileId) -> ::smear::Diagnostic<FileId>
-        where
-          FileId: 'a + ::core::marker::Copy + ::core::cmp::PartialEq
-        {
-          use ::smear::apollo_parser::ast::AstNode;
-
-          let syn = self.0.syntax();
-          let range = syn.text_range();
-          let start: usize = range.start().into();
-          let end: usize = range.end().into();
-
-          ::smear::codespan_reporting::diagnostic::Diagnostic::error()
-            .with_message("unexpected arguments")
-            .with_labels(vec![
-              ::smear::codespan_reporting::diagnostic::Label::primary(file_id, start..end)
-                .with_message(syn.text()),
-            ])
-            .into()
         }
       }
     })

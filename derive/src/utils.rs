@@ -1,4 +1,5 @@
 mod aliases;
+mod attributes;
 mod default;
 mod long;
 mod name;
@@ -7,6 +8,7 @@ mod path;
 mod short;
 
 pub(crate) use aliases::*;
+pub(crate) use attributes::*;
 pub(crate) use default::*;
 pub(crate) use long::*;
 pub(crate) use name::*;
