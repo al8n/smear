@@ -4,7 +4,7 @@ use quote::ToTokens;
 
 use crate::utils::is_valid_char;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Aliases {
   pub names: Vec<String>,
 }

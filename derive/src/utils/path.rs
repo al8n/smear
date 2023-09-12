@@ -2,7 +2,7 @@ use darling::FromMeta;
 use quote::{quote, ToTokens};
 use syn::Path;
 
-#[derive(FromMeta, Default)]
+#[derive(FromMeta, Default, Clone)]
 pub(crate) enum PathAttribute {
   #[default]
   None,

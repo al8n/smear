@@ -2,7 +2,7 @@ use darling::FromMeta;
 use quote::{quote, ToTokens};
 use syn::{Expr, Path};
 
-#[derive(FromMeta)]
+#[derive(FromMeta, Clone)]
 pub(crate) enum DefaultAttribute {
   None,
   Expr(Expr),

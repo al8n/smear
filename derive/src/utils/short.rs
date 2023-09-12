@@ -1,7 +1,7 @@
 use darling::FromMeta;
 use syn::Expr;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Short(pub(crate) Option<Option<char>>);
 
 impl FromMeta for Short {

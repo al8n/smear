@@ -1,11 +1,8 @@
 use darling::FromField;
-use heck::ToPascalCase;
 use indexmap::IndexSet;
-use quote::{quote, format_ident};
 use syn::{Ident, Visibility};
 
 use crate::utils::{Short, Long, Aliases, DefaultAttribute, PathAttribute, RenameAll, Optional};
-
 
 #[derive(FromField)]
 #[darling(attributes(smear))]
@@ -46,19 +43,6 @@ impl ArgumentField {
     })
   }
 
-  /// Returns the name of the argument struct in sdl side.
-  pub(crate) fn sdl_argument_struct_name(&self, parent_name: &str, rename_all: Option<RenameAll>) -> Ident {
-    let name = self.sdl_name(rename_all);
-    format_ident!("{}{}Argument", parent_name, name.to_pascal_case())
-  }
-
-  pub(crate) fn validate(&self, rename_all: Option<RenameAll>) -> syn::Result<()> {
-    let name = self.sdl_name(rename_all);
-    self.short.validate(&name)?;
-    self.long.validate(&name)?;
-    Ok(())
-  }
-
   pub(crate) fn short(&self, rename_all: Option<RenameAll>) -> Option<char> {
     self.short.0.as_ref().map(|s| {
       s.unwrap_or_else(|| {
@@ -85,101 +69,18 @@ impl ArgumentField {
     suggestions.into_iter().collect()
   }
 
-  pub(crate) fn generate(&self, parent_name: &str, rename_all: Option<RenameAll>) -> syn::Result<proc_macro2::TokenStream> {
-    self.validate(rename_all)?;
-
-    let ty = &self.ty;
-    let vis = &self.vis;
-    let possible_names = self.possible_names(rename_all);
-    let short = match self.short(rename_all) {
-      Some(short) => quote!(::core::option::Option::Some(#short)),
-      None => quote!(::core::option::Option::None),
-    };
-    let long = self.sdl_name(rename_all);
-    let aliases = &self.aliases.names;
-
-    let validator = self.validator.to_token_stream_with_default_and_custom(|| Ok(quote!(Self(val))), |p| {
-      Ok(quote! {#p(&val).map(Self).map_err(|err| ::smear::error::ArgumentError::invalid_value(&arg, err))})
-    })?;
-
-    let parser = match &self.default {
-      Some(default) => self
-        .parser
-        .to_token_stream_with_default(quote! {&val}, || {
-          Ok(quote!(<#ty as ::smear::DiagnosticableValue>::parse_with_default(&val, #default)))
-        })?,
-      None => self
-        .parser
-        .to_token_stream_with_default(quote! {&val}, || {
-          Ok(quote!(<#ty as ::smear::DiagnosticableValue>::parse(&val)))
-        })?,
-    };
-
-    let struct_name = self.sdl_argument_struct_name(parent_name, rename_all);
-    Ok(quote! {
-      #vis #struct_name(#vis #ty);
-
-      #[automatically_derived]
-      impl ::smear::Diagnosticable for #struct_name {
-        type Error = ::smear::error::ArgumentError;
-        type Node = ::smear::apollo_parser::ast::Argument;
-
-        fn parse(arg: &Self::Node) -> ::core::result::Result<Self, Self::Error>
-        where
-          Self: Sized
-        {
-          use ::smear::apollo_parser::ast::AstNode;
-
-          match (arg.name(), arg.value()) {
-            (::core::option::Option::None, ::core::option::Option::None) => ::core::result::Result::Err(::smear::error::ArgumentError::invalid(&arg)),
-            (::core::option::Option::None, ::core::option::Option::Some(_)) => {
-              ::core::result::Result::Err(::smear::error::ArgumentError::missing_argument_name(&arg)) 
-            },
-            (::core::option::Option::Some(name), ::core::option::Option::None) => {
-              ::core::result::Result::Err(::smear::error::ArgumentError::missing_argument_value(&arg, name.text().to_string(), ::core::option::Option::None))
-            },
-            (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
-              match name.text().as_str().trim() {
-                #(#possible_names)|* => {
-                  match #parser {
-                    ::core::result::Result::Ok(val) => {
-                      #validator
-                    }
-                    ::core::result::Result::Err(err) => {
-                      ::core::result::Result::Err(::smear::error::ArgumentError::invalid_value(&arg, err))
-                    }
-                  }
-                },
-                name => {
-                  ::core::result::Result::Err(::smear::error::ArgumentError::unknown_argument(&arg, name, &[#(#possible_names),*]))
-                }
-              }
-            },
-          }
-        }
-      }
-
-      #[automatically_derived]
-      impl ::smear::NamedDiagnosticable for #struct_name {
-        fn possible_names() -> &'static [&'static str] {
-          &[#(#possible_names),*]
-        }
-
-        fn short() -> ::core::option::Option<char> {
-          #short
-        }
-
-        fn long() -> &'static str {
-          #long
-        }
-
-        fn aliases() -> &'static [&'static str] {
-          &[#(#aliases),*]
-        }
-      }
-
-      #[automatically_derived]
-      impl ::smear::DiagnosticableArgument for #struct_name {}
-    })
+  pub(crate) fn generate(&self, parent: &str, rename_all: Option<RenameAll>) -> syn::Result<proc_macro2::TokenStream> {
+    super::ArgumentCodegen {
+      ident: self.ident.clone().unwrap(),
+      vis: self.vis.clone(),
+      ty: self.ty.clone(),
+      short: self.short.clone(),
+      long: self.long.clone(),
+      aliases: self.aliases.clone(),
+      optional: self.optional.clone(),
+      default: self.default.clone(),
+      validator: self.validator.clone(),
+      parser: self.parser.clone(),
+    }.generate(parent, rename_all)
   }
 }
