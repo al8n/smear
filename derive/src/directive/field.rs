@@ -174,7 +174,7 @@ impl ArgumentField {
     argument_handlers.push(quote! {
       #(#field_possible_names)|* => {
         if #dirty {
-          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg));
+          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
           continue;
         }
         #dirty = true;
@@ -189,7 +189,7 @@ impl ArgumentField {
         if !#dirty {
           #dirty = true;
         } else {
-          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg));
+          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
         }
       },
     });
@@ -197,7 +197,7 @@ impl ArgumentField {
     if !optional && default_attr.is_none() {
       dirty_checks.push(quote! {
         if !#dirty {
-          errors.push(::smear::error::DirectiveError::missing_required_argument(&arg));
+          missing_arguments.push(#field_name);
         }
       });
     }

@@ -1,6 +1,3 @@
-mod argument;
-pub use argument::{Error as ArgumentError, ErrorKind as ArgumentErrorKind};
-
 #[allow(clippy::len_without_is_empty)]
 mod directive;
 pub use directive::{Error as DirectiveError, ErrorKind as DirectiveErrorKind};

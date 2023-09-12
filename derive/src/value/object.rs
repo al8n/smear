@@ -257,7 +257,7 @@ impl FieldDetails {
     let validator = self.validator_tokenstream()?;
     let parser = match self.parser.path()? {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)), 
+      None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)),
     };
 
     Ok(quote! {

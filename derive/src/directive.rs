@@ -174,7 +174,14 @@ impl Directive {
       }
     };
 
-    let inherit_impls = Self::generate_inherit_impls(&struct_name, &possible_names, &available_argument_names, &short, &long, aliases);
+    let inherit_impls = Self::generate_inherit_impls(
+      &struct_name,
+      &possible_names,
+      &available_argument_names,
+      &short,
+      &long,
+      aliases,
+    );
 
     let attrs = &self.attributes;
     Ok(quote! {
@@ -216,10 +223,12 @@ impl Directive {
           if let ::core::option::Option::Some(args) = directive.arguments() {
             let mut parser = #parse_struct_name::default();
             let mut errors = ::std::vec::Vec::new();
+            let mut missing_arguments = ::std::vec::Vec::new();
+            let directive_name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
             for arg in args.arguments() {
               match (arg.name(), arg.value()) {
                 (::core::option::Option::None, ::core::option::Option::None) => {
-                  errors.push(::smear::error::ArgumentError::invalid(&arg));
+                  errors.push(::smear::error::DirectiveError::invalid(&arg));
                 },
                 (::core::option::Option::None, ::core::option::Option::Some(_)) => {
                   errors.push(::smear::error::DirectiveError::missing_argument_name(&arg));
@@ -229,7 +238,7 @@ impl Directive {
                   match name_str {
                     #(#missing_argument_value_handlers)*
                     name => {
-                      errors.push(::smear::error::ArgumentError::unknown_argument(&arg, name_str, &[#(#available_argument_names),*]));
+                      errors.push(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name_str, &[#(#available_argument_names),*]));
                     }
                   }
                 },
@@ -238,7 +247,7 @@ impl Directive {
                   match name_str {
                     #(#argument_handlers)*
                     name => {
-                      ::core::result::Result::Err(::smear::error::ArgumentError::unknown_argument(&arg, name, &[#(#available_argument_names),*]))
+                      ::core::result::Result::Err(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name, &[#(#available_argument_names),*]))
                     }
                   }
                 },
@@ -247,8 +256,12 @@ impl Directive {
 
             #(#dirty_checks)*
 
+            if !missing_arguments.is_empty() {
+              errors.push(::smear::error::DirectiveError::missing_arguments(directive, directive_name, missing_arguments));
+            }
+
             if !errors.is_empty() {
-              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(&directive, errors));
+              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(directive, errors));
             }
 
             ::core::result::Result::Ok(::core::convert::From::from(parser))
@@ -257,7 +270,7 @@ impl Directive {
           }
         }
       }
-      
+
       #inherit_impls
     })
   }
@@ -272,7 +285,8 @@ impl Directive {
     let long = self.sdl_variable_name();
     let aliases = &self.aliases.names;
     let vis = &self.vis;
-    let inherit_impls = Self::generate_inherit_impls(&struct_name, &possible_names, &[], &short, &long, aliases);
+    let inherit_impls =
+      Self::generate_inherit_impls(&struct_name, &possible_names, &[], &short, &long, aliases);
     Ok(quote! {
       #[derive(
         ::core::fmt::Debug,
@@ -322,16 +336,19 @@ impl Directive {
         where
           Self: Sized
         {
+          use ::smear::apollo_parser::ast::AstNode;
+
           if let ::core::option::Option::Some(args) = node.arguments() {
             let mut errors = ::std::vec::Vec::new();
+            let name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
             for arg in args.arguments() {
-              errors.push(::smear::error::DirectiveError::unexpected_argument(&arg, #long));
+              errors.push(::smear::error::DirectiveError::unknown_argument(&arg, name.clone(), arg.name().map(|n| n.text().to_string()).unwrap_or_default(), &[]));
             }
             if !errors.is_empty() {
-              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(&node, errors));
+              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(node, errors));
             }
           }
-          
+
           ::core::result::Result::Ok(Self(true))
         }
       }
