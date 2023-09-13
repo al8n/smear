@@ -1,9 +1,17 @@
 [workspace]
 members = [
   "derive",
-  "smear"
+  "smear",
+  "types"
 ]
 resolver = "2"
+
+[workspace.dependencies]
+apollo-parser = "0.6"
+codespan-reporting = "0.11"
+rowan = "0.15"
+strsim = "0.10"
+viewit = "0.1.5"
 
 
 [workspace.package]

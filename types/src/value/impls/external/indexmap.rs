@@ -1,16 +1,16 @@
 use super::*;
-use std::collections::{BTreeMap, BTreeSet};
+use ::indexmap::{IndexMap, IndexSet};
 
-pub fn parse_btreemap<K, V>(value: &Value) -> Result<BTreeMap<K, V>, ValueError>
+pub fn parse_indexmap<K, V>(value: &Value) -> Result<IndexMap<K, V>, ValueError>
 where
-  K: std::str::FromStr + Eq + Ord,
+  K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
   V: DiagnosticableValue,
 {
   match value {
     Value::ObjectValue(val) => {
       let mut errors = Vec::new();
-      let mut res = BTreeMap::new();
+      let mut res = IndexMap::new();
       for field in val.object_fields() {
         match (field.name(), field.value()) {
           (None, None) => continue,
@@ -49,26 +49,40 @@ where
   }
 }
 
-pub fn parse_btreemap_optional<K, V>(value: &Value) -> Result<Option<BTreeMap<K, V>>, ValueError>
+impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
+  for IndexMap<K, V>
 where
-  K: std::str::FromStr + Eq + Ord,
   K::Err: Display + 'static,
-  V: DiagnosticableValue,
 {
-  match value {
-    Value::NullValue(_) => Ok(None),
-    val => parse_btreemap(val).map(Some),
+  type Error = ValueError;
+
+  type Node = Value;
+
+  type Descriptor = ValueDescriptor;
+
+  fn descriptor() -> &'static Self::Descriptor {
+    &ValueDescriptor {
+      name: "IndexMap",
+      optional: false,
+    }
+  }
+
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    parse_indexmap(node)
   }
 }
 
-pub fn parse_btreeset<V>(value: &Value) -> Result<BTreeSet<V>, ValueError>
+pub fn parse_indexset<V>(value: &Value) -> Result<IndexSet<V>, ValueError>
 where
-  V: DiagnosticableValue + Eq + Ord,
+  V: DiagnosticableValue + core::hash::Hash + Eq,
 {
   match value {
     Value::ListValue(val) => {
       let mut errors = Vec::new();
-      let mut res = BTreeSet::new();
+      let mut res = IndexSet::new();
       for val in val.values() {
         match V::parse(&val) {
           Ok(val) => {
@@ -89,48 +103,33 @@ where
   }
 }
 
-pub fn parse_btreeset_optional<V>(value: &Value) -> Result<Option<BTreeSet<V>>, ValueError>
-where
-  V: DiagnosticableValue + Eq + Ord,
-{
-  match value {
-    Value::NullValue(_) => Ok(None),
-    val => parse_btreeset(val).map(Some),
+impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for IndexSet<V> {
+  type Error = ValueError;
+
+  type Node = Value;
+
+  type Descriptor = ValueDescriptor;
+
+  fn descriptor() -> &'static Self::Descriptor {
+    &ValueDescriptor {
+      name: "IndexSet",
+      optional: false,
+    }
+  }
+
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    parse_indexset(node)
   }
 }
 
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> Diagnosticable for BTreeMap<K, V>
+impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> DiagnosticableValue
+  for IndexMap<K, V>
 where
   K::Err: Display + 'static,
 {
-  type Error = ValueError;
-
-  type Node = Value;
-
-  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_btreemap(node)
-  }
 }
 
-impl<V: DiagnosticableValue + Eq + Ord> Diagnosticable for BTreeSet<V> {
-  type Error = ValueError;
-
-  type Node = Value;
-
-  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_btreeset(node)
-  }
-}
-
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> DiagnosticableValue for BTreeMap<K, V> where
-  K::Err: Display + 'static
-{
-}
-
-impl<V: DiagnosticableValue + Eq + Ord> DiagnosticableValue for BTreeSet<V> {}
+impl<V: DiagnosticableValue + core::hash::Hash + Eq> DiagnosticableValue for IndexSet<V> {}

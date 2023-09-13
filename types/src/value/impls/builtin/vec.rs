@@ -35,6 +35,15 @@ impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
 
   type Node = Value;
 
+  type Descriptor = ValueDescriptor;
+
+  fn descriptor() -> &'static Self::Descriptor {
+    &ValueDescriptor {
+      name: "Vec",
+      optional: false,
+    }
+  }
+
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,

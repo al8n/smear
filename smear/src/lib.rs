@@ -5,10 +5,19 @@ mod db;
 mod diagnostics;
 pub use diagnostics::*;
 
-pub mod directive;
-pub mod error;
-pub mod utils;
-pub mod value;
+pub mod directive {
+  pub use smear_types::directive::*;
+}
+pub mod error {
+  pub use smear_types::error::*;
+}
+
+pub mod utils {
+  pub use smear_types::utils::*;
+}
+pub mod value {
+  pub use smear_types::value::*;
+}
 
 pub use apollo_parser;
 pub use codespan_reporting;

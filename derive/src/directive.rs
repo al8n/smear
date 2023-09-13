@@ -1,11 +1,12 @@
 use darling::{
-  ast::{Data, Fields, Style},
-  FromDeriveInput, FromVariant,
+  ast::{Data, Fields, NestedMeta, Style},
+  FromDeriveInput, FromMeta, FromVariant,
 };
 use heck::{ToLowerCamelCase, ToPascalCase};
 use indexmap::IndexSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use smear_types::directive::{DirectiveLocation, On};
 use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
 use crate::utils::{Aliases, Attributes, DefaultAttribute, Long, RenameAll, Short};
@@ -63,6 +64,8 @@ struct Directive {
   long: Long,
   #[darling(default)]
   aliases: Aliases,
+  #[darling(default)]
+  on: On,
   default: Option<DefaultAttribute>,
   data: Data<Variant, Argument>,
   rename_all: Option<RenameAll>,
@@ -179,6 +182,7 @@ impl Directive {
       &long,
       aliases,
     );
+    let on = &self.on;
 
     let attrs = &self.attributes;
     Ok(quote! {
@@ -192,6 +196,7 @@ impl Directive {
       impl ::smear::Diagnosticable for #struct_name {
         type Error = ::smear::error::DirectiveError;
         type Node = ::smear::apollo_parser::ast::Directive;
+        type Descriptor = ::smear::directive::DirectiveDescriptor;
 
         fn parse(directive: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
@@ -264,6 +269,15 @@ impl Directive {
             ::core::result::Result::Ok(::core::convert::From::from(parser))
           } else {
             #empty_branch
+          }
+        }
+
+        fn descriptor() -> &'static Self::Descriptor {
+          &::smear::directive::DirectiveDescriptor {
+            locations: #on,
+            available_arguments: &[#(#available_argument_names),*],
+            required_arguments: &[#(#required_arguments_name),*],
+            optional_arguments: &'static [&'static ArgumentDescriptor],
           }
         }
       }

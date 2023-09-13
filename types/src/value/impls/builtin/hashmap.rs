@@ -1,7 +1,7 @@
 use super::*;
-use ::indexmap::{IndexMap, IndexSet};
+use std::collections::{HashMap, HashSet};
 
-pub fn parse_indexmap<K, V>(value: &Value) -> Result<IndexMap<K, V>, ValueError>
+pub fn parse_hashmap<K, V>(value: &Value) -> Result<HashMap<K, V>, ValueError>
 where
   K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
@@ -10,7 +10,7 @@ where
   match value {
     Value::ObjectValue(val) => {
       let mut errors = Vec::new();
-      let mut res = IndexMap::new();
+      let mut res = HashMap::new();
       for field in val.object_fields() {
         match (field.name(), field.value()) {
           (None, None) => continue,
@@ -49,31 +49,26 @@ where
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
-  for IndexMap<K, V>
+pub fn parse_hashmap_optional<K, V>(value: &Value) -> Result<Option<HashMap<K, V>>, ValueError>
 where
+  K: std::str::FromStr + core::hash::Hash + Eq,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
-  type Error = ValueError;
-
-  type Node = Value;
-
-  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
-  where
-    Self: Sized,
-  {
-    parse_indexmap(node)
+  match value {
+    Value::NullValue(_) => Ok(None),
+    val => parse_hashmap(val).map(Some),
   }
 }
 
-pub fn parse_indexset<V>(value: &Value) -> Result<IndexSet<V>, ValueError>
+pub fn parse_hashset<V>(value: &Value) -> Result<HashSet<V>, ValueError>
 where
   V: DiagnosticableValue + core::hash::Hash + Eq,
 {
   match value {
     Value::ListValue(val) => {
       let mut errors = Vec::new();
-      let mut res = IndexSet::new();
+      let mut res = HashSet::new();
       for val in val.values() {
         match V::parse(&val) {
           Ok(val) => {
@@ -94,24 +89,69 @@ where
   }
 }
 
-impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for IndexSet<V> {
+pub fn parse_hashset_optional<V>(value: &Value) -> Result<Option<HashSet<V>>, ValueError>
+where
+  V: DiagnosticableValue + core::hash::Hash + Eq,
+{
+  match value {
+    Value::NullValue(_) => Ok(None),
+    val => parse_hashset(val).map(Some),
+  }
+}
+
+impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
+  for HashMap<K, V>
+where
+  K::Err: Display + 'static,
+{
   type Error = ValueError;
 
   type Node = Value;
+
+  type Descriptor = ValueDescriptor;
+
+  fn descriptor() -> &'static Self::Descriptor {
+    &ValueDescriptor {
+      name: "HashMap",
+      optional: false,
+    }
+  }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
   where
     Self: Sized,
   {
-    parse_indexset(node)
+    parse_hashmap(node)
+  }
+}
+
+impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for HashSet<V> {
+  type Error = ValueError;
+
+  type Node = Value;
+
+  type Descriptor = ValueDescriptor;
+
+  fn descriptor() -> &'static Self::Descriptor {
+    &ValueDescriptor {
+      name: "HashSet",
+      optional: false,
+    }
+  }
+
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    parse_hashset(node)
   }
 }
 
 impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> DiagnosticableValue
-  for IndexMap<K, V>
+  for HashMap<K, V>
 where
   K::Err: Display + 'static,
 {
 }
 
-impl<V: DiagnosticableValue + core::hash::Hash + Eq> DiagnosticableValue for IndexSet<V> {}
+impl<V: DiagnosticableValue + core::hash::Hash + Eq> DiagnosticableValue for HashSet<V> {}

@@ -27,6 +27,15 @@ macro_rules! impl_diagnostic_inner {
 
       type Node = apollo_parser::ast::Value;
 
+      type Descriptor = crate::value::ValueDescriptor;
+
+      fn descriptor() -> &'static Self::Descriptor {
+        &crate::value::ValueDescriptor {
+          name: stringify!($ty),
+          optional: false,
+        }
+      }
+
       fn parse(node: &Self::Node) -> Result<Self, Self::Error>
       where
         Self: Sized,
@@ -79,21 +88,49 @@ pub use builtin::*;
 
 impl<T: DiagnosticableValue> DiagnosticableValue for Vec<T> {}
 
-// impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
-//   type Error = ValueError;
+impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
+  type Error = ValueError;
+  type Node = Value;
+  type Descriptor = ValueDescriptor;
 
-//   type Node = Value;
+  fn descriptor() -> &'static Self::Descriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
 
-//   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
-//   where
-//     Self: Sized,
-//   {
-//     match node {
-//       Value::NullValue(_) => Ok(None),
-//       val => <T as Diagnosticable>::parse(val).map(Some),
-//     }
-//   }
-// }
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
+      name: T::descriptor().name(),
+      optional: true,
+    })
+  }
+
+  fn parse(node: &Self::Node) -> Result<Self, Self::Error> {
+    match node {
+      Value::NullValue(_) => Ok(None),
+      node => T::parse(node).map(Some),
+    }
+  }
+}
+
+impl<V: DiagnosticableValue> DiagnosticableValue for Option<V> {
+  fn parse_with_default(node: &Self::Node, default: Self) -> Result<Self, Self::Error>
+  where
+    Self: Sized,
+  {
+    match node {
+      Value::NullValue(_) => Ok(default),
+      val => V::parse(val).map(Some),
+    }
+  }
+
+  fn parse_nullable(node: &Self::Node) -> Result<Option<Self>, Self::Error>
+  where
+    Self: Sized,
+  {
+    match node {
+      Value::NullValue(_) => Ok(None),
+      val => Option::<V>::parse(val).map(Some),
+    }
+  }
+}
 
 impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Vec<O> {
   fn fields() -> &'static [&'static str] {

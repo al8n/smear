@@ -24,12 +24,10 @@ mod humantime;
 #[cfg_attr(docsrs, doc(cfg(feature = "url")))]
 mod url;
 
-// #[cfg(feature = "uuid")]
-// #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
-// mod uuid;
+#[cfg(feature = "uuid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
+mod uuid;
 
 #[cfg(feature = "indexmap")]
 #[cfg_attr(docsrs, doc(cfg(feature = "indexmap")))]
 mod indexmap;
-
-mod uuid;
