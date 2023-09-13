@@ -10,8 +10,8 @@ use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
 use crate::utils::{Aliases, Attributes, DefaultAttribute, Long, RenameAll, Short};
 
-mod field;
-use field::ArgumentField;
+mod argument;
+use argument::Argument;
 
 pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
   let obj = Directive::from_derive_input(&input)?;
@@ -46,7 +46,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 #[darling(attributes(smear))]
 #[allow(dead_code)]
 struct Variant {
-  fields: Fields<ArgumentField>,
+  fields: Fields<Argument>,
 }
 
 #[derive(FromDeriveInput)]
@@ -64,7 +64,7 @@ struct Directive {
   #[darling(default)]
   aliases: Aliases,
   default: Option<DefaultAttribute>,
-  data: Data<Variant, ArgumentField>,
+  data: Data<Variant, Argument>,
   rename_all: Option<RenameAll>,
 }
 
@@ -127,7 +127,7 @@ impl Directive {
     suggestions.into_iter().collect()
   }
 
-  fn possible_argument_names(&self, fields: &Fields<ArgumentField>) -> Vec<String> {
+  fn possible_argument_names(&self, fields: &Fields<Argument>) -> Vec<String> {
     let mut names = IndexSet::new();
     for field in fields.iter() {
       names.extend(field.possible_names(self.rename_all));
@@ -135,10 +135,7 @@ impl Directive {
     names.into_iter().collect()
   }
 
-  fn generate_struct(
-    &self,
-    fields: &Fields<ArgumentField>,
-  ) -> syn::Result<proc_macro2::TokenStream> {
+  fn generate_struct(&self, fields: &Fields<Argument>) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = format_ident!("{}Directive", self.sdl_directive_struct_name());
     let parse_struct_name = format_ident!("{}Parser", struct_name);
     let possible_names = self.possible_names();

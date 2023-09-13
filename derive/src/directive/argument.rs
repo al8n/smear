@@ -10,7 +10,7 @@ use super::Helper;
 
 #[derive(FromField)]
 #[darling(attributes(smear))]
-pub(super) struct ArgumentField {
+pub(super) struct Argument {
   ident: Option<Ident>,
   vis: Visibility,
   ty: syn::Type,
@@ -29,7 +29,7 @@ pub(super) struct ArgumentField {
   parser: PathAttribute,
 }
 
-impl ArgumentField {
+impl Argument {
   pub(super) fn ty(&self) -> &syn::Type {
     &self.ty
   }

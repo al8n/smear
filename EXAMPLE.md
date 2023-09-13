@@ -1,22 +1,5 @@
 
 ```rust
-#[derive(smear_derive::BooleanDirective)]
-#[smear(
-  short,
-  long = "indexed",
-  default = true,
-  alias(name1, name2, name3),
-)]
-struct Indexed;
-
-#[derive(smear_derive::BooleanDirective)]
-#[smear(
-  short = 'f',
-  default = false,
-  alias(name1, name2, name3),
-)]
-struct Fixed;
-
 #[derive(smear_derive::Directive)]
 #[smear(
   short,
@@ -26,38 +9,46 @@ struct Derive {
     validator = "path/to/validator",
     parser = "path/to/parser",
     default,
-    required,
+    optional
   )]
-  field1: StringArgument,
-}
-
-
-#[derive(smear_derive::FieldDefinition)]
-#[smear(
-  rename_all = "xxx"
-)]
-struct Field {
-  #[smear(
-    validator = "path/to/validator",
-    parser = "path/to/parser",
-    default,
-    required,
-  )]
-  d1: FooDirective,
-
-  d2: BarDirective,
+  field1: String,
 }
 
 #[derive(smear_derive::ObjectDefinition)]
 #[smear(
   rename_all = "xxx",
-  directives(
-
+  directive(
+    type = "FooDirective",
+    short,
+    name = "foo",
+    aliases(myfoo, yourfoo),
+    optional
+  ),
+  directive(
+    type = "BarDirective",
+    short,
+    name = "bar",
+    aliases(mybar, yourbar),
   )
 )]
 struct Object {
-  #[smear(name = "xxx", )]
-  f1: FooFieldDefinition,
+  #[smear(
+    rename = "xxx1",
+    directive(
+      type = "FooDirective",
+      short,
+      name = "foo",
+      aliases(myfoo, yourfoo),
+      optional
+    ),
+    directive(
+      type = "BarDirective",
+      short,
+      name = "bar",
+      aliases(mybar, yourbar),
+    )
+  )]
+  f1: String,
 }
 
 smear::document! {
