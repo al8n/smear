@@ -1,4 +1,4 @@
-use super::*;
+use crate::value::*;
 use num_bigint::{BigInt, BigUint};
 
 pub fn parse_bigint(src: &Value) -> Result<BigInt, ValueError> {

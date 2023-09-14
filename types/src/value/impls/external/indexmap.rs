@@ -1,5 +1,13 @@
-use super::*;
+use std::fmt::Display;
+
 use ::indexmap::{IndexMap, IndexSet};
+use apollo_parser::ast::Value;
+
+use crate::{
+  error::ValueError,
+  value::{DiagnosticableValue, MapKind, SetKind, ValueDescriptor, ValueKind},
+  Diagnosticable,
+};
 
 pub fn parse_indexmap<K, V>(value: &Value) -> Result<IndexMap<K, V>, ValueError>
 where
@@ -49,10 +57,11 @@ where
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
-  for IndexMap<K, V>
+impl<K, V: DiagnosticableValue> Diagnosticable for IndexMap<K, V>
 where
+  K: std::str::FromStr + core::hash::Hash + Eq + DiagnosticableValue,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
   type Error = ValueError;
 
@@ -61,10 +70,16 @@ where
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "IndexMap",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Map {
+        kind: MapKind::IndexMap,
+        key: K::descriptor(),
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -111,10 +126,15 @@ impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for IndexSet
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "IndexSet",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Set {
+        kind: SetKind::IndexSet,
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -125,10 +145,11 @@ impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for IndexSet
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> DiagnosticableValue
-  for IndexMap<K, V>
+impl<K, V> DiagnosticableValue for IndexMap<K, V>
 where
+  K: std::str::FromStr + core::hash::Hash + Eq + DiagnosticableValue,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
 }
 

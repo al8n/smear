@@ -89,10 +89,13 @@ impl crate::Diagnosticable for DirectiveLocation {
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    const DESCRIPTOR: &ValueDescriptor = &ValueDescriptor {
       name: "DirectiveLocation",
-      optional: false,
-    }
+      kind: &crate::value::ValueKind::Enum {
+        variants: DirectiveLocation::available_locations(),
+      },
+    };
+    DESCRIPTOR
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -240,7 +243,7 @@ pub struct On {
 
 #[cfg(feature = "derive")]
 const _: () = {
-  use darling::{FromMeta, ast::NestedMeta};
+  use darling::{ast::NestedMeta, FromMeta};
   use quote::{quote, ToTokens};
 
   impl FromMeta for On {

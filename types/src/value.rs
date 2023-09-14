@@ -34,23 +34,5 @@ pub trait DiagnosticableObjectValue: DiagnosticableValue {
   }
 }
 
-pub enum ValueKind {
-  Scalar,
-  Object(&'static [(&'static str, &'static ValueDescriptor)]),
-  List(&'static ValueDescriptor),
-  Optional(&'static ValueDescriptor),
-  Map {
-    key: &'static ValueDescriptor,
-    value: &'static ValueDescriptor,
-  },
-  Set(&'static ValueDescriptor),
-}
-
-#[viewit::viewit(setters(skip))]
-pub struct ValueDescriptor {
-  name: &'static str,
-  kind: &'static ValueKind,
-}
-
 mod impls;
 pub use impls::*;

@@ -24,6 +24,15 @@ pub fn object_value(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
+#[proc_macro_derive(MapValue, attributes(smear))]
+pub fn map_value(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  let input = syn::parse_macro_input!(input as syn::DeriveInput);
+
+  value::map::derive(input)
+    .unwrap_or_else(|e| e.to_compile_error())
+    .into()
+}
+
 // ================================= Definition Macros ===============================
 
 #[proc_macro_derive(ObjectDefinition, attributes(smear))]

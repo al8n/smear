@@ -1,5 +1,6 @@
 use super::*;
 use core::fmt::Display;
+use std::str::FromStr;
 
 macro_rules! impl_parse_from_str {
   ($($ty:ident::$parser:ident), + $(,)?) => {
@@ -30,10 +31,11 @@ macro_rules! impl_diagnostic_inner {
       type Descriptor = crate::value::ValueDescriptor;
 
       fn descriptor() -> &'static Self::Descriptor {
-        &crate::value::ValueDescriptor {
-          name: stringify!($ty),
-          optional: false,
-        }
+        const DESCRIPTOR: &crate::value::ValueDescriptor = &crate::value::ValueDescriptor {
+          name: stringify!($ty!),
+          kind: &crate::value::ValueKind::Scalar,
+        };
+        DESCRIPTOR
       }
 
       fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -95,10 +97,10 @@ impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
 
   fn descriptor() -> &'static Self::Descriptor {
     static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
-
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
     DESCRIPTOR.get_or_init(|| ValueDescriptor {
-      name: T::descriptor().name(),
-      optional: true,
+      name: T::descriptor().name().trim_end_matches('!'),
+      kind: KIND.get_or_init(|| ValueKind::Optional(T::descriptor())),
     })
   }
 
@@ -143,3 +145,140 @@ impl<O: DiagnosticableObjectValue> DiagnosticableObjectValue for Vec<O> {
 //     O::fields()
 //   }
 // }
+
+pub struct UnknownMapKind(String);
+
+#[derive(Debug, Clone, Copy)]
+pub enum MapKind {
+  HashMap,
+  BTreeMap,
+  #[cfg(feature = "indexmap")]
+  IndexMap,
+}
+
+impl FromStr for MapKind {
+  type Err = UnknownMapKind;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    let kind = match s.trim() {
+      "HashMap" | "hash" | "hashmap" | "hash_map" => Self::HashMap,
+      "BTreeMap" | "btree" | "btreemap" | "btree_map" => Self::BTreeMap,
+      #[cfg(feature = "indexmap")]
+      "IndexMap" | "index" | "indexmap" | "index_map" => Self::IndexMap,
+      val => return Err(UnknownMapKind(val.to_owned())),
+    };
+    Ok(kind)
+  }
+}
+
+impl core::fmt::Display for MapKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.write_str(self.as_str())
+  }
+}
+
+impl MapKind {
+  pub const fn as_str(&self) -> &'static str {
+    match self {
+      Self::HashMap => "HashMap",
+      Self::BTreeMap => "BTreeMap",
+      #[cfg(feature = "indexmap")]
+      Self::IndexMap => "IndexMap",
+    }
+  }
+}
+
+pub struct UnknownSetKind(String);
+
+#[derive(Debug, Clone, Copy)]
+pub enum SetKind {
+  HashSet,
+  BTreeSet,
+  #[cfg(feature = "indexmap")]
+  IndexSet,
+}
+
+impl core::fmt::Display for SetKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.write_str(self.as_str())
+  }
+}
+
+impl FromStr for SetKind {
+  type Err = UnknownSetKind;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    let kind = match s.trim() {
+      "HashSet" | "hash" | "hashset" | "hash_set" => Self::HashSet,
+      "BTreeSet" | "btree" | "btreeset" | "btree_set" => Self::BTreeSet,
+      #[cfg(feature = "indexmap")]
+      "IndexSet" | "index" | "indexset" | "index_set" => Self::IndexSet,
+      val => return Err(UnknownSetKind(val.to_owned())),
+    };
+    Ok(kind)
+  }
+}
+
+impl SetKind {
+  pub const fn as_str(&self) -> &'static str {
+    match self {
+      Self::HashSet => "HashSet",
+      Self::BTreeSet => "BTreeSet",
+      #[cfg(feature = "indexmap")]
+      Self::IndexSet => "IndexSet",
+    }
+  }
+}
+
+#[cfg(feature = "derive")]
+const _: () = {
+  use darling::FromMeta;
+  use syn::Meta;
+
+  impl FromMeta for MapKind {
+    fn from_meta(item: &Meta) -> darling::Result<Self> {
+      match item {
+        Meta::Path(_) => todo!(),
+        Meta::List(_) => todo!(),
+        Meta::NameValue(_) => todo!(),
+      }
+    }
+  }
+
+  impl FromMeta for SetKind {
+    fn from_meta(item: &Meta) -> darling::Result<Self> {
+      match item {
+        Meta::Path(_) => todo!(),
+        Meta::List(_) => todo!(),
+        Meta::NameValue(_) => todo!(),
+      }
+    }
+  }
+};
+
+#[derive(Debug, Clone, Copy)]
+pub enum ValueKind {
+  Scalar,
+  Enum {
+    variants: &'static [&'static str],
+  },
+  Object(&'static [(&'static str, &'static ValueDescriptor)]),
+  List(&'static ValueDescriptor),
+  Optional(&'static ValueDescriptor),
+  Map {
+    kind: MapKind,
+    key: &'static ValueDescriptor,
+    value: &'static ValueDescriptor,
+  },
+  Set {
+    kind: SetKind,
+    value: &'static ValueDescriptor,
+  },
+}
+
+#[viewit::viewit(setters(skip), getters(style = "move"))]
+#[derive(Debug, Clone, Copy)]
+pub struct ValueDescriptor {
+  name: &'static str,
+  kind: &'static ValueKind,
+}

@@ -1,5 +1,34 @@
 
 ```rust
+
+#[derive(smear_derive::Map)]
+#[smear(
+  name = "foomap",
+  type(hash),
+  key(String),
+  value(u64)
+)]
+struct FooMap;
+
+#[derive(smear_derive::Map)]
+#[smear(
+  name = "barmap",
+  type = "index",
+  key = "f64",
+  value = "String"
+)]
+struct BarMap;
+
+#[derive(smear_derive::Map)]
+#[smear(
+  name = "bazmap",
+  type = "btree",
+  key(Duration),
+  value = "String"
+)]
+struct BazMap;
+
+
 #[derive(smear_derive::Directive)]
 #[smear(
   short,

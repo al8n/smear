@@ -1,4 +1,4 @@
-use super::*;
+use crate::value::*;
 use rust_decimal::Decimal;
 
 pub fn parse_decimal(src: &Value) -> Result<Decimal, ValueError> {

@@ -38,10 +38,12 @@ impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
-      name: "Vec",
-      optional: false,
-    }
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
+      name: "List",
+      kind: KIND.get_or_init(|| ValueKind::Optional(V::descriptor())),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>

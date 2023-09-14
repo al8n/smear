@@ -99,10 +99,11 @@ where
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> Diagnosticable
-  for HashMap<K, V>
+impl<K, V> Diagnosticable for HashMap<K, V>
 where
+  K: std::str::FromStr + core::hash::Hash + Eq + DiagnosticableValue,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
   type Error = ValueError;
 
@@ -111,10 +112,16 @@ where
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "HashMap",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Map {
+        kind: MapKind::HashMap,
+        key: K::descriptor(),
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -133,10 +140,15 @@ impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for HashSet<
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "HashSet",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Set {
+        kind: SetKind::HashSet,
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -147,10 +159,11 @@ impl<V: DiagnosticableValue + core::hash::Hash + Eq> Diagnosticable for HashSet<
   }
 }
 
-impl<K: std::str::FromStr + core::hash::Hash + Eq, V: DiagnosticableValue> DiagnosticableValue
-  for HashMap<K, V>
+impl<K, V> DiagnosticableValue for HashMap<K, V>
 where
+  K: std::str::FromStr + core::hash::Hash + Eq + DiagnosticableValue,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
 }
 

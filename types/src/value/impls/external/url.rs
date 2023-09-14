@@ -1,5 +1,7 @@
-use super::*;
 use ::url::Url;
+use apollo_parser::ast::Value;
+
+use crate::error::ValueError;
 
 pub fn parse_url(src: &Value) -> Result<Url, ValueError> {
   match src {

@@ -99,9 +99,11 @@ where
   }
 }
 
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> Diagnosticable for BTreeMap<K, V>
+impl<K, V> Diagnosticable for BTreeMap<K, V>
 where
+  K: std::str::FromStr + Eq + Ord + DiagnosticableValue,
   K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
   type Error = ValueError;
 
@@ -110,10 +112,16 @@ where
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "BTreeMap",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Map {
+        kind: MapKind::BTreeMap,
+        key: K::descriptor(),
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -132,10 +140,15 @@ impl<V: DiagnosticableValue + Eq + Ord> Diagnosticable for BTreeSet<V> {
   type Descriptor = ValueDescriptor;
 
   fn descriptor() -> &'static Self::Descriptor {
-    &ValueDescriptor {
+    static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
+    static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
+    DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "BTreeSet",
-      optional: false,
-    }
+      kind: KIND.get_or_init(|| ValueKind::Set {
+        kind: SetKind::BTreeSet,
+        value: V::descriptor(),
+      }),
+    })
   }
 
   fn parse(node: &Self::Node) -> Result<Self, Self::Error>
@@ -146,8 +159,11 @@ impl<V: DiagnosticableValue + Eq + Ord> Diagnosticable for BTreeSet<V> {
   }
 }
 
-impl<K: std::str::FromStr + Eq + Ord, V: DiagnosticableValue> DiagnosticableValue for BTreeMap<K, V> where
-  K::Err: Display + 'static
+impl<K, V> DiagnosticableValue for BTreeMap<K, V>
+where
+  K: std::str::FromStr + Eq + Ord + DiagnosticableValue,
+  K::Err: Display + 'static,
+  V: DiagnosticableValue,
 {
 }
 

@@ -1,4 +1,4 @@
-use super::*;
+use crate::value::*;
 use ::bigdecimal::BigDecimal;
 
 pub fn parse_bigdecimal(src: &Value) -> Result<BigDecimal, ValueError> {

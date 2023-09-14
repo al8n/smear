@@ -1,5 +1,7 @@
-use super::*;
 use ::uuid::Uuid;
+use apollo_parser::ast::Value;
+
+use crate::error::ValueError;
 
 pub fn parse_uuid(src: &Value) -> Result<Uuid, ValueError> {
   match src {
