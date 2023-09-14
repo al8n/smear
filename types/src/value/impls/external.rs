@@ -14,8 +14,8 @@ mod bigint;
 #[cfg_attr(docsrs, doc(cfg(feature = "bigdecimal")))]
 mod bigdecimal;
 
-#[cfg(feature = "humantime")]
-#[cfg_attr(docsrs, doc(cfg(feature = "humantime")))]
+#[cfg(feature = "duration")]
+#[cfg_attr(docsrs, doc(cfg(feature = "duration")))]
 mod humantime;
 
 #[cfg(feature = "url")]
@@ -25,7 +25,3 @@ mod url;
 #[cfg(feature = "uuid")]
 #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
 mod uuid;
-
-#[cfg(feature = "indexmap")]
-#[cfg_attr(docsrs, doc(cfg(feature = "indexmap")))]
-mod indexmap;

@@ -15,14 +15,16 @@ pub fn parse_duration(src: &Value) -> Result<Duration, ValueError> {
   }
 }
 
-pub fn parse_timestamp(src: &Value) -> Result<Timestamp, ValueError> {
+fn parse_humanduration(src: &Value) -> Result<HumanDuration, ValueError> {
   match src {
     Value::StringValue(val) => {
       let s: String = val.clone().into();
-      s.parse().map_err(|e| ValueError::invalid_value(val, e))
+      s.parse::<HumanDuration>()
+        .map_err(|e| ValueError::invalid_value(val, e))
     }
     val => Err(ValueError::unexpected_type(val)),
   }
 }
 
-impl_diagnostic!(Duration::parse_duration, Timestamp::parse_timestamp,);
+impl_diagnostic!(Duration::parse_duration, HumanDuration::parse_humanduration);
+impl_diagnostic!(string(Timestamp::parse_timestamp));

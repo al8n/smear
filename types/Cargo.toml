@@ -14,7 +14,7 @@ bigint = ["dep:num-bigint"]
 bigdecimal = ["dep:bigdecimal"]
 chrono = ["dep:chrono"]
 decimal = ["dep:rust_decimal"]
-humantime = ["dep:humantime"]
+duration = ["dep:humantime"]
 indexmap = ["dep:indexmap"]
 url = ["dep:url"]
 uuid = ["dep:uuid"]
@@ -42,6 +42,6 @@ uuid = { version = "1.4", optional = true }
 
 # derive
 darling = { version = "0.20", optional = true }
-syn = { version = "2", optional = true }
+syn = { workspace = true, optional = true }
 quote = { version = "1", optional = true }
 proc-macro2 = { version = "1", optional = true }

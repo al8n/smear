@@ -6,6 +6,7 @@ mod name;
 mod optional;
 mod path;
 mod short;
+mod ty;
 
 pub(crate) use aliases::*;
 pub(crate) use attributes::*;
@@ -15,6 +16,7 @@ pub(crate) use name::*;
 pub(crate) use optional::*;
 pub(crate) use path::*;
 pub(crate) use short::*;
+pub(crate) use ty::*;
 
 // Utility function to check if a character is valid
 pub(crate) fn is_valid_char(ch: char) -> bool {

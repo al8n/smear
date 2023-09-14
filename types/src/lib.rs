@@ -69,3 +69,27 @@ pub trait NamedDiagnosticable: Diagnosticable {
   /// Returns the aliases of the node.
   fn aliases() -> &'static [&'static str];
 }
+
+#[cfg(feature = "derive")]
+#[derive(darling::FromMeta)]
+pub enum DirectiveLocation1 {
+  Query,
+  Mutation,
+  Subscription,
+  Field,
+  FragmentDefinition,
+  FragmentSpread,
+  InlineFragment,
+  VariableDefinition,
+  Schema,
+  Scalar,
+  Object,
+  FieldDefinition,
+  ArgumentDefinition,
+  Interface,
+  Union,
+  Enum,
+  EnumValue,
+  InputObject,
+  InputFieldDefinition,
+}

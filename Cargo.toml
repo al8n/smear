@@ -12,6 +12,7 @@ codespan-reporting = "0.11"
 rowan = "0.15"
 strsim = "0.10"
 viewit = "0.1.5"
+syn = { version = "2", features = ["full"] }
 
 
 [workspace.package]

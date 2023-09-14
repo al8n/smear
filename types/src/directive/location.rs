@@ -5,6 +5,7 @@ use apollo_parser::ast::Value;
 use crate::value::ValueDescriptor;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "derive", derive(darling::FromMeta))]
 pub enum DirectiveLocation {
   Query,
   Mutation,
@@ -183,21 +184,7 @@ impl std::error::Error for UnknownDirectiveLocation {}
 
 #[cfg(feature = "derive")]
 const _: () = {
-  use darling::FromMeta;
   use quote::{quote, ToTokens};
-
-  impl FromMeta for DirectiveLocation {
-    fn from_meta(item: &syn::Meta) -> darling::Result<Self> {
-      let path = item.require_path_only()?;
-      path
-        .get_ident()
-        .ok_or_else(|| darling::Error::custom("Expected a valid identifier").with_span(item))
-        .and_then(|ident| {
-          Self::from_str(ident.to_string().as_str())
-            .map_err(|err| darling::Error::custom(err.to_string()).with_span(item))
-        })
-    }
-  }
 
   impl ToTokens for DirectiveLocation {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {

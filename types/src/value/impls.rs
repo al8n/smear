@@ -1,5 +1,4 @@
 use super::*;
-use core::fmt::Display;
 use std::str::FromStr;
 
 macro_rules! impl_parse_from_str {
@@ -32,7 +31,7 @@ macro_rules! impl_diagnostic_inner {
 
       fn descriptor() -> &'static Self::Descriptor {
         const DESCRIPTOR: &crate::value::ValueDescriptor = &crate::value::ValueDescriptor {
-          name: stringify!($ty!),
+          name: stringify!($ty),
           kind: &crate::value::ValueKind::Scalar,
         };
         DESCRIPTOR
@@ -56,7 +55,7 @@ macro_rules! impl_diagnostic {
       impl_diagnostic_inner!($ty::$parser);
     )*
   };
-  (string($($ty:ident::$parser:ident ?), + $(,)?)) => {
+  (string($($ty:ident::$parser:ident), + $(,)?)) => {
     $(
       impl_parse_from_str!($ty::$parser);
 
@@ -88,8 +87,6 @@ pub use external::*;
 mod builtin;
 pub use builtin::*;
 
-impl<T: DiagnosticableValue> DiagnosticableValue for Vec<T> {}
-
 impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
   type Error = ValueError;
   type Node = Value;
@@ -99,7 +96,7 @@ impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
     static DESCRIPTOR: std::sync::OnceLock<ValueDescriptor> = std::sync::OnceLock::new();
     static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
     DESCRIPTOR.get_or_init(|| ValueDescriptor {
-      name: T::descriptor().name().trim_end_matches('!'),
+      name: T::descriptor().name(),
       kind: KIND.get_or_init(|| ValueKind::Optional(T::descriptor())),
     })
   }
@@ -232,29 +229,89 @@ impl SetKind {
 
 #[cfg(feature = "derive")]
 const _: () = {
-  use darling::FromMeta;
-  use syn::Meta;
+  use darling::{ast::NestedMeta, util::path_to_string, Error, FromMeta};
+  use quote::{quote, ToTokens};
+  use syn::{Expr, Lit};
 
-  impl FromMeta for MapKind {
-    fn from_meta(item: &Meta) -> darling::Result<Self> {
-      match item {
-        Meta::Path(_) => todo!(),
-        Meta::List(_) => todo!(),
-        Meta::NameValue(_) => todo!(),
+  use crate::utils::did_you_mean;
+
+  macro_rules! impl_from_meta {
+    ($ty:ident) => {
+      impl FromMeta for paste::paste!([<$ty Kind>]) {
+        fn from_expr(expr: &Expr) -> darling::Result<Self> {
+          let val = match expr {
+            Expr::Lit(lit) => match &lit.lit {
+              Lit::Str(lit) => lit.value(),
+              lit => return Err(Error::unexpected_lit_type(lit)),
+            }
+            Expr::Path(p) => path_to_string(&p.path),
+            expr => return Err(Error::unexpected_expr_type(expr)),
+          };
+          Self::from_string(val.as_str())
+        }
+
+        fn from_list(__outer: &[NestedMeta]) -> darling::Result<Self> {
+          match __outer.len() {
+            0 => Err(Error::too_few_items(1)),
+            1 => {
+              let val = match &__outer[0] {
+                NestedMeta::Meta(ref nested) => path_to_string(nested.path()),
+                NestedMeta::Lit(syn::Lit::Str(s)) => s.value(),
+                NestedMeta::Lit(lit) => return Err(Error::unexpected_lit_type(lit)),
+              };
+
+              Self::from_string(&val)
+            }
+            _ => Err(Error::too_many_items(1)),
+          }
+        }
+
+        fn from_string(lit: &str) -> darling::Result<Self> {
+          const ALTS: &[&str] = &[
+            "hash",
+            "btree",
+            #[cfg(feature = "indexmap")]
+            "index",
+          ];
+          match lit.to_ascii_lowercase().as_str() {
+            "hash" => Ok(paste::paste!(Self :: [<Hash $ty>])),
+            "btree" => Ok(paste::paste!(Self :: [<BTree $ty>])),
+            #[cfg(feature = "indexmap")]
+            "index" => Ok(paste::paste!(Self :: [<Index $ty>])),
+            __other => match did_you_mean(__other, ALTS) {
+              Some(s) => Err(Error::custom(format!("Unknown value `{__other}`, did you mean `{s}`?"))),
+              None => Err(Error::custom(format!("Unknown value `{__other}`. Available values are: [{}]", ALTS.join(", ")))),
+            },
+          }
+        }
       }
-    }
+
+      paste::paste! {
+        impl ToTokens for [<$ty Kind>] {
+          fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let ts = match self {
+              Self::[<Hash $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<Hash $ty>] },
+              Self::[<BTree $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<BTree $ty>] },
+              #[cfg(feature = "indexmap")]
+              Self::[<Index $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<Index $ty>] },
+            };
+            tokens.extend(ts);
+          }
+        }
+      }
+    };
   }
 
-  impl FromMeta for SetKind {
-    fn from_meta(item: &Meta) -> darling::Result<Self> {
-      match item {
-        Meta::Path(_) => todo!(),
-        Meta::List(_) => todo!(),
-        Meta::NameValue(_) => todo!(),
-      }
-    }
-  }
+  impl_from_meta!(Map);
+  impl_from_meta!(Set);
 };
+
+#[viewit::viewit(setters(skip), getters(style = "move"))]
+#[derive(Debug, Clone, Copy)]
+pub struct FieldDescriptor {
+  name: &'static str,
+  ty: &'static ValueDescriptor,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum ValueKind {
@@ -262,7 +319,7 @@ pub enum ValueKind {
   Enum {
     variants: &'static [&'static str],
   },
-  Object(&'static [(&'static str, &'static ValueDescriptor)]),
+  Object(&'static [FieldDescriptor]),
   List(&'static ValueDescriptor),
   Optional(&'static ValueDescriptor),
   Map {

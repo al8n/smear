@@ -1,22 +1,21 @@
 use darling::{FromMeta, ast::NestedMeta, FromDeriveInput};
 use quote::quote;
 
-use smear_types::value::MapKind;
+use smear_types::value::SetKind;
 use syn::{DeriveInput, Visibility, Ident};
 
 use crate::utils::{Attributes, Ty};
 
-pub fn map(kind: MapKind, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+pub fn set(kind: SetKind, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
   let attr_args = NestedMeta::parse_meta_list(args.into())?;
   let input: DeriveInput = syn::parse(input)?;
-  let args = MapArgs::from_list(&attr_args)?;
+  let args = SetArgs::from_list(&attr_args)?;
 
   Dummy::from_derive_input(&input)?;
 
-  Map {
+  Set {
     name: input.ident,
     vis: input.vis,
-    key: args.key,
     value: args.value,
     kind,
     attributes: args.attributes,
@@ -24,8 +23,7 @@ pub fn map(kind: MapKind, args: proc_macro::TokenStream, input: proc_macro::Toke
 }
 
 #[derive(FromMeta)]
-struct MapArgs {
-  key: Ty,
+struct SetArgs {
   value: Ty,
   #[darling(default)]
   attributes: Attributes,
@@ -35,33 +33,31 @@ struct MapArgs {
 #[darling(supports(struct_unit))]
 struct Dummy {}
 
-struct Map {
+struct Set {
   name: Ident,
   vis: Visibility,
-  key: Ty,
   value: Ty,
-  kind: MapKind,
+  kind: SetKind,
   
   attributes: Attributes,
 }
 
-impl Map {
+impl Set {
   fn derive(&self) -> syn::Result<proc_macro2::TokenStream> {
     let name = &self.name;
     let name_str = name.to_string();
-    let map_type = self.map_type();
-    let key = &self.key;
+    let set_type = self.set_type();
     let value = &self.value;
-    let map_kind = self.kind;
+    let set_kind = self.kind;
     let vis = &self.vis;
     let attributes = &self.attributes;
   
     Ok(quote! {
       #attributes
-      #vis struct #name(#map_type);
+      #vis struct #name(#set_type);
   
       impl ::core::ops::Deref for #name {
-        type Target = #map_type;
+        type Target = #set_type;
   
         fn deref(&self) -> &Self::Target {
           &self.0
@@ -75,7 +71,7 @@ impl Map {
       }
   
       impl #name {
-        #vis fn into_inner(self) -> #map_type {
+        #vis fn into_inner(self) -> #set_type {
           self.0
         }
       }
@@ -96,9 +92,8 @@ impl Map {
   
           DESCRIPTOR.get_or_init(|| ::smear::value::ValueDescriptor {
             name: #name_str,
-            kind: KIND.get_or_init(|| ::smear::value::ValueKind::Map {
-              kind: #map_kind,
-              key: <#key as ::smear::Diagnosticable>::descriptor(),
+            kind: KIND.get_or_init(|| ::smear::value::ValueKind::Set {
+              kind: #set_kind,
               value: <#value as ::smear::Diagnosticable>::descriptor(),
             }),
           })
@@ -111,37 +106,18 @@ impl Map {
           use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, Diagnosticable};
   
           match value {
-            Value::ObjectValue(val) => {
+            Value::ListValue(val) => {
               let mut errors = ::std::vec::Vec::new();
-              let mut res: #map_type = ::core::default::Default::default();
-              for field in val.object_fields() {
-                match (field.name(), field.value()) {
-                  (::core::option::Option::None, ::core::option::Option::None) => continue,
-                  (::core::option::Option::None, ::core::option::Option::Some(_)) => {
-                    errors.push(ValueError::invalid_value(&field, "missing key"));
+              let mut res: #set_type = ::core::default::Default::default();
+              for val in val.values() {
+                match <#value as Diagnosticable>::parse(&val) {
+                  ::core::result::Result::Ok(val) => {
+                    res.insert(val);
                   }
-                  (::core::option::Option::Some(name), ::core::option::Option::None) => {
-                    errors.push(ValueError::invalid_value(
-                      &field,
-                      ::std::format!("{} is missing value", name.text()),
-                    ));
+                  ::core::result::Result::Err(err) => {
+                    errors.push(err);
                   }
-                  (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
-                    let key_str = name.text().to_string();
-                    let key =
-                      key_str.as_str().parse::<#key>().map_err(|e| {
-                        ValueError::invalid_value(&field, ::std::format!("fail to parse key: {e}"))
-                      })?;
-                    match <#value as Diagnosticable>::parse(&val) {
-                      ::core::result::Result::Ok(val) => {
-                        res.insert(key, val);
-                      }
-                      ::core::result::Result::Err(err) => {
-                        errors.push(err);
-                      }
-                    };
-                  }
-                }
+                };
               }
               if errors.is_empty() {
                 ::core::result::Result::Ok(#name(res))
@@ -158,19 +134,18 @@ impl Map {
     })
   }
 
-  fn map_type(&self) -> syn::Type {
-    let key = &self.key;
+  fn set_type(&self) -> syn::Type {
     let value = &self.value;
     match &self.kind {
-      MapKind::HashMap => {
-        syn::parse_quote! { ::std::collections::HashMap<#key, #value> }
+      SetKind::HashSet => {
+        syn::parse_quote! { ::std::collections::HashSet<#value> }
       }
-      MapKind::BTreeMap => {
-        syn::parse_quote! { ::std::collections::BTreeMap<#key, #value> }
+      SetKind::BTreeSet => {
+        syn::parse_quote! { ::std::collections::BTreeSet<#value> }
       }
       #[cfg(feature = "indexmap")]
-      MapKind::IndexMap => {
-        syn::parse_quote! { ::smear::__exports::indexmap::IndexMap<#key, #value> }
+      SetKind::IndexSet => {
+        syn::parse_quote! { ::smear::__exports::indexset::IndexSet<#value> }
       }
     }
   }

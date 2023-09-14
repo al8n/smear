@@ -42,7 +42,7 @@ impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
     static KIND: std::sync::OnceLock<ValueKind> = std::sync::OnceLock::new();
     DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "List",
-      kind: KIND.get_or_init(|| ValueKind::Optional(V::descriptor())),
+      kind: KIND.get_or_init(|| ValueKind::List(V::descriptor())),
     })
   }
 
@@ -53,3 +53,5 @@ impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
     parse_vec(node)
   }
 }
+
+impl<T: DiagnosticableValue> DiagnosticableValue for Vec<T> {}

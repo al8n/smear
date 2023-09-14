@@ -17,6 +17,12 @@ impl core::fmt::Debug for Attributes {
   }
 }
 
+impl From<Vec<Attribute>> for Attributes {
+  fn from(attrs: Vec<Attribute>) -> Self {
+    Self { attrs }
+  }
+}
+
 impl FromMeta for Attributes {
   fn from_list(items: &[darling::ast::NestedMeta]) -> darling::Result<Self> {
     let mut attrs = Vec::with_capacity(items.len());

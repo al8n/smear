@@ -4,10 +4,6 @@ use super::*;
 
 mod vec;
 pub use vec::*;
-mod hashmap;
-pub use hashmap::*;
-mod btreemap;
-pub use btreemap::*;
 mod net;
 pub use net::*;
 mod path;
