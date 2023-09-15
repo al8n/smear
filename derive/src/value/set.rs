@@ -1,12 +1,16 @@
-use darling::{FromMeta, ast::NestedMeta, FromDeriveInput};
+use darling::{ast::NestedMeta, FromDeriveInput, FromMeta};
 use quote::quote;
 
 use smear_types::value::SetKind;
-use syn::{DeriveInput, Visibility, Ident};
+use syn::{DeriveInput, Ident, Visibility};
 
 use crate::utils::{Attributes, Ty};
 
-pub fn set(kind: SetKind, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+pub fn set(
+  kind: SetKind,
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> syn::Result<proc_macro2::TokenStream> {
   let attr_args = NestedMeta::parse_meta_list(args.into())?;
   let input: DeriveInput = syn::parse(input)?;
   let args = SetArgs::from_list(&attr_args)?;
@@ -19,7 +23,8 @@ pub fn set(kind: SetKind, args: proc_macro::TokenStream, input: proc_macro::Toke
     value: args.value,
     kind,
     attributes: args.attributes,
-  }.derive()
+  }
+  .derive()
 }
 
 #[derive(FromMeta)]
@@ -38,7 +43,7 @@ struct Set {
   vis: Visibility,
   value: Ty,
   kind: SetKind,
-  
+
   attributes: Attributes,
 }
 
@@ -51,45 +56,45 @@ impl Set {
     let set_kind = self.kind;
     let vis = &self.vis;
     let attributes = &self.attributes;
-  
+
     Ok(quote! {
       #attributes
       #vis struct #name(#set_type);
-  
+
       impl ::core::ops::Deref for #name {
         type Target = #set_type;
-  
+
         fn deref(&self) -> &Self::Target {
           &self.0
         }
       }
-  
+
       impl ::core::ops::DerefMut for #name {
         fn deref_mut(&mut self) -> &mut Self::Target {
           &mut self.0
         }
       }
-  
+
       impl #name {
         #vis fn into_inner(self) -> #set_type {
           self.0
         }
       }
-  
+
       impl ::smear::Diagnosticable for #name
       {
         type Error = ::smear::error::ValueError;
-  
+
         type Node = ::smear::apollo_parser::ast::Value;
-  
+
         type Descriptor = ::smear::value::ValueDescriptor;
-  
+
         fn descriptor() -> &'static Self::Descriptor {
           use ::std::sync::OnceLock;
-  
+
           static DESCRIPTOR: OnceLock<::smear::value::ValueDescriptor> = OnceLock::new();
           static KIND: OnceLock<::smear::value::ValueKind> = OnceLock::new();
-  
+
           DESCRIPTOR.get_or_init(|| ::smear::value::ValueDescriptor {
             name: #name_str,
             kind: KIND.get_or_init(|| ::smear::value::ValueKind::Set {
@@ -98,19 +103,19 @@ impl Set {
             }),
           })
         }
-  
+
         fn parse(value: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
           Self: Sized,
         {
-          use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, Diagnosticable};
-  
+          use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, value::Parser};
+
           match value {
             Value::ListValue(val) => {
               let mut errors = ::std::vec::Vec::new();
               let mut res: #set_type = ::core::default::Default::default();
               for val in val.values() {
-                match <#value as Diagnosticable>::parse(&val) {
+                match <#value as Parser>::parse_value(&val) {
                   ::core::result::Result::Ok(val) => {
                     res.insert(val);
                   }
@@ -129,7 +134,7 @@ impl Set {
           }
         }
       }
-  
+
       impl ::smear::value::DiagnosticableValue for #name {}
     })
   }

@@ -1,12 +1,16 @@
-use darling::{FromMeta, ast::NestedMeta, FromDeriveInput};
+use darling::{ast::NestedMeta, FromDeriveInput, FromMeta};
 use quote::quote;
 
 use smear_types::value::MapKind;
-use syn::{DeriveInput, Visibility, Ident};
+use syn::{DeriveInput, Ident, Visibility};
 
 use crate::utils::{Attributes, Ty};
 
-pub fn map(kind: MapKind, args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> syn::Result<proc_macro2::TokenStream> {
+pub fn map(
+  kind: MapKind,
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> syn::Result<proc_macro2::TokenStream> {
   let attr_args = NestedMeta::parse_meta_list(args.into())?;
   let input: DeriveInput = syn::parse(input)?;
   let args = MapArgs::from_list(&attr_args)?;
@@ -20,7 +24,8 @@ pub fn map(kind: MapKind, args: proc_macro::TokenStream, input: proc_macro::Toke
     value: args.value,
     kind,
     attributes: args.attributes,
-  }.derive()
+  }
+  .derive()
 }
 
 #[derive(FromMeta)]
@@ -41,7 +46,7 @@ struct Map {
   key: Ty,
   value: Ty,
   kind: MapKind,
-  
+
   attributes: Attributes,
 }
 
@@ -55,45 +60,45 @@ impl Map {
     let map_kind = self.kind;
     let vis = &self.vis;
     let attributes = &self.attributes;
-  
+
     Ok(quote! {
       #attributes
       #vis struct #name(#map_type);
-  
+
       impl ::core::ops::Deref for #name {
         type Target = #map_type;
-  
+
         fn deref(&self) -> &Self::Target {
           &self.0
         }
       }
-  
+
       impl ::core::ops::DerefMut for #name {
         fn deref_mut(&mut self) -> &mut Self::Target {
           &mut self.0
         }
       }
-  
+
       impl #name {
         #vis fn into_inner(self) -> #map_type {
           self.0
         }
       }
-  
+
       impl ::smear::Diagnosticable for #name
       {
         type Error = ::smear::error::ValueError;
-  
+
         type Node = ::smear::apollo_parser::ast::Value;
-  
+
         type Descriptor = ::smear::value::ValueDescriptor;
-  
+
         fn descriptor() -> &'static Self::Descriptor {
           use ::std::sync::OnceLock;
-  
+
           static DESCRIPTOR: OnceLock<::smear::value::ValueDescriptor> = OnceLock::new();
           static KIND: OnceLock<::smear::value::ValueKind> = OnceLock::new();
-  
+
           DESCRIPTOR.get_or_init(|| ::smear::value::ValueDescriptor {
             name: #name_str,
             kind: KIND.get_or_init(|| ::smear::value::ValueKind::Map {
@@ -103,13 +108,13 @@ impl Map {
             }),
           })
         }
-  
+
         fn parse(value: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
           Self: Sized,
         {
-          use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, Diagnosticable};
-  
+          use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, value::Parser};
+
           match value {
             Value::ObjectValue(val) => {
               let mut errors = ::std::vec::Vec::new();
@@ -132,7 +137,7 @@ impl Map {
                       key_str.as_str().parse::<#key>().map_err(|e| {
                         ValueError::invalid_value(&field, ::std::format!("fail to parse key: {e}"))
                       })?;
-                    match <#value as Diagnosticable>::parse(&val) {
+                    match <#value as Parser>::parse_value(&val) {
                       ::core::result::Result::Ok(val) => {
                         res.insert(key, val);
                       }
@@ -153,7 +158,7 @@ impl Map {
           }
         }
       }
-  
+
       impl ::smear::value::DiagnosticableValue for #name {}
     })
   }

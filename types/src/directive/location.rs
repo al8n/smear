@@ -244,7 +244,7 @@ const _: () = {
             Err(e) => errors.push(e),
           },
           NestedMeta::Lit(lit) => {
-            errors.push(darling::Error::unexpected_lit_type(lit).with_span(lit));
+            errors.push(darling::Error::unexpected_lit_type(lit));
           }
         }
       }

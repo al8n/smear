@@ -174,14 +174,7 @@ impl Directive {
       }
     };
 
-    let inherit_impls = Self::generate_inherit_impls(
-      &struct_name,
-      &possible_names,
-      &available_argument_names,
-      &short,
-      &long,
-      aliases,
-    );
+    let inherit_impls = Self::generate_inherit_impls();
     let on = &self.on;
 
     let attrs = &self.attributes;
@@ -296,8 +289,8 @@ impl Directive {
     let long = self.sdl_variable_name();
     let aliases = &self.aliases.names;
     let vis = &self.vis;
-    let inherit_impls =
-      Self::generate_inherit_impls(&struct_name, &possible_names, &[], &short, &long, aliases);
+    let on = &self.on;
+    let inherit_impls = Self::generate_inherit_impls();
     Ok(quote! {
       #[derive(
         ::core::fmt::Debug,
@@ -342,6 +335,17 @@ impl Directive {
       impl ::smear::Diagnosticable for #struct_name {
         type Error = ::smear::error::DirectiveError;
         type Node = ::smear::apollo_parser::ast::Directive;
+        type Descriptor = ::smear::directive::DirectiveDescriptor;
+
+        fn descriptor() -> &'static Self::Descriptor {
+          const DESCRIPTOR: &::smear::directive::DirectiveDescriptor = &::smear::directive::DirectiveDescriptor {
+            locations: #on,
+            available_arguments: &[],
+            required_arguments: &[],
+            optional_arguments: &[],
+          };
+          DESCRIPTOR
+        }
 
         fn parse(node: &Self::Node) -> Result<Self, Self::Error>
         where
@@ -397,41 +401,8 @@ impl Directive {
     })
   }
 
-  fn generate_inherit_impls(
-    struct_name: &Ident,
-    possible_names: &[String],
-    available_argument_names: &[String],
-    short: &TokenStream,
-    long: &str,
-    aliases: &[String],
-  ) -> TokenStream {
-    quote! {
-      #[automatically_derived]
-      impl ::smear::NamedDiagnosticable for #struct_name {
-        fn possible_names() -> &'static [&'static str] {
-          &[#(#possible_names),*]
-        }
-
-        fn short() -> ::core::option::Option<char> {
-          #short
-        }
-
-        fn long() -> &'static str {
-          #long
-        }
-
-        fn aliases() -> &'static [&'static str] {
-          &[#(#aliases),*]
-        }
-      }
-
-      #[automatically_derived]
-      impl ::smear::DiagnosticableDirective for #struct_name {
-        fn available_argument_names() -> &'static [&'static str] {
-          &[#(#available_argument_names),*]
-        }
-      }
-    }
+  fn generate_inherit_impls() -> TokenStream {
+    quote! {}
   }
 }
 

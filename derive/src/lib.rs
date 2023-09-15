@@ -26,21 +26,30 @@ pub fn object_value(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 #[cfg(feature = "indexmap")]
 #[proc_macro_attribute]
-pub fn indexmap(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn indexmap(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::map::map(smear_types::value::MapKind::IndexMap, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
 }
 
 #[proc_macro_attribute]
-pub fn hashmap(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn hashmap(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::map::map(smear_types::value::MapKind::HashMap, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
 }
 
 #[proc_macro_attribute]
-pub fn btreemap(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn btreemap(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::map::map(smear_types::value::MapKind::BTreeMap, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
@@ -48,21 +57,30 @@ pub fn btreemap(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -
 
 #[cfg(feature = "indexmap")]
 #[proc_macro_attribute]
-pub fn indexset(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn indexset(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::set::set(smear_types::value::SetKind::IndexSet, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
 }
 
 #[proc_macro_attribute]
-pub fn hashset(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn hashset(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::set::set(smear_types::value::SetKind::HashSet, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
 }
 
 #[proc_macro_attribute]
-pub fn btreeset(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream { 
+pub fn btreeset(
+  args: proc_macro::TokenStream,
+  input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
   value::set::set(smear_types::value::SetKind::BTreeSet, args, input)
     .unwrap_or_else(|e| e.to_compile_error())
     .into()
