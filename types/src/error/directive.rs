@@ -181,12 +181,12 @@ impl Error {
   pub fn missing_arguments<T: AstNode>(
     node: &T,
     directive_name: impl Display,
-    arguments: Vec<&'static str>,
+    arguments: impl Iterator<Item = &'static str>,
   ) -> Self {
     Self {
       kind: ErrorKind::MissingRequiredArguments {
         directive_name: directive_name.to_string(),
-        arguments,
+        arguments: arguments.collect(),
       },
       style: Style::Error,
       range: node.syntax().text_range(),

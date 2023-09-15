@@ -5,7 +5,7 @@ use apollo_parser::ast::Value;
 use crate::value::ValueDescriptor;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "derive", derive(darling::FromMeta))]
+// #[cfg_attr(feature = "derive", derive(darling::FromMeta))]
 pub enum DirectiveLocation {
   Query,
   Mutation,
@@ -184,7 +184,37 @@ impl std::error::Error for UnknownDirectiveLocation {}
 
 #[cfg(feature = "derive")]
 const _: () = {
+  use darling::{FromMeta, util::path_to_string, ast::NestedMeta};
   use quote::{quote, ToTokens};
+  use syn::{Expr, Lit, Meta};
+
+  impl FromMeta for DirectiveLocation {
+    fn from_meta(item: &Meta) -> darling::Result<Self> {
+      match item {
+        Meta::Path(p) => {
+          Self::from_str(path_to_string(p).as_str()).map_err(|err| darling::Error::custom(err).with_span(item))
+        },
+        Meta::List(value) => Self::from_list(&NestedMeta::parse_meta_list(value.tokens.clone())?[..]).map_err(|e| e.with_span(item)),
+        Meta::NameValue(value) => Self::from_expr(&value.value).map_err(|e| e.with_span(item)),
+      }
+    }
+
+    fn from_expr(expr: &syn::Expr) -> darling::Result<Self> {
+      let s = match expr {
+        Expr::Lit(lit) => match &lit.lit {
+          Lit::Str(s) => s.value(),
+          lit => return Err(darling::Error::unexpected_lit_type(lit)),
+        },
+        Expr::Path(p) => path_to_string(&p.path),
+        expr => return Err(darling::Error::unexpected_expr_type(expr)),
+      };
+      Self::from_str(s.as_str()).map_err(darling::Error::custom)
+    }
+
+    fn from_string(value: &str) -> darling::Result<Self> {
+      Self::from_str(value).map_err(|err| darling::Error::custom(err.to_string()))
+    }
+  }
 
   impl ToTokens for DirectiveLocation {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
@@ -239,9 +269,11 @@ const _: () = {
       let mut locations = Vec::with_capacity(items.len());
       for item in items {
         match item {
-          NestedMeta::Meta(meta) => match DirectiveLocation::from_meta(meta) {
-            Ok(val) => locations.push(val),
-            Err(e) => errors.push(e),
+          NestedMeta::Meta(meta) => {
+            match DirectiveLocation::from_meta(meta) {
+              Ok(val) => locations.push(val),
+              Err(e) => errors.push(e),
+            }
           },
           NestedMeta::Lit(lit) => {
             errors.push(darling::Error::unexpected_lit_type(lit));
@@ -254,6 +286,10 @@ const _: () = {
       }
 
       Ok(Self { locations })
+    }
+
+    fn from_word() -> darling::Result<Self> {
+      Ok(Self::default())
     }
   }
 

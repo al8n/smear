@@ -23,3 +23,8 @@ pub use apollo_parser;
 pub use codespan_reporting;
 pub use derive_more;
 pub use smear_derive::*;
+
+#[doc(hidden)]
+pub mod __exports {
+  pub use once_cell;
+}

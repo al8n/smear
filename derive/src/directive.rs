@@ -1,12 +1,12 @@
 use darling::{
-  ast::{Data, Fields, NestedMeta, Style},
-  FromDeriveInput, FromMeta, FromVariant,
+  ast::{Data, Fields, Style},
+  FromDeriveInput, FromVariant,
 };
 use heck::{ToLowerCamelCase, ToPascalCase};
 use indexmap::IndexSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use smear_types::directive::{DirectiveLocation, On};
+use smear_types::directive::On;
 use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
 use crate::utils::{Aliases, Attributes, DefaultAttribute, Long, RenameAll, Short};
@@ -164,13 +164,20 @@ impl Directive {
       argument_handlers,
       required_arguments_name,
       dirty_checks,
+      dirty_definitions,
       converts,
+      available_arguments,
+      required_arguments,
+      optional_arguments,
     } = helper;
+    let len_available_arguments = available_arguments.len();
+    let len_required_arguments = required_arguments.len();
+    let len_optional_arguments = optional_arguments.len();
 
     let empty_branch = match &self.default {
       Some(default) => quote!(::core::result::Result::Ok(#default)),
       None => {
-        quote!(::core::result::Result::Err(::smear::error::DirectiveError::missing_arguments(&[#(#required_arguments_name),*])))
+        quote!(::core::result::Result::Err(::smear::error::DirectiveError::missing_arguments(directive, directive_name, [#(#required_arguments_name),*].into_iter())))
       }
     };
 
@@ -215,21 +222,25 @@ impl Directive {
             }
           }
 
+          let directive_name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
           if let ::core::option::Option::Some(args) = directive.arguments() {
             let mut parser = #parse_struct_name::default();
             let mut errors = ::std::vec::Vec::new();
             let mut missing_arguments = ::std::vec::Vec::new();
-            let directive_name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
+            
+            #(#dirty_definitions)*
+
             for arg in args.arguments() {
               match (arg.name(), arg.value()) {
                 (::core::option::Option::None, ::core::option::Option::None) => {
-                  errors.push(::smear::error::DirectiveError::invalid(&arg));
+                  errors.push(::smear::error::DirectiveError::invalid_argument(&arg));
                 },
                 (::core::option::Option::None, ::core::option::Option::Some(_)) => {
                   errors.push(::smear::error::DirectiveError::missing_argument_name(&arg));
                 },
                 (::core::option::Option::Some(name), ::core::option::Option::None) => {
-                  let name_str = name.text().as_str().trim();
+                  let name_text = name.text();
+                  let name_str = name_text.as_str().trim();
                   match name_str {
                     #(#missing_argument_value_handlers)*
                     name => {
@@ -238,11 +249,12 @@ impl Directive {
                   }
                 },
                 (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
-                  let name_str = name.text().as_str().trim();
+                  let name_text = name.text();
+                  let name_str = name_text.as_str().trim();
                   match name_str {
                     #(#argument_handlers)*
                     name => {
-                      ::core::result::Result::Err(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name, &[#(#available_argument_names),*]))
+                      errors.push(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name, &[#(#available_argument_names),*]));
                     }
                   }
                 },
@@ -252,7 +264,7 @@ impl Directive {
             #(#dirty_checks)*
 
             if !missing_arguments.is_empty() {
-              errors.push(::smear::error::DirectiveError::missing_arguments(directive, directive_name, missing_arguments));
+              errors.push(::smear::error::DirectiveError::missing_arguments(directive, directive_name, missing_arguments.into_iter()));
             }
 
             if !errors.is_empty() {
@@ -266,12 +278,49 @@ impl Directive {
         }
 
         fn descriptor() -> &'static Self::Descriptor {
-          &::smear::directive::DirectiveDescriptor {
-            locations: #on,
-            available_arguments: &[#(#available_argument_names),*],
-            required_arguments: &[#(#required_arguments_name),*],
-            optional_arguments: &'static [&'static ArgumentDescriptor],
-          }
+          use ::smear::__exports::once_cell::sync::Lazy;
+          static AVAILABLE_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_available_arguments]> = Lazy::new(|| [
+            #(#available_arguments),*
+          ]);
+          static REQUIRED_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_required_arguments]> = Lazy::new(|| [
+            #(#required_arguments),*
+          ]);
+          static OPTIONAL_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_optional_arguments]> = Lazy::new(|| [
+            #(#optional_arguments),*
+          ]);
+
+          static DESCRIPTOR: ::std::sync::OnceLock<::smear::directive::DirectiveDescriptor> = ::std::sync::OnceLock::new();
+          DESCRIPTOR.get_or_init(|| {
+            // const ARGUMENTS: &::smear::directive::ArgumentsDescriptor = &::smear::directive::ArgumentsDescriptor {
+            //   available_arguments: AVAILABLE_ARGUMENTS.get_or_init(|| {
+            //     [
+            //       #(#available_arguments),*
+            //     ]
+            //   }),
+            //   required_arguments: REQUIRED_ARGUMENTS.get_or_init(|| {
+            //     [
+            //       #(#required_arguments),*
+            //     ]
+            //   }),
+            //   optional_arguments: OPTIONAL_ARGUMENTS.get_or_init(|| {
+            //     [
+            //       #(#optional_arguments),*
+            //     ]
+            //   }),
+            // };
+            ::smear::directive::DirectiveDescriptor {
+              name: #long,
+              short: #short,
+              aliases: &[#(#aliases),*],
+              available_names: &[#(#possible_names),*],
+              locations: #on,
+              arguments: ::smear::directive::ArgumentsDescriptor {
+                available_arguments: &*AVAILABLE_ARGUMENTS,
+                required_arguments: &*REQUIRED_ARGUMENTS,
+                optional_arguments: &*OPTIONAL_ARGUMENTS, 
+              },
+            }
+          })
         }
       }
 
@@ -339,10 +388,16 @@ impl Directive {
 
         fn descriptor() -> &'static Self::Descriptor {
           const DESCRIPTOR: &::smear::directive::DirectiveDescriptor = &::smear::directive::DirectiveDescriptor {
+            name: #long,
+            short: #short,
+            aliases: &[#(#aliases),*],
+            available_names: &[#(#possible_names),*],
             locations: #on,
-            available_arguments: &[],
-            required_arguments: &[],
-            optional_arguments: &[],
+            available_arguments: &::smear::directive::ArgumentsDescriptor {
+              available_arguments: &[],
+              required_arguments: &[],
+              optional_arguments: &[],
+            }
           };
           DESCRIPTOR
         }
@@ -414,6 +469,10 @@ struct Helper {
   missing_argument_value_handlers: Vec<TokenStream>,
   argument_handlers: Vec<TokenStream>,
   required_arguments_name: Vec<String>,
+  dirty_definitions: Vec<TokenStream>,
   dirty_checks: Vec<TokenStream>,
   converts: Vec<TokenStream>,
+  available_arguments: Vec<TokenStream>,
+  required_arguments: Vec<TokenStream>,
+  optional_arguments: Vec<TokenStream>,
 }

@@ -48,16 +48,11 @@ struct Derive {
   rename_all = "xxx",
   directive(
     type = "FooDirective",
-    short,
-    name = "foo",
-    aliases(myfoo, yourfoo),
     optional
   ),
   directive(
     type = "BarDirective",
-    short,
-    name = "bar",
-    aliases(mybar, yourbar),
+    optional
   )
 )]
 struct Object {

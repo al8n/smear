@@ -14,6 +14,7 @@ pub(super) struct Argument {
   ident: Option<Ident>,
   vis: Visibility,
   ty: syn::Type,
+  #[darling(default)]
   attributes: crate::utils::Attributes,
   #[darling(default)]
   short: Short,
@@ -110,7 +111,11 @@ impl Argument {
       argument_handlers,
       required_arguments_name,
       dirty_checks,
+      dirty_definitions,
       converts,
+      available_arguments,
+      required_arguments,
+      optional_arguments,
     } = helper;
 
     let field_name = self.sdl_name(rename_all);
@@ -118,6 +123,11 @@ impl Argument {
     let dirty = format_ident!("{field_name_ident}_dirty");
     let field_vis = self.vis();
     let field_attrs = self.attributes();
+    let short = match self.short(rename_all) {
+      Some(ch) => quote!(::core::option::Option::Some(#ch)),
+      None => quote!(::core::option::Option::None),
+    };
+    let aliases = &self.aliases.names;
     let field_possible_names = self.possible_names(rename_all);
     let field_parser = self.parser();
     let field_validator = self.validator();
@@ -132,6 +142,20 @@ impl Argument {
       let ty = self.ty();
       quote!(#ty)
     };
+    let arg_descriptor = quote! {
+      ::smear::directive::ArgumentDescriptor {
+        name: #field_name,
+        short: #short,
+        aliases: &[#(#aliases),*],
+        value_descriptor: <#field_ty as ::smear::Diagnosticable>::descriptor(),
+      }
+    };
+    available_arguments.push(arg_descriptor.clone());
+    if optional {
+      optional_arguments.push(arg_descriptor);
+    } else {
+      required_arguments.push(arg_descriptor);
+    }
 
     let helper = match (optional, default_attr) {
       (true, None) => {
@@ -200,6 +224,9 @@ impl Argument {
           missing_arguments.push(#field_name);
         }
       });
+      dirty_definitions.push(quote! {
+        let mut #dirty = false;
+      });
     }
     Ok(())
   }
@@ -237,7 +264,7 @@ impl CodegenHelper {
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path()? {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -275,7 +302,7 @@ impl CodegenHelper {
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path()? {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse(&val)),
+      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -316,7 +343,7 @@ impl CodegenHelper {
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path()? {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -357,7 +384,7 @@ impl CodegenHelper {
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path()? {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::DiagnosticableValue>::parse_optional(&val)),
+      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {

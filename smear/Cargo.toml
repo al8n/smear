@@ -31,6 +31,7 @@ strsim = "0.10"
 viewit = "0.1.5"
 uuid = { version = "1.4", features = ["serde", "v4"] }
 ordered-float = { version = "3.9", features = ["std"] }
+once_cell = "1.18"
 thiserror = "1.0.31"
 
 # optional dependencies
