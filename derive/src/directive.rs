@@ -286,6 +286,7 @@ impl Directive {
 
         fn descriptor() -> &'static Self::Descriptor {
           use ::smear::__exports::once_cell::sync::Lazy;
+
           static AVAILABLE_ARGUMENTS: Lazy<[::smear::__exports::directive::ArgumentDescriptor; #len_available_arguments]> = Lazy::new(|| [
             #(#available_arguments),*
           ]);
@@ -296,8 +297,7 @@ impl Directive {
             #(#optional_arguments),*
           ]);
 
-          static DESCRIPTOR: ::std::sync::OnceLock<::smear::__exports::directive::DirectiveDescriptor> = ::std::sync::OnceLock::new();
-          DESCRIPTOR.get_or_init(|| {
+          static DESCRIPTOR: Lazy<::smear::__exports::directive::DirectiveDescriptor> = Lazy::new(|| {
             ::smear::__exports::directive::DirectiveDescriptor {
               name: #long,
               short: #short,
@@ -312,7 +312,8 @@ impl Directive {
                 optional_arguments: &*OPTIONAL_ARGUMENTS,
               },
             }
-          })
+          });
+          &*DESCRIPTOR
         }
       }
 

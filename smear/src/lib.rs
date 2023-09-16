@@ -32,4 +32,8 @@ pub mod __exports {
   pub mod utils {
     pub use smear_types::utils::*;
   }
+
+  pub mod definition {
+    pub use smear_types::definition::*;
+  }
 }

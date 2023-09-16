@@ -34,4 +34,8 @@ impl RenameAll {
       Self::ScreamingSnakeCase => name.to_shouty_snake_case(),
     }
   }
+
+  pub(crate) fn graphql_enum_style() -> Self {
+    Self::ScreamingSnakeCase
+  }
 }

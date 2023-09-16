@@ -1,6 +1,21 @@
 
 ```rust
 
+#[derive(smear_derive::Enum)]
+#[smear(
+  directives(Directive1, Directive2),
+  variant_directives(CommonVariantDirective),
+  validator = "path/to/validator",
+  parser = "path/to/parser",
+)]
+enum Derive {
+  #[smear(name = "XCopy", directives(VariantDirective, VariantDirective))]
+  Copy,
+  Clone,
+  Eq,
+  PartialEq,
+}
+
 #[derive(smear_derive::Map)]
 #[smear(
   name = "foomap",

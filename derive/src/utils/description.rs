@@ -1,4 +1,4 @@
-use quote::quote;
+use quote::{quote, ToTokens};
 
 #[derive(Default)]
 pub struct Description(Option<String>);
@@ -23,5 +23,11 @@ impl Description {
       Some(d) => quote!(::core::option::Option::Some(#d)),
       None => quote!(::core::option::Option::None),
     }
+  }
+}
+
+impl ToTokens for Description {
+  fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    tokens.extend(self.to_tokens())
   }
 }

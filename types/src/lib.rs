@@ -1,3 +1,4 @@
+pub mod definition;
 pub mod directive;
 pub mod error;
 pub mod utils;
