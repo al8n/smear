@@ -182,11 +182,11 @@ impl Directive {
     let empty_branch = match &self.default {
       Some(default) => quote!(::core::result::Result::Ok(#default)),
       None => {
-        quote!(::core::result::Result::Err(::smear::error::DirectiveError::missing_arguments(directive, directive_name, [#(#required_arguments_name),*].into_iter())))
+        quote!(::core::result::Result::Err(::smear::__exports::error::DirectiveError::missing_arguments(directive, directive_name, [#(#required_arguments_name),*].into_iter())))
       }
     };
 
-    let inherit_impls = Self::generate_inherit_impls();
+    let inherit_impls = Self::generate_inherit_impls(&struct_name);
     let on = &self.on;
     let desc = self.description.to_tokens();
     let deprecated = &self.deprecated;
@@ -200,10 +200,10 @@ impl Directive {
       }
 
       #[automatically_derived]
-      impl ::smear::Diagnosticable for #struct_name {
-        type Error = ::smear::error::DirectiveError;
-        type Node = ::smear::apollo_parser::ast::Directive;
-        type Descriptor = ::smear::directive::DirectiveDescriptor;
+      impl ::smear::__exports::Diagnosticable for #struct_name {
+        type Error = ::smear::__exports::error::DirectiveError;
+        type Node = ::smear::__exports::apollo_parser::ast::Directive;
+        type Descriptor = ::smear::__exports::directive::DirectiveDescriptor;
 
         fn parse(directive: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
@@ -240,10 +240,10 @@ impl Directive {
             for arg in args.arguments() {
               match (arg.name(), arg.value()) {
                 (::core::option::Option::None, ::core::option::Option::None) => {
-                  errors.push(::smear::error::DirectiveError::invalid_argument(&arg));
+                  errors.push(::smear::__exports::error::DirectiveError::invalid_argument(&arg));
                 },
                 (::core::option::Option::None, ::core::option::Option::Some(_)) => {
-                  errors.push(::smear::error::DirectiveError::missing_argument_name(&arg));
+                  errors.push(::smear::__exports::error::DirectiveError::missing_argument_name(&arg));
                 },
                 (::core::option::Option::Some(name), ::core::option::Option::None) => {
                   let name_text = name.text();
@@ -251,7 +251,7 @@ impl Directive {
                   match name_str {
                     #(#missing_argument_value_handlers)*
                     name => {
-                      errors.push(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name_str, &[#(#available_argument_names),*]));
+                      errors.push(::smear::__exports::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name_str, &[#(#available_argument_names),*]));
                     }
                   }
                 },
@@ -261,7 +261,7 @@ impl Directive {
                   match name_str {
                     #(#argument_handlers)*
                     name => {
-                      errors.push(::smear::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name, &[#(#available_argument_names),*]));
+                      errors.push(::smear::__exports::error::DirectiveError::unknown_argument(&arg, directive_name.clone(), name, &[#(#available_argument_names),*]));
                     }
                   }
                 },
@@ -271,11 +271,11 @@ impl Directive {
             #(#dirty_checks)*
 
             if !missing_arguments.is_empty() {
-              errors.push(::smear::error::DirectiveError::missing_arguments(directive, directive_name, missing_arguments.into_iter()));
+              errors.push(::smear::__exports::error::DirectiveError::missing_arguments(directive, directive_name, missing_arguments.into_iter()));
             }
 
             if !errors.is_empty() {
-              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(directive, errors));
+              return ::core::result::Result::Err(::smear::__exports::error::DirectiveError::multiple(directive, errors));
             }
 
             ::core::result::Result::Ok(::core::convert::From::from(parser))
@@ -286,19 +286,19 @@ impl Directive {
 
         fn descriptor() -> &'static Self::Descriptor {
           use ::smear::__exports::once_cell::sync::Lazy;
-          static AVAILABLE_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_available_arguments]> = Lazy::new(|| [
+          static AVAILABLE_ARGUMENTS: Lazy<[::smear::__exports::directive::ArgumentDescriptor; #len_available_arguments]> = Lazy::new(|| [
             #(#available_arguments),*
           ]);
-          static REQUIRED_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_required_arguments]> = Lazy::new(|| [
+          static REQUIRED_ARGUMENTS: Lazy<[::smear::__exports::directive::ArgumentDescriptor; #len_required_arguments]> = Lazy::new(|| [
             #(#required_arguments),*
           ]);
-          static OPTIONAL_ARGUMENTS: Lazy<[::smear::directive::ArgumentDescriptor; #len_optional_arguments]> = Lazy::new(|| [
+          static OPTIONAL_ARGUMENTS: Lazy<[::smear::__exports::directive::ArgumentDescriptor; #len_optional_arguments]> = Lazy::new(|| [
             #(#optional_arguments),*
           ]);
 
-          static DESCRIPTOR: ::std::sync::OnceLock<::smear::directive::DirectiveDescriptor> = ::std::sync::OnceLock::new();
+          static DESCRIPTOR: ::std::sync::OnceLock<::smear::__exports::directive::DirectiveDescriptor> = ::std::sync::OnceLock::new();
           DESCRIPTOR.get_or_init(|| {
-            ::smear::directive::DirectiveDescriptor {
+            ::smear::__exports::directive::DirectiveDescriptor {
               name: #long,
               short: #short,
               aliases: &[#(#aliases),*],
@@ -306,7 +306,7 @@ impl Directive {
               locations: #on,
               description: #desc,
               deprecated: #deprecated,
-              arguments: ::smear::directive::ArgumentsDescriptor {
+              arguments: ::smear::__exports::directive::ArgumentsDescriptor {
                 available_arguments: &*AVAILABLE_ARGUMENTS,
                 required_arguments: &*REQUIRED_ARGUMENTS,
                 optional_arguments: &*OPTIONAL_ARGUMENTS,
@@ -331,7 +331,7 @@ impl Directive {
     let aliases = &self.aliases.names;
     let vis = &self.vis;
     let on = &self.on;
-    let inherit_impls = Self::generate_inherit_impls();
+    let inherit_impls = Self::generate_inherit_impls(&struct_name);
     let desc = self.description.to_tokens();
     let deprecated = &self.deprecated;
     Ok(quote! {
@@ -344,10 +344,10 @@ impl Directive {
         ::core::cmp::PartialOrd,
         ::core::cmp::Ord,
         ::core::hash::Hash,
-        ::smear::derive_more::From,
-        ::smear::derive_more::Into,
-        ::smear::derive_more::AsRef,
-        ::smear::derive_more::AsMut,
+        ::smear::__exports::derive_more::From,
+        ::smear::__exports::derive_more::Into,
+        ::smear::__exports::derive_more::AsRef,
+        ::smear::__exports::derive_more::AsMut,
       )]
       #[repr(transparent)]
       #[automatically_derived]
@@ -375,13 +375,13 @@ impl Directive {
       }
 
       #[automatically_derived]
-      impl ::smear::Diagnosticable for #struct_name {
-        type Error = ::smear::error::DirectiveError;
-        type Node = ::smear::apollo_parser::ast::Directive;
-        type Descriptor = ::smear::directive::DirectiveDescriptor;
+      impl ::smear::__exports::Diagnosticable for #struct_name {
+        type Error = ::smear::__exports::error::DirectiveError;
+        type Node = ::smear::__exports::apollo_parser::ast::Directive;
+        type Descriptor = ::smear::__exports::directive::DirectiveDescriptor;
 
         fn descriptor() -> &'static Self::Descriptor {
-          const DESCRIPTOR: &::smear::directive::DirectiveDescriptor = &::smear::directive::DirectiveDescriptor {
+          const DESCRIPTOR: &::smear::__exports::directive::DirectiveDescriptor = &::smear::__exports::directive::DirectiveDescriptor {
             name: #long,
             short: #short,
             aliases: &[#(#aliases),*],
@@ -389,7 +389,7 @@ impl Directive {
             deprecated: #deprecated,
             available_names: &[#(#possible_names),*],
             locations: #on,
-            available_arguments: &::smear::directive::ArgumentsDescriptor {
+            available_arguments: &::smear::__exports::directive::ArgumentsDescriptor {
               available_arguments: &[],
               required_arguments: &[],
               optional_arguments: &[],
@@ -402,16 +402,16 @@ impl Directive {
         where
           Self: Sized
         {
-          use ::smear::apollo_parser::ast::AstNode;
+          use ::smear::__exports::apollo_parser::ast::AstNode;
 
           if let ::core::option::Option::Some(args) = node.arguments() {
             let mut errors = ::std::vec::Vec::new();
             let name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
             for arg in args.arguments() {
-              errors.push(::smear::error::DirectiveError::unknown_argument(&arg, name.clone(), arg.name().map(|n| n.text().to_string()).unwrap_or_default(), &[]));
+              errors.push(::smear::__exports::error::DirectiveError::unknown_argument(&arg, name.clone(), arg.name().map(|n| n.text().to_string()).unwrap_or_default(), &[]));
             }
             if !errors.is_empty() {
-              return ::core::result::Result::Err(::smear::error::DirectiveError::multiple(node, errors));
+              return ::core::result::Result::Err(::smear::__exports::error::DirectiveError::multiple(node, errors));
             }
           }
 
@@ -452,8 +452,16 @@ impl Directive {
     })
   }
 
-  fn generate_inherit_impls() -> TokenStream {
-    quote! {}
+  fn generate_inherit_impls(name: &Ident) -> TokenStream {
+    quote! {
+      impl ::smear::__exports::Encodable for #name {
+        type SDL = ::smear::__exports::apollo_encoder::DirectiveDefinition;
+
+        fn encode() -> Self::SDL {
+          ::core::convert::From::from(<Self as ::smear::__exports::Diagnosticable>::descriptor())
+        }
+      }
+    }
   }
 }
 

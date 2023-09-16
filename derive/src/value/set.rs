@@ -81,25 +81,25 @@ impl Set {
         }
       }
 
-      impl ::smear::Diagnosticable for #name
+      impl ::smear::__exports::Diagnosticable for #name
       {
-        type Error = ::smear::error::ValueError;
+        type Error = ::smear::__exports::error::ValueError;
 
-        type Node = ::smear::apollo_parser::ast::Value;
+        type Node = ::smear::__exports::apollo_parser::ast::Value;
 
-        type Descriptor = ::smear::value::ValueDescriptor;
+        type Descriptor = ::smear::__exports::value::ValueDescriptor;
 
         fn descriptor() -> &'static Self::Descriptor {
           use ::std::sync::OnceLock;
 
-          static DESCRIPTOR: OnceLock<::smear::value::ValueDescriptor> = OnceLock::new();
-          static KIND: OnceLock<::smear::value::ValueKind> = OnceLock::new();
+          static DESCRIPTOR: OnceLock<::smear::__exports::value::ValueDescriptor> = OnceLock::new();
+          static KIND: OnceLock<::smear::__exports::value::ValueKind> = OnceLock::new();
 
-          DESCRIPTOR.get_or_init(|| ::smear::value::ValueDescriptor {
+          DESCRIPTOR.get_or_init(|| ::smear::__exports::value::ValueDescriptor {
             name: #name_str,
-            kind: KIND.get_or_init(|| ::smear::value::ValueKind::Set {
+            kind: KIND.get_or_init(|| ::smear::__exports::value::ValueKind::Set {
               kind: #set_kind,
-              value: <#value as ::smear::Diagnosticable>::descriptor(),
+              value: <#value as ::smear::__exports::Diagnosticable>::descriptor(),
             }),
           })
         }
@@ -108,7 +108,7 @@ impl Set {
         where
           Self: Sized,
         {
-          use ::smear::{apollo_parser::ast::{Value, AstNode}, error::ValueError, value::Parser};
+          use ::smear::__exports::{apollo_parser::ast::{Value, AstNode}, error::ValueError, value::Parser};
 
           match value {
             Value::ListValue(val) => {
@@ -135,7 +135,7 @@ impl Set {
         }
       }
 
-      impl ::smear::value::DiagnosticableValue for #name {}
+      impl ::smear::__exports::value::DiagnosticableValue for #name {}
     })
   }
 

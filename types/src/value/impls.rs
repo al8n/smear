@@ -51,7 +51,7 @@ macro_rules! impl_diagnostic_and_encodable_inner {
     impl crate::Encodable for $ty {
       type SDL = apollo_encoder::ScalarDefinition;
 
-      fn encode(&self) -> Self::SDL {
+      fn encode() -> Self::SDL {
         let mut def = apollo_encoder::ScalarDefinition::new(stringify!($ty).into());
         if let Some(desc) = <Self as crate::Diagnosticable>::descriptor().description() {
           def.description(desc.to_string());
@@ -306,10 +306,10 @@ const _: () = {
         impl ToTokens for [<$ty Kind>] {
           fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
             let ts = match self {
-              Self::[<Hash $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<Hash $ty>] },
-              Self::[<BTree $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<BTree $ty>] },
+              Self::[<Hash $ty>] => quote! { ::smear::__exports::value::[<$ty Kind>]::[<Hash $ty>] },
+              Self::[<BTree $ty>] => quote! { ::smear::__exports::value::[<$ty Kind>]::[<BTree $ty>] },
               #[cfg(feature = "indexmap")]
-              Self::[<Index $ty>] => quote! { ::smear::value::[<$ty Kind>]::[<Index $ty>] },
+              Self::[<Index $ty>] => quote! { ::smear::__exports::value::[<$ty Kind>]::[<Index $ty>] },
             };
             tokens.extend(ts);
           }

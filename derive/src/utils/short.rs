@@ -1,4 +1,4 @@
-use darling::{FromMeta, ast::NestedMeta, Error};
+use darling::{ast::NestedMeta, Error, FromMeta};
 use syn::{Expr, Lit};
 
 #[derive(Debug, Default, Clone)]
@@ -26,7 +26,7 @@ impl FromMeta for Short {
       Expr::Lit(lit) => match &lit.lit {
         Lit::Char(ch) => Ok(Self(Some(Some(ch.value())))),
         lit => Err(Error::unexpected_lit_type(lit)),
-      }
+      },
       expr => Err(Error::unexpected_expr_type(expr)),
     }
   }

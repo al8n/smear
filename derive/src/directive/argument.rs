@@ -2,7 +2,7 @@ use darling::FromField;
 use indexmap::IndexSet;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Ident, Visibility};
+use syn::{Ident, Type, Visibility};
 
 use crate::utils::{
   Aliases, DefaultAttribute, Deprecated, Description, Long, Optional, PathAttribute, RenameAll,
@@ -150,14 +150,14 @@ impl Argument {
     let desc = self.description.to_tokens();
     let deprecated = &self.deprecated;
     let arg_descriptor = quote! {
-      ::smear::directive::ArgumentDescriptor {
+      ::smear::__exports::directive::ArgumentDescriptor {
         name: #field_name,
         short: #short,
         aliases: &[#(#aliases),*],
         available_names: &[#(#field_possible_names),*],
         description: #desc,
         deprecated: #deprecated,
-        value_descriptor: <#field_ty as ::smear::Diagnosticable>::descriptor(),
+        value_descriptor: <#field_ty as ::smear::__exports::Diagnosticable>::descriptor(),
       }
     };
     available_arguments.push(arg_descriptor.clone());
@@ -169,21 +169,21 @@ impl Argument {
 
     let helper = match (optional, default_attr) {
       (true, None) => {
-        CodegenHelper::optional_only(&field_name_ident, &field_ty, field_parser, field_validator)
+        CodegenHelper::optional_only(&field_name_ident, &self.ty, field_parser, field_validator)
       }
       (true, Some(default)) => CodegenHelper::optional_and_default(
         &field_name_ident,
-        &field_ty,
+        &self.ty,
         field_parser,
         field_validator,
         default,
       ),
       (false, None) => {
-        CodegenHelper::required_only(&field_name_ident, &field_ty, field_parser, field_validator)
+        CodegenHelper::required_only(&field_name_ident, &self.ty, field_parser, field_validator)
       }
       (false, Some(default)) => CodegenHelper::required_and_default(
         &field_name_ident,
-        &field_ty,
+        &self.ty,
         field_parser,
         field_validator,
         default,
@@ -208,7 +208,7 @@ impl Argument {
     argument_handlers.push(quote! {
       #(#field_possible_names)|* => {
         if #dirty {
-          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
+          errors.push(::smear::__exports::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
           continue;
         }
         #dirty = true;
@@ -223,9 +223,12 @@ impl Argument {
         if !#dirty {
           #dirty = true;
         } else {
-          errors.push(::smear::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
+          errors.push(::smear::__exports::error::DirectiveError::duplicated_argument(&arg, directive_name.clone(), name_str));
         }
       },
+    });
+    dirty_definitions.push(quote! {
+      let mut #dirty = false;
     });
     converts.push(converter);
     if !optional && default_attr.is_none() {
@@ -233,9 +236,6 @@ impl Argument {
         if !#dirty {
           missing_arguments.push(#field_name);
         }
-      });
-      dirty_definitions.push(quote! {
-        let mut #dirty = false;
       });
     }
     Ok(())
@@ -267,22 +267,24 @@ impl CodegenHelper {
 
   fn required_and_default(
     field_name_ident: &Ident,
-    field_ty: &TokenStream,
+    field_ty: &Type,
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
     default: &DefaultAttribute,
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
+      None => quote!(<#field_ty as ::smear::__exports::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {
         ::core::result::Result::Ok(parsed) => {
-          parser.#field_name_ident = parsed;
+          if let ::core::option::Option::Some(parsed) = parsed {
+            parser.#field_name_ident = parsed;
+          }
         }
         ::core::result::Result::Err(err) => {
-          errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+          errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           continue;
         }
       }
@@ -290,7 +292,7 @@ impl CodegenHelper {
     let validator = match field_validator.path() {
       Some(p) => quote! {
         if let ::core::result::Result::Err(e) = #p(&parser.#field_name_ident) {
-          errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+          errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
         }
       },
       None => quote!(),
@@ -306,13 +308,13 @@ impl CodegenHelper {
 
   fn required_only(
     field_name_ident: &Ident,
-    field_ty: &TokenStream,
+    field_ty: &Type,
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value(&val)),
+      None => quote!(<#field_ty as ::smear::__exports::value::Parser>::parse_value(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -320,7 +322,7 @@ impl CodegenHelper {
           parser.#field_name_ident = ::core::option::Option::Some(parsed);
         }
         ::core::result::Result::Err(err) => {
-          errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+          errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           continue;
         }
       }
@@ -329,7 +331,7 @@ impl CodegenHelper {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {
-            errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+            errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           }
         }
       },
@@ -346,14 +348,14 @@ impl CodegenHelper {
   }
   fn optional_and_default(
     field_name_ident: &Ident,
-    field_ty: &TokenStream,
+    field_ty: &Type,
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
     default: &DefaultAttribute,
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
+      None => quote!(<#field_ty as ::smear::__exports::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -361,7 +363,7 @@ impl CodegenHelper {
           parser.#field_name_ident = parsed;
         }
         ::core::result::Result::Err(err) => {
-          errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+          errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           continue;
         }
       }
@@ -370,7 +372,7 @@ impl CodegenHelper {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {
-            errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+            errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           }
         }
       },
@@ -388,13 +390,13 @@ impl CodegenHelper {
 
   fn optional_only(
     field_name_ident: &Ident,
-    field_ty: &TokenStream,
+    field_ty: &Type,
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
   ) -> syn::Result<Self> {
     let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
-      None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
+      None => quote!(<#field_ty as ::smear::__exports::value::Parser>::parse_value_nullable(&val)),
     };
     let parser = quote! {
       match #parser_fn {
@@ -402,7 +404,7 @@ impl CodegenHelper {
           parser.#field_name_ident = parsed;
         }
         ::core::result::Result::Err(err) => {
-          errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+          errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           continue;
         }
       }
@@ -411,7 +413,7 @@ impl CodegenHelper {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {
-            errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
+            errors.push(::smear::__exports::error::DirectiveError::invalid_argument_value(&arg, err));
           }
         }
       },

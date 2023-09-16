@@ -43,7 +43,7 @@ pub trait Reporter {
 pub trait Encodable {
   type SDL: core::fmt::Display;
 
-  fn encode(&self) -> Self::SDL;
+  fn encode() -> Self::SDL;
 }
 
 pub trait Diagnosticable {

@@ -88,7 +88,7 @@ impl From<DirectiveLocation> for String {
 impl crate::Encodable for DirectiveLocation {
   type SDL = EnumDefinition;
 
-  fn encode(&self) -> Self::SDL {
+  fn encode() -> Self::SDL {
     let mut def = EnumDefinition::new("DirectiveLocation".into());
     for name in DirectiveLocation::available_locations() {
       def.value(EnumValue::new(name.to_string()));
@@ -241,32 +241,42 @@ const _: () = {
   impl ToTokens for DirectiveLocation {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
       let ts = match self {
-        Self::Query => quote! { ::smear::directive::DirectiveLocation::Query },
-        Self::Mutation => quote! { ::smear::directive::DirectiveLocation::Mutation },
-        Self::Subscription => quote! { ::smear::directive::DirectiveLocation::Subscription },
-        Self::Field => quote! { ::smear::directive::DirectiveLocation::Field },
+        Self::Query => quote! { ::smear::__exports::directive::DirectiveLocation::Query },
+        Self::Mutation => quote! { ::smear::__exports::directive::DirectiveLocation::Mutation },
+        Self::Subscription => {
+          quote! { ::smear::__exports::directive::DirectiveLocation::Subscription }
+        }
+        Self::Field => quote! { ::smear::__exports::directive::DirectiveLocation::Field },
         Self::FragmentDefinition => {
-          quote! { ::smear::directive::DirectiveLocation::FragmentDefinition }
+          quote! { ::smear::__exports::directive::DirectiveLocation::FragmentDefinition }
         }
-        Self::FragmentSpread => quote! { ::smear::directive::DirectiveLocation::FragmentSpread },
-        Self::InlineFragment => quote! { ::smear::directive::DirectiveLocation::InlineFragment },
+        Self::FragmentSpread => {
+          quote! { ::smear::__exports::directive::DirectiveLocation::FragmentSpread }
+        }
+        Self::InlineFragment => {
+          quote! { ::smear::__exports::directive::DirectiveLocation::InlineFragment }
+        }
         Self::VariableDefinition => {
-          quote! { ::smear::directive::DirectiveLocation::VariableDefinition }
+          quote! { ::smear::__exports::directive::DirectiveLocation::VariableDefinition }
         }
-        Self::Schema => quote! { ::smear::directive::DirectiveLocation::Schema },
-        Self::Scalar => quote! { ::smear::directive::DirectiveLocation::Scalar },
-        Self::Object => quote! { ::smear::directive::DirectiveLocation::Object },
-        Self::FieldDefinition => quote! { ::smear::directive::DirectiveLocation::FieldDefinition },
+        Self::Schema => quote! { ::smear::__exports::directive::DirectiveLocation::Schema },
+        Self::Scalar => quote! { ::smear::__exports::directive::DirectiveLocation::Scalar },
+        Self::Object => quote! { ::smear::__exports::directive::DirectiveLocation::Object },
+        Self::FieldDefinition => {
+          quote! { ::smear::__exports::directive::DirectiveLocation::FieldDefinition }
+        }
         Self::ArgumentDefinition => {
-          quote! { ::smear::directive::DirectiveLocation::ArgumentDefinition }
+          quote! { ::smear::__exports::directive::DirectiveLocation::ArgumentDefinition }
         }
-        Self::Interface => quote! { ::smear::directive::DirectiveLocation::Interface },
-        Self::Union => quote! { ::smear::directive::DirectiveLocation::Union },
-        Self::Enum => quote! { ::smear::directive::DirectiveLocation::Enum },
-        Self::EnumValue => quote! { ::smear::directive::DirectiveLocation::EnumValue },
-        Self::InputObject => quote! { ::smear::directive::DirectiveLocation::InputObject },
+        Self::Interface => quote! { ::smear::__exports::directive::DirectiveLocation::Interface },
+        Self::Union => quote! { ::smear::__exports::directive::DirectiveLocation::Union },
+        Self::Enum => quote! { ::smear::__exports::directive::DirectiveLocation::Enum },
+        Self::EnumValue => quote! { ::smear::__exports::directive::DirectiveLocation::EnumValue },
+        Self::InputObject => {
+          quote! { ::smear::__exports::directive::DirectiveLocation::InputObject }
+        }
         Self::InputFieldDefinition => {
-          quote! { ::smear::directive::DirectiveLocation::InputFieldDefinition }
+          quote! { ::smear::__exports::directive::DirectiveLocation::InputFieldDefinition }
         }
       };
       tokens.extend(ts);

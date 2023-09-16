@@ -55,7 +55,7 @@ impl ToTokens for DeprecatedBody {
     };
 
     tokens.extend(quote! {
-      ::core::option::Option::Some(::smear::Deprecated::new(#version, #reason, #suggestion))
+      ::core::option::Option::Some(::smear::__exports::Deprecated::new(#version, #reason, #suggestion))
     });
   }
 }

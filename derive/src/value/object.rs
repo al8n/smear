@@ -48,8 +48,8 @@
 //           field.parser_tokenstream()
 //         } else {
 //           fields_null_check.push(quote! {
-//             if #field_ident.is_none() && !<#field_ty as ::smear::DiagnosticableValue>::nullable() {
-//               errors.push(::smear::error::ValueError::missing_object_field(obj, #missing_field_error));
+//             if #field_ident.is_none() && !<#field_ty as ::smear::__exports::DiagnosticableValue>::nullable() {
+//               errors.push(::smear::__exports::error::ValueError::missing_object_field(obj, #missing_field_error));
 //             }
 //           });
 
@@ -60,7 +60,7 @@
 
 //           fields_init.push(quote! {
 //             #field_ident: {
-//               if <#field_ty as ::smear::DiagnosticableValue>::nullable() {
+//               if <#field_ty as ::smear::__exports::DiagnosticableValue>::nullable() {
 //                 #field_ident
 //               } else {
 //                 #field_ident.unwrap()
@@ -74,7 +74,7 @@
 //         Result::<_, syn::Error>::Ok(quote! {
 //           #field_rename => {
 //             if #field_ident_dirty {
-//               errors.push(::smear::error::ValueError::duplicated_object_field(&field, #duplicated_field_error));
+//               errors.push(::smear::__exports::error::ValueError::duplicated_object_field(&field, #duplicated_field_error));
 //               continue;
 //             }
 
@@ -91,16 +91,16 @@
 //   Ok(quote! {
 //     const _: () = {
 //       #[automatically_derived]
-//       impl ::smear::Diagnosticable for #name {
-//         type Error = ::smear::error::ValueError;
-//         type Node = ::smear::apollo_parser::ast::Value;
+//       impl ::smear::__exports::Diagnosticable for #name {
+//         type Error = ::smear::__exports::error::ValueError;
+//         type Node = ::smear::__exports::apollo_parser::ast::Value;
 
 //         fn parse(node: &Self::Node) -> ::core::result::Result<Self, Self::Error>
 //         where
 //           Self: ::core::marker::Sized,
 //         {
 //           match node {
-//             ::smear::apollo_parser::ast::Value::ObjectValue(obj) => {
+//             ::smear::__exports::apollo_parser::ast::Value::ObjectValue(obj) => {
 //               #(#fields_declaration)*
 
 //               let mut errors = ::std::vec::Vec::new();
@@ -109,16 +109,16 @@
 //                 match (field.name(), field.value()) {
 //                   (::core::option::Option::None, ::core::option::Option::None) => {},
 //                   (::core::option::Option::None, ::core::option::Option::Some(_)) => {
-//                     errors.push(::smear::error::ValueError::missing_object_field_name(&field));
+//                     errors.push(::smear::__exports::error::ValueError::missing_object_field_name(&field));
 //                   },
 //                   (::core::option::Option::Some(name), ::core::option::Option::None) => {
-//                     errors.push(::smear::error::ValueError::missing_object_value(&field, name.text().as_str()));
+//                     errors.push(::smear::__exports::error::ValueError::missing_object_value(&field, name.text().as_str()));
 //                   },
 //                   (::core::option::Option::Some(name), ::core::option::Option::Some(val)) => {
 //                     match name.text().as_str().trim() {
 //                       #(#field_parsing)*
 //                       n => {
-//                         errors.push(::smear::error::ValueError::unknown_object_field(&field, ::smear::error::ErrorUnknownObjectField::with_alts(n, [#(#fields_name),*])));
+//                         errors.push(::smear::__exports::error::ValueError::unknown_object_field(&field, ::smear::__exports::error::ErrorUnknownObjectField::with_alts(n, [#(#fields_name),*])));
 //                       },
 //                     }
 //                   },
@@ -128,46 +128,46 @@
 //               #(#fields_null_check)*
 
 //               if !errors.is_empty() {
-//                 return ::core::result::Result::Err(::smear::error::ValueError::multiple(obj, errors));
+//                 return ::core::result::Result::Err(::smear::__exports::error::ValueError::multiple(obj, errors));
 //               }
 
 //               ::core::result::Result::Ok(Self {
 //                 #(#fields_init)*
 //               })
 //             }
-//             val => ::core::result::Result::Err(::smear::error::ValueError::unexpected_type(val)),
+//             val => ::core::result::Result::Err(::smear::__exports::error::ValueError::unexpected_type(val)),
 //           }
 //         }
 //       }
 
 //       #[automatically_derived]
-//       impl ::smear::Diagnosticable for ::core::option::Option<#name> {
-//         type Error = ::smear::error::ValueError;
-//         type Node = ::smear::apollo_parser::ast::Value;
+//       impl ::smear::__exports::Diagnosticable for ::core::option::Option<#name> {
+//         type Error = ::smear::__exports::error::ValueError;
+//         type Node = ::smear::__exports::apollo_parser::ast::Value;
 
 //         fn parse(node: &Self::Node) -> ::core::result::Result<Self, Self::Error>
 //         where
 //           Self: ::core::marker::Sized,
 //         {
 //           match node {
-//             ::smear::apollo_parser::ast::Value::NullValue(_) => ::core::result::Result::Ok(None),
-//             val => <#name as ::smear::Diagnosticable>::parse(val).map(::core::option::Option::Some),
+//             ::smear::__exports::apollo_parser::ast::Value::NullValue(_) => ::core::result::Result::Ok(None),
+//             val => <#name as ::smear::__exports::Diagnosticable>::parse(val).map(::core::option::Option::Some),
 //           }
 //         }
 //       }
 
 //       #[automatically_derived]
-//       impl ::smear::DiagnosticableValue for #name {}
+//       impl ::smear::__exports::DiagnosticableValue for #name {}
 
 //       #[automatically_derived]
-//       impl ::smear::DiagnosticableObjectValue for #name {
+//       impl ::smear::__exports::DiagnosticableObjectValue for #name {
 //         fn fields() -> &'static [&'static str] {
 //           &[#(#fields_name),*]
 //         }
 //       }
 
 //       #[automatically_derived]
-//       impl ::smear::DiagnosticableValue for ::core::option::Option<#name> {
+//       impl ::smear::__exports::DiagnosticableValue for ::core::option::Option<#name> {
 //         fn nullable() -> bool {
 //           true
 //         }
@@ -234,7 +234,7 @@
 //             #assign
 //           },
 //           ::core::result::Result::Err(err) => {
-//             errors.push(::smear::error::ValueError::invalid_value(&val, err));
+//             errors.push(::smear::__exports::error::ValueError::invalid_value(&val, err));
 //           },
 //         }
 //       }
@@ -257,7 +257,7 @@
 //     let validator = self.validator_tokenstream()?;
 //     let parser = match self.parser.path()? {
 //       Some(p) => quote!(#p(&val)),
-//       None => quote!(<#field_ty as ::smear::Diagnosticable>::parse(&val)),
+//       None => quote!(<#field_ty as ::smear::__exports::Diagnosticable>::parse(&val)),
 //     };
 
 //     Ok(quote! {

@@ -5,27 +5,31 @@ mod db;
 mod diagnostics;
 pub use diagnostics::*;
 
-pub mod directive {
-  pub use smear_types::directive::*;
-}
-pub mod error {
-  pub use smear_types::error::*;
-}
-
-pub mod utils {
-  pub use smear_types::utils::*;
-}
-pub mod value {
-  pub use smear_types::value::*;
-}
-
 pub use apollo_parser;
 pub use codespan_reporting;
 pub use derive_more;
 pub use smear_derive::*;
-pub use smear_types::Deprecated;
 
 #[doc(hidden)]
 pub mod __exports {
+  pub use apollo_encoder;
+  pub use apollo_parser;
   pub use once_cell;
+  pub use smear_types::{Deprecated, Diagnosticable, Encodable};
+
+  pub mod directive {
+    pub use smear_types::directive::*;
+  }
+
+  pub mod error {
+    pub use smear_types::error::*;
+  }
+
+  pub mod value {
+    pub use smear_types::value::*;
+  }
+
+  pub mod utils {
+    pub use smear_types::utils::*;
+  }
 }

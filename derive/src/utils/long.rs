@@ -1,4 +1,4 @@
-use darling::{FromMeta, Error, ast::NestedMeta, util::path_to_string};
+use darling::{ast::NestedMeta, util::path_to_string, Error, FromMeta};
 use syn::Expr;
 
 use crate::utils::is_valid_char;
@@ -28,7 +28,7 @@ impl FromMeta for Long {
       Expr::Lit(lit) => match &lit.lit {
         syn::Lit::Str(s) => Ok(Self(Some(s.value()))),
         lit => Err(Error::unexpected_lit_type(lit)),
-      }
+      },
       Expr::Path(p) => Ok(Self(Some(path_to_string(&p.path)))),
       expr => Err(Error::unexpected_expr_type(expr)),
     }

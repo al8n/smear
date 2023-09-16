@@ -9,16 +9,23 @@ use apollo_encoder::DirectiveDefinition;
   deprecated(version = "0.1.0")
 )]
 struct Foo {
-  #[smear(short = 's', deprecated)]
-  small: u64,
-  #[smear(short, aliases(bigger, biggest))]
-  big: u32,
+  #[smear(aliases("rwd"), deprecated, default)]
+  required_with_default: u64,
+  #[smear(short, aliases(ro), default = 16)]
+  required_only: u32,
+  #[smear(short(o), optional, default(default_optional_with_default))]
+  optional_with_default: f64,
+  #[smear(short = 'y', optional)]
+  optional_only: String,
+}
+
+fn default_optional_with_default() -> f64 {
+  1.0
 }
 
 fn main() {
-  use apollo_encoder::InputValueDefinition;
-  use smear_types::Diagnosticable;
+  use smear_types::Encodable;
 
-  let def = DirectiveDefinition::from(FooDirective::descriptor());
+  let def = FooDirective::encode();
   println!("{}", def);
 }
