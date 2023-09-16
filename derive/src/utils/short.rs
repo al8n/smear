@@ -1,31 +1,38 @@
-use darling::FromMeta;
-use syn::Expr;
+use darling::{FromMeta, ast::NestedMeta, Error};
+use syn::{Expr, Lit};
 
 #[derive(Debug, Default, Clone)]
 pub struct Short(pub(crate) Option<Option<char>>);
 
 impl FromMeta for Short {
-  fn from_meta(item: &syn::Meta) -> darling::Result<Self> {
-    match item {
-      syn::Meta::Path(_) => Ok(Self(Some(None))),
-      syn::Meta::List(l) => Err(
-        darling::Error::custom("expected a value for this attribute: `short` or `short = '...'`")
-          .with_span(l),
-      ),
-      syn::Meta::NameValue(nv) => {
-        if let Expr::Lit(lit) = &nv.value {
-          if let syn::Lit::Char(char_lit) = &lit.lit {
-            let char = char_lit.value();
-            validate_short(char).map_err(|e| e.with_span(char_lit))?;
-            Ok(Short(Some(Some(char))))
-          } else {
-            Err(darling::Error::unexpected_lit_type(&lit.lit).with_span(lit))
-          }
-        } else {
-          Err(darling::Error::unexpected_expr_type(&nv.value).with_span(&nv))
-        }
-      }
+  fn from_list(items: &[NestedMeta]) -> darling::Result<Self> {
+    match items.len() {
+      0 => Err(Error::too_few_items(1)),
+      1 => match &items[0] {
+        NestedMeta::Lit(syn::Lit::Char(s)) => Ok(Self(Some(Some(s.value())))),
+        NestedMeta::Lit(lit) => Err(Error::unexpected_lit_type(lit)),
+        NestedMeta::Meta(meta) => Self::from_meta(meta),
+      },
+      _ => Err(Error::too_many_items(1)),
     }
+  }
+
+  fn from_word() -> darling::Result<Self> {
+    Ok(Self(Some(None)))
+  }
+
+  fn from_expr(expr: &Expr) -> darling::Result<Self> {
+    match expr {
+      Expr::Lit(lit) => match &lit.lit {
+        Lit::Char(ch) => Ok(Self(Some(Some(ch.value())))),
+        lit => Err(Error::unexpected_lit_type(lit)),
+      }
+      expr => Err(Error::unexpected_expr_type(expr)),
+    }
+  }
+
+  fn from_char(value: char) -> darling::Result<Self> {
+    Ok(Self(Some(Some(value))))
   }
 }
 
@@ -44,7 +51,7 @@ impl Short {
 
 fn validate_short(short: char) -> darling::Result<()> {
   if !short.is_ascii_alphabetic() {
-    return Err(darling::Error::custom(format!(
+    return Err(Error::custom(format!(
       "The value of `short` must be an ASCII alphabetic character, but got '{short}'."
     )));
   }

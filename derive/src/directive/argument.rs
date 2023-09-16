@@ -29,7 +29,8 @@ pub(super) struct Argument {
   long: Long,
   #[darling(default)]
   aliases: Aliases,
-  optional: Option<Optional>,
+  #[darling(default)]
+  optional: Optional,
   default: Option<DefaultAttribute>,
   #[darling(default)]
   validator: PathAttribute,
@@ -51,10 +52,7 @@ impl Argument {
   }
 
   pub(super) fn optional(&self) -> bool {
-    match self.optional {
-      Some(optional) => optional.is_optional(),
-      None => false,
-    }
+    self.optional.is_optional()
   }
 
   pub(super) fn default(&self) -> Option<&DefaultAttribute> {
@@ -274,7 +272,7 @@ impl CodegenHelper {
     field_validator: &PathAttribute,
     default: &DefaultAttribute,
   ) -> syn::Result<Self> {
-    let parser_fn = match field_parser.path()? {
+    let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
       None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
@@ -289,7 +287,7 @@ impl CodegenHelper {
         }
       }
     };
-    let validator = match field_validator.path()? {
+    let validator = match field_validator.path() {
       Some(p) => quote! {
         if let ::core::result::Result::Err(e) = #p(&parser.#field_name_ident) {
           errors.push(::smear::error::DirectiveError::invalid_argument_value(&arg, err));
@@ -312,7 +310,7 @@ impl CodegenHelper {
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
   ) -> syn::Result<Self> {
-    let parser_fn = match field_parser.path()? {
+    let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
       None => quote!(<#field_ty as ::smear::value::Parser>::parse_value(&val)),
     };
@@ -327,7 +325,7 @@ impl CodegenHelper {
         }
       }
     };
-    let validator = match field_validator.path()? {
+    let validator = match field_validator.path() {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {
@@ -353,7 +351,7 @@ impl CodegenHelper {
     field_validator: &PathAttribute,
     default: &DefaultAttribute,
   ) -> syn::Result<Self> {
-    let parser_fn = match field_parser.path()? {
+    let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
       None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
@@ -368,7 +366,7 @@ impl CodegenHelper {
         }
       }
     };
-    let validator = match field_validator.path()? {
+    let validator = match field_validator.path() {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {
@@ -394,7 +392,7 @@ impl CodegenHelper {
     field_parser: &PathAttribute,
     field_validator: &PathAttribute,
   ) -> syn::Result<Self> {
-    let parser_fn = match field_parser.path()? {
+    let parser_fn = match field_parser.path() {
       Some(p) => quote!(#p(&val)),
       None => quote!(<#field_ty as ::smear::value::Parser>::parse_value_nullable(&val)),
     };
@@ -409,7 +407,7 @@ impl CodegenHelper {
         }
       }
     };
-    let validator = match field_validator.path()? {
+    let validator = match field_validator.path() {
       Some(p) => quote! {
         if let ::core::option::Option::Some(ref parsed) = parser.#field_name_ident {
           if let ::core::result::Result::Err(e) = #p(parsed) {

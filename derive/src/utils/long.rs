@@ -1,4 +1,4 @@
-use darling::FromMeta;
+use darling::{FromMeta, Error, ast::NestedMeta, util::path_to_string};
 use syn::Expr;
 
 use crate::utils::is_valid_char;
@@ -7,26 +7,30 @@ use crate::utils::is_valid_char;
 pub struct Long(pub(crate) Option<String>);
 
 impl FromMeta for Long {
-  fn from_meta(item: &syn::Meta) -> darling::Result<Self> {
-    match item {
-      syn::Meta::Path(_) => Ok(Self(None)),
-      syn::Meta::List(_) => Err(
-        darling::Error::custom("expected a value for this attribute: `long` or `long = \"...\"`")
-          .with_span(item),
-      ),
-      syn::Meta::NameValue(item) => {
-        if let Expr::Lit(lit) = &item.value {
-          if let syn::Lit::Str(s) = &lit.lit {
-            let s = s.value();
-            validate_long(&s).map_err(|e| e.with_span(&lit.lit))?;
-            Ok(Long(Some(s)))
-          } else {
-            Err(darling::Error::unexpected_lit_type(&lit.lit).with_span(lit))
-          }
-        } else {
-          Err(darling::Error::unexpected_expr_type(&item.value).with_span(&item))
-        }
+  fn from_list(items: &[NestedMeta]) -> darling::Result<Self> {
+    match items.len() {
+      0 => Err(Error::too_few_items(1)),
+      1 => match &items[0] {
+        NestedMeta::Lit(syn::Lit::Str(s)) => Ok(Self(Some(s.value()))),
+        NestedMeta::Lit(lit) => Err(Error::unexpected_lit_type(lit)),
+        NestedMeta::Meta(meta) => Self::from_meta(meta),
+      },
+      _ => Err(Error::too_many_items(1)),
+    }
+  }
+
+  fn from_word() -> darling::Result<Self> {
+    Ok(Self(None))
+  }
+
+  fn from_expr(expr: &Expr) -> darling::Result<Self> {
+    match expr {
+      Expr::Lit(lit) => match &lit.lit {
+        syn::Lit::Str(s) => Ok(Self(Some(s.value()))),
+        lit => Err(Error::unexpected_lit_type(lit)),
       }
+      Expr::Path(p) => Ok(Self(Some(path_to_string(&p.path)))),
+      expr => Err(Error::unexpected_expr_type(expr)),
     }
   }
 }

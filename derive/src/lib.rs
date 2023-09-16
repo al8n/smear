@@ -15,14 +15,14 @@ pub fn directive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 // ================================== Value Macros ==================================
 
-#[proc_macro_derive(ObjectValue, attributes(smear))]
-pub fn object_value(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-  let input = syn::parse_macro_input!(input as syn::DeriveInput);
+// #[proc_macro_derive(ObjectValue, attributes(smear))]
+// pub fn object_value(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+//   let input = syn::parse_macro_input!(input as syn::DeriveInput);
 
-  value::object::derive(input)
-    .unwrap_or_else(|e| e.to_compile_error())
-    .into()
-}
+//   value::object::derive(input)
+//     .unwrap_or_else(|e| e.to_compile_error())
+//     .into()
+// }
 
 #[cfg(feature = "indexmap")]
 #[proc_macro_attribute]
