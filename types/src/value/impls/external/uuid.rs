@@ -1,3 +1,3 @@
 use ::uuid::Uuid;
 
-impl_diagnostic!(string(Uuid::parse_uuid));
+impl_diagnostic_and_encodable!(string(Uuid::parse_uuid));

@@ -26,5 +26,5 @@ fn parse_humanduration(src: &Value) -> Result<HumanDuration, ValueError> {
   }
 }
 
-impl_diagnostic!(Duration::parse_duration, HumanDuration::parse_humanduration);
-impl_diagnostic!(string(Timestamp::parse_timestamp));
+impl_diagnostic_and_encodable!(Duration::parse_duration, HumanDuration::parse_humanduration);
+impl_diagnostic_and_encodable!(string(Timestamp::parse_timestamp));

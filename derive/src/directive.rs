@@ -9,7 +9,9 @@ use quote::{format_ident, quote};
 use smear_types::directive::On;
 use syn::{spanned::Spanned, DeriveInput, Generics, Ident, Visibility};
 
-use crate::utils::{Aliases, Attributes, DefaultAttribute, Long, RenameAll, Short};
+use crate::utils::{
+  Aliases, Attributes, DefaultAttribute, Deprecated, Description, Long, RenameAll, Short,
+};
 
 mod argument;
 use argument::Argument;
@@ -57,6 +59,10 @@ struct Directive {
   vis: Visibility,
   generics: Generics,
   #[darling(default)]
+  description: Description,
+  #[darling(default)]
+  deprecated: Deprecated,
+  #[darling(default)]
   attributes: Attributes,
   #[darling(default)]
   short: Short,
@@ -64,7 +70,6 @@ struct Directive {
   long: Long,
   #[darling(default)]
   aliases: Aliases,
-  #[darling(default)]
   on: On,
   default: Option<DefaultAttribute>,
   data: Data<Variant, Argument>,
@@ -139,7 +144,7 @@ impl Directive {
   }
 
   fn generate_struct(&self, fields: &Fields<Argument>) -> syn::Result<proc_macro2::TokenStream> {
-    let struct_name = format_ident!("{}Directive", self.sdl_directive_struct_name());
+    let struct_name = self.sdl_directive_struct_name();
     let parse_struct_name = format_ident!("{}Parser", struct_name);
     let possible_names = self.possible_names();
     let available_argument_names = self.possible_argument_names(fields);
@@ -183,6 +188,8 @@ impl Directive {
 
     let inherit_impls = Self::generate_inherit_impls();
     let on = &self.on;
+    let desc = self.description.to_tokens();
+    let deprecated = &self.deprecated;
 
     let attrs = &self.attributes;
     Ok(quote! {
@@ -227,7 +234,7 @@ impl Directive {
             let mut parser = #parse_struct_name::default();
             let mut errors = ::std::vec::Vec::new();
             let mut missing_arguments = ::std::vec::Vec::new();
-            
+
             #(#dirty_definitions)*
 
             for arg in args.arguments() {
@@ -291,33 +298,18 @@ impl Directive {
 
           static DESCRIPTOR: ::std::sync::OnceLock<::smear::directive::DirectiveDescriptor> = ::std::sync::OnceLock::new();
           DESCRIPTOR.get_or_init(|| {
-            // const ARGUMENTS: &::smear::directive::ArgumentsDescriptor = &::smear::directive::ArgumentsDescriptor {
-            //   available_arguments: AVAILABLE_ARGUMENTS.get_or_init(|| {
-            //     [
-            //       #(#available_arguments),*
-            //     ]
-            //   }),
-            //   required_arguments: REQUIRED_ARGUMENTS.get_or_init(|| {
-            //     [
-            //       #(#required_arguments),*
-            //     ]
-            //   }),
-            //   optional_arguments: OPTIONAL_ARGUMENTS.get_or_init(|| {
-            //     [
-            //       #(#optional_arguments),*
-            //     ]
-            //   }),
-            // };
             ::smear::directive::DirectiveDescriptor {
               name: #long,
               short: #short,
               aliases: &[#(#aliases),*],
               available_names: &[#(#possible_names),*],
               locations: #on,
+              description: #desc,
+              deprecated: #deprecated,
               arguments: ::smear::directive::ArgumentsDescriptor {
                 available_arguments: &*AVAILABLE_ARGUMENTS,
                 required_arguments: &*REQUIRED_ARGUMENTS,
-                optional_arguments: &*OPTIONAL_ARGUMENTS, 
+                optional_arguments: &*OPTIONAL_ARGUMENTS,
               },
             }
           })
@@ -329,7 +321,7 @@ impl Directive {
   }
 
   fn generate_unit(&self) -> syn::Result<proc_macro2::TokenStream> {
-    let struct_name = format_ident!("{}Directive", self.sdl_directive_struct_name());
+    let struct_name = self.sdl_directive_struct_name();
     let possible_names = self.possible_names();
     let short = match self.short() {
       Some(short) => quote!(::core::option::Option::Some(#short)),
@@ -340,6 +332,8 @@ impl Directive {
     let vis = &self.vis;
     let on = &self.on;
     let inherit_impls = Self::generate_inherit_impls();
+    let desc = self.description.to_tokens();
+    let deprecated = &self.deprecated;
     Ok(quote! {
       #[derive(
         ::core::fmt::Debug,
@@ -391,6 +385,8 @@ impl Directive {
             name: #long,
             short: #short,
             aliases: &[#(#aliases),*],
+            description: #desc,
+            deprecated: #deprecated,
             available_names: &[#(#possible_names),*],
             locations: #on,
             available_arguments: &::smear::directive::ArgumentsDescriptor {

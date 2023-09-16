@@ -43,6 +43,7 @@ impl<V: DiagnosticableValue> Diagnosticable for Vec<V> {
     DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: "List",
       kind: KIND.get_or_init(|| ValueKind::List(V::descriptor())),
+      description: V::descriptor().description(),
     })
   }
 

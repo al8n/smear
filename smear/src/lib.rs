@@ -23,6 +23,7 @@ pub use apollo_parser;
 pub use codespan_reporting;
 pub use derive_more;
 pub use smear_derive::*;
+pub use smear_types::Deprecated;
 
 #[doc(hidden)]
 pub mod __exports {

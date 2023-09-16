@@ -35,7 +35,7 @@ impl_parse!(
   FixedOffset::fixed_offset,
 );
 
-impl_diagnostic!(
+impl_diagnostic_and_encodable!(
   NaiveDate::parse_naive_date,
   NaiveDateTime::parse_naive_date_time,
   NaiveTime::parse_naive_time,

@@ -40,6 +40,12 @@ pub trait Reporter {
     FileId: 'a + Copy + PartialEq;
 }
 
+pub trait Encodable {
+  type SDL: core::fmt::Display;
+
+  fn encode(&self) -> Self::SDL;
+}
+
 pub trait Diagnosticable {
   type Error: Reporter;
 
@@ -56,40 +62,40 @@ pub trait Diagnosticable {
   fn descriptor() -> &'static Self::Descriptor;
 }
 
-pub trait NamedDiagnosticable: Diagnosticable {
-  /// Returns the possible names of the node.
-  fn possible_names() -> &'static [&'static str];
-
-  /// Returns the short name of the node.
-  fn short() -> ::core::option::Option<char>;
-
-  /// Returns the long name of the node.
-  fn long() -> &'static str;
-
-  /// Returns the aliases of the node.
-  fn aliases() -> &'static [&'static str];
+#[viewit::viewit(vis_all = "pub(crate)", setters(skip), getters(style = "move"))]
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Deprecated {
+  version: Option<&'static str>,
+  reason: Option<&'static str>,
+  suggestion: Option<&'static str>,
 }
 
-#[cfg(feature = "derive")]
-#[derive(darling::FromMeta)]
-pub enum DirectiveLocation1 {
-  Query,
-  Mutation,
-  Subscription,
-  Field,
-  FragmentDefinition,
-  FragmentSpread,
-  InlineFragment,
-  VariableDefinition,
-  Schema,
-  Scalar,
-  Object,
-  FieldDefinition,
-  ArgumentDefinition,
-  Interface,
-  Union,
-  Enum,
-  EnumValue,
-  InputObject,
-  InputFieldDefinition,
+impl Deprecated {
+  pub fn new(
+    version: Option<&'static str>,
+    reason: Option<&'static str>,
+    suggestion: Option<&'static str>,
+  ) -> Self {
+    Self {
+      version,
+      reason,
+      suggestion,
+    }
+  }
+}
+
+impl core::fmt::Display for Deprecated {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "Deprecated")?;
+    if let Some(version) = self.version {
+      write!(f, " since version {version}")?;
+    }
+    if let Some(reason) = self.reason {
+      write!(f, " because {reason}")?;
+    }
+    if let Some(suggestion) = self.suggestion {
+      write!(f, " , please see {suggestion}")?;
+    }
+    Ok(())
+  }
 }

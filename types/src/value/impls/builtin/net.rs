@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
-impl_diagnostic!(string(
+impl_diagnostic_and_encodable!(string(
   SocketAddr::parse_socket_addr,
   SocketAddrV4::parse_socket_addr_v4,
   SocketAddrV6::parse_socket_addr_v6,

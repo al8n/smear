@@ -29,4 +29,4 @@ pub fn parse_biguint(src: &Value) -> Result<BigUint, ValueError> {
   }
 }
 
-impl_diagnostic!(BigInt::parse_bigint, BigUint::parse_biguint,);
+impl_diagnostic_and_encodable!(BigInt::parse_bigint, BigUint::parse_biguint,);

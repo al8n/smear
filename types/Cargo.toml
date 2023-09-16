@@ -21,11 +21,13 @@ uuid = ["dep:uuid"]
 
 [dependencies]
 apollo-parser = { workspace = true }
+apollo-encoder = { workspace = true } 
 codespan-reporting = { workspace = true }
-
 paste = "1"
 rowan = { workspace = true }
 strsim = { workspace = true }
+tabled = "0.14"
+unindent = "0.2"
 viewit = { workspace = true }
 
 # optional dependencies

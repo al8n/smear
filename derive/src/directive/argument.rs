@@ -4,7 +4,10 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Ident, Visibility};
 
-use crate::utils::{Aliases, DefaultAttribute, Long, Optional, PathAttribute, RenameAll, Short};
+use crate::utils::{
+  Aliases, DefaultAttribute, Deprecated, Description, Long, Optional, PathAttribute, RenameAll,
+  Short,
+};
 
 use super::Helper;
 
@@ -14,6 +17,10 @@ pub(super) struct Argument {
   ident: Option<Ident>,
   vis: Visibility,
   ty: syn::Type,
+  #[darling(default)]
+  description: Description,
+  #[darling(default)]
+  deprecated: Deprecated,
   #[darling(default)]
   attributes: crate::utils::Attributes,
   #[darling(default)]
@@ -142,11 +149,16 @@ impl Argument {
       let ty = self.ty();
       quote!(#ty)
     };
+    let desc = self.description.to_tokens();
+    let deprecated = &self.deprecated;
     let arg_descriptor = quote! {
       ::smear::directive::ArgumentDescriptor {
         name: #field_name,
         short: #short,
         aliases: &[#(#aliases),*],
+        available_names: &[#(#field_possible_names),*],
+        description: #desc,
+        deprecated: #deprecated,
         value_descriptor: <#field_ty as ::smear::Diagnosticable>::descriptor(),
       }
     };

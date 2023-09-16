@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use apollo_encoder::{EnumDefinition, EnumValue};
 use apollo_parser::ast::Value;
 
 use crate::value::ValueDescriptor;
@@ -84,6 +85,24 @@ impl From<DirectiveLocation> for String {
   }
 }
 
+impl crate::Encodable for DirectiveLocation {
+  type SDL = EnumDefinition;
+
+  fn encode(&self) -> Self::SDL {
+    let mut def = EnumDefinition::new("DirectiveLocation".into());
+    for name in DirectiveLocation::available_locations() {
+      def.value(EnumValue::new(name.to_string()));
+    }
+    def.description(
+      <Self as crate::Diagnosticable>::descriptor()
+        .description
+        .unwrap()
+        .into(),
+    );
+    def
+  }
+}
+
 impl crate::Diagnosticable for DirectiveLocation {
   type Node = Value;
   type Error = crate::error::ValueError;
@@ -95,6 +114,7 @@ impl crate::Diagnosticable for DirectiveLocation {
       kind: &crate::value::ValueKind::Enum {
         variants: DirectiveLocation::available_locations(),
       },
+      description: Some("The supported locations for the directive"),
     };
     DESCRIPTOR
   }
@@ -184,17 +204,19 @@ impl std::error::Error for UnknownDirectiveLocation {}
 
 #[cfg(feature = "derive")]
 const _: () = {
-  use darling::{FromMeta, util::path_to_string, ast::NestedMeta};
+  use darling::{ast::NestedMeta, util::path_to_string, FromMeta};
   use quote::{quote, ToTokens};
   use syn::{Expr, Lit, Meta};
 
   impl FromMeta for DirectiveLocation {
     fn from_meta(item: &Meta) -> darling::Result<Self> {
       match item {
-        Meta::Path(p) => {
-          Self::from_str(path_to_string(p).as_str()).map_err(|err| darling::Error::custom(err).with_span(item))
-        },
-        Meta::List(value) => Self::from_list(&NestedMeta::parse_meta_list(value.tokens.clone())?[..]).map_err(|e| e.with_span(item)),
+        Meta::Path(p) => Self::from_str(path_to_string(p).as_str())
+          .map_err(|err| darling::Error::custom(err).with_span(item)),
+        Meta::List(value) => {
+          Self::from_list(&NestedMeta::parse_meta_list(value.tokens.clone())?[..])
+            .map_err(|e| e.with_span(item))
+        }
         Meta::NameValue(value) => Self::from_expr(&value.value).map_err(|e| e.with_span(item)),
       }
     }
@@ -265,15 +287,17 @@ const _: () = {
 
   impl FromMeta for On {
     fn from_list(items: &[NestedMeta]) -> darling::Result<Self> {
+      if items.is_empty() {
+        return Err(darling::Error::too_few_items(1));
+      }
+
       let mut errors = Vec::new();
       let mut locations = Vec::with_capacity(items.len());
       for item in items {
         match item {
-          NestedMeta::Meta(meta) => {
-            match DirectiveLocation::from_meta(meta) {
-              Ok(val) => locations.push(val),
-              Err(e) => errors.push(e),
-            }
+          NestedMeta::Meta(meta) => match DirectiveLocation::from_meta(meta) {
+            Ok(val) => locations.push(val),
+            Err(e) => errors.push(e),
           },
           NestedMeta::Lit(lit) => {
             errors.push(darling::Error::unexpected_lit_type(lit));

@@ -19,4 +19,4 @@ pub fn parse_bigdecimal(src: &Value) -> Result<BigDecimal, ValueError> {
   }
 }
 
-impl_diagnostic!(BigDecimal::parse_bigdecimal,);
+impl_diagnostic_and_encodable!(BigDecimal::parse_bigdecimal,);

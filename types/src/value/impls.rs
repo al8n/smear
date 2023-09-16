@@ -20,7 +20,7 @@ macro_rules! impl_parse_from_str {
   };
 }
 
-macro_rules! impl_diagnostic_inner {
+macro_rules! impl_diagnostic_and_encodable_inner {
   ($ty:ident::$parser:ident) => {
     impl crate::Diagnosticable for $ty {
       type Error = crate::error::ValueError;
@@ -33,6 +33,7 @@ macro_rules! impl_diagnostic_inner {
         const DESCRIPTOR: &crate::value::ValueDescriptor = &crate::value::ValueDescriptor {
           name: stringify!($ty),
           kind: &crate::value::ValueKind::Scalar,
+          description: None,
         };
         DESCRIPTOR
       }
@@ -46,25 +47,38 @@ macro_rules! impl_diagnostic_inner {
     }
 
     impl crate::value::DiagnosticableValue for $ty {}
+
+    impl crate::Encodable for $ty {
+      type SDL = apollo_encoder::ScalarDefinition;
+
+      fn encode(&self) -> Self::SDL {
+        let mut def = apollo_encoder::ScalarDefinition::new(stringify!($ty).into());
+        if let Some(desc) = <Self as crate::Diagnosticable>::descriptor().description() {
+          def.description(desc.to_string());
+        }
+
+        def
+      }
+    }
   };
 }
 
-macro_rules! impl_diagnostic {
+macro_rules! impl_diagnostic_and_encodable {
   ($($ty:ident::$parser:ident), + $(,)?) => {
     $(
-      impl_diagnostic_inner!($ty::$parser);
+      impl_diagnostic_and_encodable_inner!($ty::$parser);
     )*
   };
   (string($($ty:ident::$parser:ident), + $(,)?)) => {
     $(
       impl_parse_from_str!($ty::$parser);
 
-      impl_diagnostic!($ty::$parser);
+      impl_diagnostic_and_encodable!($ty::$parser);
     )*
   }
 }
 
-impl_diagnostic!(
+impl_diagnostic_and_encodable!(
   u8::parse_number,
   u16::parse_number,
   u32::parse_number,
@@ -80,9 +94,10 @@ impl_diagnostic!(
   f64::parse_float,
 );
 
-impl_diagnostic!(char::parse_char, bool::parse_boolean, String::parse_string,);
+impl_diagnostic_and_encodable!(char::parse_char, bool::parse_boolean, String::parse_string,);
 
 mod external;
+use apollo_encoder::Type_;
 pub use external::*;
 mod builtin;
 pub use builtin::*;
@@ -98,6 +113,7 @@ impl<T: DiagnosticableValue> Diagnosticable for Option<T> {
     DESCRIPTOR.get_or_init(|| ValueDescriptor {
       name: T::descriptor().name(),
       kind: KIND.get_or_init(|| ValueKind::Optional(T::descriptor())),
+      description: T::descriptor().description(),
     })
   }
 
@@ -338,4 +354,39 @@ pub enum ValueKind {
 pub struct ValueDescriptor {
   name: &'static str,
   kind: &'static ValueKind,
+  description: Option<&'static str>,
+}
+
+impl From<&ValueDescriptor> for Type_ {
+  fn from(descriptor: &ValueDescriptor) -> Self {
+    match descriptor.kind {
+      ValueKind::Scalar => nonnull_type(descriptor),
+      ValueKind::Enum { .. } => nonnull_type(descriptor),
+      ValueKind::Object(_) => nonnull_type(descriptor),
+      ValueKind::List(inner) => list_type(inner),
+      ValueKind::Optional(inner) => named_type(inner.name),
+      ValueKind::Map { .. } => nonnull_type(descriptor),
+      ValueKind::Set { .. } => nonnull_type(descriptor),
+    }
+  }
+}
+
+fn named_type(name: &str) -> Type_ {
+  Type_::NamedType {
+    name: name.to_string(),
+  }
+}
+
+fn nonnull_type(d: &ValueDescriptor) -> Type_ {
+  Type_::NonNull {
+    ty: Box::new(Type_::NamedType {
+      name: d.name.to_string(),
+    }),
+  }
+}
+
+fn list_type(d: &ValueDescriptor) -> Type_ {
+  Type_::List {
+    ty: Box::new(d.into()),
+  }
 }

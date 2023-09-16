@@ -159,3 +159,7 @@ enum DeriveArg {
   Enum()
 }
 ```
+
+| short | aliases         |
+|-------|-----------------|
+| b     | bigger, biggest |

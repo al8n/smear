@@ -1,1 +1,1 @@
-pub use smear_types::{Diagnostic, Diagnosticable, NamedDiagnosticable, Reporter};
+pub use smear_types::{Diagnostic, Diagnosticable, Reporter};

@@ -22,5 +22,5 @@ proc-macro2 = "1"
 prettyplease = "0.2"
 quote = "1"
 syn = { workspace = true }
-
+viewit = { workspace = true }
 smear-types = { path = "../types", default-features = false, features = ["derive"] }

@@ -19,4 +19,4 @@ pub fn parse_decimal(src: &Value) -> Result<Decimal, ValueError> {
   }
 }
 
-impl_diagnostic!(Decimal::parse_decimal,);
+impl_diagnostic_and_encodable!(Decimal::parse_decimal,);

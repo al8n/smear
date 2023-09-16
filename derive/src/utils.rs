@@ -1,6 +1,8 @@
 mod aliases;
 mod attributes;
 mod default;
+mod deprecated;
+mod description;
 mod long;
 mod name;
 mod optional;
@@ -11,6 +13,8 @@ mod ty;
 pub(crate) use aliases::*;
 pub(crate) use attributes::*;
 pub(crate) use default::*;
+pub(crate) use deprecated::*;
+pub(crate) use description::*;
 pub(crate) use long::*;
 pub(crate) use name::*;
 pub(crate) use optional::*;
