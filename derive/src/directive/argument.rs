@@ -346,6 +346,7 @@ impl CodegenHelper {
       converter: quote!(#field_name_ident: parser.#field_name_ident.unwrap()),
     })
   }
+
   fn optional_and_default(
     field_name_ident: &Ident,
     field_ty: &Type,

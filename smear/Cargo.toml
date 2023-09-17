@@ -29,6 +29,7 @@ paste = "1" # remove when concat_idents is stable
 rowan = "0.15"
 salsa = "0.16"
 strsim = "0.10"
+strum = "0.25"
 viewit = "0.1.5"
 uuid = { version = "1.4", features = ["serde", "v4"] }
 ordered-float = { version = "3.9", features = ["std"] }

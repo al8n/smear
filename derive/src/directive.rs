@@ -207,7 +207,7 @@ impl Directive {
 
         fn parse(directive: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
-          Self: Sized
+          Self: ::core::marker::Sized
         {
           struct #parse_struct_name {
             #(#parse_helper_struct_fields_definitions)*
@@ -229,7 +229,15 @@ impl Directive {
             }
           }
 
-          let directive_name = directive.name().map(|n| n.text().to_string()).unwrap_or_default();
+          let ::core::option::Option::Some(directive_name) = directive.name().map(|n| n.text().to_string()) else {
+            return ::core::result::Result::Err(::smear::__exports::error::DirectiveError::missing_directive_name(directive));
+          };
+
+          let descriptor = <Self as ::smear::__exports::Diagnosticable>::descriptor();
+          if !descriptor.contains_name(directive_name.as_str()) {
+            return ::core::result::Result::Err(::smear::__exports::error::DirectiveError::mismatch_directive(directive, descriptor.available_names(), directive_name));
+          }
+
           if let ::core::option::Option::Some(args) = directive.arguments() {
             let mut parser = #parse_struct_name::default();
             let mut errors = ::std::vec::Vec::new();
@@ -401,7 +409,7 @@ impl Directive {
 
         fn parse(node: &Self::Node) -> Result<Self, Self::Error>
         where
-          Self: Sized
+          Self: ::core::marker::Sized
         {
           use ::smear::__exports::apollo_parser::ast::AstNode;
 

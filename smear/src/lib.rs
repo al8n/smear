@@ -15,6 +15,8 @@ pub mod __exports {
   pub use apollo_encoder;
   pub use apollo_parser;
   pub use once_cell;
+  pub use viewit;
+  pub use strum;
   pub use smear_types::{Deprecated, Diagnosticable, Encodable};
 
   pub mod directive {

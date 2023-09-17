@@ -15,6 +15,7 @@ pub enum ErrorKind {
   InvalidValue(String),
   /// A set of errors.
   Multiple(Vec<Error>),
+  UnknownEnumValue { did_you_mean: Option<String>, name: String, available_names: &'static [&'static str] },
 }
 
 impl ErrorKind {
@@ -26,6 +27,7 @@ impl ErrorKind {
       DuplicateField(_) => "Duplicate field",
       UnknownObjectField(_) => "Unknown object field",
       MissingObjectValue(_) => "Missing object value",
+      UnknownEnumValue { .. } => "Unknown enum value",
       MissingObjectFieldName => "Missing object field name",
       MissingObjectField(_) => "Missing object field",
       InvalidValue(_) => "Invalid value",
@@ -60,6 +62,20 @@ impl fmt::Display for ErrorKind {
       MissingObjectFieldName => write!(f, "Missing field name"),
       MissingObjectField(ref field) => write!(f, "Missing object field `{field}`"),
       UnknownObjectField(ref field) => field.fmt(f),
+      UnknownEnumValue { ref name, ref did_you_mean, available_names } => {
+        if let Some(did_you_mean) = did_you_mean {
+          write!(
+            f,
+            "Unknown enum value `{name}`, did you mean `{did_you_mean}`?",
+          )
+        } else {
+          write!(
+            f,
+            "Unknown enum value `{name}`, available values are: {}",
+            available_names.join(", ")
+          )
+        }
+      }
       UnexpectedType(ref ty) => write!(f, "Unexpected type `{ty}`"),
       MissingObjectValue(ref field) => write!(f, "Missing value for field `{field}`"),
       InvalidValue(ref e) => write!(f, "Invalid value: `{e}`"),

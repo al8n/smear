@@ -1,10 +1,14 @@
 use apollo_encoder::{DirectiveDefinition, InputValueDefinition, Type_};
 use tabled::{builder::Builder, settings::Style};
 
-use crate::{value::ValueDescriptor, Deprecated};
+use crate::{value::ValueDescriptor, Deprecated, Diagnosticable, error::DirectiveError};
 
 mod location;
 pub use location::*;
+
+pub trait DiagnosticableDirective: Diagnosticable<Node = apollo_parser::ast::DirectiveDefinition, Error = DirectiveError, Descriptor = DirectiveDescriptor> {
+  
+}
 
 #[viewit::viewit(setters(skip), getters(style = "move"))]
 #[derive(Debug, Copy, Clone)]
@@ -101,7 +105,7 @@ pub struct DirectiveDescriptor {
 }
 
 impl DirectiveDescriptor {
-  pub fn contains_name(&self, name: &'static str) -> bool {
+  pub fn contains_name(&self, name: &str) -> bool {
     self.available_names.contains(&name)
   }
 }

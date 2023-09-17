@@ -3,49 +3,59 @@ use std::fmt::{self, Display};
 use apollo_parser::ast::AstNode;
 use rowan::TextRange;
 
-use crate::Reporter;
+use crate::{Reporter, directive::DirectiveDescriptor};
 
 use super::{Style, ValueError};
 
 #[derive(Debug)]
 pub enum ErrorKind {
-  MissingArgumentName,
-  MissingRequiredArguments {
-    directive_name: String,
-    arguments: Vec<&'static str>,
+  MissingName,
+  MissingRequiredDirectives {
+    enum_name: String,
+    directives: Vec<&'static str>,
   },
   MissingDirectiveName,
   MismatchDirective {
     expected: &'static [&'static str],
     got: String,
   },
-  DuplicatedArgument {
+  DuplicatedDirective {
+    source_name: String,
     directive_name: String,
-    argument_name: String,
   },
-  UnknownArgument {
+  UnknownDirective {
     directive_name: String,
     name: String,
     did_you_mean: Option<String>,
     available_names: &'static [&'static str],
   },
+  UnknownEnumValue {
+    name: String,
+    did_you_mean: Option<String>,
+    available_names: &'static [&'static str],
+  },
   Value(crate::error::ValueError),
+  Directive(crate::error::DirectiveError),
   Multiple(Vec<Error>),
-  InvalidArgument,
+  InvalidDirective,
+  MissingEnumValue,
 }
 
 impl ErrorKind {
   pub fn brief(&self) -> String {
     match self {
+      Self::MissingName => "Missing name".into(),
       Self::MissingDirectiveName => "Missing directive name".into(),
-      Self::MissingArgumentName => "Missing argument name".into(),
-      Self::MissingRequiredArguments { .. } => "Missing required argument".into(),
+      Self::MissingRequiredDirectives { .. } => "Missing required argument".into(),
+      Self::MissingEnumValue => "Missing enum value".into(),
       Self::MismatchDirective { .. } => "Mismatch directive".into(),
-      Self::UnknownArgument { .. } => "Unknown argument".into(),
+      Self::UnknownDirective { .. } => "Unknown directive".into(),
+      Self::UnknownEnumValue { .. } => "Unknown enum value".into(),
       Self::Value { .. } => "Invalid value".into(),
+      Self::Directive { .. } => "Invalid directive".into(),
       Self::Multiple(_) => "Multiple errors".into(),
-      Self::InvalidArgument => "Invalid argument".into(),
-      Self::DuplicatedArgument { .. } => "Duplicated argument".into(),
+      Self::InvalidDirective => "Invalid argument".into(),
+      Self::DuplicatedDirective { .. } => "Duplicated argument".into(),
     }
   }
 
@@ -62,25 +72,26 @@ impl ErrorKind {
 impl fmt::Display for ErrorKind {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Self::MissingDirectiveName => write!(f, "Missing directive name, anonymous directive is not supported"),
-      Self::MissingArgumentName => write!(f, "Missing argument name, anonymous argument is not supported"),
-      Self::MissingRequiredArguments {
-        directive_name,
-        arguments,
+      Self::MissingName => write!(f, "Missing name, anonymous enum are not supported"),
+      Self::MissingDirectiveName => write!(f, "Missing directive name, anonymous directive are not supported"),
+      Self::MissingRequiredDirectives {
+        enum_name,
+        directives,
       } => write!(
         f,
-        "Missing required argument `[{}]` in directive `@{directive_name}`",
-        arguments.join(", ")
+        "Missing required directives `[{}]` in enum `{enum_name}`",
+        directives.join(", ")
       ),
+      Self::MissingEnumValue => write!(f, "Missing enum value"),
       Self::MismatchDirective { expected, got } => write!(f, "Expected one of [{}], but got `@{got}`", expected.join(", ")),
-      Self::DuplicatedArgument {
+      Self::DuplicatedDirective {
         directive_name,
-        argument_name,
+        source_name,
       } => write!(
         f,
-        "Duplicated argument `@{argument_name}` in directive `@{directive_name}`",
+        "Duplicated directive `@{directive_name}` in enum `@{source_name}`",
       ),
-      Self::UnknownArgument {
+      Self::UnknownDirective {
         directive_name,
         name,
         did_you_mean,
@@ -99,8 +110,23 @@ impl fmt::Display for ErrorKind {
           )
         }
       }
+      Self::UnknownEnumValue { name, did_you_mean, available_names } => {
+        if let Some(did_you_mean) = did_you_mean {
+          write!(
+            f,
+            "Unknown enum value `{name}`, did you mean `{did_you_mean}`?",
+          )
+        } else {
+          write!(
+            f,
+            "Unknown enum value `{name}`, available values are: {}",
+            available_names.join(", ")
+          )
+        }
+      },
       Self::Value(e) => write!(f, "{e}"),
-      Self::InvalidArgument => write!(
+      Self::Directive(e) => write!(f, "{e}"),
+      Self::InvalidDirective => write!(
         f,
         "Invalid argument, argument is missing both name and value"
       ),
@@ -161,15 +187,15 @@ impl Error {
     }
   }
 
-  pub fn missing_argument_name<T: AstNode>(node: &T) -> Self {
+  pub fn missing_name<T: AstNode>(node: &T) -> Self {
     Self {
-      kind: ErrorKind::MissingArgumentName,
+      kind: ErrorKind::MissingName,
       style: Style::Error,
       range: node.syntax().text_range(),
     }
   }
 
-  pub fn unknown_argument<T: AstNode>(
+  pub fn unknown_directive<T: AstNode>(
     node: &T,
     directive_name: impl Display,
     name: impl Display,
@@ -177,7 +203,7 @@ impl Error {
   ) -> Self {
     let name = name.to_string();
     Self {
-      kind: ErrorKind::UnknownArgument {
+      kind: ErrorKind::UnknownDirective {
         directive_name: directive_name.to_string(),
         did_you_mean: crate::utils::did_you_mean(&name, alts),
         name: name.to_string(),
@@ -188,31 +214,56 @@ impl Error {
     }
   }
 
-  pub fn duplicated_argument<T: AstNode>(
+  pub fn unknown_enum_value<T: AstNode>(
     node: &T,
-    directive_name: impl Display,
-    argument_name: impl Display,
+    name: impl Display,
+    alts: &'static [&'static str],
   ) -> Self {
+    let name = name.to_string();
     Self {
-      kind: ErrorKind::DuplicatedArgument {
-        directive_name: directive_name.to_string(),
-        argument_name: argument_name.to_string(),
+      kind: ErrorKind::UnknownEnumValue {
+        did_you_mean: crate::utils::did_you_mean(&name, alts),
+        name: name.to_string(),
+        available_names: alts,
       },
       style: Style::Error,
       range: node.syntax().text_range(),
     }
   }
 
-  pub fn missing_arguments<T: AstNode>(
+  pub fn duplicated_directive<T: AstNode>(
     node: &T,
+    source_name: impl Display,
     directive_name: impl Display,
-    arguments: impl Iterator<Item = &'static str>,
   ) -> Self {
     Self {
-      kind: ErrorKind::MissingRequiredArguments {
+      kind: ErrorKind::DuplicatedDirective {
+        source_name: source_name.to_string(),
         directive_name: directive_name.to_string(),
-        arguments: arguments.collect(),
       },
+      style: Style::Error,
+      range: node.syntax().text_range(),
+    }
+  }
+
+  pub fn missing_directives<T: AstNode>(
+    node: &T,
+    enum_name: impl Display,
+    directives: impl IntoIterator<Item = &'static DirectiveDescriptor>,
+  ) -> Self {
+    Self {
+      kind: ErrorKind::MissingRequiredDirectives {
+        enum_name: enum_name.to_string(),
+        directives: directives.into_iter().map(|d| d.name()).collect(),
+      },
+      style: Style::Error,
+      range: node.syntax().text_range(),
+    }
+  }
+
+  pub fn missing_enum_value<T: AstNode>(node: &T) -> Self {
+    Self {
+      kind: ErrorKind::MissingEnumValue,
       style: Style::Error,
       range: node.syntax().text_range(),
     }
@@ -226,10 +277,10 @@ impl Error {
     }
   }
 
-  pub fn invalid_argument_value<T: AstNode>(node: &T, err: ValueError) -> Self {
+  pub fn invalid_directive<T: AstNode>(node: &T, err: crate::error::DirectiveError) -> Self {
     let r = node.syntax().text_range();
     Self {
-      kind: ErrorKind::Value(err),
+      kind: ErrorKind::Directive(err),
       style: Style::Error,
       range: r,
     }
@@ -238,7 +289,7 @@ impl Error {
   #[cold]
   pub fn invalid_argument<T: AstNode>(node: &T) -> Self {
     Self {
-      kind: ErrorKind::InvalidArgument,
+      kind: ErrorKind::InvalidDirective,
       style: Style::Error,
       range: node.syntax().text_range(),
     }

@@ -111,7 +111,7 @@ impl Map {
 
         fn parse(value: &Self::Node) -> ::core::result::Result<Self, Self::Error>
         where
-          Self: Sized,
+          Self: ::core::marker::Sized,
         {
           use ::smear::__exports::{apollo_parser::ast::{Value, AstNode}, error::ValueError, value::Parser};
 

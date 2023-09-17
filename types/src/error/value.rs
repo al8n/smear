@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::Display;
 
 use apollo_parser::ast::{AstNode, Value};
 use codespan_reporting::diagnostic::Label;
@@ -95,6 +96,23 @@ impl Error {
     )
   }
 
+  pub fn unknown_enum_value<T: AstNode>(
+    node: &T,
+    name: impl Display,
+    alts: &'static [&'static str],
+  ) -> Self {
+    let name = name.to_string();
+    Self {
+      kind: ErrorKind::UnknownEnumValue {
+        did_you_mean: crate::utils::did_you_mean(&name, alts),
+        name: name.to_string(),
+        available_names: alts,
+      },
+      style: Style::Error,
+      range: node.syntax().text_range(),
+    }
+  }
+
   pub fn unexpected_type(val: &Value) -> Self {
     let r = val.syntax().text_range();
     let val_ty = match &val {
@@ -179,6 +197,15 @@ impl Reporter for Error {
           ])
           .into()
       }
+      ErrorKind::UnknownEnumValue { .. } => {
+        style
+        .diagnostic()
+        .with_message(kind.description())
+        .with_labels(vec![
+          Label::primary(file_id, start..end).with_message(kind.to_string()),
+        ])
+        .into() 
+      },
       ErrorKind::Multiple(errors) => errors
         .iter()
         .map(|err| err.report(file_id))

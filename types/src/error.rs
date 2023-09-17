@@ -6,6 +6,9 @@ pub use directive::{Error as DirectiveError, ErrorKind as DirectiveErrorKind};
 mod value;
 pub use value::{Error as ValueError, ErrorKind as ValueErrorKind, ErrorUnknownObjectField};
 
+mod enum_;
+pub use enum_::{Error as EnumError, ErrorKind as EnumErrorKind};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Style {
   /// A bug.

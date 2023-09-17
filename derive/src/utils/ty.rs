@@ -1,11 +1,26 @@
 use darling::{ast::NestedMeta, Error, FromMeta};
+use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{Expr, Lit};
+use syn::{Expr, Lit, Ident, spanned::Spanned};
 
-use super::DisplayPath;
+use super::{DisplayPath, SafeIdent};
 
 pub(crate) struct Ty {
-  ty: syn::Type,
+  pub(crate) ty: syn::Type,
+}
+
+impl Ty {
+  pub(crate) fn to_rust_ident(&self) -> SafeIdent {
+    // Convert the type to a token stream.
+    let mut token_stream = TokenStream::new();
+    self.ty.to_tokens(&mut token_stream);
+    
+    // Convert the token stream to a string and replace :: with _
+    let modified_str = token_stream.to_string().replace("::", "_");
+    
+    // Convert the modified string to Ident.
+    SafeIdent::from(modified_str.trim_start_matches('_'))
+  }
 }
 
 impl FromMeta for Ty {
