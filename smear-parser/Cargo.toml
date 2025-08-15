@@ -1,0 +1,17 @@
+[package]
+name = "smear-parser"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+alloc = []
+std = ["chumsky/default"]
+bytes = ["chumsky/bytes"]
+
+[dependencies]
+chumsky = { version = "0.10", default-features = false }
+paste = "1"

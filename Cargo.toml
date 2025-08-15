@@ -1,17 +1,17 @@
 [workspace]
 members = [
-  "derive",
   "smear",
-  "types"
+  "smear-parser"
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.dependencies]
-apollo-parser = "0.6"
-apollo-encoder = "0.7"
+apollo-parser = "0.8"
+apollo-encoder = "0.8"
 codespan-reporting = "0.11"
-rowan = "0.15"
-strsim = "0.10"
+salsa = "0.19"
+strsim = "0.11"
+smol_str = "0.3"
 viewit = "0.1.5"
 syn = { version = "2", features = ["full"] }
 
