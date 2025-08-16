@@ -58,5 +58,8 @@ impl<D, S> Spanned<D, S> {
 //   })
 // }
 
+#[cfg(all(feature = "std", test))]
+mod tests;
+
 #[test]
 fn t() {}

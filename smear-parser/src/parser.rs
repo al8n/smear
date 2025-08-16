@@ -1,4 +1,11 @@
-use chumsky::{input::Input, text::Char};
+use chumsky::{
+  extra::ParserExtra,
+  input::{SliceInput, StrInput},
+  label::LabelError,
+  prelude::*,
+  text::{Char, TextExpected},
+  util::MaybeRef,
+};
 
 mod ignored;
 mod input_value;
@@ -11,7 +18,110 @@ pub mod punct;
 
 type Error<'a> = chumsky::extra::Err<chumsky::prelude::Rich<'a, char>>;
 
-type StrSpan<'a> = <&'a str as Input<'a>>::Span;
+/// A name
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Name<Src, Span>(Spanned<Src, Span>);
+
+impl<Src, Span> Name<Src, Span> {
+  /// Creates a name from a spanned
+  #[inline]
+  pub const fn new(span: Spanned<Src, Span>) -> Self {
+    Self(span)
+  }
+
+  /// Returns the span of the name.
+  #[inline]
+  pub const fn span(&self) -> &Spanned<Src, Span> {
+    &self.0
+  }
+
+  /// Returns the parser to parse a name.
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Name<I::Slice, I::Span>, E> + Clone
+  where
+    I: StrInput<'src>,
+    I::Token: SmearChar + 'src,
+    E: ParserExtra<'src, I>,
+    E::Error:
+      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+  {
+    // [_A-Za-z]
+    let start = one_of([
+      // underscore
+      I::Token::UNDERSCORE,
+
+      // A-Z
+      I::Token::A, I::Token::B, I::Token::C, I::Token::D, I::Token::E, I::Token::F, I::Token::G,
+      I::Token::H, I::Token::I, I::Token::J, I::Token::K, I::Token::L, I::Token::M, I::Token::N,
+      I::Token::O, I::Token::P, I::Token::Q, I::Token::R, I::Token::S, I::Token::T, I::Token::U,
+      I::Token::V, I::Token::W, I::Token::X, I::Token::Y, I::Token::Z,
+
+      // a-z
+      I::Token::a, I::Token::b, I::Token::c, I::Token::d, I::Token::e, I::Token::f, I::Token::g,
+      I::Token::h, I::Token::i, I::Token::j, I::Token::k, I::Token::l, I::Token::m, I::Token::n,
+      I::Token::o, I::Token::p, I::Token::q, I::Token::r, I::Token::s, I::Token::t, I::Token::u,
+      I::Token::v, I::Token::w, I::Token::x, I::Token::y, I::Token::z,
+    ])
+    .ignored();
+
+    let cont = one_of([
+    // underscore
+    I::Token::UNDERSCORE,
+
+    // 0-9
+    I::Token::ZERO, I::Token::ONE, I::Token::TWO, I::Token::THREE, I::Token::FOUR,
+    I::Token::FIVE, I::Token::SIX, I::Token::SEVEN, I::Token::EIGHT, I::Token::NINE,
+
+    // A-Z
+    I::Token::A, I::Token::B, I::Token::C, I::Token::D, I::Token::E, I::Token::F, I::Token::G,
+    I::Token::H, I::Token::I, I::Token::J, I::Token::K, I::Token::L, I::Token::M, I::Token::N,
+    I::Token::O, I::Token::P, I::Token::Q, I::Token::R, I::Token::S, I::Token::T, I::Token::U,
+    I::Token::V, I::Token::W, I::Token::X, I::Token::Y, I::Token::Z,
+
+    // a-z
+    I::Token::a, I::Token::b, I::Token::c, I::Token::d, I::Token::e, I::Token::f, I::Token::g,
+    I::Token::h, I::Token::i, I::Token::j, I::Token::k, I::Token::l, I::Token::m, I::Token::n,
+    I::Token::o, I::Token::p, I::Token::q, I::Token::r, I::Token::s, I::Token::t, I::Token::u,
+    I::Token::v, I::Token::w, I::Token::x, I::Token::y, I::Token::z,
+  ])
+  .ignored()
+  .repeated();
+
+  start
+    .then(cont)
+    .map_with(|_, sp| Name::new(Spanned::from(sp)))
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Spanned<Src, Span> {
+  src: Src,
+  span: Span,
+}
+
+impl<Src, Span> Spanned<Src, Span> {
+  /// Create a new `Spanned` value.
+  pub const fn new(src: Src, span: Span) -> Self {
+    Self { src, span }
+  }
+
+  /// Returns the source
+  pub const fn source(&self) -> &Src {
+    &self.src
+  }
+
+  /// Returns the span
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+}
+
+impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>>
+  From<&mut chumsky::input::MapExtra<'src, 'b, I, E>> for Spanned<I::Slice, I::Span>
+{
+  fn from(value: &mut chumsky::input::MapExtra<'src, 'b, I, E>) -> Self {
+    Self::new(value.slice(), value.span())
+  }
+}
 
 /// Providing some extra methods for working with `Char`.
 #[allow(non_upper_case_globals)]
@@ -75,6 +185,8 @@ pub trait SmearChar: Char {
   const TILDE: Self;
   /// The ASCII vertical bar character (`|`).
   const VERTICAL_BAR: Self;
+  /// The ASCII underscore character (`_`).
+  const UNDERSCORE: Self;
 
   /// The ASCII space character (` `).
   const SPACE: Self;
@@ -84,6 +196,27 @@ pub trait SmearChar: Char {
   const LINE_FEED: Self;
   /// The ASCII carriage return character (`\r`).
   const CARRIAGE_RETURN: Self;
+
+  /// The ASCII '0' character.
+  const ZERO: Self;
+  /// The ASCII '1' character.
+  const ONE: Self;
+  /// The ASCII '2' character.
+  const TWO: Self;
+  /// The ASCII '3' character.
+  const THREE: Self;
+  /// The ASCII '4' character.
+  const FOUR: Self;
+  /// The ASCII '5' character.
+  const FIVE: Self;
+  /// The ASCII '6' character.
+  const SIX: Self;
+  /// The ASCII '7' character.
+  const SEVEN: Self;
+  /// The ASCII '8' character.
+  const EIGHT: Self;
+  /// The ASCII '9' character.
+  const NINE: Self;
 
   /// The ASCII 'A' character.
   const A: Self;
@@ -224,10 +357,21 @@ impl SmearChar for char {
   const CURLY_BRACE_CLOSE: Self = '}';
   const TILDE: Self = '~';
   const VERTICAL_BAR: Self = '|';
+  const UNDERSCORE: Self = '_';
   const SPACE: Self = ' ';
   const TAB: Self = '\t';
   const LINE_FEED: Self = '\n';
   const CARRIAGE_RETURN: Self = '\r';
+  const ZERO: Self = '0';
+  const ONE: Self = '1';
+  const TWO: Self = '2';
+  const THREE: Self = '3';
+  const FOUR: Self = '4';
+  const FIVE: Self = '5';
+  const SIX: Self = '6';
+  const SEVEN: Self = '7';
+  const EIGHT: Self = '8';
+  const NINE: Self = '9';
   const A: Self = 'A';
   const B: Self = 'B';
   const C: Self = 'C';
@@ -315,10 +459,21 @@ impl SmearChar for u8 {
   const CURLY_BRACE_CLOSE: Self = b'}';
   const TILDE: Self = b'~';
   const VERTICAL_BAR: Self = b'|';
+  const UNDERSCORE: Self = b'_';
   const SPACE: Self = b' ';
   const TAB: Self = b'\t';
   const LINE_FEED: Self = b'\n';
   const CARRIAGE_RETURN: Self = b'\r';
+  const ZERO: Self = b'0';
+  const ONE: Self = b'1';
+  const TWO: Self = b'2';
+  const THREE: Self = b'3';
+  const FOUR: Self = b'4';
+  const FIVE: Self = b'5';
+  const SIX: Self = b'6';
+  const SEVEN: Self = b'7';
+  const EIGHT: Self = b'8';
+  const NINE: Self = b'9';
   const A: Self = b'A';
   const B: Self = b'B';
   const C: Self = b'C';
