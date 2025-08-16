@@ -18,6 +18,8 @@ pub mod punct;
 
 type Error<'a> = chumsky::extra::Err<chumsky::prelude::Rich<'a, char>>;
 
+pub type DefaultContainer<T> = std::vec::Vec<T>;
+
 /// A name
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Name<Src, Span>(Spanned<Src, Span>);
@@ -48,47 +50,138 @@ impl<Src, Span> Name<Src, Span> {
     let start = one_of([
       // underscore
       I::Token::UNDERSCORE,
-
       // A-Z
-      I::Token::A, I::Token::B, I::Token::C, I::Token::D, I::Token::E, I::Token::F, I::Token::G,
-      I::Token::H, I::Token::I, I::Token::J, I::Token::K, I::Token::L, I::Token::M, I::Token::N,
-      I::Token::O, I::Token::P, I::Token::Q, I::Token::R, I::Token::S, I::Token::T, I::Token::U,
-      I::Token::V, I::Token::W, I::Token::X, I::Token::Y, I::Token::Z,
-
+      I::Token::A,
+      I::Token::B,
+      I::Token::C,
+      I::Token::D,
+      I::Token::E,
+      I::Token::F,
+      I::Token::G,
+      I::Token::H,
+      I::Token::I,
+      I::Token::J,
+      I::Token::K,
+      I::Token::L,
+      I::Token::M,
+      I::Token::N,
+      I::Token::O,
+      I::Token::P,
+      I::Token::Q,
+      I::Token::R,
+      I::Token::S,
+      I::Token::T,
+      I::Token::U,
+      I::Token::V,
+      I::Token::W,
+      I::Token::X,
+      I::Token::Y,
+      I::Token::Z,
       // a-z
-      I::Token::a, I::Token::b, I::Token::c, I::Token::d, I::Token::e, I::Token::f, I::Token::g,
-      I::Token::h, I::Token::i, I::Token::j, I::Token::k, I::Token::l, I::Token::m, I::Token::n,
-      I::Token::o, I::Token::p, I::Token::q, I::Token::r, I::Token::s, I::Token::t, I::Token::u,
-      I::Token::v, I::Token::w, I::Token::x, I::Token::y, I::Token::z,
+      I::Token::a,
+      I::Token::b,
+      I::Token::c,
+      I::Token::d,
+      I::Token::e,
+      I::Token::f,
+      I::Token::g,
+      I::Token::h,
+      I::Token::i,
+      I::Token::j,
+      I::Token::k,
+      I::Token::l,
+      I::Token::m,
+      I::Token::n,
+      I::Token::o,
+      I::Token::p,
+      I::Token::q,
+      I::Token::r,
+      I::Token::s,
+      I::Token::t,
+      I::Token::u,
+      I::Token::v,
+      I::Token::w,
+      I::Token::x,
+      I::Token::y,
+      I::Token::z,
     ])
     .ignored();
 
     let cont = one_of([
-    // underscore
-    I::Token::UNDERSCORE,
+      // underscore
+      I::Token::UNDERSCORE,
+      // 0-9
+      I::Token::ZERO,
+      I::Token::ONE,
+      I::Token::TWO,
+      I::Token::THREE,
+      I::Token::FOUR,
+      I::Token::FIVE,
+      I::Token::SIX,
+      I::Token::SEVEN,
+      I::Token::EIGHT,
+      I::Token::NINE,
+      // A-Z
+      I::Token::A,
+      I::Token::B,
+      I::Token::C,
+      I::Token::D,
+      I::Token::E,
+      I::Token::F,
+      I::Token::G,
+      I::Token::H,
+      I::Token::I,
+      I::Token::J,
+      I::Token::K,
+      I::Token::L,
+      I::Token::M,
+      I::Token::N,
+      I::Token::O,
+      I::Token::P,
+      I::Token::Q,
+      I::Token::R,
+      I::Token::S,
+      I::Token::T,
+      I::Token::U,
+      I::Token::V,
+      I::Token::W,
+      I::Token::X,
+      I::Token::Y,
+      I::Token::Z,
+      // a-z
+      I::Token::a,
+      I::Token::b,
+      I::Token::c,
+      I::Token::d,
+      I::Token::e,
+      I::Token::f,
+      I::Token::g,
+      I::Token::h,
+      I::Token::i,
+      I::Token::j,
+      I::Token::k,
+      I::Token::l,
+      I::Token::m,
+      I::Token::n,
+      I::Token::o,
+      I::Token::p,
+      I::Token::q,
+      I::Token::r,
+      I::Token::s,
+      I::Token::t,
+      I::Token::u,
+      I::Token::v,
+      I::Token::w,
+      I::Token::x,
+      I::Token::y,
+      I::Token::z,
+    ])
+    .ignored()
+    .repeated();
 
-    // 0-9
-    I::Token::ZERO, I::Token::ONE, I::Token::TWO, I::Token::THREE, I::Token::FOUR,
-    I::Token::FIVE, I::Token::SIX, I::Token::SEVEN, I::Token::EIGHT, I::Token::NINE,
-
-    // A-Z
-    I::Token::A, I::Token::B, I::Token::C, I::Token::D, I::Token::E, I::Token::F, I::Token::G,
-    I::Token::H, I::Token::I, I::Token::J, I::Token::K, I::Token::L, I::Token::M, I::Token::N,
-    I::Token::O, I::Token::P, I::Token::Q, I::Token::R, I::Token::S, I::Token::T, I::Token::U,
-    I::Token::V, I::Token::W, I::Token::X, I::Token::Y, I::Token::Z,
-
-    // a-z
-    I::Token::a, I::Token::b, I::Token::c, I::Token::d, I::Token::e, I::Token::f, I::Token::g,
-    I::Token::h, I::Token::i, I::Token::j, I::Token::k, I::Token::l, I::Token::m, I::Token::n,
-    I::Token::o, I::Token::p, I::Token::q, I::Token::r, I::Token::s, I::Token::t, I::Token::u,
-    I::Token::v, I::Token::w, I::Token::x, I::Token::y, I::Token::z,
-  ])
-  .ignored()
-  .repeated();
-
-  start
-    .then(cont)
-    .map_with(|_, sp| Name::new(Spanned::from(sp)))
+    start
+      .then(cont)
+      .map_with(|_, sp| Name::new(Spanned::from(sp)))
   }
 }
 

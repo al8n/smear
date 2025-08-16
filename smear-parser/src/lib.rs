@@ -4,7 +4,7 @@
 
 use chumsky::{combinator::Repeated, container::Seq, prelude::*};
 
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(not(feature = "std"))]
 extern crate alloc as std;
 
 #[cfg(feature = "std")]

@@ -4,8 +4,10 @@ use chumsky::{
 
 use crate::parser::SmearChar;
 
+/// A parser which consumes line terminators
+///
 /// Spec: [LineTerminator](https://spec.graphql.org/draft/#LineTerminator)
-pub(super) fn line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+pub fn line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
   I::Token: SmearChar + 'src,
@@ -18,8 +20,10 @@ where
     .or(just(I::Token::LINE_FEED).ignored())
 }
 
+/// Returns a parser which consumes comments
+///
 /// Spec: [Comment](https://spec.graphql.org/draft/#sec-Comments)
-pub(super) fn comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+pub fn comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
   I::Token: SmearChar + 'src,
@@ -32,8 +36,10 @@ where
     .ignored()
 }
 
+/// Returns a parser which consumes white spaces.
+///
 /// Spec: [Whitespace](https://spec.graphql.org/draft/#WhiteSpace)
-pub(super) fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+pub fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
   I::Token: SmearChar + 'src,
@@ -48,7 +54,10 @@ where
   .ignored()
 }
 
-pub(super) fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+/// Returns a parser which consumes byte order marks (BOM)
+///
+/// Spec: `\u{FEFF}`
+pub fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
   I::Token: SmearChar + 'src,
@@ -58,8 +67,10 @@ where
   just(I::Token::bom()).ignored()
 }
 
+/// Returns a parser which consumes all ignored tokens
+///
 /// Spec: [IgnoreTokens](https://spec.graphql.org/draft/#Ignored)
-pub(super) fn ignored<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+pub fn ignored<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
   I::Token: SmearChar + 'src,
@@ -69,11 +80,4 @@ where
   choice((white_space(), line_terminator(), comment(), bom()))
     .repeated()
     .ignored()
-}
-
-#[test]
-fn t() {
-  let input = "\u{feff} # Hello, world! \t\n";
-  let parser = ignored::<_, super::Error>();
-  parser.parse(input).into_result().unwrap();
 }

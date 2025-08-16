@@ -1,5 +1,3 @@
-use chumsky::span::Span;
-
 macro_rules! punct {
   ($token_name:ident:$token:literal) => {
     paste::paste! {
