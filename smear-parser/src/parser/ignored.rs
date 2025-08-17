@@ -36,9 +36,9 @@ where
     .ignored()
 }
 
-/// Returns a parser which consumes white spaces.
+/// Returns a parser which consumes spaces.
 ///
-/// Spec: [Whitespace](https://spec.graphql.org/draft/#WhiteSpace)
+/// Spec: [WhiteSpace](https://spec.graphql.org/draft/#WhiteSpace)
 pub fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -46,17 +46,25 @@ where
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
-  choice((
-    just(I::Token::SPACE),
-    just(I::Token::TAB),
-    just(I::Token::COMMA),
-  ))
-  .ignored()
+  choice((just(I::Token::SPACE), just(I::Token::TAB))).ignored()
+}
+
+/// Returns a parser which consumes a comma
+///
+/// Spec: [Comma](https://spec.graphql.org/draft/#Comma)
+pub fn comma<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+where
+  I: StrInput<'src>,
+  I::Token: SmearChar + 'src,
+  E: ParserExtra<'src, I>,
+  E::Error: LabelError<'src, I, TextExpected<'src, I>>,
+{
+  just(I::Token::COMMA).ignored()
 }
 
 /// Returns a parser which consumes byte order marks (BOM)
 ///
-/// Spec: `\u{FEFF}`
+/// Spec: [Unicode BOM](https://spec.graphql.org/draft/#UnicodeBOM)
 pub fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -77,7 +85,20 @@ where
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
-  choice((white_space(), line_terminator(), comment(), bom()))
+  choice((white_space(), bom(), line_terminator(), comment()))
+    .repeated()
+    .ignored()
+}
+
+/// Returns a parser which consumes whitespaces and line terminators
+pub fn padded<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+where
+  I: StrInput<'src>,
+  I::Token: SmearChar + 'src,
+  E: ParserExtra<'src, I>,
+  E::Error: LabelError<'src, I, TextExpected<'src, I>>,
+{
+  choice((white_space(), line_terminator()))
     .repeated()
     .ignored()
 }

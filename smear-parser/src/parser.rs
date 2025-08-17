@@ -8,7 +8,9 @@ use chumsky::{
 };
 
 mod ignored;
-mod input_value;
+
+/// Input value types and parsers
+pub mod input_value;
 
 /// The source span
 mod span;
@@ -182,6 +184,7 @@ impl<Src, Span> Name<Src, Span> {
     start
       .then(cont)
       .map_with(|_, sp| Name::new(Spanned::from(sp)))
+      .padded_by(ignored::ignored())
   }
 }
 
@@ -242,6 +245,10 @@ pub trait SmearChar: Char {
   const PAREN_OPEN: Self;
   /// The ASCII right paren character (`)`).
   const PAREN_CLOSE: Self;
+  /// The ASCII left bracket character (`[`).
+  const BRACKET_OPEN: Self;
+  /// The ASCII right bracket character (`]`).
+  const BRACKET_CLOSE: Self;
   /// The ASCII asterisk character (`*`).
   const ASTERISK: Self;
   /// The ASCII plus character (`+`).
@@ -432,6 +439,8 @@ impl SmearChar for char {
   const APOSTROPHE: Self = '\'';
   const PAREN_OPEN: Self = '(';
   const PAREN_CLOSE: Self = ')';
+  const BRACKET_OPEN: Self = '[';
+  const BRACKET_CLOSE: Self = ']';
   const ASTERISK: Self = '*';
   const PLUS: Self = '+';
   const COMMA: Self = ',';
@@ -534,6 +543,8 @@ impl SmearChar for u8 {
   const APOSTROPHE: Self = b'\'';
   const PAREN_OPEN: Self = b'(';
   const PAREN_CLOSE: Self = b')';
+  const BRACKET_OPEN: Self = b'[';
+  const BRACKET_CLOSE: Self = b']';
   const ASTERISK: Self = b'*';
   const PLUS: Self = b'+';
   const COMMA: Self = b',';

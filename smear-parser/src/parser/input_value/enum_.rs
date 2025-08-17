@@ -9,12 +9,12 @@ use crate::parser::{Name, SmearChar, Spanned};
 ///
 /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumValue<Src, Span> {
+pub struct Enum<Src, Span> {
   /// The name of the enum value
   name: Name<Src, Span>,
 }
 
-impl<Src, Span> EnumValue<Src, Span> {
+impl<Src, Span> Enum<Src, Span> {
   /// Returns the span of the enum value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -47,7 +47,7 @@ impl<Src, Span> EnumValue<Src, Span> {
       just([I::Token::n, I::Token::u, I::Token::l, I::Token::l]).not(),
     ))
     .then(Name::<Src, Span>::parser())
-    .map_with(|(_, name), _| EnumValue { name })
-    .padded_by(super::ignored::ignored())
+    .map_with(|(_, name), _| Enum { name })
+    .padded_by(super::ignored::padded())
   }
 }

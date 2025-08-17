@@ -9,7 +9,7 @@ use crate::parser::{Name, SmearChar, Spanned};
 ///
 /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct VariableValue<Src, Span> {
+pub struct Variable<Src, Span> {
   span: Spanned<Src, Span>,
   /// The name of the variable value
   name: Name<Src, Span>,
@@ -17,7 +17,7 @@ pub struct VariableValue<Src, Span> {
   dollar: Spanned<Src, Span>,
 }
 
-impl<Src, Span> VariableValue<Src, Span> {
+impl<Src, Span> Variable<Src, Span> {
   /// Returns the span of the name
   #[inline]
   pub const fn name(&self) -> &Spanned<Src, Span> {
@@ -52,11 +52,11 @@ impl<Src, Span> VariableValue<Src, Span> {
     just(I::Token::DOLLAR)
       .map_with(|_, span| Spanned::from(span))
       .then(Name::<Src, Span>::parser())
-      .map_with(|(dollar, name), sp| VariableValue {
+      .map_with(|(dollar, name), sp| Variable {
         name,
         span: Spanned::from(sp),
         dollar,
       })
-      .padded_by(super::ignored::ignored())
+      .padded_by(super::ignored::padded())
   }
 }

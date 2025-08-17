@@ -27,6 +27,6 @@
     - ERROR@38..39 "}"
     - WHITESPACE@39..40 "\n"
 - ERROR@36:37 "expected R_CURLY, got ]" ]
-- ERROR@36:37 "expected a StringValue, Name or OperationDefinition" ]
-- ERROR@38:39 "expected a StringValue, Name or OperationDefinition" }
+- ERROR@36:37 "expected a String, Name or OperationDefinition" ]
+- ERROR@38:39 "expected a String, Name or OperationDefinition" }
 recursion limit: 500, high: 2

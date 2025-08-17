@@ -11,8 +11,8 @@ use crate::parser::{
 /// Delimiters used by a GraphQL string literal.
 ///
 /// GraphQL has two forms of string values:
-/// - **StringValue**: delimited by a single double quote (`"`).
-/// - **BlockStringValue**: delimited by triple double quotes (`"""`).
+/// - **String**: delimited by a single double quote (`"`).
+/// - **BlockString**: delimited by triple double quotes (`"""`).
 ///
 /// We store both the opening and closing delimiter as *spanned* slices so you
 /// can report exact locations, preserve trivia, or re-emit the original text.
@@ -20,7 +20,7 @@ use crate::parser::{
 pub enum StringDelimiter<Src, Span> {
   /// Triple-quoted **block string**: `"""`
   ///
-  /// Spec: <https://spec.graphql.org/draft/#BlockStringValue>
+  /// Spec: <https://spec.graphql.org/draft/#BlockString>
   TripleQuote {
     /// The opening `"""`.
     l_triple_quote: TripleQuote<Spanned<Src, Span>>,
@@ -29,7 +29,7 @@ pub enum StringDelimiter<Src, Span> {
   },
   /// Single-quoted **string**: `"`
   ///
-  /// Spec: <https://spec.graphql.org/draft/#StringValue>
+  /// Spec: <https://spec.graphql.org/draft/#String>
   Quote {
     /// The opening `"`.
     l_quote: Quote<Spanned<Src, Span>>,
@@ -50,7 +50,7 @@ pub enum StringDelimiter<Src, Span> {
 ///
 /// Spec: [String Value](<https://spec.graphql.org/draft/#sec-String-Value>)
 #[derive(Debug, Clone, Copy)]
-pub struct StringValue<Src, Span> {
+pub struct String<Src, Span> {
   /// Entire literal, including opening and closing delimiters.
   ///
   /// Example:
@@ -73,7 +73,7 @@ pub struct StringValue<Src, Span> {
   content: Spanned<Src, Span>,
 }
 
-impl<Src, Span> StringValue<Src, Span> {
+impl<Src, Span> String<Src, Span> {
   /// Returns the span of the string value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -221,7 +221,7 @@ impl<Src, Span> StringValue<Src, Span> {
       quote
         .then(inline_content_span)
         .then(quote)
-        .map_with(|((lq, content), rq), sp| StringValue {
+        .map_with(|((lq, content), rq), sp| String {
           span: Spanned::from(sp),
           delimiters: StringDelimiter::Quote {
             l_quote: lq,
@@ -234,7 +234,7 @@ impl<Src, Span> StringValue<Src, Span> {
     let block_string = triple_quote
       .then(block_content_span)
       .then(triple_quote)
-      .map_with(|((ltq, content), rtq), sp| StringValue {
+      .map_with(|((ltq, content), rtq), sp| String {
         span: Spanned::from(sp),
         delimiters: StringDelimiter::TripleQuote {
           l_triple_quote: ltq,
@@ -246,6 +246,6 @@ impl<Src, Span> StringValue<Src, Span> {
     // Choose block first or inline first — both are unambiguous.
     block_string
       .or(inline_string)
-      .padded_by(super::ignored::ignored())
+      .padded_by(super::ignored::padded())
   }
 }

@@ -5,7 +5,7 @@ use chumsky::{
 
 use crate::parser::{SmearChar, Spanned};
 
-use super::IntValue;
+use super::Int;
 
 /// The sign of the float value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,25 +90,25 @@ impl<Src, Span> Fractional<Src, Span> {
 ///
 /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct FloatValue<Src, Span> {
+pub struct Float<Src, Span> {
   /// The span of the float value
   span: Spanned<Src, Span>,
   /// The integer section of the float value
-  int: IntValue<Src, Span>,
+  int: Int<Src, Span>,
   /// The fractional section of the float value
   fractional: Option<Fractional<Src, Span>>,
   /// The exponent section of the float value
   exponent: Option<Exponent<Src, Span>>,
 }
 
-impl<Src, Span> FloatValue<Src, Span> {
+impl<Src, Span> Float<Src, Span> {
   /// Returns the span of the float value
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
 
   /// Returns the integer section of the float value.
-  pub const fn int(&self) -> &IntValue<Src, Span> {
+  pub const fn int(&self) -> &Int<Src, Span> {
     &self.int
   }
 
@@ -163,24 +163,24 @@ impl<Src, Span> FloatValue<Src, Span> {
         })
     };
 
-    IntValue::<Src, Span>::parser()
+    Int::<Src, Span>::parser()
       .then(frac().then(exp().or_not()))
-      .map_with(|(int, (frac, exp)), span| FloatValue {
+      .map_with(|(int, (frac, exp)), span| Float {
         span: Spanned::from(span),
         int,
         fractional: Some(frac),
         exponent: exp,
       })
       .or(
-        IntValue::<Src, Span>::parser()
+        Int::<Src, Span>::parser()
           .then(exp())
-          .map_with(|(int, exp), span| FloatValue {
+          .map_with(|(int, exp), span| Float {
             span: Spanned::from(span),
             int,
             fractional: None,
             exponent: Some(exp),
           }),
       )
-      .padded_by(super::ignored::ignored())
+      .padded_by(super::ignored::padded())
   }
 }

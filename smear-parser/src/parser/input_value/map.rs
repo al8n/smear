@@ -4,20 +4,20 @@ use chumsky::{
 };
 
 use crate::parser::{
-  punct::{LBrace, RBrace},
-  Name, SmearChar, Spanned,
+  punct::{LAngle, RAngle},
+  SmearChar, Spanned,
 };
 
 #[derive(Debug, Clone)]
-pub struct ObjectField<Value, Src, Span> {
+pub struct MapEntry<T, Src, Span> {
   span: Spanned<Src, Span>,
-  name: Name<Src, Span>,
   colon: Spanned<Src, Span>,
-  value: Value,
+  key: T,
+  value: T,
 }
 
-impl<Value, Src, Span> ObjectField<Value, Src, Span> {
-  /// Returns the span of the field.
+impl<T, Src, Span> MapEntry<T, Src, Span> {
+  /// Returns the span of the entry.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -29,15 +29,15 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
     &self.colon
   }
 
-  /// Returns the span of the field name
+  /// Returns the key of the entry.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn key(&self) -> &T {
+    &self.key
   }
 
-  /// Returns the value of the field.
+  /// Returns the value of the entry.
   #[inline]
-  pub const fn value(&self) -> &Value {
+  pub const fn value(&self) -> &T {
     &self.value
   }
 
@@ -51,17 +51,18 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
-    P: Parser<'src, I, Value, E> + Clone,
+    P: Parser<'src, I, T, E> + Clone,
   {
-    Name::<Src, Span>::parser()
+    value
+      .clone()
       .then(
         just(I::Token::COLON)
           .map_with(|_, span| Spanned::from(span))
           .padded_by(super::ignored::padded()),
       )
       .then(value) // <-- use injected value parser
-      .map_with(|((name, colon), value), sp| Self {
-        name,
+      .map_with(|((key, colon), value), sp| Self {
+        key,
         colon,
         value,
         span: Spanned::from(sp),
@@ -72,41 +73,41 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
 
 /// Represents an input object value parsed from input
 ///
-/// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
+/// Spec: [Input Object T](https://spec.graphql.org/draft/#sec-Input-Object-T)
 #[derive(Debug, Clone)]
-pub struct Object<Value, Src, Span> {
+pub struct Map<T, Src, Span> {
   /// The original span of the object value
   span: Spanned<Src, Span>,
   /// The left `{` token.
-  l_brace: LBrace<Spanned<Src, Span>>,
+  l_angle: LAngle<Spanned<Src, Span>>,
   /// The right `}` token.
-  r_brace: RBrace<Spanned<Src, Span>>,
+  r_angle: RAngle<Spanned<Src, Span>>,
   /// The content between the brackets.
-  fields: Vec<ObjectField<Value, Src, Span>>,
+  fields: Vec<MapEntry<T, Src, Span>>,
 }
 
-impl<Value, Src, Span> Object<Value, Src, Span> {
+impl<T, Src, Span> Map<T, Src, Span> {
   /// Returns the span of the object value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
 
-  /// Returns the left brace of the object value.
+  /// Returns the left angle of the object value.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Spanned<Src, Span>> {
-    &self.l_brace
+  pub const fn l_angle(&self) -> &LAngle<Spanned<Src, Span>> {
+    &self.l_angle
   }
 
-  /// Returns the right brace of the object value.
+  /// Returns the right angle of the object value.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Spanned<Src, Span>> {
-    &self.r_brace
+  pub const fn r_angle(&self) -> &RAngle<Spanned<Src, Span>> {
+    &self.r_angle
   }
 
   /// Returns the fields of the object value.
   #[inline]
-  pub const fn fields(&self) -> &[ObjectField<Value, Src, Span>] {
+  pub const fn fields(&self) -> &[MapEntry<T, Src, Span>] {
     self.fields.as_slice()
   }
 
@@ -120,22 +121,22 @@ impl<Value, Src, Span> Object<Value, Src, Span> {
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
-    P: Parser<'src, I, Value, E> + Clone,
+    P: Parser<'src, I, T, E> + Clone,
   {
-    just(I::Token::CURLY_BRACE_OPEN)
-      .map_with(|_, span| LBrace::new(Spanned::from(span)))
+    just(I::Token::LESS_THAN)
+      .map_with(|_, span| LAngle::new(Spanned::from(span)))
       .then(
-        ObjectField::<Value, Src, Span>::parser_with(value.clone())
+        MapEntry::<T, Src, Span>::parser_with(value.clone())
           .separated_by(just(I::Token::COMMA).padded_by(super::ignored::padded()))
           .allow_trailing() // `{ a: 1, }` allowed
           .collect()
           .padded_by(super::ignored::padded()),
       )
-      .then(just(I::Token::CURLY_BRACE_CLOSE).map_with(|_, span| RBrace::new(Spanned::from(span))))
-      .map_with(|((l_brace, fields), r_brace), span| Self {
+      .then(just(I::Token::GREATER_THAN).map_with(|_, span| RAngle::new(Spanned::from(span))))
+      .map_with(|((l_angle, fields), r_angle), span| Self {
         span: Spanned::from(span),
-        l_brace,
-        r_brace,
+        l_angle,
+        r_angle,
         fields,
       })
   }

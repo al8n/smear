@@ -1,4 +1,4 @@
-COMMENT@0:88 "# Both IntValue and FloatValue are specified with [lookahead != {Digit, `.`, NameStart}]"
+COMMENT@0:88 "# Both Int and Float are specified with [lookahead != {Digit, `.`, NameStart}]"
 WHITESPACE@88:89 "\n"
 ERROR@89:91 "Numbers must not have non-significant leading zeroes" 00
 WHITESPACE@91:92 "\n"

@@ -7,14 +7,14 @@ use crate::parser::{SmearChar, Spanned};
 
 /// Represents a boolean value parsed from input
 #[derive(Debug, Clone, Copy)]
-pub struct BooleanValue<Src, Span> {
+pub struct Boolean<Src, Span> {
   /// The original span of the boolean value
   span: Spanned<Src, Span>,
   /// The value of the boolean
   value: bool,
 }
 
-impl<Src, Span> BooleanValue<Src, Span> {
+impl<Src, Span> Boolean<Src, Span> {
   /// Returns the value
   #[inline]
   pub const fn value(&self) -> bool {
@@ -50,10 +50,10 @@ impl<Src, Span> BooleanValue<Src, Span> {
         ])
         .to(false),
       )
-      .map_with(|data, span| BooleanValue {
+      .map_with(|data, span| Boolean {
         span: Spanned::from(span),
         value: data,
       })
-      .padded_by(super::ignored::ignored())
+      .padded_by(super::ignored::padded())
   }
 }

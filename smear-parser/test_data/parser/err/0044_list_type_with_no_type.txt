@@ -53,8 +53,8 @@
 - ERROR@60:64 "expected R_BRACK, got Type" Type
 - ERROR@64:65 "expected a type" ]
 - ERROR@64:65 "expected R_CURLY, got ]" ]
-- ERROR@64:65 "expected a StringValue, Name or OperationDefinition" ]
-- ERROR@65:66 "expected a StringValue, Name or OperationDefinition" ]
-- ERROR@66:67 "expected a StringValue, Name or OperationDefinition" ]
-- ERROR@68:69 "expected a StringValue, Name or OperationDefinition" }
+- ERROR@64:65 "expected a String, Name or OperationDefinition" ]
+- ERROR@65:66 "expected a String, Name or OperationDefinition" ]
+- ERROR@66:67 "expected a String, Name or OperationDefinition" ]
+- ERROR@68:69 "expected a String, Name or OperationDefinition" }
 recursion limit: 500, high: 3

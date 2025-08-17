@@ -9,7 +9,7 @@ use crate::parser::{SmearChar, Spanned};
 ///
 /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct IntValue<Src, Span> {
+pub struct Int<Src, Span> {
   /// The original raw string representation of the integer value.
   span: Spanned<Src, Span>,
   /// Returns the sign of the value.
@@ -18,7 +18,7 @@ pub struct IntValue<Src, Span> {
   digits: Spanned<Src, Span>,
 }
 
-impl<Src, Span> IntValue<Src, Span> {
+impl<Src, Span> Int<Src, Span> {
   /// Returns the span of the integer value.
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -57,6 +57,6 @@ impl<Src, Span> IntValue<Src, Span> {
         sign,
         digits,
       })
-      .padded_by(super::ignored::ignored())
+      .padded_by(super::ignored::padded())
   }
 }

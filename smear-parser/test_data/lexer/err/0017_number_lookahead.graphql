@@ -1,4 +1,4 @@
-# Both IntValue and FloatValue are specified with [lookahead != {Digit, `.`, NameStart}]
+# Both Int and Float are specified with [lookahead != {Digit, `.`, NameStart}]
 00
 2.
 2.2.
