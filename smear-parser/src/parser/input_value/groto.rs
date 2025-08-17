@@ -7,6 +7,7 @@ use chumsky::{
   text::{Char, TextExpected},
   util::MaybeRef,
 };
+use either::Either;
 
 use crate::parser::{
   punct::{LBrace, LBracket, Quote, RBrace, RBracket, TripleQuote},
@@ -100,11 +101,12 @@ impl<Src, Span> InputValue<Src, Span> {
       let variable_value_parser = Variable::parser::<I, E>().map(|v| Self::Variable(v));
       let object_value_parser =
         Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser =
-        List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
-      let set_value_parser =
-        Set::parser_with::<I, E, _>(value.clone()).map(|v| Self::Set(v));
-      let map_value_parser = Map::parser_with::<I, E, _>(value.clone()).map(|v| Self::Map(v));
+      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+      let angle_value_parser =
+        Angle::parser_with::<I, E, _>(value.clone()).map(|v| match v.into() {
+          Either::Left(set) => Self::Set(set),
+          Either::Right(map) => Self::Map(map),
+        });
 
       choice((
         boolean_value_parser,
@@ -115,8 +117,7 @@ impl<Src, Span> InputValue<Src, Span> {
         float_value_parser,
         int_value_parser,
         list_value_parser,
-        set_value_parser,
-        map_value_parser,
+        angle_value_parser,
         object_value_parser,
       ))
       .padded_by(super::ignored::padded())
@@ -207,12 +208,12 @@ impl<Src, Span> ConstInputValue<Src, Span> {
 
       let object_value_parser =
         Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser =
-        List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
-      let set_value_parser =
-        Set::parser_with::<I, E, _>(value.clone()).map(|v| Self::Set(v));
-      let map_value_parser =
-        Map::parser_with::<I, E, _>(value.clone()).map(|v| Self::Map(v));
+      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+      let angle_value_parser =
+        Angle::parser_with::<I, E, _>(value.clone()).map(|v| match v.into() {
+          Either::Left(set) => Self::Set(set),
+          Either::Right(map) => Self::Map(map),
+        });
 
       choice((
         boolean_value_parser,
@@ -222,8 +223,7 @@ impl<Src, Span> ConstInputValue<Src, Span> {
         string_value_parser,
         enum_value_parser,
         list_value_parser,
-        set_value_parser,
-        map_value_parser,
+        angle_value_parser,
         object_value_parser,
       ))
       .padded_by(super::ignored::padded())
@@ -508,7 +508,8 @@ fn test_set_value_parser() {
 
 #[test]
 fn test_map_value() {
-  let input = r#"<"a": 1, "b": true, "c": "foo", "d": [1, 2, 3], "e": { foo: 1, bar: ["b", "a", "z"] }>"#;
+  let input =
+    r#"<"a": 1, "b": true, "c": "foo", "d": [1, 2, 3], "e": { foo: 1, bar: ["b", "a", "z"] }>"#;
   let InputValue::Map(result) = InputValue::parser::<&str, super::super::Error>()
     .parse(input)
     .into_result()

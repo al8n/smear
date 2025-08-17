@@ -94,8 +94,7 @@ impl<Src, Span> InputValue<Src, Span> {
       let variable_value_parser = Variable::parser::<I, E>().map(|v| Self::Variable(v));
       let object_value_parser =
         Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser =
-        List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
 
       choice((
         boolean_value_parser,
@@ -190,8 +189,7 @@ impl<Src, Span> ConstInputValue<Src, Span> {
 
       let object_value_parser =
         Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser =
-        List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
 
       choice((
         boolean_value_parser,

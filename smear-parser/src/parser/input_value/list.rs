@@ -66,9 +66,11 @@ impl<Value, Src, Span> List<Value, Src, Span> {
     P: Parser<'src, I, Value, E> + Clone + 'src,
   {
     let empty = just(I::Token::BRACKET_OPEN)
+      .padded_by(super::ignored::padded())
       .map_with(|_, sp| LBracket::new(Spanned::from(sp)))
       .then(
         just(I::Token::BRACKET_CLOSE)
+          .padded_by(super::ignored::padded())
           .map_with(|_, sp| RBracket::new(Spanned::from(sp))),
       )
       .map_with(|(l_bracket, r_bracket), sp| Self {
@@ -78,15 +80,21 @@ impl<Value, Src, Span> List<Value, Src, Span> {
         values: Vec::new(),
       });
     let parser = just(I::Token::BRACKET_OPEN)
+      .padded_by(super::ignored::padded())
       .map_with(|_, sp| LBracket::new(Spanned::from(sp)))
       .then(
         value
+          .padded_by(super::ignored::padded())
           .separated_by(just(I::Token::COMMA).padded_by(super::ignored::padded()))
           .allow_trailing()
           .collect()
           .padded_by(super::ignored::padded()),
       )
-      .then(just(I::Token::BRACKET_CLOSE).map_with(|_, sp| RBracket::new(Spanned::from(sp))))
+      .then(
+        just(I::Token::BRACKET_CLOSE)
+          .padded_by(super::ignored::padded())
+          .map_with(|_, sp| RBracket::new(Spanned::from(sp))),
+      )
       .map_with(|((l_bracket, values), r_bracket), sp| Self {
         span: Spanned::from(sp),
         l_bracket,
@@ -96,5 +104,3 @@ impl<Value, Src, Span> List<Value, Src, Span> {
     empty.or(parser)
   }
 }
-
-

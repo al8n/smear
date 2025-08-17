@@ -103,4 +103,3 @@ impl<Value, Src, Span> Set<Value, Src, Span> {
 //   assert!(third.is_boolean());
 //   assert!(fourth.is_set());
 // }
-
