@@ -1,12 +1,10 @@
+use crate::parser::SmearChar;
 use chumsky::{
   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
 };
 
-use crate::parser::SmearChar;
-
-/// A parser which consumes line terminators
-///
-/// Spec: [LineTerminator](https://spec.graphql.org/draft/#LineTerminator)
+/// LineTerminator  ::  <LF> | <CR> [<LF>]
+/// Treat CR and CRLF as a single terminator.
 pub fn line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -14,15 +12,17 @@ where
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
-  just(I::Token::CARRIAGE_RETURN)
-    .then(just(I::Token::LINE_FEED).or_not())
-    .ignored()
-    .or(just(I::Token::LINE_FEED).ignored())
+  choice((
+    just(I::Token::LINE_FEED).ignored(),
+    just(I::Token::CARRIAGE_RETURN)
+      .then(just(I::Token::LINE_FEED).or_not())
+      .ignored(),
+  ))
 }
 
-/// Returns a parser which consumes comments
-///
-/// Spec: [Comment](https://spec.graphql.org/draft/#sec-Comments)
+/// Comment  ::  '#' CommentChar*
+/// CommentChar :: SourceCharacter but not LineTerminator
+/// (U+0000 is excluded from SourceCharacter)
 pub fn comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -31,14 +31,18 @@ where
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
   just(I::Token::HASH)
-    // CommentChar*: any SourceCharacter except LineTerminator; SourceCharacter excludes U+0000.
-    .ignore_then(any().filter(|c: &I::Token| I::Token::LINE_FEED.ne(c) && I::Token::CARRIAGE_RETURN.ne(c) && I::Token::NULL.ne(c)).repeated())
+    .ignore_then(
+      // consume until CR/LF/NULL or end of input
+      any()
+        .filter(|t: &I::Token| {
+          *t != I::Token::LINE_FEED && *t != I::Token::CARRIAGE_RETURN && *t != I::Token::NULL
+        })
+        .repeated(),
+    )
     .ignored()
 }
 
-/// Returns a parser which consumes spaces.
-///
-/// Spec: [WhiteSpace](https://spec.graphql.org/draft/#WhiteSpace)
+/// WhiteSpace  :: U+0009 (TAB) | U+0020 (SPACE)
 pub fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -49,9 +53,7 @@ where
   choice((just(I::Token::SPACE), just(I::Token::TAB))).ignored()
 }
 
-/// Returns a parser which consumes a comma
-///
-/// Spec: [Comma](https://spec.graphql.org/draft/#Comma)
+/// Comma is insignificant in GraphQL (treat like whitespace).
 pub fn comma<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -62,9 +64,8 @@ where
   just(I::Token::COMMA).ignored()
 }
 
-/// Returns a parser which consumes byte order marks (BOM)
-///
-/// Spec: [Unicode BOM](https://spec.graphql.org/draft/#UnicodeBOM)
+/// Unicode BOM — may appear *at the start of the source*.
+/// Keep this separate; don't include in general padding.
 pub fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -75,9 +76,8 @@ where
   just(I::Token::bom()).ignored()
 }
 
-/// Returns a parser which consumes all ignored tokens
-///
-/// Spec: [IgnoreTokens](https://spec.graphql.org/draft/#Ignored)
+/// Ignored tokens *between* meaningful tokens (no BOM here).
+/// Spec: WhiteSpace | LineTerminator | Comment | Comma
 pub fn ignored<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
@@ -85,20 +85,7 @@ where
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
-  choice((white_space(), bom(), line_terminator(), comment()))
-    .repeated()
-    .ignored()
-}
-
-/// Returns a parser which consumes whitespaces and line terminators
-pub fn padded<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
-  E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, TextExpected<'src, I>>,
-{
-  choice((white_space(), line_terminator()))
+  choice((bom(), white_space(), line_terminator(), comment(), comma()))
     .repeated()
     .ignored()
 }

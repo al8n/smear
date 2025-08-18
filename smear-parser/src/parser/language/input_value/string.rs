@@ -4,7 +4,7 @@ use chumsky::{
 };
 
 use crate::parser::{
-  punct::{Quote, TripleQuote},
+  language::punct::{Quote, TripleQuote},
   SmearChar, Spanned,
 };
 
@@ -246,6 +246,6 @@ impl<Src, Span> String<Src, Span> {
     // Choose block first or inline first — both are unambiguous.
     block_string
       .or(inline_string)
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

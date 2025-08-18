@@ -57,6 +57,6 @@ impl<Src, Span> Int<Src, Span> {
         sign,
         digits,
       })
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

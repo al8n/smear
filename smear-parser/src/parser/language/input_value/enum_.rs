@@ -48,6 +48,6 @@ impl<Src, Span> Enum<Src, Span> {
     ))
     .then(Name::<Src, Span>::parser())
     .map_with(|(_, name), _| Enum { name })
-    .padded_by(super::ignored::padded())
+    .padded_by(super::ignored::ignored())
   }
 }

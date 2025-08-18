@@ -1,11 +1,10 @@
+use crate::parser::{
+  language::punct::{LBrace, RBrace},
+  Name, SmearChar, Spanned,
+};
 use chumsky::{
   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
   util::MaybeRef,
-};
-
-use crate::parser::{
-  punct::{LBrace, RBrace},
-  Name, SmearChar, Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -17,31 +16,24 @@ pub struct ObjectField<Value, Src, Span> {
 }
 
 impl<Value, Src, Span> ObjectField<Value, Src, Span> {
-  /// Returns the span of the field.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-
-  /// Returns the span of the colon
   #[inline]
   pub const fn colon(&self) -> &Spanned<Src, Span> {
     &self.colon
   }
-
-  /// Returns the span of the field name
   #[inline]
   pub const fn name(&self) -> &Spanned<Src, Span> {
     self.name.span()
   }
-
-  /// Returns the value of the field.
   #[inline]
   pub const fn value(&self) -> &Value {
     &self.value
   }
 
-  /// Returns a parser for the field.
+  /// name ':' value  — only **trailing** ignored so repeats stop cleanly at `}`.
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
@@ -53,64 +45,58 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
     P: Parser<'src, I, Value, E> + Clone,
   {
+    let ws = super::ignored::ignored();
+
     Name::<Src, Span>::parser()
       .then(
         just(I::Token::COLON)
-          .map_with(|_, span| Spanned::from(span))
-          .padded_by(super::ignored::padded()),
+          .map_with(|_, sp| Spanned::from(sp))
+          .padded_by(ws.clone()), // padding *around* ':'
       )
-      .then(value) // <-- use injected value parser
+      .then(value)
       .map_with(|((name, colon), value), sp| Self {
+        span: Spanned::from(sp),
         name,
         colon,
         value,
-        span: Spanned::from(sp),
       })
-      .padded_by(super::ignored::padded())
+      .then_ignore(ws) // <-- trailing only (incl. commas)
   }
 }
 
-/// Represents an input object value parsed from input
-///
-/// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
+/// Input Object Value: `{` (fields)? `}`
 #[derive(Debug, Clone)]
-pub struct Object<Value, Src, Span> {
-  /// The original span of the object value
+pub struct Object<Value, Src, Span, Container = std::vec::Vec<ObjectField<Value, Src, Span>>> {
   span: Spanned<Src, Span>,
-  /// The left `{` token.
   l_brace: LBrace<Spanned<Src, Span>>,
-  /// The right `}` token.
   r_brace: RBrace<Spanned<Src, Span>>,
-  /// The content between the brackets.
-  fields: Vec<ObjectField<Value, Src, Span>>,
+  fields: Container,
+  _value: core::marker::PhantomData<Value>,
 }
 
-impl<Value, Src, Span> Object<Value, Src, Span> {
-  /// Returns the span of the object value.
+impl<Value, Src, Span, Container> Object<Value, Src, Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-
-  /// Returns the left brace of the object value.
   #[inline]
   pub const fn l_brace(&self) -> &LBrace<Spanned<Src, Span>> {
     &self.l_brace
   }
-
-  /// Returns the right brace of the object value.
   #[inline]
   pub const fn r_brace(&self) -> &RBrace<Spanned<Src, Span>> {
     &self.r_brace
   }
-
-  /// Returns the fields of the object value.
   #[inline]
-  pub const fn fields(&self) -> &[ObjectField<Value, Src, Span>] {
-    self.fields.as_slice()
+  pub const fn fields(&self) -> &Container {
+    &self.fields
   }
+}
 
-  /// Returns a parser for the object value.
+impl<Value, Src, Span, Container> Object<Value, Src, Span, Container>
+where
+  Container: chumsky::container::Container<ObjectField<Value, Src, Span>>,
+{
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
@@ -122,21 +108,26 @@ impl<Value, Src, Span> Object<Value, Src, Span> {
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
     P: Parser<'src, I, Value, E> + Clone,
   {
-    just(I::Token::CURLY_BRACE_OPEN)
-      .map_with(|_, span| LBrace::new(Spanned::from(span)))
-      .then(
-        ObjectField::<Value, Src, Span>::parser_with(value.clone())
-          .separated_by(just(I::Token::COMMA).padded_by(super::ignored::padded()))
-          .allow_trailing() // `{ a: 1, }` allowed
-          .collect()
-          .padded_by(super::ignored::padded()),
-      )
-      .then(just(I::Token::CURLY_BRACE_CLOSE).map_with(|_, span| RBrace::new(Spanned::from(span))))
-      .map_with(|((l_brace, fields), r_brace), span| Self {
-        span: Spanned::from(span),
+    let ws = super::ignored::ignored();
+    let open = just(I::Token::CURLY_BRACE_OPEN).map_with(|_, sp| LBrace::new(Spanned::from(sp)));
+    let close = just(I::Token::CURLY_BRACE_CLOSE).map_with(|_, sp| RBrace::new(Spanned::from(sp)));
+    let field = ObjectField::<Value, Src, Span>::parser_with(value.clone()); // has trailing ws
+
+    // '{' ws? ( '}' | field+ '}' )
+    open
+      .then_ignore(ws.clone())
+      .then(choice((
+        // Empty fast path: immediately '}'
+        close.clone().map(|r| (Container::default(), r)),
+        // Non-empty: one-or-more fields; commas are in `ws`
+        field.repeated().at_least(1).collect().then(close.clone()),
+      )))
+      .map_with(|(l_brace, (fields, r_brace)), sp| Self {
+        span: Spanned::from(sp),
         l_brace,
         r_brace,
         fields,
+        _value: core::marker::PhantomData,
       })
   }
 }

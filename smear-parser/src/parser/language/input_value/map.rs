@@ -1,10 +1,10 @@
 use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
+  container::Container, extra::ParserExtra, input::StrInput, label::LabelError, prelude::*,
+  text::TextExpected, util::MaybeRef,
 };
 
 use crate::parser::{
-  punct::{LAngle, RAngle},
+  language::punct::{LAngle, RAngle},
   SmearChar, Spanned,
 };
 
@@ -17,31 +17,20 @@ pub struct MapEntry<T, Src, Span> {
 }
 
 impl<T, Src, Span> MapEntry<T, Src, Span> {
-  /// Returns the span of the entry.
-  #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-
-  /// Returns the span of the colon
-  #[inline]
   pub const fn colon(&self) -> &Spanned<Src, Span> {
     &self.colon
   }
-
-  /// Returns the key of the entry.
-  #[inline]
   pub const fn key(&self) -> &T {
     &self.key
   }
-
-  /// Returns the value of the entry.
-  #[inline]
   pub const fn value(&self) -> &T {
     &self.value
   }
 
-  /// Returns a parser for the field.
+  /// key ':' value  (only **trailing** ignored so repeats stop cleanly at '>')
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
@@ -53,65 +42,54 @@ impl<T, Src, Span> MapEntry<T, Src, Span> {
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
     P: Parser<'src, I, T, E> + Clone,
   {
+    let ws = super::ignored::ignored();
+
     value
       .clone()
       .then(
         just(I::Token::COLON)
-          .map_with(|_, span| Spanned::from(span))
-          .padded_by(super::ignored::padded()),
+          .map_with(|_, sp| Spanned::from(sp))
+          .padded_by(ws.clone()), // padding around ':'
       )
-      .then(value) // <-- use injected value parser
+      .then(value)
       .map_with(|((key, colon), value), sp| Self {
         key,
         colon,
         value,
         span: Spanned::from(sp),
       })
-      .padded_by(super::ignored::padded())
+      .then_ignore(ws) // trailing ignored (incl. commas)
   }
 }
 
-/// Represents an input object value parsed from input
-///
-/// Spec: [Input Object T](https://spec.graphql.org/draft/#sec-Input-Object-T)
 #[derive(Debug, Clone)]
-pub struct Map<T, Src, Span> {
-  /// The original span of the object value
+pub struct Map<T, Src, Span, C = Vec<MapEntry<T, Src, Span>>> {
   span: Spanned<Src, Span>,
-  /// The left `{` token.
   l_angle: LAngle<Spanned<Src, Span>>,
-  /// The right `}` token.
   r_angle: RAngle<Spanned<Src, Span>>,
-  /// The content between the brackets.
-  fields: Vec<MapEntry<T, Src, Span>>,
+  fields: C,
+  _value: core::marker::PhantomData<T>,
 }
 
-impl<T, Src, Span> Map<T, Src, Span> {
-  /// Returns the span of the object value.
-  #[inline]
+impl<T, Src, Span, C> Map<T, Src, Span, C> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-
-  /// Returns the left angle of the object value.
-  #[inline]
   pub const fn l_angle(&self) -> &LAngle<Spanned<Src, Span>> {
     &self.l_angle
   }
-
-  /// Returns the right angle of the object value.
-  #[inline]
   pub const fn r_angle(&self) -> &RAngle<Spanned<Src, Span>> {
     &self.r_angle
   }
-
-  /// Returns the fields of the object value.
-  #[inline]
-  pub const fn fields(&self) -> &[MapEntry<T, Src, Span>] {
-    self.fields.as_slice()
+  pub const fn fields(&self) -> &C {
+    &self.fields
   }
+}
 
-  /// Returns a parser for the object value.
+impl<T, Src, Span, C> Map<T, Src, Span, C>
+where
+  C: Container<MapEntry<T, Src, Span>>,
+{
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
@@ -123,21 +101,34 @@ impl<T, Src, Span> Map<T, Src, Span> {
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
     P: Parser<'src, I, T, E> + Clone,
   {
-    just(I::Token::LESS_THAN)
-      .map_with(|_, span| LAngle::new(Spanned::from(span)))
-      .then(
-        MapEntry::<T, Src, Span>::parser_with(value.clone())
-          .separated_by(just(I::Token::COMMA).padded_by(super::ignored::padded()))
-          .allow_trailing() // `{ a: 1, }` allowed
-          .collect()
-          .padded_by(super::ignored::padded()),
-      )
-      .then(just(I::Token::GREATER_THAN).map_with(|_, span| RAngle::new(Spanned::from(span))))
-      .map_with(|((l_angle, fields), r_angle), span| Self {
-        span: Spanned::from(span),
+    let ws = super::ignored::ignored();
+    let colon = just(I::Token::COLON);
+
+    let open = just(I::Token::LESS_THAN).map_with(|_, sp| LAngle::new(Spanned::from(sp)));
+    let close = just(I::Token::GREATER_THAN).map_with(|_, sp| RAngle::new(Spanned::from(sp)));
+
+    let entry = MapEntry::<T, Src, Span>::parser_with(value);
+
+    open
+      .then_ignore(ws.clone())
+      .then(choice((
+        // Empty sentinel: "<:>"
+        colon
+          .clone()
+          .then_ignore(ws.clone())
+          .then_ignore(just(I::Token::GREATER_THAN).rewind())
+          .map(|_| C::default()),
+        // Non-empty: one-or-more entries; commas live in `ws`
+        entry.repeated().at_least(1).collect::<C>(),
+      )))
+      .then_ignore(ws)
+      .then(close)
+      .map_with(|((l_angle, fields), r_angle), sp| Self {
+        span: Spanned::from(sp),
         l_angle,
         r_angle,
         fields,
+        _value: core::marker::PhantomData,
       })
   }
 }

@@ -54,6 +54,6 @@ impl<Src, Span> Boolean<Src, Span> {
         span: Spanned::from(span),
         value: data,
       })
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

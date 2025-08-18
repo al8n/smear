@@ -181,6 +181,6 @@ impl<Src, Span> Float<Src, Span> {
             exponent: Some(exp),
           }),
       )
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

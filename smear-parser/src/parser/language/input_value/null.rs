@@ -34,6 +34,6 @@ impl<Src, Span> Null<Src, Span> {
       .map_with(|_, span| Null {
         span: Spanned::from(span),
       })
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

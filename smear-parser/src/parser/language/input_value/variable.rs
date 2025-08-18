@@ -57,6 +57,6 @@ impl<Src, Span> Variable<Src, Span> {
         span: Spanned::from(sp),
         dollar,
       })
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
   }
 }

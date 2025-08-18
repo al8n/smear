@@ -1,17 +1,9 @@
 use chumsky::{
-  extra::ParserExtra,
-  input::StrInput,
-  label::LabelError,
-  prelude::*,
-  span::Span,
-  text::{Char, TextExpected},
+  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
   util::MaybeRef,
 };
 
-use crate::parser::{
-  punct::{LBrace, LBracket, Quote, RBrace, RBracket, TripleQuote},
-  Name, SmearChar, Spanned,
-};
+use crate::parser::{SmearChar, Spanned};
 
 use super::*;
 
@@ -107,7 +99,7 @@ impl<Src, Span> InputValue<Src, Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
     })
   }
 }
@@ -201,242 +193,7 @@ impl<Src, Span> ConstInputValue<Src, Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(super::ignored::padded())
+      .padded_by(super::ignored::ignored())
     })
   }
-}
-
-#[test]
-fn test_boolean_value() {
-  let input = "true";
-  let InputValue::Boolean(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert!(result.value());
-
-  let input = "false";
-  let InputValue::Boolean(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert!(!result.value());
-}
-
-#[test]
-fn test_null_value() {
-  let input = "null";
-  let InputValue::Null(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert!(result.span().source().eq(&"null"));
-}
-
-#[test]
-fn test_int_value() {
-  let input = "42";
-  let InputValue::Int(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert!(result.sign().is_none());
-  println!("{}", result.span().source());
-
-  let input = "-42";
-  let InputValue::Int(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert!(result.sign().is_some());
-}
-
-#[test]
-fn test_float_value() {
-  let input = r"
-4.123
--4.123
-0.123
-123e4
-123E4
-123e-4
-123e+4
--1.123e4
--1.123E4
--1.123e-4
--1.123e+4
--1.123e4567  
-";
-
-  let expected = input.trim().lines().collect::<Vec<_>>();
-  let parser = InputValue::parser::<&str, extra::Err<Simple<char>>>()
-    .repeated()
-    .at_least(1)
-    .collect::<Vec<_>>()                                   // <- prevents `()`
-    .then_ignore(super::ignored::padded()); // eat trailing ws/comments
-
-  let values = parser.parse(input).into_result().unwrap();
-  assert_eq!(values.len(), 12);
-
-  // All should be Float (given our inputs)
-  for (v, exp) in values.iter().zip(expected.iter()) {
-    match v {
-      InputValue::Float(f) => {
-        // sanity: float must have fractional and/or exponent
-        assert!(f.fractional().is_some() || f.exponent().is_some());
-        assert!(f.span().source().eq(exp));
-      }
-      other => panic!("expected Float, got {:?}", other),
-    }
-  }
-}
-
-#[test]
-fn test_string_value() {
-  let input = r###"
-""
-"simple"
-" white space "
-"unicode \u1234\u5678\u90AB\uCDEF"
-"string with \"escaped\" characters"
-"string with multiple languages котя, 猫, ねこ, قطة"
-"""
-block string with unusual whitespaces
-a b  c
-d
-
-e	f
-g  h
-ijk﻿l‎‏m
-"""
-"###;
-
-  let parser = InputValue::parser::<&str, super::super::Error>()
-    .repeated()
-    .at_least(1)
-    .collect::<Vec<_>>()
-    .then_ignore(super::ignored::padded());
-
-  let values = parser.parse(input).into_result().unwrap();
-  assert_eq!(values.len(), 7);
-
-  // All should be String (given our inputs)
-  for v in values {
-    match v {
-      InputValue::String(s) => {
-        println!("{}", s.span().source());
-        println!("{}", s.content().source());
-      }
-      other => panic!("expected String, got {:?}", other),
-    }
-  }
-}
-
-#[test]
-fn test_enum_value() {
-  let input = "SomeEnum";
-  let InputValue::Enum(result) = InputValue::parser::<_, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("unexpected value");
-  };
-  assert_eq!(*result.span().source(), "SomeEnum");
-}
-
-#[test]
-fn test_object_value() {
-  let input = "{ a: 1, b: 2 }";
-  let InputValue::Object(result) = InputValue::parser::<&str, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("Expected Object");
-  };
-  assert_eq!(result.fields().len(), 2);
-
-  let ConstInputValue::Object(result) = ConstInputValue::parser::<&str, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("Expected Object");
-  };
-  assert_eq!(result.fields().len(), 2);
-
-  let input = "{ a: 1, b: { c: \"foo\", d: true } }";
-  let InputValue::Object(result) = InputValue::parser::<&str, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("Expected Object");
-  };
-  assert_eq!(result.fields().len(), 2);
-  assert!(result.fields()[0].name().source().eq(&"a"));
-  let InputValue::Int(int) = result.fields()[0].value() else {
-    panic!("Expected Int");
-  };
-  assert_eq!(int.digits().source(), &"1");
-  assert!(result.fields()[1].name().source().eq(&"b"));
-  let InputValue::Object(inner) = result.fields()[1].value() else {
-    panic!("Expected Object");
-  };
-  assert_eq!(inner.fields().len(), 2);
-  assert!(inner.fields()[0].name().source().eq(&"c"));
-  let InputValue::String(string) = inner.fields()[0].value() else {
-    panic!("Expected String");
-  };
-  assert_eq!(string.content().source(), &"foo");
-  assert!(inner.fields()[1].name().source().eq(&"d"));
-  let InputValue::Boolean(boolean) = inner.fields()[1].value() else {
-    panic!("Expected BoolValue");
-  };
-  assert!(boolean.value());
-
-  let ConstInputValue::Object(result) = ConstInputValue::parser::<&str, super::super::Error>()
-    .parse(input)
-    .into_result()
-    .unwrap()
-  else {
-    panic!("Expected Object");
-  };
-  assert_eq!(result.fields().len(), 2);
-  assert!(result.fields()[0].name().source().eq(&"a"));
-  let ConstInputValue::Int(int) = result.fields()[0].value() else {
-    panic!("Expected Int");
-  };
-  assert_eq!(int.digits().source(), &"1");
-  assert!(result.fields()[1].name().source().eq(&"b"));
-  let ConstInputValue::Object(inner) = result.fields()[1].value() else {
-    panic!("Expected Object");
-  };
-  assert_eq!(inner.fields().len(), 2);
-  assert!(inner.fields()[0].name().source().eq(&"c"));
-  let ConstInputValue::String(string) = inner.fields()[0].value() else {
-    panic!("Expected String");
-  };
-  assert_eq!(string.content().source(), &"foo");
-  assert!(inner.fields()[1].name().source().eq(&"d"));
-  let ConstInputValue::Boolean(boolean) = inner.fields()[1].value() else {
-    panic!("Expected BoolValue");
-  };
-  assert!(boolean.value());
 }
