@@ -8,6 +8,8 @@ use crate::parser::{
   Name, SmearChar, Spanned,
 };
 
+use std::vec::Vec;
+
 #[derive(Debug, Clone)]
 pub struct Argument<Value, Src, Span> {
   span: Spanned<Src, Span>,
@@ -29,10 +31,10 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
     &self.colon
   }
 
-  /// Returns the name of the argument.
+  /// Returns the span of the argument name
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
-    &self.name
+  pub const fn name(&self) -> &Spanned<Src, Span> {
+    self.name.span()
   }
 
   /// Returns the value of the argument.
@@ -73,15 +75,15 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Arguments<Value, Src, Span, Container = std::vec::Vec<Argument<Value, Src, Span>>> {
+pub struct Arguments<Arg, Src, Span, Container = Vec<Arg>> {
   span: Spanned<Src, Span>,
   l_paren: LParen<Spanned<Src, Span>>,
   arguments: Container,
   r_paren: RParen<Spanned<Src, Span>>,
-  _value: core::marker::PhantomData<Value>,
+  _arg: core::marker::PhantomData<Arg>,
 }
 
-impl<Value, Src, Span, Container> Arguments<Value, Src, Span, Container> {
+impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container> {
   /// Returns the span of the arguments.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -94,16 +96,22 @@ impl<Value, Src, Span, Container> Arguments<Value, Src, Span, Container> {
     &self.l_paren
   }
 
+  /// Returns the right parenthesis of the arguments.
+  #[inline]
+  pub const fn r_paren(&self) -> &RParen<Spanned<Src, Span>> {
+    &self.r_paren
+  }
+
   /// Returns the arguments.
   #[inline]
   pub const fn arguments(&self) -> &Container {
     &self.arguments
   }
 
-  /// Returns the right parenthesis of the arguments.
+  /// Consumes the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Spanned<Src, Span>> {
-    &self.r_paren
+  pub fn into_arguments(self) -> Container {
+    self.arguments
   }
 }
 
@@ -118,12 +126,12 @@ where
   }
 }
 
-impl<Value, Src, Span, Container> Arguments<Value, Src, Span, Container>
+impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container>
 where
-  Container: chumsky::container::Container<Argument<Value, Src, Span>>,
+  Container: chumsky::container::Container<Arg>,
 {
   /// Returns a parser to parse arguments.
-  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(arg: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
@@ -132,25 +140,23 @@ where
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
-    P: Parser<'src, I, Value, E> + Clone,
+    P: Parser<'src, I, Arg, E> + Clone,
   {
     let ws = super::ignored::ignored();
     let open = just(I::Token::PAREN_OPEN).map_with(|_, sp| LParen::new(Spanned::from(sp)));
     let close = just(I::Token::PAREN_CLOSE).map_with(|_, sp| RParen::new(Spanned::from(sp)));
 
-    let arg = Argument::<Value, Src, Span>::parser_with(value);
-
     // '(' ws? arg+ ')'
     open
-      .then_ignore(ws.clone())                           // allow ignored right after '('
+      .then_ignore(ws.clone())
       .then(arg.repeated().at_least(1).collect())
-      .then(close)                                       // no extra ws needed; arg ate trailing ws
+      .then(close)
       .map_with(|((l_paren, arguments), r_paren), sp| Self {
         span: Spanned::from(sp),
         l_paren,
         arguments,
         r_paren,
-        _value: core::marker::PhantomData,
+        _arg: core::marker::PhantomData,
       })
   }
 }

@@ -8,6 +8,9 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
+/// The GraphQL parsers
+pub mod graphql;
+
 /// The parser
 pub mod parser;
 mod utils;

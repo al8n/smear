@@ -10,5 +10,8 @@ pub mod arguments;
 /// Directives types and parsers
 pub mod directives;
 
+/// Field types and parsers
+pub mod field;
+
 /// The punctuators
 pub mod punct;

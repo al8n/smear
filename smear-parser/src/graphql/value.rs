@@ -3,9 +3,19 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{
+  language::{
+    ignored::ignored,
+    input_value::{self, *},
+  },
+  SmearChar, Spanned,
+};
 
-use super::*;
+pub type List<Src, Span> = input_value::List<InputValue<Src, Span>, Src, Span>;
+pub type ConstList<Src, Span> = input_value::List<ConstInputValue<Src, Span>, Src, Span>;
+
+pub type Object<Src, Span> = input_value::Object<InputValue<Src, Span>, Src, Span>;
+pub type ConstObject<Src, Span> = input_value::Object<ConstInputValue<Src, Span>, Src, Span>;
 
 /// Input value
 ///
@@ -41,9 +51,9 @@ pub enum InputValue<Src, Span> {
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
   Enum(Enum<Src, Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(List<Self, Src, Span>),
+  List(List<Src, Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
-  Object(Object<Self, Src, Span>),
+  Object(Object<Src, Span>),
 }
 
 impl<Src, Span> InputValue<Src, Span> {
@@ -99,7 +109,7 @@ impl<Src, Span> InputValue<Src, Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(super::ignored::ignored())
+      .padded_by(ignored())
     })
   }
 }
@@ -136,9 +146,9 @@ pub enum ConstInputValue<Src, Span> {
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
   Enum(Enum<Src, Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(List<Self, Src, Span>),
+  List(ConstList<Src, Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
-  Object(Object<Self, Src, Span>),
+  Object(ConstObject<Src, Span>),
 }
 
 impl<Src, Span> ConstInputValue<Src, Span> {
@@ -180,8 +190,9 @@ impl<Src, Span> ConstInputValue<Src, Span> {
       let enum_value_parser = Enum::parser::<I, E>().map(|v| Self::Enum(v));
 
       let object_value_parser =
-        Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+        ConstObject::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
+      let list_value_parser =
+        ConstList::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
 
       choice((
         boolean_value_parser,
@@ -193,7 +204,7 @@ impl<Src, Span> ConstInputValue<Src, Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(super::ignored::ignored())
+      .padded_by(ignored())
     })
   }
 }

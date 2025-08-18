@@ -1,8 +1,5 @@
 use super::ignored;
 
-/// GraphQL input value and const input value parsers
-pub mod graphql;
-
 /// Groto input value and const input value parsers
 pub mod groto;
 
