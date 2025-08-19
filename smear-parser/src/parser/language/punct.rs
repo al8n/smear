@@ -1,19 +1,18 @@
+use crate::parser::{SmearChar, Spanned};
+
+use chumsky::{
+  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
+  util::MaybeRef,
+};
+
 macro_rules! punct {
-  ($token_name:ident:$token:literal) => {
+  ($token_name:ident:$token:literal:$tokens: expr) => {
     paste::paste! {
       #[doc = "The `" $token "`" " punctuator."]
-      #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-      pub struct [< $token_name:upper:camel >]<S> {
-        span: S,
-      }
+      #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+      pub struct [< $token_name:upper:camel >]<Src, Span>(Spanned<Src, Span>);
 
-      impl<S> [< $token_name:upper:camel >]<S> {
-        #[doc = "Creates a new " $token_name " punctuator."]
-        #[inline]
-        pub const fn new(span: S) -> Self {
-          Self { span }
-        }
-
+      impl<Src, Span> [< $token_name:upper:camel >]<Src, Span> {
         /// Returns the raw string literal of the punctuator.
         #[inline]
         pub const fn raw() -> &'static str {
@@ -22,77 +21,47 @@ macro_rules! punct {
 
         #[doc = "Returns the span of the " $token_name " punctuator."]
         #[inline]
-        pub const fn span(&self) -> &S {
-          &self.span
+        pub const fn span(&self) -> &Spanned<Src, Span> {
+          &self.0
+        }
+
+        /// Returns the parser.
+        pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+        where
+          I: StrInput<'src, Slice = Src, Span = Span>,
+          I::Token: SmearChar + 'src,
+          E: ParserExtra<'src, I>,
+          E::Error:
+            LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+        {
+          just($tokens)
+            .map_with(|_, sp| Self(Spanned::from(sp)))
         }
       }
     }
   };
 }
 
-punct!(bang: "!");
-punct!(dollar: "$");
-punct!(ampersand: "&");
-punct!(l_paren: "(");
-punct!(r_paren: ")");
-punct!(ellipsis: "...");
-punct!(colon: ":");
-punct!(equal: "=");
-punct!(at: "@");
-punct!(l_bracket: "[");
-punct!(r_bracket: "]");
-punct!(l_brace: "{");
-punct!(pipe: "|");
-punct!(r_brace: "}");
+punct!(bang: "!": I::Token::EXCLAMATION);
+punct!(dollar: "$": I::Token::DOLLAR);
+punct!(ampersand: "&": I::Token::AMPERSAND);
+punct!(l_paren: "(": I::Token::PAREN_OPEN);
+punct!(r_paren: ")": I::Token::PAREN_CLOSE);
+punct!(ellipsis: "...": [I::Token::DOT, I::Token::DOT, I::Token::DOT]);
+punct!(colon: ":": I::Token::COLON);
+punct!(equal: "=": I::Token::EQUAL);
+punct!(at: "@": I::Token::AT);
+punct!(l_bracket: "[": I::Token::BRACKET_OPEN);
+punct!(r_bracket: "]": I::Token::BRACKET_CLOSE);
+punct!(l_brace: "{": I::Token::CURLY_BRACE_OPEN);
+punct!(pipe: "|": I::Token::VERTICAL_BAR);
+punct!(r_brace: "}": I::Token::CURLY_BRACE_CLOSE);
 
-punct!(l_angle: "<");
-punct!(r_angle: ">");
+punct!(l_angle: "<": I::Token::LESS_THAN);
+punct!(r_angle: ">": I::Token::GREATER_THAN);
 
-punct!(triple_quote: "\"\"\"");
-punct!(quote: "\"");
-
-/// Punctuator
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Punctuator<S> {
-  /// The exclamation mark `!`
-  Bang(Bang<S>),
-  /// The dollar sign `$`
-  Dollar(Dollar<S>),
-  /// The ampersand `&`
-  Ampersand(Ampersand<S>),
-  /// The left parenthesis `(`
-  LParen(LParen<S>),
-  /// The right parenthesis `)`
-  RParen(RParen<S>),
-  /// The ellipsis `...`
-  Ellipsis(Ellipsis<S>),
-  /// The colon `:`
-  Colon(Colon<S>),
-  /// The equal sign `=`
-  Equal(Equal<S>),
-  /// The at sign `@`
-  At(At<S>),
-  /// The left bracket `[`
-  LBracket(LBracket<S>),
-  /// The right bracket `]`
-  RBracket(RBracket<S>),
-  /// The left brace `{`
-  LBrace(LBrace<S>),
-  /// The pipe `|`
-  Pipe(Pipe<S>),
-  /// The right brace `}`
-  RBrace(RBrace<S>),
-
-  /// The left angle bracket `<`
-  LAngle(LAngle<S>),
-  /// The right angle bracket `>`
-  RAngle(RAngle<S>),
-  /// The triple quote `"""``
-  TripleQuote(TripleQuote<S>),
-  /// The quote `"`
-  Quote(Quote<S>),
-}
+punct!(triple_quote: "\"\"\"": [I::Token::QUOTATION, I::Token::QUOTATION, I::Token::QUOTATION]);
+punct!(quote: "\"": I::Token::QUOTATION);
 
 #[test]
 fn t() {}

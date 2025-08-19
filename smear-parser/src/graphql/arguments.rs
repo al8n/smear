@@ -114,13 +114,13 @@ impl<Src, Span> Arguments<Src, Span> {
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Spanned<Src, Span>> {
+  pub const fn l_paren(&self) -> &LParen<Src, Span> {
     self.0.l_paren()
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Spanned<Src, Span>> {
+  pub const fn r_paren(&self) -> &RParen<Src, Span> {
     self.0.r_paren()
   }
 
@@ -164,13 +164,13 @@ impl<Src, Span> ConstArguments<Src, Span> {
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Spanned<Src, Span>> {
+  pub const fn l_paren(&self) -> &LParen<Src, Span> {
     self.0.l_paren()
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Spanned<Src, Span>> {
+  pub const fn r_paren(&self) -> &RParen<Src, Span> {
     self.0.r_paren()
   }
 

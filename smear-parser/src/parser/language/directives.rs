@@ -3,17 +3,14 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{
-  language::punct::At,
-  Name, SmearChar, Spanned,
-};
+use crate::parser::{language::punct::At, Name, SmearChar, Spanned};
 
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
 pub struct Directive<Args, Src, Span> {
   span: Spanned<Src, Span>,
-  at: At<Spanned<Src, Span>>,
+  at: At<Src, Span>,
   name: Name<Src, Span>,
   arguments: Option<Args>,
 }
@@ -24,7 +21,7 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
     &self.span
   }
   #[inline]
-  pub const fn at(&self) -> &At<Spanned<Src, Span>> {
+  pub const fn at(&self) -> &At<Src, Span> {
     &self.at
   }
   #[inline]
@@ -56,12 +53,10 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
     P: Parser<'src, I, Args, E> + Clone,
   {
     let ws = super::ignored::ignored();
-
-    let at_tok = just(I::Token::AT).map_with(|_, sp| At::new(Spanned::from(sp)));
     let name = Name::<Src, Span>::parser();
     let args = args.or_not();
 
-    at_tok
+    At::parser()
       .then_ignore(ws.clone())     // allow ignored between '@' and the name
       .then(name)
       .then_ignore(ws.clone())     // allow ignored before optional '('

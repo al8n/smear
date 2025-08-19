@@ -25,7 +25,7 @@ impl<Src, Span> FragmentSpread<Src, Span> {
   pub const fn name(&self) -> &Spanned<Src, Span> {
     self.0.name()
   }
-  pub const fn ellipsis(&self) -> &Ellipsis<Spanned<Src, Span>> {
+  pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
     self.0.ellipsis()
   }
   pub const fn directives(&self) -> Option<&Directives<Src, Span>> {
@@ -58,7 +58,7 @@ impl<Src, Span> InlineFragment<Src, Span> {
   }
 
   #[inline]
-  pub const fn ellipsis(&self) -> &Ellipsis<Spanned<Src, Span>> {
+  pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
     self.0.ellipsis()
   }
 
@@ -208,12 +208,12 @@ impl<Src, Span> SelectionSet<Src, Span> {
   }
 
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Spanned<Src, Span>> {
+  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
     self.0.l_brace()
   }
 
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Spanned<Src, Span>> {
+  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
     self.0.r_brace()
   }
 

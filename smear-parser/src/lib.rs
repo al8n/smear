@@ -15,6 +15,13 @@ pub mod graphql;
 pub mod parser;
 mod utils;
 
+#[doc(hidden)]
+pub mod __private {
+  pub use chumsky;
+
+  pub use crate::parser::{SmearChar, Spanned};
+}
+
 #[cfg(all(feature = "std", test))]
 mod tests;
 

@@ -77,9 +77,9 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
 #[derive(Debug, Clone)]
 pub struct Arguments<Arg, Src, Span, Container = Vec<Arg>> {
   span: Spanned<Src, Span>,
-  l_paren: LParen<Spanned<Src, Span>>,
+  l_paren: LParen<Src, Span>,
   arguments: Container,
-  r_paren: RParen<Spanned<Src, Span>>,
+  r_paren: RParen<Src, Span>,
   _arg: core::marker::PhantomData<Arg>,
 }
 
@@ -92,13 +92,13 @@ impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container> {
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Spanned<Src, Span>> {
+  pub const fn l_paren(&self) -> &LParen<Src, Span> {
     &self.l_paren
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Spanned<Src, Span>> {
+  pub const fn r_paren(&self) -> &RParen<Src, Span> {
     &self.r_paren
   }
 
@@ -143,8 +143,8 @@ where
     P: Parser<'src, I, Arg, E> + Clone,
   {
     let ws = super::ignored::ignored();
-    let open = just(I::Token::PAREN_OPEN).map_with(|_, sp| LParen::new(Spanned::from(sp)));
-    let close = just(I::Token::PAREN_CLOSE).map_with(|_, sp| RParen::new(Spanned::from(sp)));
+    let open = LParen::parser();
+    let close = RParen::parser();
 
     // '(' ws? arg+ ')'
     open

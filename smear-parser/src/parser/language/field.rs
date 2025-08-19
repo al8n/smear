@@ -14,18 +14,18 @@ use crate::parser::{
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-/// Helper: parse '...' as either a dedicated ELLIPSIS token or three DOTs.
-fn ellipsis<'src, I, E>() -> impl Parser<'src, I, Ellipsis<Spanned<I::Slice, I::Span>>, E> + Clone
-where
-  I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
-  E: ParserExtra<'src, I>,
-  E::Error:
-    LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
-{
-  just([I::Token::DOT, I::Token::DOT, I::Token::DOT])
-    .map_with(|_, sp| Ellipsis::new(Spanned::from(sp)))
-}
+// /// Helper: parse '...' as either a dedicated ELLIPSIS token or three DOTs.
+// fn ellipsis<'src, I, E>() -> impl Parser<'src, I, Ellipsis<Spanned<I::Slice, I::Span>>, E> + Clone
+// where
+//   I: StrInput<'src>,
+//   I::Token: SmearChar + 'src,
+//   E: ParserExtra<'src, I>,
+//   E::Error:
+//     LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+// {
+//   just([I::Token::DOT, I::Token::DOT, I::Token::DOT])
+//     .map_with(|_, sp| Ellipsis::new(Spanned::from(sp)))
+// }
 
 // WHITESPACE+ per your pest rule (space/tabs; tweak if you allow more)
 fn ws_plus<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
@@ -88,7 +88,7 @@ impl<Src, Span> TypeCondition<Src, Span> {
 #[derive(Debug, Clone)]
 pub struct FragmentSpread<Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  ellipsis: Ellipsis<Spanned<Src, Span>>,
+  ellipsis: Ellipsis<Src, Span>,
   name: Name<Src, Span>,
   directives: Option<Directives>,
 }
@@ -100,7 +100,7 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
   pub const fn name(&self) -> &Spanned<Src, Span> {
     self.name.span()
   }
-  pub const fn ellipsis(&self) -> &Ellipsis<Spanned<Src, Span>> {
+  pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
     &self.ellipsis
   }
   pub const fn directives(&self) -> Option<&Directives> {
@@ -127,7 +127,7 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
       .not()
       .ignored();
 
-    ellipsis::<I, E>()
+    Ellipsis::parser()
       .then_ignore(ws.clone())
       .then_ignore(not_type_condition)
       .then(Name::<Src, Span>::parser())
@@ -146,7 +146,7 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
 #[derive(Debug, Clone)]
 pub struct InlineFragment<SelectionSet, Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  ellipsis: Ellipsis<Spanned<Src, Span>>,
+  ellipsis: Ellipsis<Src, Span>,
   type_condition: Option<TypeCondition<Src, Span>>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
@@ -159,7 +159,7 @@ impl<SelectionSet, Directives, Src, Span> InlineFragment<SelectionSet, Directive
   }
 
   #[inline]
-  pub const fn ellipsis(&self) -> &Ellipsis<Spanned<Src, Span>> {
+  pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
     &self.ellipsis
   }
 
@@ -195,7 +195,7 @@ impl<SelectionSet, Directives, Src, Span> InlineFragment<SelectionSet, Directive
   {
     let ws = super::ignored::ignored();
 
-    ellipsis::<I, E>()
+    Ellipsis::parser()
       .then_ignore(ws.clone())
       .then(TypeCondition::<Src, Span>::parser().or_not())
       .then_ignore(ws.clone())
@@ -269,9 +269,9 @@ impl<Src, Span> Alias<Src, Span> {
 #[derive(Debug, Clone)]
 pub struct SelectionSet<S, Src, Span, Container = Vec<S>> {
   span: Spanned<Src, Span>,
-  l_brace: LBrace<Spanned<Src, Span>>,
+  l_brace: LBrace<Src, Span>,
   selections: Container,
-  r_brace: RBrace<Spanned<Src, Span>>,
+  r_brace: RBrace<Src, Span>,
   _marker: PhantomData<S>,
 }
 
@@ -284,7 +284,7 @@ impl<S, Src, Span, Container> SelectionSet<S, Src, Span, Container> {
 
   /// Returns the left brace of the selection set.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Spanned<Src, Span>> {
+  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
     &self.l_brace
   }
 
@@ -302,7 +302,7 @@ impl<S, Src, Span, Container> SelectionSet<S, Src, Span, Container> {
 
   /// Returns the right brace of the selection set.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Spanned<Src, Span>> {
+  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
     &self.r_brace
   }
 }
@@ -324,8 +324,8 @@ where
     PS: Parser<'src, I, S, E> + Clone,
   {
     let ws = super::ignored::ignored();
-    let open = just(I::Token::CURLY_BRACE_OPEN).map_with(|_, sp| LBrace::new(Spanned::from(sp)));
-    let close = just(I::Token::CURLY_BRACE_CLOSE).map_with(|_, sp| RBrace::new(Spanned::from(sp)));
+    let open = LBrace::parser();
+    let close = RBrace::parser();
 
     open
       .then_ignore(ws.clone())
@@ -436,4 +436,3 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
       .then_ignore(ws)
   }
 }
-

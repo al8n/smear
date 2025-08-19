@@ -21,7 +21,7 @@ impl<Src, Span> Directive<Src, Span> {
     self.0.span()
   }
   #[inline]
-  pub const fn at(&self) -> &At<Spanned<Src, Span>> {
+  pub const fn at(&self) -> &At<Src, Span> {
     self.0.at()
   }
   #[inline]
@@ -64,7 +64,7 @@ impl<Src, Span> ConstDirective<Src, Span> {
     self.0.span()
   }
   #[inline]
-  pub const fn at(&self) -> &At<Spanned<Src, Span>> {
+  pub const fn at(&self) -> &At<Src, Span> {
     self.0.at()
   }
   #[inline]

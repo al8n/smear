@@ -23,18 +23,18 @@ pub enum StringDelimiter<Src, Span> {
   /// Spec: <https://spec.graphql.org/draft/#BlockString>
   TripleQuote {
     /// The opening `"""`.
-    l_triple_quote: TripleQuote<Spanned<Src, Span>>,
+    l_triple_quote: TripleQuote<Src, Span>,
     /// The closing `"""`.
-    r_triple_quote: TripleQuote<Spanned<Src, Span>>,
+    r_triple_quote: TripleQuote<Src, Span>,
   },
   /// Single-quoted **string**: `"`
   ///
   /// Spec: <https://spec.graphql.org/draft/#String>
   Quote {
     /// The opening `"`.
-    l_quote: Quote<Spanned<Src, Span>>,
+    l_quote: Quote<Src, Span>,
     /// The closing `"`.
-    r_quote: Quote<Spanned<Src, Span>>,
+    r_quote: Quote<Src, Span>,
   },
 }
 
@@ -103,13 +103,10 @@ impl<Src, Span> String<Src, Span> {
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
   {
-    let quote = just(I::Token::QUOTATION).map_with(|_, sp| Quote::new(Spanned::from(sp)));
+    let quote = Quote::parser();
 
     // `"""` → TripleQuote<S>
-    let triple_quote = just(I::Token::QUOTATION)
-      .then(just(I::Token::QUOTATION))
-      .then(just(I::Token::QUOTATION))
-      .map_with(|_, sp| TripleQuote::new(Spanned::from(sp)));
+    let triple_quote = TripleQuote::parser();
 
     // \uXXXX (exactly 4 hex digits)
     let hex_digit = one_of([
@@ -217,21 +214,22 @@ impl<Src, Span> String<Src, Span> {
     let block_content_span = block_piece.repeated().map_with(|_, sp| Spanned::from(sp));
 
     // " ... "
-    let inline_string =
-      quote
-        .then(inline_content_span)
-        .then(quote)
-        .map_with(|((lq, content), rq), sp| String {
-          span: Spanned::from(sp),
-          delimiters: StringDelimiter::Quote {
-            l_quote: lq,
-            r_quote: rq,
-          },
-          content,
-        });
+    let inline_string = quote
+      .clone()
+      .then(inline_content_span)
+      .then(quote)
+      .map_with(|((lq, content), rq), sp| String {
+        span: Spanned::from(sp),
+        delimiters: StringDelimiter::Quote {
+          l_quote: lq,
+          r_quote: rq,
+        },
+        content,
+      });
 
     // """ ... """
     let block_string = triple_quote
+      .clone()
       .then(block_content_span)
       .then(triple_quote)
       .map_with(|((ltq, content), rtq), sp| String {

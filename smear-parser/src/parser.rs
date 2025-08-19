@@ -1,15 +1,60 @@
 use chumsky::{extra::ParserExtra, input::SliceInput, text::Char};
 
+macro_rules! word {
+  ($(
+    $(#[$meta:meta])*
+    $name:ident: $expr:expr
+  ),+$(,)?) => {
+    $(
+      $(#[$meta])*
+      #[derive(Debug, Clone, Copy)]
+      pub struct $name<Src, Span>($crate::__private::Spanned<Src, Span>);
+
+      impl<Src, Span> $name<Src, Span> {
+        /// Returns the span
+        #[inline]
+        pub const fn span(&self) -> &$crate::__private::Spanned<Src, Span> {
+          &self.0
+        }
+
+        /// Returns the parser.
+        pub fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
+        where
+          I: $crate::__private::chumsky::input::StrInput<'src, Slice = Src, Span = Span>,
+          I::Token: $crate::__private::SmearChar + 'src,
+          E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+          E::Error:
+            $crate::__private::chumsky::label::LabelError<'src, I, $crate::__private::chumsky::text::TextExpected<'src, I>>
+            + $crate::__private::chumsky::label::LabelError<'src, I, $crate::__private::chumsky::util::MaybeRef<'src, I::Token>>,
+        {
+          use ::core::convert::From;
+          use $crate::__private::{SmearChar as _, chumsky::Parser as _};
+
+          $crate::__private::chumsky::prelude::just($expr)
+            .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
+        }
+      }
+    )*
+  };
+}
+
 pub use name::Name;
+pub use operation_type::OperationType;
 
 /// Language constructs
 pub mod language;
 
+/// Definations parsers
+pub mod definitions;
+
+/// The common keywords
+pub mod keywords;
+
+mod operation_type;
+
 mod name;
 
 type Error<'a> = chumsky::extra::Err<chumsky::prelude::Rich<'a, char>>;
-
-pub type DefaultContainer<T> = std::vec::Vec<T>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Spanned<Src, Span> {

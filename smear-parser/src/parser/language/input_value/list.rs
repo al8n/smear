@@ -16,9 +16,9 @@ pub struct List<Value, Src, Span, Container = std::vec::Vec<Value>> {
   /// The original span of the list value
   span: Spanned<Src, Span>,
   /// The left `[` token.
-  l_bracket: LBracket<Spanned<Src, Span>>,
+  l_bracket: LBracket<Src, Span>,
   /// The right `]` token.
-  r_bracket: RBracket<Spanned<Src, Span>>,
+  r_bracket: RBracket<Src, Span>,
   /// The content between the brackets.
   ///
   /// Instead of parsing the list entirely, we keep the raw string representation.
@@ -37,13 +37,13 @@ impl<Value, Src, Span, Container> List<Value, Src, Span, Container> {
 
   /// Returns the left bracket of the list value.
   #[inline]
-  pub const fn l_bracket(&self) -> &LBracket<Spanned<Src, Span>> {
+  pub const fn l_bracket(&self) -> &LBracket<Src, Span> {
     &self.l_bracket
   }
 
   /// Returns the right bracket of the list value.
   #[inline]
-  pub const fn r_bracket(&self) -> &RBracket<Spanned<Src, Span>> {
+  pub const fn r_bracket(&self) -> &RBracket<Src, Span> {
     &self.r_bracket
   }
 
@@ -68,8 +68,8 @@ impl<Value, Src, Span, Container> List<Value, Src, Span, Container> {
     let ws = super::ignored::ignored();
 
     // Keep bracket token spans precise; don't pad the tokens themselves.
-    let open = just(I::Token::BRACKET_OPEN).map_with(|_, sp| LBracket::new(Spanned::from(sp)));
-    let close = just(I::Token::BRACKET_CLOSE).map_with(|_, sp| RBracket::new(Spanned::from(sp)));
+    let open = LBracket::parser();
+    let close = RBracket::parser();
 
     // Each element owns only *trailing* ignored (incl. commas).
     let elem = value.clone().then_ignore(ws.clone());

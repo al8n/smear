@@ -1,5 +1,5 @@
 use crate::parser::{
-  language::punct::{LBrace, RBrace},
+  language::punct::{Colon, LBrace, RBrace},
   Name, SmearChar, Spanned,
 };
 use chumsky::{
@@ -11,7 +11,7 @@ use chumsky::{
 pub struct ObjectField<Value, Src, Span> {
   span: Spanned<Src, Span>,
   name: Name<Src, Span>,
-  colon: Spanned<Src, Span>,
+  colon: Colon<Src, Span>,
   value: Value,
 }
 
@@ -21,7 +21,7 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
     &self.span
   }
   #[inline]
-  pub const fn colon(&self) -> &Spanned<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Src, Span> {
     &self.colon
   }
   #[inline]
@@ -49,9 +49,7 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
 
     Name::<Src, Span>::parser()
       .then(
-        just(I::Token::COLON)
-          .map_with(|_, sp| Spanned::from(sp))
-          .padded_by(ws.clone()), // padding *around* ':'
+        Colon::parser().padded_by(ws.clone()), // padding *around* ':'
       )
       .then(value)
       .map_with(|((name, colon), value), sp| Self {
@@ -68,8 +66,8 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
 #[derive(Debug, Clone)]
 pub struct Object<Value, Src, Span, Container = std::vec::Vec<ObjectField<Value, Src, Span>>> {
   span: Spanned<Src, Span>,
-  l_brace: LBrace<Spanned<Src, Span>>,
-  r_brace: RBrace<Spanned<Src, Span>>,
+  l_brace: LBrace<Src, Span>,
+  r_brace: RBrace<Src, Span>,
   fields: Container,
   _value: core::marker::PhantomData<Value>,
 }
@@ -80,11 +78,11 @@ impl<Value, Src, Span, Container> Object<Value, Src, Span, Container> {
     &self.span
   }
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Spanned<Src, Span>> {
+  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
     &self.l_brace
   }
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Spanned<Src, Span>> {
+  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
     &self.r_brace
   }
   #[inline]
@@ -109,8 +107,8 @@ where
     P: Parser<'src, I, Value, E> + Clone,
   {
     let ws = super::ignored::ignored();
-    let open = just(I::Token::CURLY_BRACE_OPEN).map_with(|_, sp| LBrace::new(Spanned::from(sp)));
-    let close = just(I::Token::CURLY_BRACE_CLOSE).map_with(|_, sp| RBrace::new(Spanned::from(sp)));
+    let open = LBrace::parser();
+    let close = RBrace::parser();
     let field = ObjectField::<Value, Src, Span>::parser_with(value.clone()); // has trailing ws
 
     // '{' ws? ( '}' | field+ '}' )

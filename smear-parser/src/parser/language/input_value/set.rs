@@ -11,8 +11,8 @@ use crate::parser::{
 #[derive(Debug, Clone)]
 pub struct Set<T, Src, Span, C = Vec<T>> {
   span: Spanned<Src, Span>,
-  l_angle: LAngle<Spanned<Src, Span>>,
-  r_angle: RAngle<Spanned<Src, Span>>,
+  l_angle: LAngle<Src, Span>,
+  r_angle: RAngle<Src, Span>,
   values: C,
   _marker: core::marker::PhantomData<T>,
 }
@@ -21,10 +21,10 @@ impl<T, Src, Span, C> Set<T, Src, Span, C> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-  pub const fn l_angle(&self) -> &LAngle<Spanned<Src, Span>> {
+  pub const fn l_angle(&self) -> &LAngle<Src, Span> {
     &self.l_angle
   }
-  pub const fn r_angle(&self) -> &RAngle<Spanned<Src, Span>> {
+  pub const fn r_angle(&self) -> &RAngle<Src, Span> {
     &self.r_angle
   }
   pub const fn values(&self) -> &C {
@@ -48,8 +48,8 @@ where
     P: Parser<'src, I, T, E> + Clone,
   {
     let ws = super::ignored::ignored();
-    let open = just(I::Token::LESS_THAN).map_with(|_, sp| LAngle::new(Spanned::from(sp)));
-    let close = just(I::Token::GREATER_THAN).map_with(|_, sp| RAngle::new(Spanned::from(sp)));
+    let open = LAngle::parser();
+    let close = RAngle::parser();
 
     let elem = value.then_ignore(ws.clone()); // trailing ignored only
 

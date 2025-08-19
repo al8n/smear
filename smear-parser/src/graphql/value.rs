@@ -6,7 +6,8 @@ use chumsky::{
 use crate::parser::{
   language::{
     ignored::ignored,
-    input_value::{self, *}, punct::Equal,
+    input_value::{self, *},
+    punct::Equal,
   },
   SmearChar, Spanned,
 };
@@ -211,29 +212,27 @@ impl<Src, Span> ConstInputValue<Src, Span> {
 
 /// Default input value
 #[derive(Debug, Clone)]
-pub struct DefaultInputValue<Src, Span> {
-  span: Spanned<Src, Span>,
-  eq: Equal<Spanned<Src, Span>>,
-  value: ConstInputValue<Src, Span>,
-}
+pub struct DefaultInputValue<Src, Span>(
+  input_value::DefaultInputValue<ConstInputValue<Src, Span>, Src, Span>,
+);
 
 impl<Src, Span> DefaultInputValue<Src, Span> {
   /// Returns the span of the default input value
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
-    &self.span
+    self.0.span()
   }
 
   /// Returns a reference to the equal token
   #[inline]
-  pub const fn eq(&self) -> &Equal<Spanned<Src, Span>> {
-    &self.eq
+  pub const fn eq(&self) -> &Equal<Src, Span> {
+    self.0.eq()
   }
 
   /// Returns a reference to the value of the default input value.
   #[inline]
   pub const fn value(&self) -> &ConstInputValue<Src, Span> {
-    &self.value
+    self.0.value()
   }
 
   /// Returns a parser of default input value.
@@ -247,15 +246,6 @@ impl<Src, Span> DefaultInputValue<Src, Span> {
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
   {
-    just(I::Token::EQUAL)
-      .map_with(|_, sp| Equal::new(Spanned::from(sp)))
-      .then_ignore(ignored())
-      .then(ConstInputValue::<Src, Span>::parser())
-      .map_with(|(eq, value), sp| Self {
-        span: Spanned::from(sp),
-        eq,
-        value,
-      })
-      .then_ignore(ignored())
+    input_value::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }
 }
