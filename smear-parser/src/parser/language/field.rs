@@ -4,6 +4,7 @@ use chumsky::{
 };
 
 use crate::parser::{
+  keywords,
   language::{
     ignored::{bom, comma, comment, line_terminator, white_space},
     punct::{Ellipsis, LBrace, RBrace},
@@ -44,7 +45,7 @@ where
 #[derive(Debug, Clone)]
 pub struct TypeCondition<Src, Span> {
   span: Spanned<Src, Span>,
-  on: Spanned<Src, Span>,
+  on: keywords::On<Src, Span>,
   type_name: Name<Src, Span>, // NamedType in spec; Name node is fine here
 }
 
@@ -54,7 +55,7 @@ impl<Src, Span> TypeCondition<Src, Span> {
     &self.span
   }
   #[inline]
-  pub const fn on(&self) -> &Spanned<Src, Span> {
+  pub const fn on_keyword(&self) -> &keywords::On<Src, Span> {
     &self.on
   }
   #[inline]
@@ -66,16 +67,17 @@ impl<Src, Span> TypeCondition<Src, Span> {
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
+    Src: 'src,
+    Span: 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
   {
     let ws = super::ignored::ignored();
 
-    just([I::Token::o, I::Token::n])
-      .map_with(|_, sp| Spanned::from(sp))
+    keywords::On::parser()
       .then_ignore(ws_plus::<I, E>())
-      .then(Name::<I::Slice, I::Span>::parser())
+      .then(Name::parser())
       .map_with(|(on, type_name), sp| Self {
         span: Spanned::from(sp),
         on,

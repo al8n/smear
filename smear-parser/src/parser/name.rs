@@ -23,10 +23,12 @@ impl<Src, Span> Name<Src, Span> {
   }
 
   /// Returns the parser to parse a name.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Name<I::Slice, I::Span>, E> + Clone
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src>,
+    I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
+    Src: 'src,
+    Span: 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

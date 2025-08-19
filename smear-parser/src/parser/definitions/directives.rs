@@ -476,6 +476,8 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
+    Src: 'src,
+    Span: 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -488,7 +490,7 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
       .then_ignore(ignored())
       .then(At::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::parser())
       .then_ignore(ignored())
       .then(args_parser.or_not())
       .then_ignore(ignored())

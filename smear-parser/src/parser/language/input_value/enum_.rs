@@ -28,6 +28,8 @@ impl<Src, Span> Enum<Src, Span> {
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
+    Src: 'src,
+    Span: 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

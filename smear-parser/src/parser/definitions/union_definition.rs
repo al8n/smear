@@ -254,8 +254,24 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
     self.members.as_ref()
   }
   #[inline]
-  pub fn into_components(self) -> (Spanned<Src, Span>, keywords::Extend<Src, Span>, keywords::Union<Src, Span>, Name<Src, Span>, Option<Directives>, Option<MemberTypes>) {
-    (self.span, self.extend, self.keyword, self.name, self.directives, self.members)
+  pub fn into_components(
+    self,
+  ) -> (
+    Spanned<Src, Span>,
+    keywords::Extend<Src, Span>,
+    keywords::Union<Src, Span>,
+    Name<Src, Span>,
+    Option<Directives>,
+    Option<MemberTypes>,
+  ) {
+    (
+      self.span,
+      self.extend,
+      self.keyword,
+      self.name,
+      self.directives,
+      self.members,
+    )
   }
 
   pub fn parser_with<'src, I, E, DP, MP>(
@@ -274,49 +290,47 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
     // extend union Name
-    let head =
-      keywords::Extend::parser()
-        .then_ignore(ignored())
-        .then(keywords::Union::parser())
-        .then_ignore(ignored())
-        .then(Name::<Src, Span>::parser())
-        .then_ignore(ignored());
+    let head = keywords::Extend::parser()
+      .then_ignore(ignored())
+      .then(keywords::Union::parser())
+      .then_ignore(ignored())
+      .then(Name::<Src, Span>::parser())
+      .then_ignore(ignored());
 
     // Negative look-ahead for '=' used by the "no members" branch.
     let no_eq_guard = just(I::Token::EQUAL).rewind().not().ignored();
 
     // Branch 1: extend union Name Directives[Const]? UnionMemberTypes
-    let with_members =
-      head
-        .clone()
-        .then(directives_parser().or_not())
-        .then_ignore(ignored())
-        .then(member_types())
-        .map_with(|((((extend, keyword), name), directives), members), sp| Self {
+    let with_members = head
+      .clone()
+      .then(directives_parser().or_not())
+      .then_ignore(ignored())
+      .then(member_types())
+      .map_with(
+        |((((extend, keyword), name), directives), members), sp| Self {
           span: Spanned::from(sp),
           extend,
           keyword,
           name,
           directives,
           members: Some(members),
-        });
+        },
+      );
 
     // Branch 2: extend union Name Directives[Const]   (and ensure no '=' follows)
-    let without_members =
-      head
-        .then(directives_parser())
-        .then_ignore(ignored())
-        .then_ignore(no_eq_guard)
-        .map_with(|(((extend, keyword), name), directives), sp| Self {
-          span: Spanned::from(sp),
-          extend,
-          keyword,
-          name,
-          directives: Some(directives),
-          members: None,
-        });
+    let without_members = head
+      .then(directives_parser())
+      .then_ignore(ignored())
+      .then_ignore(no_eq_guard)
+      .map_with(|(((extend, keyword), name), directives), sp| Self {
+        span: Spanned::from(sp),
+        extend,
+        keyword,
+        name,
+        directives: Some(directives),
+        members: None,
+      });
 
     choice((with_members, without_members))
   }
 }
-
