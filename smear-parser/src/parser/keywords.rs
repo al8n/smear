@@ -23,4 +23,6 @@ word!(
   Fragment: [I::Token::f, I::Token::r, I::Token::a, I::Token::g, I::Token::m, I::Token::e],
   /// `schema` keyword
   Schema: [I::Token::s, I::Token::c, I::Token::h, I::Token::e, I::Token::m, I::Token::a],
+  /// `implements` keyword
+  Implements: [I::Token::i, I::Token::m, I::Token::p, I::Token::l, I::Token::e, I::Token::m, I::Token::e, I::Token::n, I::Token::t, I::Token::s],
 );
