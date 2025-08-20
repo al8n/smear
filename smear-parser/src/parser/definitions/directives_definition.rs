@@ -68,8 +68,8 @@ word!(
   derive_more::Unwrap,
   derive_more::TryUnwrap,
 )]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ExecutableDirectiveLocation<Src, Span> {
   /// `QUERY`
   Query(QueryLocation<Src, Span>),
@@ -139,8 +139,8 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
   derive_more::Unwrap,
   derive_more::TryUnwrap,
 )]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum TypeSystemDirectiveLocation<Src, Span> {
   /// `SCHEMA`
   Schema(SchemaLocation<Src, Span>),
@@ -224,8 +224,8 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
   derive_more::Unwrap,
   derive_more::TryUnwrap,
 )]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Location<Src, Span> {
   /// Executable directive location
   Executable(ExecutableDirectiveLocation<Src, Span>),

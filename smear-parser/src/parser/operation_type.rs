@@ -17,8 +17,8 @@ word!(Subscription: [I::Token::s, I::Token::u, I::Token::b, I::Token::s, I::Toke
   derive_more::Unwrap,
   derive_more::TryUnwrap,
 )]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum OperationType<Src, Span> {
   /// `query`
   Query(Query<Src, Span>),

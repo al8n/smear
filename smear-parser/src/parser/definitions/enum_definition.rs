@@ -167,7 +167,7 @@ impl<EnumValueDefinition, Src, Span, Container>
 }
 
 #[derive(Debug, Clone)]
-pub struct EnumDefinition<EnumValuesDefinition, Directives, Src, Span> {
+pub struct EnumDefinition<Directives, EnumValuesDefinition, Src, Span> {
   span: Spanned<Src, Span>,
   description: Option<String<Src, Span>>,
   keyword: keywords::Enum<Src, Span>,
@@ -176,8 +176,8 @@ pub struct EnumDefinition<EnumValuesDefinition, Directives, Src, Span> {
   directives: Option<Directives>,
 }
 
-impl<EnumValuesDefinition, Directives, Src, Span>
-  EnumDefinition<EnumValuesDefinition, Directives, Src, Span>
+impl<Directives, EnumValuesDefinition, Src, Span>
+  EnumDefinition<Directives, EnumValuesDefinition, Src, Span>
 {
   /// The span of the enum definition.
   #[inline]
@@ -282,17 +282,50 @@ impl<EnumValuesDefinition, Directives, Src, Span>
 }
 
 #[derive(Debug, Clone)]
-pub struct EnumExtension<EnumValuesDefinition, Directives, Src, Span> {
+pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
+  Values {
+    directives: Option<Directives>,
+    values: EnumValuesDefinition,
+  },
+  Directives(Directives),
+}
+
+impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValuesDefinition> {
+  pub fn parser_with<'src, I, E, DP, EVP>(
+    directives_parser: impl Fn() -> DP,
+    enum_values_parser: impl Fn() -> EVP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: StrInput<'src>,
+    I::Token: SmearChar + 'src,
+    E: ParserExtra<'src, I>,
+    E::Error:
+      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
+  {
+    choice((
+      directives_parser()
+        .then_ignore(ignored())
+        .or_not()
+        .then(enum_values_parser())
+        .map(|(directives, values)| Self::Values { directives, values }),
+      directives_parser().map(Self::Directives),
+    ))
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumExtension<Directives, EnumValuesDefinition, Src, Span> {
   span: Spanned<Src, Span>,
   extend: keywords::Extend<Src, Span>,
   keyword: keywords::Enum<Src, Span>,
   name: Name<Src, Span>,
-  enum_values: Option<EnumValuesDefinition>,
-  directives: Option<Directives>,
+  content: EnumExtensionContent<Directives, EnumValuesDefinition>,
 }
 
-impl<EnumValuesDefinition, Directives, Src, Span>
-  EnumExtension<EnumValuesDefinition, Directives, Src, Span>
+impl<Directives, EnumValuesDefinition, Src, Span>
+  EnumExtension<Directives, EnumValuesDefinition, Src, Span>
 {
   /// The span of the enum definition.
   #[inline]
@@ -320,14 +353,8 @@ impl<EnumValuesDefinition, Directives, Src, Span>
 
   /// The enum values of the enum definition.
   #[inline]
-  pub const fn enum_values(&self) -> Option<&EnumValuesDefinition> {
-    self.enum_values.as_ref()
-  }
-
-  /// The directives of the enum definition.
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
+  pub const fn content(&self) -> &EnumExtensionContent<Directives, EnumValuesDefinition> {
+    &self.content
   }
 
   /// Consumes the enum definition, returning its components
@@ -339,24 +366,22 @@ impl<EnumValuesDefinition, Directives, Src, Span>
     keywords::Extend<Src, Span>,
     keywords::Enum<Src, Span>,
     Name<Src, Span>,
-    Option<EnumValuesDefinition>,
-    Option<Directives>,
+    EnumExtensionContent<Directives, EnumValuesDefinition>,
   ) {
     (
       self.span,
       self.extend,
       self.keyword,
       self.name,
-      self.enum_values,
-      self.directives,
+      self.content,
     )
   }
 
   /// Returns a parser for the enum definition.
   #[inline]
-  pub fn parser_with<'src, I, E, P, DP>(
-    enum_values_definition: P,
-    directives_parser: DP,
+  pub fn parser_with<'src, I, E, DP, EVP>(
+    directives_parser: impl Fn() -> DP,
+    enum_values_definition: impl Fn() -> EVP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
@@ -366,47 +391,25 @@ impl<EnumValuesDefinition, Directives, Src, Span>
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
-    P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
+    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
-    let ws = crate::parser::language::ignored::ignored();
-
-    // extend enum Name
-    let head = keywords::Extend::parser()
-      .then_ignore(ws.clone())
+    keywords::Extend::parser()
+      .then_ignore(ignored())
       .then(keywords::Enum::parser())
-      .then_ignore(ws.clone())
-      .then(Name::<Src, Span>::parser())
-      .then_ignore(ws.clone());
-
-    // Alt A: optional directives + EnumValuesDefinition (starts with '{')
-    // If there is no '{', this alt FAILS and REWINDS.
-    let with_values = directives_parser
-      .clone()
-      .or_not()
-      .then_ignore(ws.clone())
-      .then(enum_values_definition)
-      .map(|(directives, values)| (directives, Some(values)))
-      .rewind();
-
-    // Alt B: directives REQUIRED, and lookahead must NOT be '{'
-    let without_values = directives_parser
-      .then_ignore(ws.clone())
-      .then_ignore(LBrace::parser().rewind().not().ignored())
-      .map(|directives| (Some(directives), None));
-
-    head
-      .then(choice((with_values, without_values)))
-      .map_with(
-        |(((extend, keyword), name), (directives, enum_values)), sp| Self {
-          span: Spanned::from(sp),
-          extend,
-          keyword,
-          name,
-          enum_values,
-          directives,
-        },
-      )
+      .then_ignore(ignored())
+      .then(Name::<Src, Span>::parser().then_ignore(ignored()))
+      .then(EnumExtensionContent::parser_with(
+        directives_parser,
+        enum_values_definition,
+      ))
+      .map_with(|(((extend, keyword), name), content), sp| Self {
+        span: Spanned::from(sp),
+        extend,
+        keyword,
+        name,
+        content,
+      })
       .padded_by(ignored())
   }
 }

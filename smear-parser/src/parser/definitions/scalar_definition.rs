@@ -161,7 +161,9 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
 
   /// Returns a parser for the input value definition.
   #[inline]
-  pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, DP>(
+    directives_parser: impl FnOnce() -> DP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
@@ -177,7 +179,7 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
       .padded_by(ignored())
       .then(Name::<Src, Span>::parser())
       .then_ignore(ignored())
-      .then(directives_parser)
+      .then(directives_parser())
       .map_with(|(((extend, scalar), name), directives), sp| Self {
         span: Spanned::from(sp),
         extend,

@@ -5,7 +5,7 @@ use chumsky::{
 
 use crate::parser::{
   keywords,
-  language::{ignored::ignored, input_value::String, punct::LBrace},
+  language::{ignored::ignored, input_value::String},
   Name, SmearChar, Spanned,
 };
 
@@ -115,17 +115,50 @@ impl<FieldsDefinition, Directives, Src, Span>
 }
 
 #[derive(Debug, Clone)]
-pub struct InputObjectExtension<FieldsDefinition, Directives, Src, Span> {
+pub enum InputObjectExtensionContent<Directives, FieldsDefinition> {
+  Directives(Directives),
+  Fields {
+    directives: Option<Directives>,
+    fields: FieldsDefinition,
+  },
+}
+
+impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, FieldsDefinition> {
+  pub fn parser_with<'src, I, E, DP, IFDP>(
+    directives_parser: impl Fn() -> DP,
+    fields_definition_parser: impl Fn() -> IFDP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: StrInput<'src>,
+    I::Token: SmearChar + 'src,
+    E: ParserExtra<'src, I>,
+    E::Error:
+      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+  {
+    choice((
+      directives_parser()
+        .then_ignore(ignored())
+        .or_not()
+        .then(fields_definition_parser())
+        .map(|(directives, fields)| Self::Fields { directives, fields }),
+      directives_parser().map(Self::Directives),
+    ))
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct InputObjectExtension<Directives, FieldsDefinition, Src, Span> {
   span: Spanned<Src, Span>,
   extend: keywords::Extend<Src, Span>,
   input: keywords::Input<Src, Span>,
   name: Name<Src, Span>,
-  directives: Option<Directives>,
-  fields: Option<FieldsDefinition>,
+  content: InputObjectExtensionContent<Directives, FieldsDefinition>,
 }
 
-impl<FieldsDefinition, Directives, Src, Span>
-  InputObjectExtension<FieldsDefinition, Directives, Src, Span>
+impl<Directives, FieldsDefinition, Src, Span>
+  InputObjectExtension<Directives, FieldsDefinition, Src, Span>
 {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -148,13 +181,8 @@ impl<FieldsDefinition, Directives, Src, Span>
   }
 
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> Option<&FieldsDefinition> {
-    self.fields.as_ref()
+  pub const fn content(&self) -> &InputObjectExtensionContent<Directives, FieldsDefinition> {
+    &self.content
   }
 
   #[inline]
@@ -165,17 +193,9 @@ impl<FieldsDefinition, Directives, Src, Span>
     keywords::Extend<Src, Span>,
     keywords::Input<Src, Span>,
     Name<Src, Span>,
-    Option<Directives>,
-    Option<FieldsDefinition>,
+    InputObjectExtensionContent<Directives, FieldsDefinition>,
   ) {
-    (
-      self.span,
-      self.extend,
-      self.input,
-      self.name,
-      self.directives,
-      self.fields,
-    )
+    (self.span, self.extend, self.input, self.name, self.content)
   }
 
   #[inline]
@@ -194,38 +214,21 @@ impl<FieldsDefinition, Directives, Src, Span>
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
-    // extend input Name
-    let head = keywords::Extend::parser()
+    keywords::Extend::parser()
       .then_ignore(ignored())
       .then(keywords::Input::parser())
       .then_ignore(ignored())
-      .then(Name::parser())
-      .then_ignore(ignored());
-
-    // Alt A: (Directives[Const]?) InputFieldsDefinition
-    // If no '{' follows, this alt fails and rewinds.
-    let with_fields = directives_parser()
-      .padded_by(ignored())
-      .or_not()
-      .then(input_fields_definition_parser())
-      .map(|(directives, fields)| (directives, Some(fields)))
-      .rewind();
-
-    // Alt B: Directives[Const]  and lookahead ≠ '{'
-    let without_fields = directives_parser()
-      .padded_by(ignored())
-      .then_ignore(LBrace::parser().rewind().not().ignored())
-      .map(|directives| (Some(directives), None));
-
-    head
-      .then(choice((with_fields, without_fields)))
-      .map_with(|(((extend, input), name), (directives, fields)), sp| Self {
+      .then(Name::parser().then_ignore(ignored()))
+      .then(InputObjectExtensionContent::parser_with(
+        directives_parser,
+        input_fields_definition_parser,
+      ))
+      .map_with(|(((extend, input), name), content), sp| Self {
         span: Spanned::from(sp),
         extend,
         input,
         name,
-        directives,
-        fields,
+        content,
       })
       .padded_by(ignored())
   }

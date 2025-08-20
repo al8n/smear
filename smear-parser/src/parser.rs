@@ -293,6 +293,7 @@ pub trait SmearChar: Char {
 }
 
 impl SmearChar for char {
+  #[inline]
   fn bom<'a>() -> &'a [Self] {
     &['\u{feff}']
   }
@@ -397,8 +398,10 @@ impl SmearChar for char {
 }
 
 impl SmearChar for u8 {
+  #[inline]
   fn bom<'a>() -> &'a [Self] {
-    "\u{feff}".as_bytes()
+    const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+    UTF8_BOM
   }
 
   const NULL: Self = b'\0';

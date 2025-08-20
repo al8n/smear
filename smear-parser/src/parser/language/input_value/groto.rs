@@ -17,8 +17,8 @@ use super::*;
 /// - `Span`: the span type of the input [`StrInput`](chumsky::input::StrInput)
 /// - `Container`: the container type for storing the nested type, e.g. list, object, map, set.
 #[derive(Debug, Clone, derive_more::Unwrap, derive_more::TryUnwrap, derive_more::IsVariant)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum InputValue<Src, Span> {
   /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
@@ -128,8 +128,8 @@ impl<Src, Span> InputValue<Src, Span> {
 /// - `Span`: the span type of the input [`StrInput`](chumsky::input::StrInput)
 /// - `Container`: the container type for storing the nested type, e.g. list, object, map, set.
 #[derive(Debug, Clone, derive_more::Unwrap, derive_more::TryUnwrap, derive_more::IsVariant)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum ConstInputValue<Src, Span> {
   /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)

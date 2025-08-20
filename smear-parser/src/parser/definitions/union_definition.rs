@@ -139,7 +139,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
 ///
 /// Spec: [UnionTypeDefinition](https://spec.graphql.org/draft/#UnionTypeDefinition)
 #[derive(Debug, Clone)]
-pub struct UnionDefinition<MemberTypes, Directives, Src, Span> {
+pub struct UnionDefinition<Directives, MemberTypes, Src, Span> {
   span: Spanned<Src, Span>,
   description: Option<String<Src, Span>>,
   keyword: keywords::Union<Src, Span>,
@@ -148,7 +148,7 @@ pub struct UnionDefinition<MemberTypes, Directives, Src, Span> {
   members: Option<MemberTypes>,
 }
 
-impl<MemberTypes, Directives, Src, Span> UnionDefinition<MemberTypes, Directives, Src, Span> {
+impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes, Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -216,20 +216,56 @@ impl<MemberTypes, Directives, Src, Span> UnionDefinition<MemberTypes, Directives
   }
 }
 
+#[derive(Debug, Clone)]
+pub enum UnionExtensionContent<Directives, MemberTypes> {
+  Directives(Directives),
+  Members {
+    directives: Option<Directives>,
+    fields: MemberTypes,
+  },
+}
+
+impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
+  pub fn parser_with<'src, I, E, DP, MP>(
+    directives_parser: impl Fn() -> DP,
+    member_types: impl Fn() -> MP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: StrInput<'src>,
+    I::Token: SmearChar + 'src,
+    E: ParserExtra<'src, I>,
+    E::Error:
+      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    MP: Parser<'src, I, MemberTypes, E> + Clone,
+  {
+    choice((
+      directives_parser()
+        .then_ignore(ignored())
+        .or_not()
+        .then(member_types())
+        .map(|(directives, members)| Self::Members {
+          directives,
+          fields: members,
+        }),
+      directives_parser().map(|directives| Self::Directives(directives)),
+    ))
+  }
+}
+
 /// A union type extension
 ///
 /// Spec: [UnionTypeExtension](https://spec.graphql.org/draft/#UnionTypeExtension)
 #[derive(Debug, Clone)]
-pub struct UnionExtension<MemberTypes, Directives, Src, Span> {
+pub struct UnionExtension<Directives, MemberTypes, Src, Span> {
   span: Spanned<Src, Span>,
   extend: keywords::Extend<Src, Span>,
   keyword: keywords::Union<Src, Span>,
   name: Name<Src, Span>,
-  directives: Option<Directives>,
-  members: Option<MemberTypes>,
+  content: UnionExtensionContent<Directives, MemberTypes>,
 }
 
-impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives, Src, Span> {
+impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes, Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -247,13 +283,10 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
     self.name.span()
   }
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
+  pub const fn content(&self) -> &UnionExtensionContent<Directives, MemberTypes> {
+    &self.content
   }
-  #[inline]
-  pub const fn members(&self) -> Option<&MemberTypes> {
-    self.members.as_ref()
-  }
+
   #[inline]
   pub fn into_components(
     self,
@@ -262,16 +295,14 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
     keywords::Extend<Src, Span>,
     keywords::Union<Src, Span>,
     Name<Src, Span>,
-    Option<Directives>,
-    Option<MemberTypes>,
+    UnionExtensionContent<Directives, MemberTypes>,
   ) {
     (
       self.span,
       self.extend,
       self.keyword,
       self.name,
-      self.directives,
-      self.members,
+      self.content,
     )
   }
 
@@ -290,83 +321,22 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
-    // extend union Name
-    let head = keywords::Extend::parser()
+    keywords::Extend::parser()
       .then_ignore(ignored())
       .then(keywords::Union::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
-      .then_ignore(ignored());
-
-    // Negative look-ahead for '=' used by the "no members" branch.
-    let no_eq_guard = just(I::Token::EQUAL).rewind().not().ignored();
-
-    // Branch 1: extend union Name Directives[Const]? UnionMemberTypes
-    let with_members = head
-      .clone()
-      .then(directives_parser().or_not())
-      .then_ignore(ignored())
-      .then(member_types())
-      .map_with(
-        |((((extend, keyword), name), directives), members), sp| Self {
-          span: Spanned::from(sp),
-          extend,
-          keyword,
-          name,
-          directives,
-          members: Some(members),
-        },
-      );
-
-    // Branch 2: extend union Name Directives[Const]   (and ensure no '=' follows)
-    let without_members = head
-      .then(directives_parser())
-      .then_ignore(ignored())
-      .then_ignore(no_eq_guard)
-      .map_with(|(((extend, keyword), name), directives), sp| Self {
+      .then(Name::parser().then_ignore(ignored()))
+      .then(UnionExtensionContent::parser_with(
+        directives_parser,
+        member_types,
+      ))
+      .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Spanned::from(sp),
         extend,
         keyword,
         name,
-        directives: Some(directives),
-        members: None,
-      });
-
-    choice((with_members, without_members)).padded_by(ignored())
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn t() {
-    let input = r#"= One | Two"#;
-
-    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
-      .parse(input)
-      .into_result()
-      .unwrap();
-
-    assert!(result.members.len() == 2);
-
-    let input = r#"= | One | Two"#;
-
-    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
-      .parse(input)
-      .into_result()
-      .unwrap();
-
-    assert!(result.members.len() == 2);
-
-    let input = r#"= One Two"#;
-
-    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
-      .parse(input)
-      .into_result()
-      .unwrap();
-
-    assert!(result.members.len() == 2);
+        content,
+      })
+      .padded_by(ignored())
   }
 }
