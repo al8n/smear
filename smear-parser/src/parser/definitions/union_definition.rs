@@ -55,7 +55,7 @@ impl<Src, Span> UnionMemberType<Src, Span> {
     Pipe::parser()
       .or_not()
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
         span: Spanned::from(sp),
         pipe,
@@ -76,7 +76,7 @@ impl<Src, Span> UnionMemberType<Src, Span> {
   {
     Pipe::parser()
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
         span: Spanned::from(sp),
         pipe: Some(pipe),
@@ -107,7 +107,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
     &self.members
   }
 
-  pub fn parser<'src, I, E, P>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
     I::Token: SmearChar + 'src,
@@ -121,7 +121,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
     Equal::parser()
       .then_ignore(ignored())
       .then(
-        UnionMemberType::parser::<I, E>()
+        UnionMemberType::parser()
           .padded_by(ignored())
           .repeated()
           .at_least(1)
@@ -212,6 +212,7 @@ impl<MemberTypes, Directives, Src, Span> UnionDefinition<MemberTypes, Directives
           members,
         },
       )
+      .padded_by(ignored())
   }
 }
 
@@ -331,6 +332,41 @@ impl<MemberTypes, Directives, Src, Span> UnionExtension<MemberTypes, Directives,
         members: None,
       });
 
-    choice((with_members, without_members))
+    choice((with_members, without_members)).padded_by(ignored())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn t() {
+    let input = r#"= One | Two"#;
+
+    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
+      .parse(input)
+      .into_result()
+      .unwrap();
+
+    assert!(result.members.len() == 2);
+
+    let input = r#"= | One | Two"#;
+
+    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
+      .parse(input)
+      .into_result()
+      .unwrap();
+
+    assert!(result.members.len() == 2);
+
+    let input = r#"= One Two"#;
+
+    let result = UnionMemberTypes::<_, _, Vec<_>>::parser::<&str, super::super::super::Error>()
+      .parse(input)
+      .into_result()
+      .unwrap();
+
+    assert!(result.members.len() == 2);
   }
 }

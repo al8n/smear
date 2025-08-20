@@ -96,6 +96,7 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
         name,
         directives,
       })
+      .padded_by(ignored())
   }
 }
 
@@ -184,5 +185,6 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
         name,
         directives,
       })
+      .padded_by(ignored())
   }
 }

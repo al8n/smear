@@ -106,21 +106,16 @@ impl<Type, DefaultValue, Directives, Src, Span>
   {
     let ws = ignored();
 
-    let head = choice((
-      String::parser()
-        .then(Name::<Src, Span>::parser().padded_by(ignored()))
-        .map(|(desc, name)| (Some(desc), name)),
-      // No description → go straight to Name (no leading ws eaten)
-      Name::<Src, Span>::parser().map(|name| (None, name)),
-    ));
-
-    head
-      .then(Colon::parser().padded_by(ws.clone())) // padding around ':'
+    String::parser()
+      .then_ignore(ignored())
+      .or_not()
+      .then(Name::parser())
+      .then(Colon::parser().padded_by(ws.clone()))
       .then(type_parser.padded_by(ignored()))
-      .then(default_const_value_parser.or_not().padded_by(ignored()))
+      .then(default_const_value_parser.padded_by(ignored()).or_not())
       .then(const_directives_parser.or_not())
-      .map_with(|(((((description, name), colon), ty), default_value), directives), span| {
-        Self {
+      .map_with(
+        |(((((description, name), colon), ty), default_value), directives), span| Self {
           span: Spanned::from(span),
           description,
           name,
@@ -128,7 +123,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
           ty,
           default_value,
           directives,
-        }
-      })
+        },
+      )
   }
 }

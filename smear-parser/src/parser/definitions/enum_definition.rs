@@ -258,8 +258,8 @@ impl<EnumValuesDefinition, Directives, Src, Span>
 
     // Head: Description? enum Name Directives[Const]? EnumValuesDefinition?
     String::parser()
-      .or_not()
       .then_ignore(ws.clone())
+      .or_not()
       .then(keywords::Enum::parser())
       .then_ignore(ws.clone())
       .then(Name::<Src, Span>::parser())
@@ -277,6 +277,7 @@ impl<EnumValuesDefinition, Directives, Src, Span>
           enum_values,
         },
       )
+      .padded_by(ignored())
   }
 }
 
@@ -394,15 +395,18 @@ impl<EnumValuesDefinition, Directives, Src, Span>
       .then_ignore(LBrace::parser().rewind().not().ignored())
       .map(|directives| (Some(directives), None));
 
-    head.then(choice((with_values, without_values))).map_with(
-      |(((extend, keyword), name), (directives, enum_values)), sp| Self {
-        span: Spanned::from(sp),
-        extend,
-        keyword,
-        name,
-        enum_values,
-        directives,
-      },
-    )
+    head
+      .then(choice((with_values, without_values)))
+      .map_with(
+        |(((extend, keyword), name), (directives, enum_values)), sp| Self {
+          span: Spanned::from(sp),
+          extend,
+          keyword,
+          name,
+          enum_values,
+          directives,
+        },
+      )
+      .padded_by(ignored())
   }
 }
