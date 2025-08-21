@@ -1,10 +1,7 @@
-use chumsky::{
-  container::Container, extra::ParserExtra, input::StrInput, label::LabelError, prelude::*,
-  text::TextExpected, util::MaybeRef,
-};
+use chumsky::{container::Container, extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
-  super::{char::Char, spanned::Spanned},
+  super::{char::Char, source::Source, spanned::Spanned},
   punct::{LAngle, RAngle},
 };
 
@@ -33,13 +30,12 @@ impl<T, Src, Span> MapValueEntry<T, Src, Span> {
   /// key ':' value  (only **trailing** ignored so repeats stop cleanly at '>')
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, T, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -92,13 +88,12 @@ where
 {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, T, E> + Clone,
   {
     let ws = super::ignored::ignored();

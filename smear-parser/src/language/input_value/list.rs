@@ -1,10 +1,7 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
-  super::{char::Char, spanned::Spanned},
+  super::{char::Char, source::Source, spanned::Spanned},
   punct::{LBracket, RBracket},
 };
 
@@ -55,13 +52,12 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
 
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     Src: 'src,
     Span: 'src,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
   {

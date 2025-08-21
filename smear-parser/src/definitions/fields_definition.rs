@@ -1,9 +1,6 @@
 use core::marker::PhantomData;
 
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
@@ -13,6 +10,7 @@ use super::super::{
     punct::{Colon, LBrace, RBrace},
   },
   name::Name,
+  source::Source,
   spanned::Spanned,
 };
 
@@ -92,13 +90,12 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
     directives_parser: impl FnOnce() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -179,13 +176,12 @@ impl<FieldDefinition, Src, Span, Container>
     field_definition_parser: impl FnOnce() -> P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
   {

@@ -1,6 +1,5 @@
 use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
+  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
 };
 use derive_more::{AsMut, AsRef, From, Into};
 
@@ -33,13 +32,12 @@ impl<Src, Span> FragmentSpread<Src, Span> {
   }
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     field::FragmentSpread::parser_with(Directives::parser()).map(Self)
   }
@@ -79,13 +77,12 @@ impl<Src, Span> InlineFragment<Src, Span> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     field::InlineFragment::parser_with(SelectionSet::parser(), Directives::parser()).map(Self)
   }
@@ -136,13 +133,12 @@ impl<Src, Span> Field<Src, Span> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     field::Field::parser_with(
       Arguments::parser(),
@@ -172,13 +168,12 @@ impl<Src, Span> Selection<Src, Span> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|selection| {
       let selset =
@@ -236,13 +231,12 @@ impl<Src, Span> SelectionSetValue<Src, Span> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|selset| {
       let field_p =

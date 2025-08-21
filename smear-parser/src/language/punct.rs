@@ -1,9 +1,6 @@
-use super::super::{char::Char, spanned::Spanned};
+use crate::{char::Char, source::Source, spanned::Spanned};
 
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 macro_rules! punct {
   ($token_name:ident:$token:literal:$tokens: expr) => {
@@ -25,17 +22,23 @@ macro_rules! punct {
           &self.0
         }
 
+        #[doc = "Consumes the " $token_name " punctuator, returning the span."]
+        pub fn into_span(self) -> Spanned<Src, Span> {
+          self.0
+        }
+
         /// Returns the parser.
         pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
         where
-          I: StrInput<'src, Slice = Src, Span = Span>,
+          I: Source<'src, Slice = Src, Span = Span>,
           I::Token: Char + 'src,
           E: ParserExtra<'src, I>,
           E::Error:
-            LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+            LabelError<'src, I, &'static str>,
         {
           just($tokens)
             .map_with(|_, sp| Self(Spanned::from(sp)))
+            .labelled(concat!(stringify!($token_name), " ", $token))
         }
       }
     }
@@ -60,3 +63,6 @@ punct!(l_angle: "<": I::Token::LESS_THAN);
 punct!(r_angle: ">": I::Token::GREATER_THAN);
 punct!(triple_quote: "\"\"\"": [I::Token::QUOTATION, I::Token::QUOTATION, I::Token::QUOTATION]);
 punct!(quote: "\"": I::Token::QUOTATION);
+punct!(minus: "-": I::Token::MINUS);
+punct!(plus: "+": I::Token::PLUS);
+punct!(dot: ".": I::Token::DOT);

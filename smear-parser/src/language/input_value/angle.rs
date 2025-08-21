@@ -1,11 +1,8 @@
-use chumsky::{
-  container::Container, extra::ParserExtra, input::StrInput, label::LabelError, prelude::*,
-  text::TextExpected, util::MaybeRef,
-};
+use chumsky::{container::Container, extra::ParserExtra, label::LabelError, prelude::*};
 use either::Either;
 
 use super::super::{
-  super::char::Char,
+  super::{char::Char, source::Source},
   input_value::{MapValue, MapValueEntry, SetValue},
 };
 
@@ -19,13 +16,12 @@ pub fn angle_parser_with<'src, I, E, P, T, CS, CM>(
   E,
 > + Clone
 where
-  I: StrInput<'src>,
+  I: Source<'src>,
   I::Token: Char + 'src,
   I::Slice: 'src,
   I::Span: 'src,
   E: ParserExtra<'src, I>,
-  E::Error:
-    LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+  E::Error: LabelError<'src, I, &'static str>,
   P: Parser<'src, I, T, E> + Clone,
   CM: Container<MapValueEntry<T, I::Slice, I::Span>>,
   CS: Container<T>,
@@ -48,7 +44,11 @@ where
     .rewind();
 
   map_guard
-    .ignore_then(MapValue::<T, _, _, CM>::parser_with(value.clone()))
+    .ignore_then(MapValue::<T, _, _, CM>::parser_with(value.clone()).labelled("map value"))
     .map(Either::Right)
-    .or(SetValue::<T, _, _, CS>::parser_with(value).map(Either::Left))
+    .or(
+      SetValue::<T, _, _, CS>::parser_with(value)
+        .labelled("set value")
+        .map(Either::Left),
+    )
 }

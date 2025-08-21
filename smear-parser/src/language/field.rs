@@ -1,30 +1,13 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::{
-  super::{char::Char, keywords, name::Name, spanned::Spanned},
-  ignored::{bom, comma, comment, line_terminator, white_space},
+  super::{char::Char, keywords, name::Name, source::Source, spanned::Spanned},
+  ignored::ignored,
   punct::{Ellipsis, LBrace, RBrace},
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
-// WHITESPACE+ per your pest rule (space/tabs; tweak if you allow more)
-fn ws_plus<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: StrInput<'src>,
-  I::Token: Char + 'src,
-  E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, TextExpected<'src, I>>,
-{
-  choice((bom(), white_space(), line_terminator(), comment(), comma()))
-    .repeated()
-    .at_least(1)
-    .ignored()
-}
 
 #[derive(Debug, Clone)]
 pub struct TypeCondition<Src, Span> {
@@ -49,13 +32,12 @@ impl<Src, Span> TypeCondition<Src, Span> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     let ws = super::ignored::ignored();
 
@@ -94,29 +76,29 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
   }
   pub fn parser_with<'src, I, E, P>(directives: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     let ws = super::ignored::ignored();
 
     // `!type_condition`   i.e., not: ws* "on" WS+ ...
-    let not_type_condition = ws.clone()
+    let not_type_condition = ws
+      .clone()
       .ignore_then(just([I::Token::o, I::Token::n]))
-      .then_ignore(ws_plus::<I, E>())
-      .rewind()                  // don't consume if it matches
+      .then_ignore(ignored())
+      .rewind()
       .not()
       .ignored();
 
     Ellipsis::parser()
       .then_ignore(ws.clone())
       .then_ignore(not_type_condition)
-      .then(Name::<Src, Span>::parser())
+      .then(Name::parser())
       .then_ignore(ws.clone())
       .then(directives.or_not())
       .map_with(|((ellipsis_sp, name), directives), sp| Self {
@@ -169,13 +151,12 @@ impl<SelectionSet, Directives, Src, Span> InlineFragment<SelectionSet, Directive
     directives: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     PS: Parser<'src, I, SelectionSet, E> + Clone,
     P: Parser<'src, I, Directives, E> + Clone,
   {
@@ -227,13 +208,12 @@ impl<Src, Span> Alias<Src, Span> {
   /// Returns a parser of the alias.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     let ws = super::ignored::ignored();
 
@@ -248,7 +228,7 @@ impl<Src, Span> Alias<Src, Span> {
         name,
         colon,
       })
-      .then_ignore(ws) // trailing ignored
+      .labelled("alias")
   }
 }
 
@@ -300,13 +280,12 @@ where
   /// Returns a parser of the selection set.
   pub fn parser_with<'src, I, E, PS>(selection: PS) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     PS: Parser<'src, I, S, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -329,6 +308,7 @@ where
         r_brace,
         _marker: PhantomData,
       })
+      .labelled("selection set")
   }
 }
 
@@ -386,13 +366,12 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
     selection_set: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     AP: Parser<'src, I, Args, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
@@ -402,7 +381,7 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
     Alias::<Src, Span>::parser()
       .or_not()
       .then_ignore(ws.clone())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::parser())
       .then_ignore(ws.clone())
       .then(args.or_not())
       .then_ignore(ws.clone())
@@ -419,6 +398,6 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
           selection_set,
         },
       )
-      .then_ignore(ws)
+      .labelled("field")
   }
 }

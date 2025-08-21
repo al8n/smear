@@ -1,13 +1,11 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
   keywords,
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
+  source::Source,
   spanned::Spanned,
 };
 
@@ -89,13 +87,12 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     implement_interfaces_parser: impl Fn() -> IP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -147,11 +144,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
     fields_definition_parser: impl Fn() -> FDP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -244,13 +240,12 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     fields_definition_parser: impl Fn() -> FDP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,

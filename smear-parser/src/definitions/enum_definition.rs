@@ -1,7 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
@@ -12,6 +9,7 @@ use super::super::{
     punct::{LBrace, RBrace},
   },
   name::Name,
+  source::Source,
   spanned::Spanned,
 };
 
@@ -55,13 +53,12 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -137,13 +134,12 @@ impl<EnumValueDefinition, Src, Span, Container>
   #[inline]
   pub fn parser_with<'src, I, E, P>(enum_value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -246,13 +242,12 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     directives_parser: DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -298,11 +293,10 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
     enum_values_parser: impl Fn() -> EVP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     DP: Parser<'src, I, Directives, E> + Clone,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
   {
@@ -386,13 +380,12 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     enum_values_definition: impl Fn() -> EVP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

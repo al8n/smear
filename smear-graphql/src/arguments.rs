@@ -1,6 +1,5 @@
 use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
+  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
 };
 use derive_more::{AsMut, AsRef, From, Into};
 
@@ -46,13 +45,12 @@ impl<Src, Span> Argument<Src, Span> {
   /// Returns a parser for the argument.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
@@ -89,13 +87,12 @@ impl<Src, Span> ConstArgument<Src, Span> {
   /// Returns a parser for the argument.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
@@ -139,13 +136,12 @@ impl<Src, Span> Arguments<Src, Span> {
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Arguments::parser_with(Argument::parser()).map(Self)
   }
@@ -189,13 +185,12 @@ impl<Src, Span> ConstArguments<Src, Span> {
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Arguments::parser_with(ConstArgument::parser()).map(Self)
   }

@@ -1,9 +1,6 @@
 use core::marker::PhantomData;
 
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
@@ -12,6 +9,7 @@ use super::super::{
     input_value::{DefaultInputValue, StringValue, Variable},
     punct::{Colon, LParen, RParen},
   },
+  source::Source,
   spanned::Spanned,
 };
 
@@ -94,13 +92,12 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
     value_parser: impl FnOnce() -> VP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
@@ -179,13 +176,12 @@ impl<VariableDefinition, Src, Span, Container>
 
   pub fn parser_with<'src, I, E, P>(parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     Container: chumsky::container::Container<VariableDefinition>,
     P: Parser<'src, I, VariableDefinition, E> + Clone,
   {

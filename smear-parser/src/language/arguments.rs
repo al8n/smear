@@ -1,10 +1,7 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::{
-  super::{char::Char, name::Name, spanned::Spanned},
+  super::{char::Char, name::Name, source::Source, spanned::Spanned},
   punct::{LParen, RParen},
 };
 
@@ -46,13 +43,12 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
   /// Returns a parser for the argument.
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Value, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -133,13 +129,12 @@ where
   /// Returns a parser to parse arguments.
   pub fn parser_with<'src, I, E, P>(arg: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Arg, E> + Clone,
   {
     let ws = super::ignored::ignored();

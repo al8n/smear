@@ -10,10 +10,13 @@ license.workspace = true
 default = ["std"]
 alloc = []
 std = ["chumsky/default"]
-bytes = ["chumsky/bytes"]
+
+bytes = ["chumsky/bytes", "dep:bytes"]
 
 [dependencies]
 chumsky = { version = "0.10", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref"] }
 either = { version = "1", default-features = false }
 paste = "1"
+
+bytes = { version = "1", default-features = false, optional = true }

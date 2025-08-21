@@ -1,9 +1,6 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use super::{char::Char, spanned::Spanned};
+use super::{char::Char, source::Source, spanned::Spanned};
 
 /// A name
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,13 +22,12 @@ impl<Src, Span> Name<Src, Span> {
   /// Returns the parser to parse a name.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     // [_A-Za-z]
     let start = one_of([
@@ -89,6 +85,7 @@ impl<Src, Span> Name<Src, Span> {
       I::Token::y,
       I::Token::z,
     ])
+    .labelled("name start")
     .ignored();
 
     // [_0-9A-Za-z]*
@@ -163,5 +160,6 @@ impl<Src, Span> Name<Src, Span> {
     start
       .then(cont)
       .map_with(|_, sp| Name::new(Spanned::from(sp)))
+      .labelled("name")
   }
 }

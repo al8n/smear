@@ -1,6 +1,5 @@
 use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
+  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
 };
 
 use super::{
@@ -80,13 +79,12 @@ impl<Src, Span> InputValue<Src, Span> {
   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|value| {
       let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
@@ -174,13 +172,12 @@ impl<Src, Span> ConstInputValue<Src, Span> {
   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|value| {
       // scalars (whatever you already have)
@@ -239,13 +236,12 @@ impl<Src, Span> DefaultInputValue<Src, Span> {
   /// Returns a parser of default input value.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     input_value::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }

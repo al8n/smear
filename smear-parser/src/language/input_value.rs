@@ -1,10 +1,7 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::{
-  super::{char::Char, language::punct::Equal, spanned::Spanned},
+  super::{char::Char, language::punct::Equal, source::Source, spanned::Spanned},
   ignored,
 };
 
@@ -22,6 +19,7 @@ pub use null::*;
 pub use object::*;
 pub use set::*;
 pub use string::*;
+pub use uint::*;
 pub use variable::*;
 
 mod angle;
@@ -35,6 +33,7 @@ mod null;
 mod object;
 mod set;
 mod string;
+mod uint;
 mod variable;
 
 /// Default input value
@@ -67,13 +66,12 @@ impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
   /// Returns a parser of default input value.
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Value, E> + Clone,
   {
     Equal::parser()

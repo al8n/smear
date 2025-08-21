@@ -1,10 +1,10 @@
 // use chumsky::{
-//   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
+//   extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected,
 //   util::MaybeRef,
 // };
 // use either::Either;
 
-// use super::{char::Char, spanned::Spanned};
+// use super::{char::Char, spanned::Spanned, source::Source};
 
 // use super::*;
 
@@ -77,13 +77,13 @@
 //   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
 //   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
 //   where
-//     I: StrInput<'src, Slice = Src, Span = Span>,
+//     I: Source<'src, Slice = Src, Span = Span>,
 //     I::Token: Char + 'src,
 //     Src: 'src,
 //     Span: 'src,
 //     E: ParserExtra<'src, I>,
 //     E::Error:
-//       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+//       LabelError<'src, I, &'static str>,
 //   {
 //     recursive(|value| {
 //       let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
@@ -185,13 +185,13 @@
 //   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
 //   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
 //   where
-//     I: StrInput<'src, Slice = Src, Span = Span>,
+//     I: Source<'src, Slice = Src, Span = Span>,
 //     I::Token: Char + 'src,
 //     Src: 'src,
 //     Span: 'src,
 //     E: ParserExtra<'src, I>,
 //     E::Error:
-//       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+//       LabelError<'src, I, &'static str>,
 //   {
 //     recursive(|value| {
 //       // scalars (whatever you already have)
@@ -231,7 +231,7 @@
 // fn test_empty_set() {
 //   let input = "<>";
 
-//   let set = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let set = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -243,7 +243,7 @@
 // fn test_non_empty_set() {
 //   let input = "<0, 1, 2, 3>";
 
-//   let set = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let set = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -267,7 +267,7 @@
 // fn test_empty_map() {
 //   let input = "<:>";
 
-//   let map = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let map = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -279,7 +279,7 @@
 // fn test_non_empty_map() {
 //   let input = r##"<"0": 0, "1": 1, "2": 2>"##;
 
-//   let map = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let map = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -314,7 +314,7 @@
 // fn test_empty_list() {
 //   let input = "[]";
 
-//   let list = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let list = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -326,7 +326,7 @@
 // fn test_non_empty_list() {
 //   let input = "[0, 1, 2]";
 
-//   let list = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let list = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -350,7 +350,7 @@
 // fn test_empty_object() {
 //   let input = "{}";
 
-//   let object = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let object = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()
@@ -362,7 +362,7 @@
 // fn test_non_empty_object() {
 //   let input = r##"{ _0: 0, _1: 1, _2: 2 }"##;
 
-//   let object = ConstInputValue::parser::<&str, super::super::super::Error>()
+//   let object = ConstInputValue::parser::<&str, crate::Error>()
 //     .parse(input)
 //     .into_result()
 //     .unwrap()

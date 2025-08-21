@@ -1,10 +1,7 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::{
-  super::{char::Char, name::Name, spanned::Spanned},
+  super::{char::Char, name::Name, source::Source, spanned::Spanned},
   punct::At,
 };
 
@@ -46,13 +43,12 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
 impl<Args, Src, Span> Directive<Args, Src, Span> {
   pub fn parser_with<'src, I, E, P>(args: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Args, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -103,13 +99,12 @@ where
   /// `Directive+` (the nonterminal `Directives` in the spec is one-or-more).
   pub fn parser_with<'src, I, E, P>(directive: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, Directive, E> + Clone,
   {
     directive

@@ -1,7 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
@@ -10,6 +7,7 @@ use super::super::{
     punct::{Colon, LBrace, RBrace},
   },
   name::Name,
+  source::Source,
   spanned::Spanned,
 };
 
@@ -66,13 +64,12 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
     operation_type_parser: impl FnOnce() -> P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, OperationType, E> + Clone,
   {
     operation_type_parser()
@@ -150,13 +147,12 @@ impl<OperationTypeDefinition, Src, Span, Container>
     operation_type_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     P: Parser<'src, I, OperationTypeDefinition, E> + Clone,
     Container: chumsky::container::Container<OperationTypeDefinition>,
   {

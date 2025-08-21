@@ -1,9 +1,6 @@
 use core::marker::PhantomData;
 
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
   char::Char,
@@ -14,48 +11,49 @@ use super::super::{
     punct::{At, Pipe},
   },
   name::Name,
+  source::Source,
   spanned::Spanned,
 };
 
 word!(
   /// `QUERY` location.
-  QueryLocation: [I::Token::Q, I::Token::U, I::Token::E, I::Token::R, I::Token::Y],
+  "query location": QueryLocation: [I::Token::Q, I::Token::U, I::Token::E, I::Token::R, I::Token::Y],
   /// `MUTATION` location.
-  MutationLocation: [I::Token::M, I::Token::U, I::Token::T, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "mutation location": MutationLocation: [I::Token::M, I::Token::U, I::Token::T, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SUBSCRIPTION` location.
-  SubscriptionLocation: [I::Token::S, I::Token::U, I::Token::B, I::Token::S, I::Token::C, I::Token::R, I::Token::I, I::Token::P, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "subscription location": SubscriptionLocation: [I::Token::S, I::Token::U, I::Token::B, I::Token::S, I::Token::C, I::Token::R, I::Token::I, I::Token::P, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD_DEFINITION` location.
-  FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "field definition location": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD` location.
-  FieldLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D],
+  "field location": FieldLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D],
   /// `FRAGMENT_DEFINITION` location.
-  FragmentDefinitionLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "fragment definition location": FragmentDefinitionLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FRAGMENT_SPREAD` location.
-  FragmentSpreadLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::S, I::Token::P, I::Token::R, I::Token::E, I::Token::A, I::Token::D],
+  "fragment spread location": FragmentSpreadLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::S, I::Token::P, I::Token::R, I::Token::E, I::Token::A, I::Token::D],
   /// `INLINE_FRAGMENT` location.
-  InlineFragmentLocation: [I::Token::I, I::Token::N, I::Token::L, I::Token::I, I::Token::N, I::Token::E, I::Token::UNDERSCORE, I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E],
+  "inline fragement location": InlineFragmentLocation: [I::Token::I, I::Token::N, I::Token::L, I::Token::I, I::Token::N, I::Token::E, I::Token::UNDERSCORE, I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E],
   /// `VARIABLE_DEFINITION` location.
-  VariableDefinitionLocation: [I::Token::V, I::Token::A, I::Token::R, I::Token::I, I::Token::A, I::Token::B, I::Token::L, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "variable definition location": VariableDefinitionLocation: [I::Token::V, I::Token::A, I::Token::R, I::Token::I, I::Token::A, I::Token::B, I::Token::L, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SCHEMA` location.
-  SchemaLocation: [I::Token::S, I::Token::C, I::Token::H, I::Token::E, I::Token::M, I::Token::A],
+  "schema location": SchemaLocation: [I::Token::S, I::Token::C, I::Token::H, I::Token::E, I::Token::M, I::Token::A],
   /// `SCALAR` location.
-  ScalarLocation: [I::Token::S, I::Token::C, I::Token::A, I::Token::L, I::Token::A, I::Token::R],
+  "scalar location": ScalarLocation: [I::Token::S, I::Token::C, I::Token::A, I::Token::L, I::Token::A, I::Token::R],
   /// `OBJECT` location.
-  ObjectLocation: [I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
+  "object location": ObjectLocation: [I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `ARGUMENT_DEFINITION` location.
-  ArgumentDefinitionLocation: [I::Token::A, I::Token::R, I::Token::G, I::Token::U, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "argument definition location": ArgumentDefinitionLocation: [I::Token::A, I::Token::R, I::Token::G, I::Token::U, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `INTERFACE` location.
-  InterfaceLocation: [I::Token::I, I::Token::N, I::Token::T, I::Token::E, I::Token::R, I::Token::F, I::Token::A, I::Token::C, I::Token::E],
+  "interface location": InterfaceLocation: [I::Token::I, I::Token::N, I::Token::T, I::Token::E, I::Token::R, I::Token::F, I::Token::A, I::Token::C, I::Token::E],
   /// `UNION` location.
-  UnionLocation: [I::Token::U, I::Token::N, I::Token::I, I::Token::O, I::Token::N],
+  "union location": UnionLocation: [I::Token::U, I::Token::N, I::Token::I, I::Token::O, I::Token::N],
   /// `ENUM_VALUE` location.
-  EnumValueLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M, I::Token::UNDERSCORE, I::Token::V, I::Token::A, I::Token::L, I::Token::U, I::Token::E],
-    /// `ENUM` location.
-  EnumLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M],
+  "enum value location": EnumValueLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M, I::Token::UNDERSCORE, I::Token::V, I::Token::A, I::Token::L, I::Token::U, I::Token::E],
+  /// `ENUM` location.
+  "enum location": EnumLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M],
   /// `INPUT_OBJECT` location.
-  InputObjectLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
+  "input object location": InputObjectLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `INPUT_FIELD_DEFINITION` location.
-  InputFieldDefinitionLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "input field definition location": InputFieldDefinitionLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
 );
 
 /// Executable directive location
@@ -110,11 +108,10 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
   /// Returns a parser to parse the location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -190,11 +187,10 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
   /// Returns a parser to parse the location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -248,11 +244,10 @@ impl<Src, Span> Location<Src, Span> {
   /// Returns a parser to parse the directive location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -335,11 +330,10 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
     location_parser: impl Parser<'src, I, Location, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     Pipe::parser()
       .or_not()
@@ -380,11 +374,10 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
     directive_location_parser: impl Parser<'src, I, Location, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
     Container: chumsky::container::Container<Location>,
   {
     directive_location_parser
@@ -476,13 +469,12 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
     args_parser: impl Parser<'src, I, Args, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()

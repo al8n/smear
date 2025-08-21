@@ -1,10 +1,7 @@
-use chumsky::{
-  extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
-  util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
-  super::{char::Char, spanned::Spanned},
+  super::{char::Char, source::Source, spanned::Spanned},
   punct::{Quote, TripleQuote},
 };
 
@@ -109,11 +106,10 @@ impl<Src, Span> StringValue<Src, Span> {
   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: StrInput<'src, Slice = Src, Span = Span>,
+    I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error:
-      LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
+    E::Error: LabelError<'src, I, &'static str>,
   {
     let quote = Quote::parser();
 
