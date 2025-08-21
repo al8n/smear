@@ -1,4 +1,4 @@
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 use chumsky::{
   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
@@ -29,7 +29,7 @@ macro_rules! punct {
         pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
         where
           I: StrInput<'src, Slice = Src, Span = Span>,
-          I::Token: SmearChar + 'src,
+          I::Token: Char + 'src,
           E: ParserExtra<'src, I>,
           E::Error:
             LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

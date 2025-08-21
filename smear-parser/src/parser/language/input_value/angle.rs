@@ -6,7 +6,7 @@ use either::Either;
 
 use crate::parser::{
   language::input_value::{Map, MapEntry, Set},
-  SmearChar,
+  Char,
 };
 
 /// Returns a parser which can parse either a set or a map.
@@ -15,7 +15,7 @@ pub fn angle_parser_with<'src, I, E, P, T, CS, CM>(
 ) -> impl Parser<'src, I, Either<Set<T, I::Slice, I::Span, CS>, Map<T, I::Slice, I::Span, CM>>, E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   I::Slice: 'src,
   I::Span: 'src,
   E: ParserExtra<'src, I>,

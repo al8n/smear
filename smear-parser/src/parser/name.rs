@@ -3,7 +3,7 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 /// A name
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ impl<Src, Span> Name<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

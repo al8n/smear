@@ -1,4 +1,4 @@
-use crate::parser::SmearChar;
+use crate::parser::Char;
 use chumsky::{
   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
 };
@@ -8,7 +8,7 @@ use chumsky::{
 pub fn line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -26,7 +26,7 @@ where
 pub fn comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -46,7 +46,7 @@ where
 pub fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -57,7 +57,7 @@ where
 pub fn comma<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -69,7 +69,7 @@ where
 pub fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -81,7 +81,7 @@ where
 pub fn ignored<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {

@@ -5,14 +5,14 @@ use chumsky::{
 
 use crate::parser::{
   keywords::Fragment,
-  language::{field::TypeCondition, ignored::ignored, input_value::String},
-  Name, SmearChar, Spanned,
+  language::{field::TypeCondition, ignored::ignored, input_value::StringValue},
+  Char, Name, Spanned,
 };
 
 #[derive(Debug, Clone)]
 pub struct FragmentDefinition<SelectionSet, Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   fragment: Fragment<Src, Span>,
   name: Name<Src, Span>,
   type_condition: TypeCondition<Src, Span>,
@@ -32,7 +32,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -61,7 +61,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     Name<Src, Span>,
     TypeCondition<Src, Span>,
     Option<Directives>,
@@ -84,7 +84,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

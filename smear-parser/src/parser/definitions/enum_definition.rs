@@ -10,7 +10,7 @@ use crate::parser::{
     input_value::{Enum as EnumValue, String},
     punct::{LBrace, RBrace},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 use core::marker::PhantomData;
@@ -19,7 +19,7 @@ use std::vec::Vec;
 #[derive(Debug, Clone)]
 pub struct EnumValueDefinition<Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   enum_value: EnumValue<Src, Span>,
   directives: Option<Directives>,
 }
@@ -33,7 +33,7 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
 
   /// The description of the enum value definition.
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -54,7 +54,7 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -136,7 +136,7 @@ impl<EnumValueDefinition, Src, Span, Container>
   pub fn parser_with<'src, I, E, P>(enum_value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -169,8 +169,8 @@ impl<EnumValueDefinition, Src, Span, Container>
 #[derive(Debug, Clone)]
 pub struct EnumDefinition<Directives, EnumValuesDefinition, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
-  keyword: keywords::Enum<Src, Span>,
+  description: Option<StringValue<Src, Span>>,
+  keyword: keywords::EnumValue<Src, Span>,
   name: Name<Src, Span>,
   enum_values: Option<EnumValuesDefinition>,
   directives: Option<Directives>,
@@ -187,7 +187,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
 
   /// The description of the enum definition.
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -199,7 +199,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
 
   /// The enum keyword of the enum definition.
   #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Src, Span> {
+  pub const fn enum_keyword(&self) -> &keywords::EnumValue<Src, Span> {
     &self.keyword
   }
 
@@ -221,8 +221,8 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
-    keywords::Enum<Src, Span>,
+    Option<StringValue<Src, Span>>,
+    keywords::EnumValue<Src, Span>,
     Name<Src, Span>,
     Option<EnumValuesDefinition>,
     Option<Directives>,
@@ -245,7 +245,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -297,7 +297,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -319,7 +319,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
 pub struct EnumExtension<Directives, EnumValuesDefinition, Src, Span> {
   span: Spanned<Src, Span>,
   extend: keywords::Extend<Src, Span>,
-  keyword: keywords::Enum<Src, Span>,
+  keyword: keywords::EnumValue<Src, Span>,
   name: Name<Src, Span>,
   content: EnumExtensionContent<Directives, EnumValuesDefinition>,
 }
@@ -347,7 +347,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
 
   /// The enum keyword of the enum definition.
   #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Src, Span> {
+  pub const fn enum_keyword(&self) -> &keywords::EnumValue<Src, Span> {
     &self.keyword
   }
 
@@ -364,7 +364,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
   ) -> (
     Spanned<Src, Span>,
     keywords::Extend<Src, Span>,
-    keywords::Enum<Src, Span>,
+    keywords::EnumValue<Src, Span>,
     Name<Src, Span>,
     EnumExtensionContent<Directives, EnumValuesDefinition>,
   ) {
@@ -385,7 +385,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

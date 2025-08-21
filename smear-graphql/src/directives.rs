@@ -6,7 +6,7 @@ use derive_more::{AsMut, AsRef, From, Into};
 
 use crate::parser::{
   language::{directives, punct::At},
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 use super::arguments::{Arguments, ConstArguments};
@@ -43,7 +43,7 @@ impl<Src, Span> Directive<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -86,7 +86,7 @@ impl<Src, Span> ConstDirective<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -119,7 +119,7 @@ impl<Src, Span> Directives<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -152,7 +152,7 @@ impl<Src, Span> ConstDirectives<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

@@ -4,8 +4,8 @@ use chumsky::{
 };
 
 use crate::parser::{
-  language::{ignored::ignored, input_value::String, punct::Colon},
-  Name, SmearChar, Spanned,
+  language::{ignored::ignored, input_value::StringValue, punct::Colon},
+  Char, Name, Spanned,
 };
 
 /// Represents a GraphQL input value definition.
@@ -14,7 +14,7 @@ use crate::parser::{
 #[derive(Debug, Clone)]
 pub struct InputValueDefinition<Type, DefaultValue, Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   name: Name<Src, Span>,
   colon: Colon<Src, Span>,
   ty: Type,
@@ -27,7 +27,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
 {
   /// The description of the input value definition.
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -67,7 +67,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     Name<Src, Span>,
     Colon<Src, Span>,
     Type,
@@ -94,7 +94,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

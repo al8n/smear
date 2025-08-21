@@ -3,16 +3,16 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 /// Represents a null value parsed from input
 #[derive(Debug, Clone, Copy)]
-pub struct Null<Src, Span> {
+pub struct NullValue<Src, Span> {
   /// The original span of the null value
   span: Spanned<Src, Span>,
 }
 
-impl<Src, Span> Null<Src, Span> {
+impl<Src, Span> NullValue<Src, Span> {
   /// Returns the span of the null value
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -25,7 +25,7 @@ impl<Src, Span> Null<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

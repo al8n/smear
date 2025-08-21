@@ -5,7 +5,7 @@ use chumsky::{
 
 use crate::parser::{
   language::punct::{Quote, TripleQuote},
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 /// Delimiters used by a GraphQL string literal.
@@ -50,7 +50,7 @@ pub enum StringDelimiter<Src, Span> {
 ///
 /// Spec: [String Value](<https://spec.graphql.org/draft/#sec-String-Value>)
 #[derive(Debug, Clone, Copy)]
-pub struct String<Src, Span> {
+pub struct StringValue<Src, Span> {
   /// Entire literal, including opening and closing delimiters.
   ///
   /// Example:
@@ -73,7 +73,7 @@ pub struct String<Src, Span> {
   content: Spanned<Src, Span>,
 }
 
-impl<Src, Span> String<Src, Span> {
+impl<Src, Span> StringValue<Src, Span> {
   /// Returns the span of the string value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -92,13 +92,25 @@ impl<Src, Span> String<Src, Span> {
     &self.delimiters
   }
 
+  /// Consumes the string value and returns its components
+  #[inline]
+  pub fn into_components(
+    self,
+  ) -> (
+    Spanned<Src, Span>,
+    StringDelimiter<Src, Span>,
+    Spanned<Src, Span>,
+  ) {
+    (self.span, self.delimiters, self.content)
+  }
+
   /// Returns a parser for the string value.
   ///
   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -218,7 +230,7 @@ impl<Src, Span> String<Src, Span> {
       .clone()
       .then(inline_content_span)
       .then(quote)
-      .map_with(|((lq, content), rq), sp| String {
+      .map_with(|((lq, content), rq), sp| Self {
         span: Spanned::from(sp),
         delimiters: StringDelimiter::Quote {
           l_quote: lq,
@@ -232,7 +244,7 @@ impl<Src, Span> String<Src, Span> {
       .clone()
       .then(block_content_span)
       .then(triple_quote)
-      .map_with(|((ltq, content), rtq), sp| String {
+      .map_with(|((ltq, content), rtq), sp| Self {
         span: Spanned::from(sp),
         delimiters: StringDelimiter::TripleQuote {
           l_triple_quote: ltq,

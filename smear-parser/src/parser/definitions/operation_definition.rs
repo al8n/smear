@@ -4,8 +4,8 @@ use chumsky::{
 };
 
 use crate::parser::{
-  language::{ignored::ignored, input_value::String},
-  Name, SmearChar, Spanned,
+  language::{ignored::ignored, input_value::StringValue},
+  Char, Name, Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub struct NamedOperationDefinition<
   Span,
 > {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   operation_type: OperationType,
   name: Option<Name<Src, Span>>,
   variable_definitions: Option<VariableDefinitions>,
@@ -35,7 +35,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -69,7 +69,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     OperationType,
     Option<Name<Src, Span>>,
     Option<VariableDefinitions>,
@@ -96,7 +96,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -179,7 +179,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

@@ -5,11 +5,11 @@ use chumsky::{
 
 use crate::parser::{
   language::punct::{LAngle, RAngle},
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 #[derive(Debug, Clone)]
-pub struct Set<T, Src, Span, C = Vec<T>> {
+pub struct SetValue<T, Src, Span, C = Vec<T>> {
   span: Spanned<Src, Span>,
   l_angle: LAngle<Src, Span>,
   r_angle: RAngle<Src, Span>,
@@ -17,7 +17,7 @@ pub struct Set<T, Src, Span, C = Vec<T>> {
   _marker: core::marker::PhantomData<T>,
 }
 
-impl<T, Src, Span, C> Set<T, Src, Span, C> {
+impl<T, Src, Span, C> SetValue<T, Src, Span, C> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
@@ -32,14 +32,14 @@ impl<T, Src, Span, C> Set<T, Src, Span, C> {
   }
 }
 
-impl<T, Src, Span, C> Set<T, Src, Span, C>
+impl<T, Src, Span, C> SetValue<T, Src, Span, C>
 where
   C: Container<T>,
 {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

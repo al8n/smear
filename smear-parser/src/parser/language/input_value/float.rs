@@ -3,7 +3,7 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 use super::Int;
 
@@ -90,25 +90,25 @@ impl<Src, Span> Fractional<Src, Span> {
 ///
 /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct Float<Src, Span> {
+pub struct FloatValue<Src, Span> {
   /// The span of the float value
   span: Spanned<Src, Span>,
   /// The integer section of the float value
-  int: Int<Src, Span>,
+  int: IntValue<Src, Span>,
   /// The fractional section of the float value
   fractional: Option<Fractional<Src, Span>>,
   /// The exponent section of the float value
   exponent: Option<Exponent<Src, Span>>,
 }
 
-impl<Src, Span> Float<Src, Span> {
+impl<Src, Span> FloatValue<Src, Span> {
   /// Returns the span of the float value
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
 
   /// Returns the integer section of the float value.
-  pub const fn int(&self) -> &Int<Src, Span> {
+  pub const fn int(&self) -> &IntValue<Src, Span> {
     &self.int
   }
 
@@ -128,7 +128,7 @@ impl<Src, Span> Float<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

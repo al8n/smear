@@ -8,16 +8,16 @@ use chumsky::{
 use crate::parser::{
   language::{
     ignored::ignored,
-    input_value::String,
+    input_value::StringValue,
     punct::{Colon, LBrace, RBrace},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 #[derive(Debug, Clone)]
 pub struct FieldDefinition<Args, Type, Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   name: Name<Src, Span>,
   arguments_definition: Option<Args>,
   colon: Colon<Src, Span>,
@@ -32,7 +32,7 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -65,7 +65,7 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   pub fn into_components(
     self,
   ) -> (
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     Name<Src, Span>,
     Option<Args>,
     Colon<Src, Span>,
@@ -91,7 +91,7 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -178,7 +178,7 @@ impl<FieldDefinition, Src, Span, Container>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

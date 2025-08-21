@@ -3,13 +3,13 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 /// Represents a raw integer value parsed from input.
 ///
 /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct Int<Src, Span> {
+pub struct IntValue<Src, Span> {
   /// The original raw string representation of the integer value.
   span: Spanned<Src, Span>,
   /// Returns the sign of the value.
@@ -18,7 +18,7 @@ pub struct Int<Src, Span> {
   digits: Spanned<Src, Span>,
 }
 
-impl<Src, Span> Int<Src, Span> {
+impl<Src, Span> IntValue<Src, Span> {
   /// Returns the span of the integer value.
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -40,7 +40,7 @@ impl<Src, Span> Int<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

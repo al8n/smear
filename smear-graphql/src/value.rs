@@ -9,14 +9,15 @@ use crate::parser::{
     input_value::{self, *},
     punct::Equal,
   },
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
-pub type List<Src, Span> = input_value::List<InputValue<Src, Span>, Src, Span>;
-pub type ConstList<Src, Span> = input_value::List<ConstInputValue<Src, Span>, Src, Span>;
+pub type ListValue<Src, Span> = input_value::ListValue<InputValue<Src, Span>, Src, Span>;
+pub type ConstListValue<Src, Span> = input_value::ListValue<ConstInputValue<Src, Span>, Src, Span>;
 
-pub type Object<Src, Span> = input_value::Object<InputValue<Src, Span>, Src, Span>;
-pub type ConstObject<Src, Span> = input_value::Object<ConstInputValue<Src, Span>, Src, Span>;
+pub type ObjectValue<Src, Span> = input_value::ObjectValue<InputValue<Src, Span>, Src, Span>;
+pub type ConstObjectValue<Src, Span> =
+  input_value::ObjectValue<ConstInputValue<Src, Span>, Src, Span>;
 
 /// Input value
 ///
@@ -37,22 +38,22 @@ pub enum InputValue<Src, Span> {
   ///
   /// Instead of giving a type of number, keep the raw string representation, let the
   /// upper layers handle the conversion.
-  Int(Int<Src, Span>),
+  Int(IntValue<Src, Span>),
   /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
   ///
   /// Instead of giving a type of float, keep the raw string representation, let the
   /// upper layers handle the conversion.
-  Float(Float<Src, Span>),
+  Float(FloatValue<Src, Span>),
   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
-  Boolean(Boolean<Src, Span>),
+  Boolean(BooleanValue<Src, Span>),
   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
-  String(String<Src, Span>),
+  String(StringValue<Src, Span>),
   /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
-  Null(Null<Src, Span>),
+  Null(NullValue<Src, Span>),
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
-  Enum(Enum<Src, Span>),
+  Enum(EnumValue<Src, Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(List<Src, Span>),
+  List(ListValue<Src, Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
   Object(Object<Src, Span>),
 }
@@ -80,7 +81,7 @@ impl<Src, Span> InputValue<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -132,22 +133,22 @@ pub enum ConstInputValue<Src, Span> {
   ///
   /// Instead of giving a type of number, keep the raw string representation, let the
   /// upper layers handle the conversion.
-  Int(Int<Src, Span>),
+  Int(IntValue<Src, Span>),
   /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
   ///
   /// Instead of giving a type of float, keep the raw string representation, let the
   /// upper layers handle the conversion.
-  Float(Float<Src, Span>),
+  Float(FloatValue<Src, Span>),
   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
-  Boolean(Boolean<Src, Span>),
+  Boolean(BooleanValue<Src, Span>),
   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
-  String(String<Src, Span>),
+  String(StringValue<Src, Span>),
   /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
-  Null(Null<Src, Span>),
+  Null(NullValue<Src, Span>),
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
-  Enum(Enum<Src, Span>),
+  Enum(EnumValue<Src, Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(ConstList<Src, Span>),
+  List(ConstListValue<Src, Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
   Object(ConstObject<Src, Span>),
 }
@@ -174,7 +175,7 @@ impl<Src, Span> ConstInputValue<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -239,7 +240,7 @@ impl<Src, Span> DefaultInputValue<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

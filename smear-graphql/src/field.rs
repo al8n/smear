@@ -9,7 +9,7 @@ use crate::parser::{
     field::{self, Alias, TypeCondition},
     punct::{Ellipsis, LBrace, RBrace},
   },
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 use super::{arguments::Arguments, directives::Directives};
@@ -34,7 +34,7 @@ impl<Src, Span> FragmentSpread<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -48,7 +48,7 @@ impl<Src, Span> FragmentSpread<Src, Span> {
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
 pub struct InlineFragment<Src, Span>(
-  field::InlineFragment<SelectionSet<Src, Span>, Directives<Src, Span>, Src, Span>,
+  field::InlineFragment<SelectionSetValue<Src, Span>, Directives<Src, Span>, Src, Span>,
 );
 
 impl<Src, Span> InlineFragment<Src, Span> {
@@ -73,14 +73,14 @@ impl<Src, Span> InlineFragment<Src, Span> {
   }
 
   #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<Src, Span> {
+  pub const fn selection_set(&self) -> &SelectionSetValue<Src, Span> {
     self.0.selection_set()
   }
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -94,7 +94,13 @@ impl<Src, Span> InlineFragment<Src, Span> {
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
 pub struct Field<Src, Span>(
-  field::Field<Arguments<Src, Span>, Directives<Src, Span>, SelectionSet<Src, Span>, Src, Span>,
+  field::Field<
+    Arguments<Src, Span>,
+    Directives<Src, Span>,
+    SelectionSetValue<Src, Span>,
+    Src,
+    Span,
+  >,
 );
 
 impl<Src, Span> Field<Src, Span> {
@@ -124,14 +130,14 @@ impl<Src, Span> Field<Src, Span> {
   }
 
   #[inline]
-  pub const fn selection_set(&self) -> Option<&SelectionSet<Src, Span>> {
+  pub const fn selection_set(&self) -> Option<&SelectionSetValue<Src, Span>> {
     self.0.selection_set()
   }
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -167,7 +173,7 @@ impl<Src, Span> Selection<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -199,9 +205,9 @@ impl<Src, Span> Selection<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct SelectionSet<Src, Span>(field::SelectionSet<Selection<Src, Span>, Src, Span>);
+pub struct SelectionSetValue<Src, Span>(field::SelectionSet<Selection<Src, Span>, Src, Span>);
 
-impl<Src, Span> SelectionSet<Src, Span> {
+impl<Src, Span> SelectionSetValue<Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     self.0.span()
@@ -231,7 +237,7 @@ impl<Src, Span> SelectionSet<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

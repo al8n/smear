@@ -5,7 +5,7 @@ use chumsky::{
 
 use crate::parser::{
   language::{ignored::ignored, punct::Dollar},
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 /// Represents a variable value parsed from input
@@ -45,7 +45,7 @@ impl<Src, Span> Variable<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

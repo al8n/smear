@@ -8,9 +8,6 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// The GraphQL parsers
-pub mod graphql;
-
 /// The parser
 pub mod parser;
 mod utils;
@@ -19,11 +16,8 @@ mod utils;
 pub mod __private {
   pub use chumsky;
 
-  pub use crate::parser::{SmearChar, Spanned};
+  pub use crate::parser::{Char, Spanned};
 }
 
 #[cfg(all(feature = "std", test))]
 mod tests;
-
-#[test]
-fn t() {}

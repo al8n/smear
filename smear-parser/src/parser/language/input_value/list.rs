@@ -5,14 +5,14 @@ use chumsky::{
 
 use crate::parser::{
   language::punct::{LBracket, RBracket},
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 /// Represents an list value parsed from input
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
 #[derive(Debug, Clone)]
-pub struct List<Value, Src, Span, Container = std::vec::Vec<Value>> {
+pub struct ListValue<Value, Src, Span, Container = std::vec::Vec<Value>> {
   /// The original span of the list value
   span: Spanned<Src, Span>,
   /// The left `[` token.
@@ -28,7 +28,7 @@ pub struct List<Value, Src, Span, Container = std::vec::Vec<Value>> {
   _value: core::marker::PhantomData<Value>,
 }
 
-impl<Value, Src, Span, Container> List<Value, Src, Span, Container> {
+impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   /// Returns the span of the list value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -58,7 +58,7 @@ impl<Value, Src, Span, Container> List<Value, Src, Span, Container> {
     I: StrInput<'src, Slice = Src, Span = Span>,
     Src: 'src,
     Span: 'src,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

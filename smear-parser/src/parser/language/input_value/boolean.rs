@@ -3,18 +3,18 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 /// Represents a boolean value parsed from input
 #[derive(Debug, Clone, Copy)]
-pub struct Boolean<Src, Span> {
+pub struct BooleanValue<Src, Span> {
   /// The original span of the boolean value
   span: Spanned<Src, Span>,
   /// The value of the boolean
   value: bool,
 }
 
-impl<Src, Span> Boolean<Src, Span> {
+impl<Src, Span> BooleanValue<Src, Span> {
   /// Returns the value
   #[inline]
   pub const fn value(&self) -> bool {
@@ -33,7 +33,7 @@ impl<Src, Span> Boolean<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,

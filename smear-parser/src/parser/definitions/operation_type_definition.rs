@@ -8,7 +8,7 @@ use crate::parser::{
     ignored::ignored,
     punct::{Colon, LBrace, RBrace},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 use core::marker::PhantomData;
@@ -65,7 +65,7 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -149,7 +149,7 @@ impl<OperationTypeDefinition, Src, Span, Container>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

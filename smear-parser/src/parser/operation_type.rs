@@ -3,7 +3,7 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{SmearChar, Spanned};
+use crate::parser::{Char, Spanned};
 
 word!(Query: [I::Token::q, I::Token::u, I::Token::e, I::Token::r, I::Token::y]);
 word!(Mutation: [I::Token::m, I::Token::u, I::Token::t, I::Token::a, I::Token::t, I::Token::i, I::Token::o, I::Token::n]);
@@ -44,7 +44,7 @@ impl<Src, Span> OperationType<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

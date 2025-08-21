@@ -5,14 +5,14 @@ use chumsky::{
 
 use crate::parser::{
   keywords,
-  language::{ignored::ignored, input_value::String},
-  Name, SmearChar, Spanned,
+  language::{ignored::ignored, input_value::StringValue},
+  Char, Name, Spanned,
 };
 
 #[derive(Debug, Clone)]
 pub struct ScalarDefinition<Directives, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   scalar: keywords::Scalar<Src, Span>,
   name: Name<Src, Span>,
   directives: Option<Directives>,
@@ -27,7 +27,7 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
 
   /// The description of the scalar definition.
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -54,7 +54,7 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     keywords::Scalar<Src, Span>,
     Name<Src, Span>,
     Option<Directives>,
@@ -73,7 +73,7 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -166,7 +166,7 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

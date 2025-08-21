@@ -11,7 +11,7 @@ use crate::parser::{
     ignored::ignored,
     punct::{LBrace, RBrace},
   },
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 /// The arguments definition.
@@ -65,7 +65,7 @@ impl<InputValueDefinition, Src, Span, Container>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

@@ -6,7 +6,7 @@ use chumsky::{
 use crate::parser::language::punct::Equal;
 
 use super::{
-  super::{SmearChar, Spanned},
+  super::{Char, Spanned},
   ignored,
 };
 
@@ -70,7 +70,7 @@ impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

@@ -7,10 +7,10 @@ use crate::parser::{
   keywords,
   language::{
     ignored::ignored,
-    input_value::String,
+    input_value::StringValue,
     punct::{Equal, Pipe},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 use std::vec::Vec;
@@ -45,7 +45,7 @@ impl<Src, Span> UnionMemberType<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -67,7 +67,7 @@ impl<Src, Span> UnionMemberType<Src, Span> {
   pub fn parser_with_pipe<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -110,7 +110,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -141,7 +141,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
 #[derive(Debug, Clone)]
 pub struct UnionDefinition<Directives, MemberTypes, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   keyword: keywords::Union<Src, Span>,
   name: Name<Src, Span>,
   directives: Option<Directives>,
@@ -156,7 +156,7 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
   #[inline]
   pub const fn description(
     &self,
-  ) -> Option<&crate::parser::language::input_value::String<Src, Span>> {
+  ) -> Option<&crate::parser::language::input_value::StringValueValue<Src, Span>> {
     self.description.as_ref()
   }
   #[inline]
@@ -182,7 +182,7 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -232,7 +232,7 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -312,7 +312,7 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

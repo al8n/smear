@@ -1,0 +1,17 @@
+[package]
+name = "smear-graphql"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+alloc = ["smear-parser/alloc"]
+std = ["smear-parser/std"]
+
+bytes = ["smear-parser/bytes"]
+
+[dependencies]
+smear-parser.workspace = true

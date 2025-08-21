@@ -5,14 +5,14 @@ use chumsky::{
 
 use crate::parser::{
   keywords,
-  language::{ignored::ignored, input_value::String},
-  SmearChar, Spanned,
+  language::{ignored::ignored, input_value::StringValue},
+  Char, Spanned,
 };
 
 #[derive(Debug, Clone)]
 pub struct SchemaDefinition<Directives, RootOperationTypesDefinition, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   schema: keywords::Schema<Src, Span>,
   directives: Option<Directives>,
   operation_type_definitions: RootOperationTypesDefinition,
@@ -29,7 +29,7 @@ impl<Directives, RootOperationTypesDefinition, Src, Span>
 
   /// Returns the description of the schema definition.
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -55,7 +55,7 @@ impl<Directives, RootOperationTypesDefinition, Src, Span>
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     keywords::Schema<Src, Span>,
     Option<Directives>,
     RootOperationTypesDefinition,
@@ -75,7 +75,7 @@ impl<Directives, RootOperationTypesDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -121,7 +121,7 @@ impl<Directives, RootOperationTypesDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -191,7 +191,7 @@ impl<Directives, RootOperationTypesDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

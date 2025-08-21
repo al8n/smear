@@ -1,6 +1,6 @@
 use crate::parser::{
   language::punct::{Colon, LBrace, RBrace},
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 use chumsky::{
   extra::ParserExtra, input::StrInput, label::LabelError, prelude::*, text::TextExpected,
@@ -8,14 +8,14 @@ use chumsky::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ObjectField<Value, Src, Span> {
+pub struct ObjectValueField<Value, Src, Span> {
   span: Spanned<Src, Span>,
   name: Name<Src, Span>,
   colon: Colon<Src, Span>,
   value: Value,
 }
 
-impl<Value, Src, Span> ObjectField<Value, Src, Span> {
+impl<Value, Src, Span> ObjectValueField<Value, Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -37,7 +37,7 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -64,7 +64,12 @@ impl<Value, Src, Span> ObjectField<Value, Src, Span> {
 
 /// Input Object Value: `{` (fields)? `}`
 #[derive(Debug, Clone)]
-pub struct Object<Value, Src, Span, Container = std::vec::Vec<ObjectField<Value, Src, Span>>> {
+pub struct ObjectValue<
+  Value,
+  Src,
+  Span,
+  Container = std::vec::Vec<ObjectValueField<Value, Src, Span>>,
+> {
   span: Spanned<Src, Span>,
   l_brace: LBrace<Src, Span>,
   r_brace: RBrace<Src, Span>,
@@ -72,7 +77,7 @@ pub struct Object<Value, Src, Span, Container = std::vec::Vec<ObjectField<Value,
   _value: core::marker::PhantomData<Value>,
 }
 
-impl<Value, Src, Span, Container> Object<Value, Src, Span, Container> {
+impl<Value, Src, Span, Container> ObjectValue<Value, Src, Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
@@ -91,14 +96,14 @@ impl<Value, Src, Span, Container> Object<Value, Src, Span, Container> {
   }
 }
 
-impl<Value, Src, Span, Container> Object<Value, Src, Span, Container>
+impl<Value, Src, Span, Container> ObjectValue<Value, Src, Span, Container>
 where
-  Container: chumsky::container::Container<ObjectField<Value, Src, Span>>,
+  Container: chumsky::container::Container<ObjectValueField<Value, Src, Span>>,
 {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -109,9 +114,8 @@ where
     let ws = super::ignored::ignored();
     let open = LBrace::parser();
     let close = RBrace::parser();
-    let field = ObjectField::<Value, Src, Span>::parser_with(value.clone()); // has trailing ws
+    let field = ObjectValueField::<Value, Src, Span>::parser_with(value.clone());
 
-    // '{' ws? ( '}' | field+ '}' )
     open
       .then_ignore(ws.clone())
       .then(choice((

@@ -5,7 +5,7 @@ use chumsky::{
 
 use crate::parser::{
   language::punct::{LParen, RParen},
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 use std::vec::Vec;
@@ -47,7 +47,7 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -134,7 +134,7 @@ where
   pub fn parser_with<'src, I, E, P>(arg: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

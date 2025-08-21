@@ -9,10 +9,10 @@ use crate::parser::{
   keywords,
   language::{
     ignored::ignored,
-    input_value::String,
+    input_value::StringValue,
     punct::{At, Pipe},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 word!(
@@ -109,7 +109,7 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -189,7 +189,7 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -247,7 +247,7 @@ impl<Src, Span> Location<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -334,7 +334,7 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -379,7 +379,7 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -403,7 +403,7 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
 #[derive(Debug, Clone)]
 pub struct DirectiveDefinition<Args, Locations, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   keyword: keywords::Directive<Src, Span>,
   at: At<Src, Span>,
   name: Name<Src, Span>,
@@ -428,7 +428,7 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
 
   /// Returns the description of the directive definition
   #[inline]
-  pub const fn description(&self) -> &Option<String<Src, Span>> {
+  pub const fn description(&self) -> &Option<StringValue<Src, Span>> {
     &self.description
   }
 
@@ -475,7 +475,7 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

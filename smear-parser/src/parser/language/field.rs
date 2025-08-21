@@ -9,7 +9,7 @@ use crate::parser::{
     ignored::{bom, comma, comment, line_terminator, white_space},
     punct::{Ellipsis, LBrace, RBrace},
   },
-  Name, SmearChar, Spanned,
+  Char, Name, Spanned,
 };
 
 use core::marker::PhantomData;
@@ -19,7 +19,7 @@ use std::vec::Vec;
 // fn ellipsis<'src, I, E>() -> impl Parser<'src, I, Ellipsis<Spanned<I::Slice, I::Span>>, E> + Clone
 // where
 //   I: StrInput<'src>,
-//   I::Token: SmearChar + 'src,
+//   I::Token: Char + 'src,
 //   E: ParserExtra<'src, I>,
 //   E::Error:
 //     LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -32,7 +32,7 @@ use std::vec::Vec;
 fn ws_plus<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: StrInput<'src>,
-  I::Token: SmearChar + 'src,
+  I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
   E::Error: LabelError<'src, I, TextExpected<'src, I>>,
 {
@@ -66,7 +66,7 @@ impl<Src, Span> TypeCondition<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -111,7 +111,7 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
   pub fn parser_with<'src, I, E, P>(directives: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -186,7 +186,7 @@ impl<SelectionSet, Directives, Src, Span> InlineFragment<SelectionSet, Directive
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -244,7 +244,7 @@ impl<Src, Span> Alias<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -317,7 +317,7 @@ where
   pub fn parser_with<'src, I, E, PS>(selection: PS) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -403,7 +403,7 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

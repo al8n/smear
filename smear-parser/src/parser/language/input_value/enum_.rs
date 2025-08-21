@@ -3,18 +3,18 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{Name, SmearChar, Spanned};
+use crate::parser::{Char, Name, Spanned};
 
 /// Represents an enum value parsed from input
 ///
 /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct Enum<Src, Span> {
+pub struct EnumValue<Src, Span> {
   /// The name of the enum value
   name: Name<Src, Span>,
 }
 
-impl<Src, Span> Enum<Src, Span> {
+impl<Src, Span> EnumValue<Src, Span> {
   /// Returns the span of the enum value.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
@@ -27,7 +27,7 @@ impl<Src, Span> Enum<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

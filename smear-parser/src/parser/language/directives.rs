@@ -3,7 +3,7 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{language::punct::At, Name, SmearChar, Spanned};
+use crate::parser::{language::punct::At, Char, Name, Spanned};
 
 use std::vec::Vec;
 
@@ -44,7 +44,7 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
   pub fn parser_with<'src, I, E, P>(args: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -101,7 +101,7 @@ where
   pub fn parser_with<'src, I, E, P>(directive: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

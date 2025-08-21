@@ -5,8 +5,8 @@ use chumsky::{
 
 use crate::parser::{
   keywords,
-  language::{ignored::ignored, input_value::String, punct::Ampersand},
-  Name, SmearChar, Spanned,
+  language::{ignored::ignored, input_value::StringValue, punct::Ampersand},
+  Char, Name, Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ impl<Src, Span> ImplementInterface<Src, Span> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -58,7 +58,7 @@ impl<Src, Span> ImplementInterface<Src, Span> {
   pub fn parser_with_amp<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -119,7 +119,7 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -149,7 +149,7 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
 #[derive(Debug, Clone)]
 pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   interface: keywords::Interface<Src, Span>,
   name: Name<Src, Span>,
   implements: Option<ImplementInterfaces>,
@@ -166,7 +166,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -200,7 +200,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     keywords::Interface<Src, Span>,
     Name<Src, Span>,
     Option<ImplementInterfaces>,
@@ -225,7 +225,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -283,7 +283,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
     E::Error:
       LabelError<'src, I, TextExpected<'src, I>> + LabelError<'src, I, MaybeRef<'src, I::Token>>,
@@ -380,7 +380,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,

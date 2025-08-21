@@ -5,18 +5,18 @@ use chumsky::{
 
 use crate::parser::{
   language::punct::{LAngle, RAngle},
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 #[derive(Debug, Clone)]
-pub struct MapEntry<T, Src, Span> {
+pub struct MapValueEntry<T, Src, Span> {
   span: Spanned<Src, Span>,
   colon: Spanned<Src, Span>,
   key: T,
   value: T,
 }
 
-impl<T, Src, Span> MapEntry<T, Src, Span> {
+impl<T, Src, Span> MapValueEntry<T, Src, Span> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
@@ -34,7 +34,7 @@ impl<T, Src, Span> MapEntry<T, Src, Span> {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -63,7 +63,7 @@ impl<T, Src, Span> MapEntry<T, Src, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Map<T, Src, Span, C = Vec<MapEntry<T, Src, Span>>> {
+pub struct MapValue<T, Src, Span, C = Vec<MapValueEntry<T, Src, Span>>> {
   span: Spanned<Src, Span>,
   l_angle: LAngle<Src, Span>,
   r_angle: RAngle<Src, Span>,
@@ -71,7 +71,7 @@ pub struct Map<T, Src, Span, C = Vec<MapEntry<T, Src, Span>>> {
   _value: core::marker::PhantomData<T>,
 }
 
-impl<T, Src, Span, C> Map<T, Src, Span, C> {
+impl<T, Src, Span, C> MapValue<T, Src, Span, C> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
@@ -86,14 +86,14 @@ impl<T, Src, Span, C> Map<T, Src, Span, C> {
   }
 }
 
-impl<T, Src, Span, C> Map<T, Src, Span, C>
+impl<T, Src, Span, C> MapValue<T, Src, Span, C>
 where
-  C: Container<MapEntry<T, Src, Span>>,
+  C: Container<MapValueEntry<T, Src, Span>>,
 {
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -107,7 +107,7 @@ where
     let open = LAngle::parser();
     let close = RAngle::parser();
 
-    let entry = MapEntry::<T, Src, Span>::parser_with(value);
+    let entry = MapValueEntry::<T, Src, Span>::parser_with(value);
 
     open
       .then_ignore(ws.clone())

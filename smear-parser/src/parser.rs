@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, input::SliceInput, text::Char};
+use chumsky::{extra::ParserExtra, input::SliceInput, text::Char as ChumskyChar};
 
 macro_rules! word {
   ($(
@@ -21,14 +21,14 @@ macro_rules! word {
         pub fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
         where
           I: $crate::__private::chumsky::input::StrInput<'src, Slice = Src, Span = Span>,
-          I::Token: $crate::__private::SmearChar + 'src,
+          I::Token: $crate::__private::Char + 'src,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
           E::Error:
             $crate::__private::chumsky::label::LabelError<'src, I, $crate::__private::chumsky::text::TextExpected<'src, I>>
             + $crate::__private::chumsky::label::LabelError<'src, I, $crate::__private::chumsky::util::MaybeRef<'src, I::Token>>,
         {
           use ::core::convert::From;
-          use $crate::__private::{SmearChar as _, chumsky::Parser as _};
+          use $crate::__private::{Char as _, chumsky::Parser as _};
 
           $crate::__private::chumsky::prelude::just($expr)
             .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
@@ -89,7 +89,7 @@ impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>>
 
 /// Providing some extra methods for working with `Char`.
 #[allow(non_upper_case_globals)]
-pub trait SmearChar: Char {
+pub trait Char: ChumskyChar {
   /// Returns a sequence representing the BOM
   fn bom<'a>() -> &'a [Self];
 
@@ -292,7 +292,7 @@ pub trait SmearChar: Char {
   const z: Self;
 }
 
-impl SmearChar for char {
+impl Char for char {
   #[inline]
   fn bom<'a>() -> &'a [Self] {
     &['\u{feff}']
@@ -397,7 +397,7 @@ impl SmearChar for char {
   const z: Self = 'z';
 }
 
-impl SmearChar for u8 {
+impl Char for u8 {
   #[inline]
   fn bom<'a>() -> &'a [Self] {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";

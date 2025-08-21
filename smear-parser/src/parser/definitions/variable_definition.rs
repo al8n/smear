@@ -11,13 +11,13 @@ use crate::parser::{
     input_value::{DefaultInputValue, String, Variable},
     punct::{Colon, LParen, RParen},
   },
-  SmearChar, Spanned,
+  Char, Spanned,
 };
 
 #[derive(Debug, Clone)]
 pub struct VariableDefinition<Type, Directives, Value, Src, Span> {
   span: Spanned<Src, Span>,
-  description: Option<String<Src, Span>>,
+  description: Option<StringValue<Src, Span>>,
   variable: Variable<Src, Span>,
   colon: Colon<Src, Span>,
   ty: Type,
@@ -32,7 +32,7 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&String<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
     self.description.as_ref()
   }
 
@@ -66,7 +66,7 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
     self,
   ) -> (
     Spanned<Src, Span>,
-    Option<String<Src, Span>>,
+    Option<StringValue<Src, Span>>,
     Variable<Src, Span>,
     Colon<Src, Span>,
     Type,
@@ -94,7 +94,7 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
@@ -179,7 +179,7 @@ impl<VariableDefinition, Src, Span, Container>
   pub fn parser_with<'src, I, E, P>(parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: StrInput<'src, Slice = Src, Span = Span>,
-    I::Token: SmearChar + 'src,
+    I::Token: Char + 'src,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
