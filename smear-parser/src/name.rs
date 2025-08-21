@@ -1,25 +1,135 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use super::{char::Char, source::Source, spanned::Spanned};
+use super::{char::Char, source::Source, spanned::Spanned, convert::*};
 
-/// A name
+/// A GraphQL name identifier.
+///
+/// Represents a valid GraphQL name as defined by the specification. Names are
+/// used throughout GraphQL for field names, type names, argument names, directive
+/// names, and other identifiers. They follow strict lexical rules to ensure
+/// consistent parsing across different GraphQL implementations.
+///
+/// ## Specification Rules
+///
+/// A GraphQL name must:
+/// - Start with a letter (`A-Z`, `a-z`) or underscore (`_`)
+/// - Contain only letters, digits (`0-9`), and underscores in subsequent positions
+/// - Be at least one character long
+/// - Be case-sensitive (`myField` and `MyField` are different names)
+///
+/// ## Format
+///
+/// ```text
+/// Name ::= [_A-Za-z][_0-9A-Za-z]*
+/// ```
+///
+/// ## Examples
+///
+/// **Valid names:**
+/// ```text
+/// user           // Simple lowercase name
+/// User           // Capitalized name
+/// _private       // Starting with underscore
+/// field123       // Contains digits
+/// __typename     // GraphQL introspection field
+/// MyCustomType   // PascalCase type name
+/// _id            // Underscore prefix
+/// a              // Single character
+/// ```
+///
+/// **Invalid names:**
+/// ```text
+/// 123field       // Cannot start with digit
+/// my-field       // Hyphens not allowed
+/// my.field       // Dots not allowed
+/// my field       // Spaces not allowed
+/// my@field       // Special characters not allowed
+/// ""             // Empty string not allowed
+/// ```
+///
+/// ## Usage in GraphQL
+///
+/// Names appear in various contexts within GraphQL:
+/// - **Field names**: `{ user { name email } }`
+/// - **Type names**: `type User { ... }`
+/// - **Argument names**: `field(limit: 10)`
+/// - **Directive names**: `@deprecated`
+/// - **Variable names**: `query($userId: ID)`
+/// - **Fragment names**: `fragment UserInfo on User`
+///
+/// ## Implementation Notes
+///
+/// This parser only handles the lexical structure of names and does not validate
+/// GraphQL-specific naming conventions (e.g., type names should be PascalCase).
+/// Such semantic validation should be performed at a higher level.
+///
+/// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Name<Src, Span>(Spanned<Src, Span>);
+pub struct Name<Src, Span>(pub(crate) Spanned<Src, Span>);
 
 impl<Src, Span> Name<Src, Span> {
-  /// Creates a name from a spanned
-  #[inline]
-  pub const fn new(span: Spanned<Src, Span>) -> Self {
-    Self(span)
-  }
-
-  /// Returns the span of the name.
+  /// Returns the source span of the name.
+  /// 
+  /// This provides access to the original source location and text of the name,
+  /// useful for error reporting, source mapping, syntax highlighting, and 
+  /// extracting the actual string content of the name.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.0
   }
 
-  /// Returns the parser to parse a name.
+
+  /// Creates a parser for GraphQL names.
+  ///
+  /// This parser implements the complete GraphQL name specification, enforcing
+  /// the lexical rules for valid identifiers. It uses a two-part strategy:
+  /// first matching the initial character (which has stricter rules), then
+  /// matching any number of continuation characters.
+  ///
+  /// ## Parsing Strategy
+  ///
+  /// 1. **Start character**: Must be a letter (`A-Z`, `a-z`) or underscore (`_`)
+  /// 2. **Continuation characters**: Zero or more letters, digits (`0-9`), or underscores
+  ///
+  /// The parser builds the complete character sequence and validates it conforms
+  /// to GraphQL naming rules during parsing, ensuring only valid names are accepted.
+  ///
+  /// ## Examples
+  ///
+  /// ```text
+  /// // Successful parses:
+  /// "user"         -> Name { span: "user" }
+  /// "User"         -> Name { span: "User" }
+  /// "_private"     -> Name { span: "_private" }
+  /// "field123"     -> Name { span: "field123" }
+  /// "__typename"   -> Name { span: "__typename" }
+  /// "a"            -> Name { span: "a" }
+  /// 
+  /// // Parse failures:
+  /// "123field"     -> Error: cannot start with digit
+  /// "my-field"     -> Error: hyphen not allowed
+  /// "my.field"     -> Error: dot not allowed
+  /// "my field"     -> Error: space not allowed
+  /// ""             -> Error: empty string
+  /// "@directive"   -> Error: @ symbol not allowed at start
+  /// ```
+  ///
+  /// ## Character Set Details
+  ///
+  /// The parser explicitly handles the following character classes:
+  /// - **Letters**: `A-Z` (uppercase) and `a-z` (lowercase)
+  /// - **Digits**: `0-9` (only allowed after the first character)
+  /// - **Underscore**: `_` (allowed anywhere)
+  ///
+  /// ## Error Handling
+  ///
+  /// The parser will fail if:
+  /// - The input is empty
+  /// - The first character is not a letter or underscore
+  /// - Any subsequent character is not a letter, digit, or underscore
+  /// - The input contains any other characters (spaces, punctuation, etc.)
+  ///
+  /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src, Slice = Src, Span = Span>,
@@ -159,7 +269,29 @@ impl<Src, Span> Name<Src, Span> {
 
     start
       .then(cont)
-      .map_with(|_, sp| Name::new(Spanned::from(sp)))
+      .map_with(|_, sp| Name(Spanned::from(sp)))
       .labelled("name")
+  }
+}
+
+impl<Src, Span> AsSpanned<Src, Span> for Name<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for Name<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.0
+  }
+}
+
+impl<Src, Span> IntoComponents for Name<Src, Span> {
+  type Components = Spanned<Src, Span>;
+
+  fn into_components(self) -> Self::Components {
+    self.into_spanned()
   }
 }

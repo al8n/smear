@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned};
+use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
 
 /// A parsed GraphQL **Boolean Value** (`true` or `false`).
 ///
@@ -21,23 +21,35 @@ pub struct BooleanValue<Src, Span> {
 }
 
 impl<Src, Span> BooleanValue<Src, Span> {
-  /// Returns the parsed boolean.
+  /// Returns the parsed boolean value.
+  /// 
+  /// This is the actual boolean value (`true` or `false`) that was parsed
+  /// from the source text, extracted from the literal tokens.
   #[inline]
   pub const fn value(&self) -> bool {
     self.value
   }
 
-  /// Returns the source span for this literal.
+  /// Returns the source span of the boolean literal.
+  /// 
+  /// This span covers the entire boolean token (`true` or `false`) in the
+  /// original source, useful for error reporting, source mapping, and
+  /// syntax highlighting.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
 
-  /// Parser for a GraphQL **Boolean Value**.
+  /// Creates a parser for GraphQL boolean literals.
   ///
-  /// Accepts only the exact tokens `true` and `false` (lowercase).
+  /// This parser implements the GraphQL boolean literal specification by
+  /// matching the exact character sequences for `true` and `false`. The
+  /// parser is strictly case-sensitive and will reject any variations
+  /// in capitalization.
   ///
-  /// Spec: <https://spec.graphql.org/draft/#sec-Boolean-Value>
+  /// The parser will not handle any surrounding whitespace or comments.
+  /// 
+  /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src, Slice = Src, Span = Span>,
@@ -62,6 +74,29 @@ impl<Src, Span> BooleanValue<Src, Span> {
         value: data,
       })
       .labelled("boolean value")
+  }
+}
+
+impl<Src, Span> AsSpanned<Src, Span> for BooleanValue<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for BooleanValue<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.span
+  }
+}
+
+impl<Src, Span> IntoComponents for BooleanValue<Src, Span> {
+  type Components = (Spanned<Src, Span>, bool);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.value)
   }
 }
 

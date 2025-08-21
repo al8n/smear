@@ -101,6 +101,7 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
+    Value: crate::language::input_value::InputValue<true>,
   {
     StringValue::parser()
       .or_not()

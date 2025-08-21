@@ -6,6 +6,7 @@ use crate::{
   language::punct::{Dot, Minus, Plus},
   source::Source,
   spanned::Spanned,
+  convert::*,
 };
 
 use super::IntValue;
@@ -57,14 +58,6 @@ impl<Src, Span> ExponentSign<Src, Span> {
     }
   }
 
-  #[inline]
-  pub fn into_span(self) -> Spanned<Src, Span> {
-    match self {
-      Self::Positive(plus) => plus.into_span(),
-      Self::Negative(minus) => minus.into_span(),
-    }
-  }
-
   /// Creates a parser for exponent sign (`+` or `-`).
   ///
   /// This parser will successfully match either a plus or minus character,
@@ -89,6 +82,32 @@ impl<Src, Span> ExponentSign<Src, Span> {
   }
 }
 
+impl<Src, Span> AsSpanned<Src, Span> for ExponentSign<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for ExponentSign<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    match self {
+      Self::Positive(plus) => plus.into_spanned(),
+      Self::Negative(minus) => minus.into_spanned(),
+    }
+  }
+}
+
+impl<Src, Span> IntoComponents for ExponentSign<Src, Span> {
+  type Components = Spanned<Src, Span>;
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.into_spanned()
+  }
+}
+
 /// Represents the exponent indicator (`e` or `E`) in a float literal.
 ///
 /// This struct captures the source location of the exponent marker character
@@ -103,6 +122,29 @@ impl<Src, Span> ExponentSign<Src, Span> {
 #[derive(Debug, Clone, Copy)]
 pub struct ExponentIdentifier<Src, Span>(Spanned<Src, Span>);
 
+impl<Src, Span> AsSpanned<Src, Span> for ExponentIdentifier<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for ExponentIdentifier<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.0
+  }
+}
+
+impl<Src, Span> IntoComponents for ExponentIdentifier<Src, Span> {
+  type Components = Spanned<Src, Span>;
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.into_spanned()
+  }
+}
+
 impl<Src, Span> ExponentIdentifier<Src, Span> {
   /// Returns the source span of the exponent identifier character.
   ///
@@ -111,10 +153,6 @@ impl<Src, Span> ExponentIdentifier<Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.0
-  }
-
-  pub fn into_span(self) -> Spanned<Src, Span> {
-    self.0
   }
 
   /// Creates a parser for exponent identifier characters (`e` or `E`).
@@ -169,6 +207,34 @@ pub struct Exponent<Src, Span> {
   digits: Digits<Src, Span>,
 }
 
+impl<Src, Span> AsSpanned<Src, Span> for Exponent<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for Exponent<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.span
+  }
+}
+
+impl<Src, Span> IntoComponents for Exponent<Src, Span> {
+  type Components = (
+    Spanned<Src, Span>,
+    ExponentIdentifier<Src, Span>,
+    Option<ExponentSign<Src, Span>>,
+    Digits<Src, Span>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.e, self.sign, self.digits)
+  }
+}
+
 impl<Src, Span> Exponent<Src, Span> {
   /// Returns the source span of the entire exponent part.
   ///
@@ -206,17 +272,6 @@ impl<Src, Span> Exponent<Src, Span> {
     &self.digits
   }
 
-  pub fn into_components(
-    self,
-  ) -> (
-    Spanned<Src, Span>,
-    ExponentIdentifier<Src, Span>,
-    Option<ExponentSign<Src, Span>>,
-    Digits<Src, Span>,
-  ) {
-    (self.span, self.e, self.sign, self.digits)
-  }
-
   /// Creates a parser for exponent parts.
   ///
   /// This parser expects the complete exponent structure: an identifier (`e` or `E`),
@@ -230,7 +285,7 @@ impl<Src, Span> Exponent<Src, Span> {
     E::Error: LabelError<'src, I, &'static str>,
   {
     ExponentIdentifier::parser()
-      .then(Sign::parser().or_not())
+      .then(ExponentSign::parser().or_not())
       .then(Digits::parser())
       .map_with(|((e, sign), digits), span| Exponent {
         span: Spanned::from(span),
@@ -273,6 +328,33 @@ pub struct Fractional<Src, Span> {
   digits: Digits<Src, Span>,
 }
 
+impl<Src, Span> AsSpanned<Src, Span> for Fractional<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for Fractional<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.span
+  }
+}
+
+impl<Src, Span> IntoComponents for Fractional<Src, Span> {
+  type Components = (
+    Spanned<Src, Span>,
+    Dot<Src, Span>,
+    Digits<Src, Span>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.dot, self.digits)
+  }
+}
+
 impl<Src, Span> Fractional<Src, Span> {
   /// Returns the source span of the entire fractional part.
   ///
@@ -299,10 +381,6 @@ impl<Src, Span> Fractional<Src, Span> {
   #[inline]
   pub const fn digits(&self) -> &Digits<Src, Span> {
     &self.digits
-  }
-
-  pub fn into_components(self) -> (Spanned<Src, Span>, Dot<Src, Span>, Digits<Src, Span>) {
-    (self.span, self.dot, self.digits)
   }
 
   /// Creates a parser for fractional parts.
@@ -385,6 +463,34 @@ pub struct FloatValue<Src, Span> {
   exponent: Option<Exponent<Src, Span>>,
 }
 
+impl<Src, Span> AsSpanned<Src, Span> for FloatValue<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for FloatValue<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.span
+  }
+}
+
+impl<Src, Span> IntoComponents for FloatValue<Src, Span> {
+  type Components = (
+    Spanned<Src, Span>,
+    IntValue<Src, Span>,
+    Option<Fractional<Src, Span>>,
+    Option<Exponent<Src, Span>>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.int, self.fractional, self.exponent)
+  }
+}
+
 impl<Src, Span> FloatValue<Src, Span> {
   /// Returns the source span of the entire float literal.
   ///
@@ -420,17 +526,6 @@ impl<Src, Span> FloatValue<Src, Span> {
   /// have an exponent part (those with only a fractional part don't).
   pub const fn exponent(&self) -> Option<&Exponent<Src, Span>> {
     self.exponent.as_ref()
-  }
-
-  pub fn into_components(
-    self,
-  ) -> (
-    Spanned<Src, Span>,
-    IntValue<Src, Span>,
-    Option<Fractional<Src, Span>>,
-    Option<Exponent<Src, Span>>,
-  ) {
-    (self.span, self.int, self.fractional, self.exponent)
   }
 
   /// Creates a parser for GraphQL float literals.
@@ -697,7 +792,7 @@ mod tests {
         (Some(m), sgn, Some(d), Some(exp)) => {
           let marker = if m == 'e' { "e" } else { "E" };
           assert_eq!(
-            exp.e().span().source(),
+            exp.identifier().span().source(),
             &marker,
             "exp marker mismatch: {}",
             c.s
@@ -705,8 +800,8 @@ mod tests {
 
           match (sgn, exp.sign()) {
             (None, None) => {}
-            (Some('+'), Some(super::Sign::Positive(_))) => {}
-            (Some('-'), Some(super::Sign::Negative(_))) => {}
+            (Some('+'), Some(super::ExponentSign::Positive(_))) => {}
+            (Some('-'), Some(super::ExponentSign::Negative(_))) => {}
             (expected, got) => panic!(
               "exp sign mismatch for `{}`: expected {:?}, got {:?}",
               c.s,
@@ -825,7 +920,7 @@ mod tests {
     let _ = fv.int();
     let _ = fv.fractional().unwrap().dot();
     let _ = fv.fractional().unwrap().digits();
-    let _ = fv.exponent().unwrap().e();
+    let _ = fv.exponent().unwrap().identifier();
     let _ = fv.exponent().unwrap().sign();
     let _ = fv.exponent().unwrap().digits();
   }

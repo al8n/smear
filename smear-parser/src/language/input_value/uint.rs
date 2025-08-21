@@ -1,35 +1,98 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned};
+use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
 
-/// An unsigned, base-10 integer token used as a building block for GraphQL numbers.
+/// An unsigned decimal integer component for GraphQL numeric literals.
 ///
-/// This is **not** a standalone GraphQL literal — it’s a helper that parses:
-/// - `0`, or
-/// - a non-zero digit followed by zero or more digits (`[1-9][0-9]*`)
+/// This parser handles the unsigned integer portion that appears in GraphQL
+/// integer and float literals. It enforces GraphQL's strict rules about numeric
+/// formatting, particularly around leading zeros and sign handling.
 ///
-/// ## Rules
-/// - **No sign**: `+1`/`-1` are rejected.
-/// - **No leading zeros**: `01`, `00` are rejected.
-/// - **Base-10 only**.
+/// ## Important Note
 ///
-/// The span returned by [`span`](UintValue::span) covers the full digit sequence.
+/// This is **not** a complete GraphQL literal parser by itself — it's a building
+/// block used by higher-level parsers for integers (`IntValue`) and floats
+/// (`FloatValue`). Those parsers handle signs and combine this with other
+/// components as needed.
+///
+/// ## Specification Rules
+///
+/// GraphQL unsigned integers must follow these strict formatting rules:
+/// - **Zero**: The single digit `0` is valid
+/// - **Non-zero integers**: Must start with `1-9` followed by any number of `0-9`
+/// - **No leading zeros**: Values like `01`, `007`, `00` are forbidden
+/// - **No signs**: Values like `+1`, `-1` are handled at a higher level
+/// - **Decimal digits only**: Base-10 representation required
+///
+/// ## Format
+///
+/// ```text
+/// UintValue ::= '0' | [1-9][0-9]*
+/// ```
+///
+/// ## Examples
+///
+/// **Valid unsigned integers:**
+/// ```text
+/// 0              // Zero is always valid
+/// 1              // Single non-zero digit
+/// 42             // Multiple digits starting with non-zero
+/// 123456789      // Long sequence
+/// 999999999999   // Very long sequence
+/// ```
+///
+/// **Invalid formats:**
+/// ```text
+/// 01             // Leading zero forbidden
+/// 007            // Leading zeros forbidden  
+/// 00             // Multiple zeros forbidden
+/// +1             // Plus sign not handled here
+/// -1             // Minus sign not handled here
+/// 1.0            // Decimal notation not handled here
+/// 1e10           // Scientific notation not handled here
+/// ```
+///
+/// ## Usage in GraphQL
+///
+/// This component appears in:
+/// - **Integer literals**: `42`, `0`, `123456` (combined with optional minus sign)
+/// - **Float integer parts**: In `3.14`, the `3` is parsed as a `UintValue`
+/// - **Float exponent values**: In `1e42`, the `42` is parsed as a `UintValue`
+///
+/// ## Design Philosophy
+///
+/// This parser implements GraphQL's "no leading zeros" rule, which prevents
+/// ambiguity about numeric base and ensures consistent formatting across
+/// different GraphQL implementations. The rule exists because:
+/// - Leading zeros might suggest octal notation in some languages
+/// - Consistent formatting improves readability and prevents confusion
+/// - It matches common JSON numeric formatting expectations
+///
+/// ## Error Prevention
+///
+/// Common mistakes this parser prevents:
+/// - Using octal-style notation (`077`)
+/// - Copy-pasting zero-padded numbers (`001`, `042`)
+/// - Including unnecessary leading zeros from other systems
 #[derive(Debug, Clone, Copy)]
 pub struct UintValue<Src, Span>(Spanned<Src, Span>);
 
 impl<Src, Span> UintValue<Src, Span> {
-  /// Source span of the entire unsigned digit sequence.
+  /// Returns the source span of the unsigned integer.
+  /// 
+  /// This provides access to the original source location and text of the
+  /// unsigned integer, useful for error reporting, source mapping, extracting
+  /// the actual numeric string for conversion, and building higher-level
+  /// numeric AST nodes.
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.0
   }
 
-  /// Parser for an **unsigned**, base-10 integer token.
+  /// Creates a parser for unsigned decimal integers.
   ///
-  /// Accepts either:
-  /// - a lone `0`, or
-  /// - a non-zero digit followed by zero or more digits (`[1-9][0-9]*`).
-  ///
-  /// **Rejects** any sign (`+`/`-`) and any leading zeros (`01`, `00`).
+  /// This parser implements GraphQL's unsigned integer specification with
+  /// strict validation of leading zero rules. It uses an alternation strategy
+  /// to handle the two valid cases: zero and non-zero integers.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src, Slice = Src, Span = Span>,
@@ -43,6 +106,29 @@ impl<Src, Span> UintValue<Src, Span> {
       .map_with(|_, sp| Self(Spanned::from(sp)))
       .or(just(I::Token::ZERO).map_with(|_, sp| Self(Spanned::from(sp))))
       .labelled("uint value")
+  }
+}
+
+impl<Src, Span> AsSpanned<Src, Span> for UintValue<Src, Span> {
+  #[inline]
+  fn as_spanned(&self) -> &Spanned<Src, Span> {
+    self.span()
+  }
+}
+
+impl<Src, Span> IntoSpanned<Src, Span> for UintValue<Src, Span> {
+  #[inline]
+  fn into_spanned(self) -> Spanned<Src, Span> {
+    self.0
+  }
+}
+
+impl<Src, Span> IntoComponents for UintValue<Src, Span> {
+  type Components = Spanned<Src, Span>;
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.into_spanned()
   }
 }
 
