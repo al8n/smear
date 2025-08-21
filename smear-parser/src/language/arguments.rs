@@ -33,8 +33,8 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
 
   /// Returns the span of the argument name
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// Returns the value of the argument.

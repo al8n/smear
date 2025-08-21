@@ -29,8 +29,8 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   #[inline]

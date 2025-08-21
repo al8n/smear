@@ -460,8 +460,8 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
 
   /// Returns the name of the derictive definition
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// Returns the directive locations of the directive definition.

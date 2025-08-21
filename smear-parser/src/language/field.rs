@@ -30,7 +30,7 @@ where
 pub struct TypeCondition<Src, Span> {
   span: Spanned<Src, Span>,
   on: keywords::On<Src, Span>,
-  type_name: Name<Src, Span>, // NamedType in spec; Name node is fine here
+  type_name: Name<Src, Span>,
 }
 
 impl<Src, Span> TypeCondition<Src, Span> {
@@ -43,8 +43,8 @@ impl<Src, Span> TypeCondition<Src, Span> {
     &self.on
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.type_name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.type_name
   }
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
@@ -60,7 +60,7 @@ impl<Src, Span> TypeCondition<Src, Span> {
     let ws = super::ignored::ignored();
 
     keywords::On::parser()
-      .then_ignore(ws_plus::<I, E>())
+      .then_ignore(ws.clone())
       .then(Name::parser())
       .map_with(|(on, type_name), sp| Self {
         span: Spanned::from(sp),
@@ -83,8 +83,8 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.span
   }
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
   pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
     &self.ellipsis
@@ -215,8 +215,8 @@ impl<Src, Span> Alias<Src, Span> {
   }
 
   /// Returns the name of the alias.
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// Returns the colon of the alias.
@@ -357,8 +357,8 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
 
   /// Returns the span of the field name
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// Returns the arguments of the field

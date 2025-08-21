@@ -195,8 +195,8 @@ impl<Directives, EnumValuesDefinition, Src, Span>
 
   /// The span of the name of the enum definition
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// The enum keyword of the enum definition.
@@ -337,8 +337,8 @@ impl<Directives, EnumValuesDefinition, Src, Span>
 
   /// The span of the name of the enum definition
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// The extend keyword of the enum extension

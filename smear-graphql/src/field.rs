@@ -22,7 +22,7 @@ impl<Src, Span> FragmentSpread<Src, Span> {
   pub const fn span(&self) -> &Spanned<Src, Span> {
     self.0.span()
   }
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
   pub const fn ellipsis(&self) -> &Ellipsis<Src, Span> {
@@ -110,7 +110,7 @@ impl<Src, Span> Field<Src, Span> {
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
 

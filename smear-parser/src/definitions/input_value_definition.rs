@@ -35,8 +35,8 @@ impl<Type, DefaultValue, Directives, Src, Span>
 
   /// The name of the input value definition.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// The colon of the input value definition.

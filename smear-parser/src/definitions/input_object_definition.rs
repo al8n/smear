@@ -40,8 +40,8 @@ impl<FieldsDefinition, Directives, Src, Span>
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   #[inline]
@@ -178,8 +178,8 @@ impl<Directives, FieldsDefinition, Src, Span>
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   #[inline]

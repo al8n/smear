@@ -26,8 +26,8 @@ impl<Value, Src, Span> ObjectValueField<Value, Src, Span> {
     &self.colon
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
   #[inline]
   pub const fn value(&self) -> &Value {

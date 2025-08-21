@@ -41,8 +41,8 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
 
   /// The name of the scalar definition.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// The directives of the scalar definition.
@@ -132,8 +132,8 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
 
   /// The name of the scalar extension.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// The directives of the scalar extension.

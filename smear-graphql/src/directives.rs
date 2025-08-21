@@ -25,7 +25,7 @@ impl<Src, Span> Directive<Src, Span> {
     self.0.at()
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
 
@@ -68,7 +68,7 @@ impl<Src, Span> ConstDirective<Src, Span> {
     self.0.at()
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
 

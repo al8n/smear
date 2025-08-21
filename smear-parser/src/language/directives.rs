@@ -28,8 +28,8 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
     &self.at
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   #[inline]

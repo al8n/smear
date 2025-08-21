@@ -33,7 +33,7 @@ impl<Src, Span> Argument<Src, Span> {
 
   /// Returns the name of the argument.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
 
@@ -76,7 +76,7 @@ impl<Src, Span> ConstArgument<Src, Span> {
 
   /// Returns the name of the argument.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
+  pub const fn name(&self) -> &Name<Src, Span> {
     self.0.name()
   }
 

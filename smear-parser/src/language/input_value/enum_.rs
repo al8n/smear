@@ -21,6 +21,12 @@ impl<Src, Span> EnumValue<Src, Span> {
     self.name.span()
   }
 
+  /// Returns the name of the enum value.
+  #[inline]
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
+  }
+
   /// Returns a parser for the enum value.
   ///
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)

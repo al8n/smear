@@ -39,8 +39,8 @@ impl<Src, Span> UnionMemberType<Src, Span> {
 
   /// The name of the union member type.
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// First member: `|? Name`  (pipe is optional)
@@ -164,8 +164,8 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
     &self.keyword
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
@@ -279,8 +279,8 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
     &self.keyword
   }
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
   #[inline]
   pub const fn content(&self) -> &UnionExtensionContent<Directives, MemberTypes> {

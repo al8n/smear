@@ -30,8 +30,8 @@ impl<Src, Span> ImplementInterface<Src, Span> {
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   /// First member: `|? Name`  (pipe is optional)

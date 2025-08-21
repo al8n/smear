@@ -39,8 +39,8 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   }
 
   #[inline]
-  pub const fn name(&self) -> &Spanned<Src, Span> {
-    self.name.span()
+  pub const fn name(&self) -> &Name<Src, Span> {
+    &self.name
   }
 
   #[inline]
