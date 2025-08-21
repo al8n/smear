@@ -33,7 +33,7 @@ pub struct Spanned<Src, Span> {
 
 impl<Src, Span> Spanned<Src, Span> {
   /// Creates a new spanned value from source data and span information.
-  /// 
+  ///
   /// This constructor pairs source data with its location information,
   /// creating the fundamental building block for location-aware parsing.
   #[inline]
@@ -42,7 +42,7 @@ impl<Src, Span> Spanned<Src, Span> {
   }
 
   /// Returns a reference to the source data.
-  /// 
+  ///
   /// This provides access to the actual parsed content without the span
   /// information. The source data represents what was parsed from the
   /// original input at the location specified by the span.
@@ -51,7 +51,7 @@ impl<Src, Span> Spanned<Src, Span> {
   }
 
   /// Returns a reference to the span information.
-  /// 
+  ///
   /// This provides access to the location data indicating where in the
   /// original source this element was found. The span format depends on
   /// the span type being used (byte positions, line/column, etc.).
@@ -60,7 +60,7 @@ impl<Src, Span> Spanned<Src, Span> {
   }
 
   /// Transforms the source data while preserving the span.
-  /// 
+  ///
   /// This method applies a transformation function to the source data while
   /// keeping the same span information. This is useful when converting between
   /// different representations of the same logical data.
@@ -69,7 +69,7 @@ impl<Src, Span> Spanned<Src, Span> {
   }
 
   /// Transforms the span information while preserving the source data.
-  /// 
+  ///
   /// This method applies a transformation function to the span information while
   /// keeping the same source data. This is useful when adjusting the location
   /// information without modifying the underlying data.
@@ -78,14 +78,14 @@ impl<Src, Span> Spanned<Src, Span> {
   }
 
   /// Transforms both the source data and span information.
-  /// 
+  ///
   /// This method allows transforming both components of the spanned value
   /// simultaneously. This is useful when converting to different coordinate
   /// systems or when both the data and its location need adjustment.
   pub fn map<U, NewSpan>(
-    self, 
-    src: impl FnOnce(Src) -> U, 
-    span: impl FnOnce(Span) -> NewSpan
+    self,
+    src: impl FnOnce(Src) -> U,
+    span: impl FnOnce(Span) -> NewSpan,
   ) -> Spanned<U, NewSpan> {
     Spanned::new(src(self.src), span(self.span))
   }

@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
-  super::{char::Char, source::Source, spanned::Spanned, convert::*},
+  super::{char::Char, convert::*, source::Source, spanned::Spanned},
   punct::{Quote, TripleQuote},
 };
 
@@ -93,121 +93,6 @@ impl<Src, Span> StringContent<Src, Span> {
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.0
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src, Slice = Src, Span = Span>,
-    I::Token: Char + 'src,
-    E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
-  {
-    // \uXXXX (exactly 4 hex digits)
-    let hex_digit = one_of([
-      I::Token::ZERO,
-      I::Token::ONE,
-      I::Token::TWO,
-      I::Token::THREE,
-      I::Token::FOUR,
-      I::Token::FIVE,
-      I::Token::SIX,
-      I::Token::SEVEN,
-      I::Token::EIGHT,
-      I::Token::NINE,
-      I::Token::A,
-      I::Token::B,
-      I::Token::C,
-      I::Token::D,
-      I::Token::E,
-      I::Token::F,
-      I::Token::a,
-      I::Token::b,
-      I::Token::c,
-      I::Token::d,
-      I::Token::e,
-      I::Token::f,
-    ]);
-
-    let esc_unicode = just(I::Token::BACKSLASH)
-      .then(just(I::Token::u))
-      .ignore_then(hex_digit.repeated().exactly(4).ignored());
-
-    // \" \\ \/ \b \f \n \r \t
-    let esc_char = just(I::Token::BACKSLASH)
-      .ignore_then(one_of([
-        I::Token::QUOTATION, // "
-        I::Token::BACKSLASH, // \
-        I::Token::SLASH,     // /
-        I::Token::b,
-        I::Token::f,
-        I::Token::n,
-        I::Token::r,
-        I::Token::t,
-      ]))
-      .ignored();
-
-    // Any char except " or \ or line terminator
-    let unescaped_scalar = none_of([
-      I::Token::QUOTATION,
-      I::Token::BACKSLASH,
-      I::Token::LINE_FEED,       // \n
-      I::Token::CARRIAGE_RETURN, // \r
-    ])
-    .ignored();
-
-    // Content of a normal "string"
-    let inline_content_parser = esc_unicode
-      .or(esc_char)
-      .or(unescaped_scalar)
-      .repeated()
-      .map_with(|_, sp| Self(Spanned::from(sp)));
-
-    // Content of a block """string"""
-    //
-    // Spec allows any SourceCharacter except:
-    //   - the sequence `"""`
-    //   - the escaped triple quote `\"""` is permitted (because the backslash escapes the first ")
-    //
-    // We consume either:
-    //  - an escaped triple quote `\"""` as 1 unit, or
-    //  - any char that does not start `"""`
-    //
-    // To keep this simple and zero-copy, we implement:
-    //    ( \"\"\" )  OR  ( any char not starting a raw `"""`
-    //
-    // Note: If your tokenization doesn’t have lookahead-friendly helpers,
-    // this conservative version works: keep consuming until we *see* the
-    // closing triple-quote sequence. That’s what `take_until_triple` below does.
-    let escaped_triple = just(I::Token::BACKSLASH)
-      .then(just(I::Token::QUOTATION))
-      .then(just(I::Token::QUOTATION))
-      .then(just(I::Token::QUOTATION))
-      .ignored();
-
-    // Or anything that does *not* start a raw `"""`
-    // We cover three cases:
-    //   - not a quote at all
-    //   - a single quote followed by a non-quote
-    //   - two quotes followed by a non-quote
-    let not_triple_prefix = none_of([I::Token::QUOTATION])
-      .ignored()
-      .or(
-        just(I::Token::QUOTATION)
-          .then(none_of([I::Token::QUOTATION]))
-          .ignored(),
-      )
-      .or(
-        just(I::Token::QUOTATION)
-          .then(just(I::Token::QUOTATION))
-          .then(none_of([I::Token::QUOTATION]))
-          .ignored(),
-      );
-
-    let block_piece = escaped_triple.or(not_triple_prefix);
-
-    let block_content_parser = block_piece.repeated().map_with(|_, sp| Self(Spanned::from(sp)));
-
-    block_content_parser.or(inline_content_parser)
   }
 }
 
@@ -365,18 +250,18 @@ pub struct StringValue<Src, Span> {
   /// Note: For block strings this is the raw slice; spec-defined block string
   /// processing (common indentation removal, newline normalization) is not
   /// applied here.
-  content: Spanned<Src, Span>,
+  content: StringContent<Src, Span>,
 }
 
 impl<Src, Span> StringValue<Src, Span> {
   /// Returns the source span of the entire string literal.
-  /// 
+  ///
   /// This span covers from the opening delimiter through the closing delimiter,
   /// including all content within. Useful for error reporting, source mapping,
   /// and extracting the complete literal text including quotes.
-  /// 
+  ///
   /// # Examples
-  /// 
+  ///
   /// ```text
   /// "hello"     // span covers all 7 characters
   /// """world""" // span covers all 9 characters
@@ -387,13 +272,13 @@ impl<Src, Span> StringValue<Src, Span> {
   }
 
   /// Returns the raw content span between the delimiters.
-  /// 
+  ///
   /// This provides access to the string content without the surrounding
   /// quote delimiters. The content is raw and unprocessed - escape sequences
   /// are not converted and block string formatting rules are not applied.
-  /// 
+  ///
   /// # Examples
-  /// 
+  ///
   /// ```text
   /// "hello"           // content: "hello" (5 chars)
   /// "say \"hi\""      // content: "say \"hi\"" (raw escapes)
@@ -403,12 +288,12 @@ impl<Src, Span> StringValue<Src, Span> {
   /// """               // content: "\nline 1\nline 2\n" (raw)
   /// ```
   #[inline]
-  pub const fn content(&self) -> &Spanned<Src, Span> {
+  pub const fn content(&self) -> &StringContent<Src, Span> {
     &self.content
   }
 
   /// Returns the delimiter information for this string literal.
-  /// 
+  ///
   /// This provides access to which delimiter format was used (single or triple
   /// quotes) and the exact source locations of both opening and closing
   /// delimiters. Useful for syntax highlighting, re-emission, and understanding
@@ -431,10 +316,10 @@ impl<Src, Span> StringValue<Src, Span> {
     E: ParserExtra<'src, I>,
     E::Error: LabelError<'src, I, &'static str>,
   {
-    let quote = Quote::parser();
+    // let quote = Quote::<Src, Span>::parser();
 
-    // `"""` → TripleQuote<S>
-    let triple_quote = TripleQuote::parser();
+    // // `"""` → TripleQuote<S>
+    // let triple_quote = TripleQuote::<Src, Span>::parser();
 
     // \uXXXX (exactly 4 hex digits)
     let hex_digit = one_of([
@@ -464,14 +349,14 @@ impl<Src, Span> StringValue<Src, Span> {
 
     let esc_unicode = just(I::Token::BACKSLASH)
       .then(just(I::Token::u))
-      .ignore_then(hex_digit.repeated().exactly(4).ignored());
+      .ignore_then(hex_digit.repeated().exactly(4))
+      .ignored();
 
-    // \" \\ \/ \b \f \n \r \t
     let esc_char = just(I::Token::BACKSLASH)
       .ignore_then(one_of([
-        I::Token::QUOTATION, // "
-        I::Token::BACKSLASH, // \
-        I::Token::SLASH,     // /
+        I::Token::QUOTATION,
+        I::Token::BACKSLASH,
+        I::Token::SLASH,
         I::Token::b,
         I::Token::f,
         I::Token::n,
@@ -480,72 +365,39 @@ impl<Src, Span> StringValue<Src, Span> {
       ]))
       .ignored();
 
-    // Any char except " or \ or line terminator
     let unescaped_scalar = none_of([
       I::Token::QUOTATION,
       I::Token::BACKSLASH,
-      I::Token::LINE_FEED,       // \n
-      I::Token::CARRIAGE_RETURN, // \r
+      I::Token::LINE_FEED,
+      I::Token::CARRIAGE_RETURN,
     ])
     .ignored();
 
-    // Content of a normal "string"
     let inline_content_parser = esc_unicode
       .or(esc_char)
       .or(unescaped_scalar)
       .repeated()
-      .map_with(|_, sp| Spanned::from(sp));
+      .map_with(|_, sp| StringContent(Spanned::from(sp)));
 
-    // Content of a block """string"""
-    //
-    // Spec allows any SourceCharacter except:
-    //   - the sequence `"""`
-    //   - the escaped triple quote `\"""` is permitted (because the backslash escapes the first ")
-    //
-    // We consume either:
-    //  - an escaped triple quote `\"""` as 1 unit, or
-    //  - any char that does not start `"""`
-    //
-    // To keep this simple and zero-copy, we implement:
-    //    ( \"\"\" )  OR  ( any char not starting a raw `"""`
-    //
-    // Note: If your tokenization doesn’t have lookahead-friendly helpers,
-    // this conservative version works: keep consuming until we *see* the
-    // closing triple-quote sequence. That’s what `take_until_triple` below does.
+    // Block content: consume either an escaped triple quote, or any single token
+    // that is NOT the start of a raw closing `"""`.
     let escaped_triple = just(I::Token::BACKSLASH)
-      .then(just(I::Token::QUOTATION))
-      .then(just(I::Token::QUOTATION))
-      .then(just(I::Token::QUOTATION))
+      .then(TripleQuote::parser())
       .ignored();
 
-    // Or anything that does *not* start a raw `"""`
-    // We cover three cases:
-    //   - not a quote at all
-    //   - a single quote followed by a non-quote
-    //   - two quotes followed by a non-quote
-    let not_triple_prefix = none_of([I::Token::QUOTATION])
-      .ignored()
-      .or(
-        just(I::Token::QUOTATION)
-          .then(none_of([I::Token::QUOTATION]))
-          .ignored(),
-      )
-      .or(
-        just(I::Token::QUOTATION)
-          .then(just(I::Token::QUOTATION))
-          .then(none_of([I::Token::QUOTATION]))
-          .ignored(),
-      );
+    let any_token = any().ignored();
+    let not_closing_triple = TripleQuote::parser().not().ignore_then(any_token);
 
-    let block_piece = escaped_triple.or(not_triple_prefix);
+    let block_piece = escaped_triple.or(not_closing_triple);
 
-    let block_content_parser = block_piece.repeated().map_with(|_, sp| Spanned::from(sp));
+    let block_content_parser = block_piece
+      .repeated()
+      .map_with(|_, sp| StringContent(Spanned::from(sp)));
 
     // " ... "
-    let inline_string = quote
-      .clone()
+    let inline_string = Quote::parser()
       .then(inline_content_parser)
-      .then(quote)
+      .then(Quote::parser())
       .map_with(|((lq, content), rq), sp| Self {
         span: Spanned::from(sp),
         delimiters: StringDelimiter::Quote {
@@ -556,10 +408,9 @@ impl<Src, Span> StringValue<Src, Span> {
       });
 
     // """ ... """
-    let block_string = triple_quote
-      .clone()
+    let block_string = TripleQuote::parser()
       .then(block_content_parser)
-      .then(triple_quote)
+      .then(TripleQuote::parser())
       .map_with(|((ltq, content), rtq), sp| Self {
         span: Spanned::from(sp),
         delimiters: StringDelimiter::TripleQuote {
@@ -569,10 +420,7 @@ impl<Src, Span> StringValue<Src, Span> {
         content,
       });
 
-    // Choose block first or inline first — both are unambiguous.
-    block_string
-      .or(inline_string)
-      .labelled("string value")
+    block_string.or(inline_string).labelled("string value")
   }
 }
 
@@ -591,7 +439,11 @@ impl<Src, Span> IntoSpanned<Src, Span> for StringValue<Src, Span> {
 }
 
 impl<Src, Span> IntoComponents for StringValue<Src, Span> {
-  type Components = (Spanned<Src, Span>, StringDelimiter<Src, Span>, Spanned<Src, Span>);
+  type Components = (
+    Spanned<Src, Span>,
+    StringDelimiter<Src, Span>,
+    StringContent<Src, Span>,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -607,8 +459,7 @@ mod tests {
   type Err<'a> = extra::Err<Simple<'a, char>>;
   type Span = SimpleSpan;
 
-  fn string_parser<'a>(
-  ) -> impl Parser<'a, &'a str, StringValue<&'a str, Span>, Err<'a>> + Clone {
+  fn string_parser<'a>() -> impl Parser<'a, &'a str, StringValue<&'a str, Span>, Err<'a>> + Clone {
     StringValue::<&str, Span>::parser::<&str, Err>().then_ignore(end())
   }
 
@@ -619,11 +470,11 @@ mod tests {
     let s = r#""""#;
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().source(), &"");
+    assert_eq!(sv.content().span().source(), &"");
 
     let s = r#""hello""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &"hello");
+    assert_eq!(sv.content().span().source(), &"hello");
     match sv.delimiters() {
       StringDelimiter::Quote { l_quote, r_quote } => {
         assert_eq!(l_quote.span().source(), &"\"");
@@ -638,12 +489,12 @@ mod tests {
     // Escaped characters are accepted; content is raw (not unescaped here).
     let s = r#""line1\nline2\t\\\/\"""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &r#"line1\nline2\t\\\/\""#);
+    assert_eq!(sv.content().span().source(), &r#"line1\nline2\t\\\/\""#);
 
     // Unicode escape: exactly four hex digits
     let s = r#""\u0041\u0062\u0030""#; // A b 0
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &r#"\u0041\u0062\u0030"#);
+    assert_eq!(sv.content().span().source(), &r#"\u0041\u0062\u0030"#);
   }
 
   #[test]
@@ -654,7 +505,10 @@ mod tests {
 
     // Bad unicode: non-hex or wrong length
     for s in [r#""\u004Z""#, r#""\u041""#, r#""\u0G10""#] {
-      assert!(string_parser().parse(s).into_result().is_err(), "should reject `{s}`");
+      assert!(
+        string_parser().parse(s).into_result().is_err(),
+        "should reject `{s}`"
+      );
     }
 
     // Unknown short escape
@@ -669,7 +523,10 @@ mod tests {
   #[test]
   fn inline_trailing_garbage_rejected() {
     for s in [r#""hi"x"#, r#""hi" "#] {
-      assert!(string_parser().parse(s).into_result().is_err(), "should reject `{s}`");
+      assert!(
+        string_parser().parse(s).into_result().is_err(),
+        "should reject `{s}`"
+      );
     }
   }
 
@@ -677,17 +534,24 @@ mod tests {
 
   #[test]
   fn block_empty_and_basic() {
-    let s = r#"""""" "#; // """ """
-    let s = &s[..6];     // trim the space so it's exactly """"""
+    let s = r#""""""""#; // """ """
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().source(), &"");
+    assert_eq!(sv.content().span().source(), &"");
+
+    let s = r#"""" """"#; // """ """
+    let sv = string_parser().parse(s).into_result().unwrap();
+    assert_eq!(sv.span().source(), &s);
+    assert_eq!(sv.content().span().source(), &" ");
 
     let s = r#""""hello""""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &"hello");
+    assert_eq!(sv.content().span().source(), &"hello");
     match sv.delimiters() {
-      StringDelimiter::TripleQuote { l_triple_quote, r_triple_quote } => {
+      StringDelimiter::TripleQuote {
+        l_triple_quote,
+        r_triple_quote,
+      } => {
         assert_eq!(l_triple_quote.span().source(), &r#"""""#);
         assert_eq!(r_triple_quote.span().source(), &r#"""""#);
       }
@@ -699,7 +563,10 @@ mod tests {
   fn block_allows_newlines_and_quotes() {
     let s = "\"\"\"\nHe said \"Hi\".\nMultiline.\n\"\"\"";
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &"\nHe said \"Hi\".\nMultiline.\n");
+    assert_eq!(
+      sv.content().span().source(),
+      &"\nHe said \"Hi\".\nMultiline.\n"
+    );
   }
 
   #[test]
@@ -707,7 +574,7 @@ mod tests {
     // Content contains an escaped triple-quote sequence: \""
     let s = "\"\"\"x\\\"\"\"y\"\"\""; // runtime: """x\"""y"""
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().source(), &r#"x\"""y"#);
+    assert_eq!(sv.content().span().source(), &r#"x\"""y"#);
   }
 
   #[test]
@@ -728,7 +595,7 @@ mod tests {
     let s = r#""abc""#;
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().source(), &"abc");
+    assert_eq!(sv.content().span().source(), &"abc");
   }
 
   #[test]

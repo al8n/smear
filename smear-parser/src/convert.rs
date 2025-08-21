@@ -23,7 +23,7 @@ use super::spanned::Spanned;
 /// - The reference remains valid for the lifetime of the implementing type
 pub trait AsSpanned<Src, Span> {
   /// Returns a reference to the source span of this parsed element.
-  /// 
+  ///
   /// The span provides the exact source location where this element was parsed,
   /// including start and end positions. This information is essential for error
   /// reporting, source mapping, and other tooling that needs to relate parsed
@@ -54,7 +54,7 @@ pub trait AsSpanned<Src, Span> {
 /// - The conversion is efficient (ideally zero-cost)
 pub trait IntoSpanned<Src, Span>: AsSpanned<Src, Span> {
   /// Consumes this element and returns the owned source span.
-  /// 
+  ///
   /// This method takes ownership of the element and extracts its span information
   /// as an owned value. This is useful when you need to transfer ownership of
   /// the span data to another data structure or when the element itself is no
@@ -89,7 +89,7 @@ pub trait IntoSpanned<Src, Span>: AsSpanned<Src, Span> {
 /// // Extracting components for transformation
 /// let float_value: FloatValue<&str, SimpleSpan> = parse_float("3.14e-2")?;
 /// let (span, int_part, frac_part, exp_part) = float_value.into_components();
-/// 
+///
 /// // Building a custom representation
 /// let custom_float = CustomFloat {
 ///     location: span,
@@ -97,11 +97,11 @@ pub trait IntoSpanned<Src, Span>: AsSpanned<Src, Span> {
 ///     fractional: frac_part,
 ///     exponent: exp_part,
 /// };
-/// 
+///
 /// // Component analysis
 /// let int_literal: IntValue<&str, SimpleSpan> = parse_int("-42")?;
 /// let (span, sign, digits) = int_literal.into_components();
-/// 
+///
 /// if sign.is_some() {
 ///     println!("Found negative integer at {:?}", span);
 /// }
@@ -125,14 +125,14 @@ pub trait IntoSpanned<Src, Span>: AsSpanned<Src, Span> {
 /// 4. **Sub-elements**: Nested parsed elements in source order
 pub trait IntoComponents {
   /// The tuple or struct type containing the decomposed components.
-  /// 
+  ///
   /// This associated type defines the structure returned by `into_components()`.
   /// It should include all meaningful parts of the parsed element in a logical
   /// order that makes sense for the specific element type.
   type Components;
 
   /// Consumes this element and returns its constituent components.
-  /// 
+  ///
   /// This method breaks down the parsed element into its individual parts,
   /// providing owned access to each component. The exact structure of the
   /// returned components is defined by the `Components` associated type.

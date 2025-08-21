@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use super::{char::Char, source::Source, spanned::Spanned, convert::*};
+use super::{char::Char, convert::*, source::Source, spanned::Spanned};
 
 /// A GraphQL name identifier.
 ///
@@ -69,15 +69,14 @@ pub struct Name<Src, Span>(pub(crate) Spanned<Src, Span>);
 
 impl<Src, Span> Name<Src, Span> {
   /// Returns the source span of the name.
-  /// 
+  ///
   /// This provides access to the original source location and text of the name,
-  /// useful for error reporting, source mapping, syntax highlighting, and 
+  /// useful for error reporting, source mapping, syntax highlighting, and
   /// extracting the actual string content of the name.
   #[inline]
   pub const fn span(&self) -> &Spanned<Src, Span> {
     &self.0
   }
-
 
   /// Creates a parser for GraphQL names.
   ///
@@ -104,7 +103,7 @@ impl<Src, Span> Name<Src, Span> {
   /// "field123"     -> Name { span: "field123" }
   /// "__typename"   -> Name { span: "__typename" }
   /// "a"            -> Name { span: "a" }
-  /// 
+  ///
   /// // Parse failures:
   /// "123field"     -> Error: cannot start with digit
   /// "my-field"     -> Error: hyphen not allowed

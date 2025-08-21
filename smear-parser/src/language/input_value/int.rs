@@ -2,10 +2,10 @@ use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use crate::{
   char::Char,
+  convert::*,
   language::{input_value::UintValue, punct::Minus},
   source::Source,
   spanned::Spanned,
-  convert::*,
 };
 
 /// A GraphQL integer literal value.
@@ -117,7 +117,11 @@ impl<Src, Span> IntoSpanned<Src, Span> for IntValue<Src, Span> {
 }
 
 impl<Src, Span> IntoComponents for IntValue<Src, Span> {
-  type Components = (Spanned<Src, Span>, Option<Minus<Src, Span>>, UintValue<Src, Span>);
+  type Components = (
+    Spanned<Src, Span>,
+    Option<Minus<Src, Span>>,
+    UintValue<Src, Span>,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -127,7 +131,7 @@ impl<Src, Span> IntoComponents for IntValue<Src, Span> {
 
 impl<Src, Span> IntValue<Src, Span> {
   /// Returns the source span of the entire integer literal.
-  /// 
+  ///
   /// This span covers from the first character (sign or first digit) through
   /// the last digit, providing the complete source location for error reporting,
   /// source mapping, and extracting the full literal text.
@@ -136,13 +140,13 @@ impl<Src, Span> IntValue<Src, Span> {
   }
 
   /// Returns the optional minus sign component.
-  /// 
+  ///
   /// This provides access to the leading minus sign if the integer is negative.
   /// Returns `Some(Minus)` for negative literals, `None` for positive literals.
   /// Note that positive literals never have an explicit `+` sign in GraphQL.
-  /// 
+  ///
   /// # Examples
-  /// 
+  ///
   /// ```text
   /// 42      // Returns None
   /// -42     // Returns Some(Minus)
@@ -154,16 +158,16 @@ impl<Src, Span> IntValue<Src, Span> {
   }
 
   /// Returns the unsigned integer component (digits only).
-  /// 
+  ///
   /// This provides access to the numeric digits without any sign information.
   /// The digits follow GraphQL's unsigned integer rules (no leading zeros
   /// except for the value `0` itself).
-  /// 
+  ///
   /// # Examples
-  /// 
+  ///
   /// ```text
   /// 42      // digits = UintValue("42")
-  /// -42     // digits = UintValue("42") 
+  /// -42     // digits = UintValue("42")
   /// 0       // digits = UintValue("0")
   /// -0      // digits = UintValue("0")
   /// ```

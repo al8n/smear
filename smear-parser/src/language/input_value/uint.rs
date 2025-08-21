@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
+use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
 /// An unsigned decimal integer component for GraphQL numeric literals.
 ///
@@ -79,7 +79,7 @@ pub struct UintValue<Src, Span>(Spanned<Src, Span>);
 
 impl<Src, Span> UintValue<Src, Span> {
   /// Returns the source span of the unsigned integer.
-  /// 
+  ///
   /// This provides access to the original source location and text of the
   /// unsigned integer, useful for error reporting, source mapping, extracting
   /// the actual numeric string for conversion, and building higher-level

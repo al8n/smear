@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use super::super::{
-  super::{char::Char, source::Source, spanned::Spanned, convert::*},
+  super::{char::Char, convert::*, source::Source, spanned::Spanned},
   punct::{LBracket, RBracket},
 };
 
@@ -88,7 +88,7 @@ pub struct ListValue<Value, Src, Span, Container = Vec<Value>> {
 
 impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   /// Returns the source span of the entire list literal.
-  /// 
+  ///
   /// This span covers from the opening bracket through the closing bracket,
   /// including all whitespace and elements within. Useful for error reporting,
   /// source mapping, and extracting the complete list text.
@@ -98,7 +98,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   }
 
   /// Returns the opening bracket token.
-  /// 
+  ///
   /// This provides access to the `[` character that begins the list,
   /// including its exact source position. Useful for syntax highlighting,
   /// bracket matching, and precise error reporting at list boundaries.
@@ -108,7 +108,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   }
 
   /// Returns the closing bracket token.
-  /// 
+  ///
   /// This provides access to the `]` character that ends the list,
   /// including its exact source position. Useful for syntax highlighting,
   /// bracket matching, and detecting incomplete lists.
@@ -118,7 +118,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   }
 
   /// Returns the container holding the parsed list elements.
-  /// 
+  ///
   /// This provides access to all elements that were successfully parsed
   /// from the list literal.
   #[inline]
@@ -131,7 +131,9 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   /// This is the core parsing function that accepts any value parser and
   /// creates a complete list parser. It handles all GraphQL list syntax
   /// including whitespace, optional commas, trailing commas, and empty lists.
-  pub fn parser_with<'src, I, E, P, const CONST: bool>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P, const CONST: bool>(
+    value: P,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src, Slice = Src, Span = Span>,
     Src: 'src,
@@ -154,9 +156,8 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
 
     // '[' ws? ( ']' | elem+ ']' )
     open
-    .then_ignore(ws.clone())
-    .then(
-      choice((
+      .then_ignore(ws.clone())
+      .then(choice((
         // Empty fast path: immediately see ']'
         close.clone().map(|r| (Container::default(), r)),
         // Non-empty: one-or-more elements; trailing commas handled by elem’s trailing ws
@@ -165,20 +166,19 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
           .at_least(1)
           .collect::<Container>()
           .then(close),
-      ))
-    )
-    .map_with(|(l_bracket, (values, r_bracket)), sp| Self {
-      span: Spanned::from(sp),
-      l_bracket,
-      r_bracket,
-      values,
-      _value: core::marker::PhantomData,
-    })
-    .labelled(if CONST {
-      "const list value"
-    } else {
-      "list value"
-    })
+      )))
+      .map_with(|(l_bracket, (values, r_bracket)), sp| Self {
+        span: Spanned::from(sp),
+        l_bracket,
+        r_bracket,
+        values,
+        _value: core::marker::PhantomData,
+      })
+      .labelled(if CONST {
+        "const list value"
+      } else {
+        "list value"
+      })
   }
 }
 
@@ -189,7 +189,9 @@ impl<Value, Src, Span, Container> AsSpanned<Src, Span> for ListValue<Value, Src,
   }
 }
 
-impl<Value, Src, Span, Container> IntoSpanned<Src, Span> for ListValue<Value, Src, Span, Container> {
+impl<Value, Src, Span, Container> IntoSpanned<Src, Span>
+  for ListValue<Value, Src, Span, Container>
+{
   #[inline]
   fn into_spanned(self) -> Spanned<Src, Span> {
     self.span
@@ -197,7 +199,12 @@ impl<Value, Src, Span, Container> IntoSpanned<Src, Span> for ListValue<Value, Sr
 }
 
 impl<Value, Src, Span, Container> IntoComponents for ListValue<Value, Src, Span, Container> {
-  type Components = (Spanned<Src, Span>, LBracket<Src, Span>, RBracket<Src, Span>, Container);
+  type Components = (
+    Spanned<Src, Span>,
+    LBracket<Src, Span>,
+    RBracket<Src, Span>,
+    Container,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {

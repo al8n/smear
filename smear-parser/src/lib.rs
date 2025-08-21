@@ -107,7 +107,7 @@ mod utils;
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{char::Char, source::Source, spanned::Spanned, convert::*};
+  pub use super::{char::Char, convert::*, source::Source, spanned::Spanned};
 }
 
 #[cfg(all(feature = "std", test))]

@@ -2,11 +2,11 @@ use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
 use crate::{
   char::Char,
+  convert::*,
   digits::Digits,
   language::punct::{Dot, Minus, Plus},
   source::Source,
   spanned::Spanned,
-  convert::*,
 };
 
 use super::IntValue;
@@ -343,11 +343,7 @@ impl<Src, Span> IntoSpanned<Src, Span> for Fractional<Src, Span> {
 }
 
 impl<Src, Span> IntoComponents for Fractional<Src, Span> {
-  type Components = (
-    Spanned<Src, Span>,
-    Dot<Src, Span>,
-    Digits<Src, Span>,
-  );
+  type Components = (Spanned<Src, Span>, Dot<Src, Span>, Digits<Src, Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {

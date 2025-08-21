@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, name::Name, source::Source, spanned::Spanned, convert::*};
+use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned};
 
 /// A GraphQL enum value identifier.
 ///
@@ -99,7 +99,7 @@ pub struct EnumValue<Src, Span> {
 
 impl<Src, Span> EnumValue<Src, Span> {
   /// Returns the source span of the enum value.
-  /// 
+  ///
   /// This provides access to the original source location and text of the
   /// enum value, useful for error reporting, source mapping, syntax highlighting,
   /// and extracting the actual string content of the enum value name.
@@ -109,7 +109,7 @@ impl<Src, Span> EnumValue<Src, Span> {
   }
 
   /// Returns the name component of the enum value.
-  /// 
+  ///
   /// This provides access to the underlying [`Name`] that represents the enum
   /// value identifier. The name contains the parsed identifier with its source
   /// location information.
@@ -197,8 +197,16 @@ mod tests {
     ];
     for s in ok {
       let ev = enum_parser().parse(s).into_result().unwrap();
-      assert_eq!(ev.name().span().source(), &s, "name source mismatch for `{s}`");
-      assert_eq!(ev.span().source(), &s, "outer span should match full input `{s}`");
+      assert_eq!(
+        ev.name().span().source(),
+        &s,
+        "name source mismatch for `{s}`"
+      );
+      assert_eq!(
+        ev.span().source(),
+        &s,
+        "outer span should match full input `{s}`"
+      );
     }
   }
 
@@ -224,7 +232,16 @@ mod tests {
 
   #[test]
   fn rejects_non_name_starters_and_illegal_chars() {
-    for s in ["1", "1a", "-", "my-enum", "my.enum", "my enum", "@directive", ""] {
+    for s in [
+      "1",
+      "1a",
+      "-",
+      "my-enum",
+      "my.enum",
+      "my enum",
+      "@directive",
+      "",
+    ] {
       assert!(
         enum_parser().parse(s).into_result().is_err(),
         "should reject non-name `{s}`"

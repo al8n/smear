@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
+use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
 /// A parsed GraphQL **Boolean Value** (`true` or `false`).
 ///
@@ -22,7 +22,7 @@ pub struct BooleanValue<Src, Span> {
 
 impl<Src, Span> BooleanValue<Src, Span> {
   /// Returns the parsed boolean value.
-  /// 
+  ///
   /// This is the actual boolean value (`true` or `false`) that was parsed
   /// from the source text, extracted from the literal tokens.
   #[inline]
@@ -31,7 +31,7 @@ impl<Src, Span> BooleanValue<Src, Span> {
   }
 
   /// Returns the source span of the boolean literal.
-  /// 
+  ///
   /// This span covers the entire boolean token (`true` or `false`) in the
   /// original source, useful for error reporting, source mapping, and
   /// syntax highlighting.
@@ -48,7 +48,7 @@ impl<Src, Span> BooleanValue<Src, Span> {
   /// in capitalization.
   ///
   /// The parser will not handle any surrounding whitespace or comments.
-  /// 
+  ///
   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where

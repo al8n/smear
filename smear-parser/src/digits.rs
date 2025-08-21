@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
+use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
 /// A sequence of decimal digits (`0-9`).
 ///
@@ -68,7 +68,7 @@ pub struct Digits<Src, Span>(Spanned<Src, Span>);
 
 impl<Src, Span> Digits<Src, Span> {
   /// Returns the source span of the digit sequence.
-  /// 
+  ///
   /// This provides access to the original source location and text of the
   /// digits, useful for error reporting, source mapping, extracting the
   /// actual numeric string, and building higher-level numeric types.
@@ -119,4 +119,3 @@ impl<Src, Span> IntoComponents for Digits<Src, Span> {
     self.into_spanned()
   }
 }
-

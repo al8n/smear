@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
 
-use crate::{char::Char, source::Source, spanned::Spanned, convert::*};
+use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
 /// A GraphQL null literal value.
 ///
@@ -28,7 +28,7 @@ pub struct NullValue<Src, Span>(Spanned<Src, Span>);
 
 impl<Src, Span> NullValue<Src, Span> {
   /// Returns the source span of the null literal.
-  /// 
+  ///
   /// This provides access to the exact location in the source where the `null`
   /// keyword was found, useful for error reporting, source mapping, syntax
   /// highlighting, and other tooling that needs to relate the null value back
