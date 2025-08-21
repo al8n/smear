@@ -3,7 +3,7 @@ use chumsky::{
   util::MaybeRef,
 };
 
-use crate::parser::{
+use super::{
   language::{
     ignored::ignored,
     input_value::{self, *},

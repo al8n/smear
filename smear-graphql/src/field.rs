@@ -4,7 +4,7 @@ use chumsky::{
 };
 use derive_more::{AsMut, AsRef, From, Into};
 
-use crate::parser::{
+use super::{
   language::{
     field::{self, Alias, TypeCondition},
     punct::{Ellipsis, LBrace, RBrace},
