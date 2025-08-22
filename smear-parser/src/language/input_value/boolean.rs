@@ -50,9 +50,15 @@ impl<Span> BooleanValue<Span> {
   /// parser is strictly case-sensitive and will reject any variations
   /// in capitalization.
   ///
-  /// The parser will not handle any surrounding whitespace or comments.
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the boolean value.
   ///
   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -89,7 +95,7 @@ impl<Span> AsRef<Span> for BooleanValue<Span> {
 
 impl<Span> IntoSpan<Span> for BooleanValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

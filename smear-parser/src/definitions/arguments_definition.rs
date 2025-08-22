@@ -37,7 +37,7 @@ impl<InputValueDefinition, Span, Container> IntoSpan<Span>
   for ArgumentsDefinition<InputValueDefinition, Span, Container>
 {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

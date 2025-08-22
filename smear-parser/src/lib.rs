@@ -16,7 +16,7 @@ macro_rules! word {
     paste::paste! {
       $(
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct $name<Span>(Span);
 
         impl<Span> ::core::convert::AsRef<Span> for $name<Span> {
@@ -28,7 +28,7 @@ macro_rules! word {
 
         impl<Span> $crate::__private::IntoSpan<Span> for $name<Span> {
           #[inline]
-          fn into_spanned(self) -> Span {
+          fn into_span(self) -> Span {
             self.0
           }
         }
@@ -38,7 +38,7 @@ macro_rules! word {
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <$name<Span> as $crate::__private::IntoSpan<Span>>::into_spanned(self)
+            <$name<Span> as $crate::__private::IntoSpan<Span>>::into_span(self)
           }
         }
 

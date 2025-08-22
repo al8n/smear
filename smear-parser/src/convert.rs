@@ -26,7 +26,7 @@ pub trait IntoSpan<Span>: AsRef<Span> {
   /// as an owned value. This is useful when you need to transfer ownership of
   /// the span data to another data structure or when the element itself is no
   /// longer needed but the location information should be preserved.
-  fn into_spanned(self) -> Span;
+  fn into_span(self) -> Span;
 }
 
 /// Enables destructuring a parsed element into its constituent components.

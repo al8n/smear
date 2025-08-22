@@ -47,7 +47,13 @@ impl<Span> NullValue<Span> {
   /// the exact character sequence `n-u-l-l`. It is strictly case-sensitive and
   /// will reject any variations in spelling or capitalization.
   ///
-  /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the null value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -70,7 +76,7 @@ impl<Span> AsRef<Span> for NullValue<Span> {
 
 impl<Span> IntoSpan<Span> for NullValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.0
   }
 }
@@ -80,6 +86,6 @@ impl<Span> IntoComponents for NullValue<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }

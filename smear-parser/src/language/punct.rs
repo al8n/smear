@@ -14,7 +14,7 @@ macro_rules! punct {
 
       impl<Span> $crate::__private::IntoSpan<Span> for [< $token_name:upper:camel >]<Span> {
         #[inline]
-        fn into_spanned(self) -> Span {
+        fn into_span(self) -> Span {
           self.0
         }
       }
@@ -24,7 +24,7 @@ macro_rules! punct {
 
         #[inline]
         fn into_components(self) -> Self::Components {
-          <Self as $crate::__private::IntoSpan<Span>>::into_spanned(self)
+          <Self as $crate::__private::IntoSpan<Span>>::into_span(self)
         }
       }
 

@@ -1,31 +1,80 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
+  convert::*,
   keywords::Fragment,
-  language::{field::TypeCondition, ignored::ignored, input_value::StringValue},
-  name::Name,
+  language::{
+    fragment::{FragmentName, TypeCondition},
+    ignored::ignored,
+    input_value::StringValue,
+  },
   source::{Char, Slice, Source},
 };
 
 #[derive(Debug, Clone)]
-pub struct FragmentDefinition<SelectionSet, Directives, Span> {
+pub struct FragmentDefinition<Directives, SelectionSet, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   fragment: Fragment<Span>,
-  name: Name<Span>,
+  name: FragmentName<Span>,
   type_condition: TypeCondition<Span>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives, Span> {
+impl<Directives, SelectionSet, Span> AsRef<Span>
+  for FragmentDefinition<Directives, SelectionSet, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directives, SelectionSet, Span> IntoSpan<Span>
+  for FragmentDefinition<Directives, SelectionSet, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directives, SelectionSet, Span> IntoComponents
+  for FragmentDefinition<Directives, SelectionSet, Span>
+{
+  type Components = (
+    Span,
+    Option<StringValue<Span>>,
+    Fragment<Span>,
+    FragmentName<Span>,
+    TypeCondition<Span>,
+    Option<Directives>,
+    SelectionSet,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.description,
+      self.fragment,
+      self.name,
+      self.type_condition,
+      self.directives,
+      self.selection_set,
+    )
+  }
+}
+
+impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet, Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &FragmentName<Span> {
     &self.name
   }
 
@@ -54,27 +103,6 @@ impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives
     &self.selection_set
   }
 
-  #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    Option<StringValue<Span>>,
-    Name<Span>,
-    TypeCondition<Span>,
-    Option<Directives>,
-    SelectionSet,
-  ) {
-    (
-      self.span,
-      self.description,
-      self.name,
-      self.type_condition,
-      self.directives,
-      self.selection_set,
-    )
-  }
-
   /// Returns a parser for the fragment definition.
   pub fn parser_with<'src, I, E, SP, DP>(
     selection_set_parser: impl FnOnce() -> SP,
@@ -90,19 +118,17 @@ impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
-    let ws = ignored();
-
     StringValue::parser()
       .or_not()
       .then_ignore(ignored())
       .then(Fragment::parser())
       .then_ignore(ignored())
-      .then(Name::<Span>::parser())
+      .then(FragmentName::parser())
       .then_ignore(ignored())
       .then(TypeCondition::parser())
       .then_ignore(ignored())
       .then(directives_parser().or_not())
-      .then_ignore(ws.clone())
+      .then_ignore(ignored())
       .then(selection_set_parser())
       .map_with(
         |(((((description, fragment), name), type_condition), directives), selection_set), sp| {
@@ -117,6 +143,6 @@ impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives
           }
         },
       )
-      .padded_by(ws)
+      .padded_by(ignored())
   }
 }

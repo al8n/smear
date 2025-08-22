@@ -108,7 +108,7 @@ impl<Span> AsRef<Span> for StringContent<Span> {
 
 impl<Span> IntoSpan<Span> for StringContent<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.0
   }
 }
@@ -118,7 +118,7 @@ impl<Span> IntoComponents for StringContent<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }
 
@@ -127,14 +127,6 @@ impl<Span> IntoComponents for StringContent<Span> {
 /// Represents a complete string literal as defined by the GraphQL specification.
 /// GraphQL supports two string formats: standard quoted strings for simple text
 /// and triple-quoted block strings for multi-line content with natural formatting.
-///
-/// ## Design Philosophy
-///
-/// This parser is designed for **zero-copy parsing** efficiency:
-/// - **No string allocation**: All content stored as source slices
-/// - **Precise spans**: Every component retains exact source location
-/// - **Deferred processing**: Escape sequence processing happens separately
-/// - **Raw preservation**: Original source text fully preserved for re-emission
 ///
 /// ## String Format Support
 ///
@@ -156,14 +148,6 @@ impl<Span> IntoComponents for StringContent<Span> {
 /// - **Overall span**: Covers the entire literal including delimiters
 /// - **Delimiters**: The opening and closing quote tokens with positions
 /// - **Content span**: The raw text between delimiters (no processing applied)
-///
-/// ## Processing Stages
-///
-/// The parser handles lexical analysis only. Additional processing stages:
-/// 1. **Lexical parsing** (this parser): Recognize delimiters and extract content
-/// 2. **Escape processing**: Convert escape sequences to actual characters
-/// 3. **Block string processing**: Remove common indentation, normalize newlines
-/// 4. **Value conversion**: Convert to target language string representation
 ///
 /// ## Examples
 ///
@@ -214,22 +198,6 @@ impl<Span> IntoComponents for StringContent<Span> {
 /// 2. **Indentation removal**: Common leading whitespace stripped
 /// 3. **Blank line handling**: Leading/trailing blank lines may be removed
 /// 4. **Quote escaping**: Only `\"""` needs escaping (becomes `"""`)
-///
-/// ## Memory and Performance
-///
-/// - **Zero-copy**: Content stored as references to source input
-/// - **Allocation-free parsing**: No strings allocated during lexical analysis
-/// - **Streaming-friendly**: Can process large strings without loading entirely
-/// - **Source preservation**: Original formatting preserved for tooling
-///
-/// ## Usage in GraphQL
-///
-/// String literals appear throughout GraphQL:
-/// - **Field arguments**: `user(name: "John Doe")`
-/// - **Variable values**: `{ "description": "A detailed explanation" }`
-/// - **Default values**: `field(message: String = "Hello")`
-/// - **Documentation**: `"""This field returns user information"""`
-/// - **Descriptions**: Schema documentation and field descriptions
 ///
 /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
 #[derive(Debug, Clone, Copy)]
@@ -312,6 +280,14 @@ impl<Span> StringValue<Span> {
   /// supporting both standard quoted strings and triple-quoted block strings.
   /// It handles all escape sequences, delimiter recognition, and content
   /// extraction while maintaining zero-copy efficiency.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the string value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -432,7 +408,7 @@ impl<Span> AsRef<Span> for StringValue<Span> {
 
 impl<Span> IntoSpan<Span> for StringValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

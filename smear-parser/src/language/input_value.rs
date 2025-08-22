@@ -115,8 +115,28 @@ mod variable;
 /// Spec: [Input Values](https://spec.graphql.org/draft/#sec-Input-Values)
 pub trait InputValue<const CONST: bool> {}
 
-/// Default input value
-#[derive(Debug, Clone)]
+/// A GraphQL default value assignment for input parameters.
+///
+/// Represents the default value assignment syntax used in GraphQL variable
+/// declarations, field arguments, and input type definitions. Default values
+/// provide fallback values when no explicit value is provided, following
+/// GraphQL's default value semantics and constant expression requirements.
+///
+/// ## Specification Rules
+///
+/// GraphQL default values follow strict formatting and semantic rules:
+/// - **Equals syntax**: Must use `=` to assign the default value
+/// - **Constant requirement**: Default values must be constant expressions (no variables)
+/// - **Type compatibility**: Default value type must match the declared type
+/// - **Nullability handling**: Non-null types can have null defaults (making them effectively nullable)
+/// - **Whitespace flexibility**: Optional whitespace around the `=` token
+///
+/// ## Format
+///
+/// ```text
+/// DefaultValue ::= '=' Value
+/// ```
+#[derive(Debug, Clone, Copy)]
 pub struct DefaultInputValue<Value, Span> {
   span: Span,
   eq: Equal<Span>,
@@ -124,25 +144,43 @@ pub struct DefaultInputValue<Value, Span> {
 }
 
 impl<Value, Span> DefaultInputValue<Value, Span> {
-  /// Returns the span of the default input value
+  /// Returns the source span of the entire default value assignment.
+  ///
+  /// This span covers from the `=` token through the last character of the
+  /// default value, providing the complete source location for error reporting
+  /// and source mapping.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns a reference to the equal token
+  /// Returns the equals assignment token.
+  ///
+  /// This provides access to the `=` character that introduces the default
+  /// value assignment, including its exact source position. Useful for syntax
+  /// highlighting and precise error reporting.
   #[inline]
   pub const fn eq(&self) -> &Equal<Span> {
     &self.eq
   }
 
-  /// Returns a reference to the value of the default input value.
+  /// Returns the default value expression.
+  ///
+  /// This provides access to the constant expression that serves as the
+  /// default value.
   #[inline]
   pub const fn value(&self) -> &Value {
     &self.value
   }
 
-  /// Returns a parser of default input value.
+  /// Creates a parser for default value assignments with constant validation.
+  ///
+  /// This parser handles the complete default value syntax including the equals
+  /// token, optional whitespace, and the default value expression. It enforces
+  /// GraphQL's requirement that default values must be constant expressions
+  /// through compile-time type constraints.
+  ///
+  ///
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -173,7 +211,7 @@ impl<Value, Span> AsRef<Span> for DefaultInputValue<Value, Span> {
 
 impl<Value, Span> IntoSpan<Span> for DefaultInputValue<Value, Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

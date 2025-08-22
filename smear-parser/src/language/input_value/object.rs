@@ -41,15 +41,6 @@ use super::super::{
 /// - **Field name**: A GraphQL name identifier
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
-///
-/// ## Trait Implementations
-///
-/// This type implements the standard span traits:
-/// - [`AsSpan`]: Provides access to the source span
-/// - [`IntoSpan`]: Enables consuming the field to extract its span
-/// - [`IntoComponents`]: Allows decomposition into constituent parts
-///
-/// The component tuple contains: `(span, name, colon, value)`
 #[derive(Debug, Clone)]
 pub struct ObjectValueField<InputValue, Span> {
   span: Span,
@@ -67,7 +58,7 @@ impl<InputValue, Span> AsRef<Span> for ObjectValueField<InputValue, Span> {
 
 impl<InputValue, Span> IntoSpan<Span> for ObjectValueField<InputValue, Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -128,6 +119,14 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   /// field name, colon separator, and field value. It manages whitespace
   /// and comments around each component according to GraphQL rules, and
   /// enforces constant vs variable context requirements at compile time.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the object.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -261,7 +260,7 @@ impl<Field, Span, Container> AsRef<Span> for ObjectValue<Field, Span, Container>
 
 impl<Field, Span, Container> IntoSpan<Span> for ObjectValue<Field, Span, Container> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

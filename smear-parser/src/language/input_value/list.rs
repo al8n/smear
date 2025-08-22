@@ -37,7 +37,6 @@ use std::vec::Vec;
 /// ## Generic Parameters
 ///
 /// - `Value`: The type of elements contained in the list
-/// - `Src`: The source slice type (typically `&str`)
 /// - `Span`: The span type for position information
 /// - `Container`: The collection type (defaults to `Vec<Value>`, can be customized)
 ///
@@ -54,31 +53,6 @@ use std::vec::Vec;
 /// - **Left bracket**: The opening `[` token with its position
 /// - **Right bracket**: The closing `]` token with its position  
 /// - **Values**: The parsed elements in their container
-///
-/// ## Design Philosophy
-///
-/// This parser is designed to be flexible and efficient:
-/// - **Generic value type**: Works with any parseable value type
-/// - **Configurable container**: Allows optimization for different use cases
-/// - **Precise spans**: Each component retains exact source location
-/// - **Whitespace tolerant**: Handles GraphQL's flexible whitespace rules
-/// - **Error friendly**: Detailed position information for parse errors
-///
-/// ## Usage in GraphQL
-///
-/// List literals appear throughout GraphQL syntax:
-/// - **Query arguments**: `users(ids: [1, 2, 3])`
-/// - **Variable values**: `{ "tags": ["urgent", "bug"] }`
-/// - **Default values**: `field(items: [String] = ["default"])`
-/// - **Input object fields**: `{ scores: [95, 87, 92] }`
-/// - **Nested structures**: `{ users: [{ id: 1 }, { id: 2 }] }`
-///
-/// ## Memory and Performance
-///
-/// - **Zero-copy parsing**: Source references avoid string allocation when possible
-/// - **Lazy evaluation**: Values parsed on-demand by the value parser
-/// - **Container optimization**: Custom containers can optimize for specific patterns
-/// - **Span preservation**: All position information retained for tooling
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
 #[derive(Debug, Clone)]
@@ -135,8 +109,16 @@ impl<Value, Span, Container> List<Value, Span, Container> {
   /// This is the core parsing function that accepts any value parser and
   /// creates a complete list parser. It handles all GraphQL list syntax
   /// including whitespace, optional commas, trailing commas, and empty lists.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the list.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P, const CONST: bool>(
-    value: P,
+    value_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -155,7 +137,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
         // Empty fast path: immediately see ']'
         RBracket::parser().map(|r| (Container::default(), r)),
         // Non-empty: one-or-more elements; trailing commas handled by elem’s trailing ws
-        value
+        value_parser
           .padded_by(ignored())
           .repeated()
           .at_least(1)
@@ -181,7 +163,7 @@ impl<Value, Span, Container> AsRef<Span> for List<Value, Span, Container> {
 
 impl<Value, Span, Container> IntoSpan<Span> for List<Value, Span, Container> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

@@ -32,74 +32,9 @@ use crate::{
 /// EnumValue ::= Name but not (`true` | `false` | `null`)
 /// ```
 ///
-/// ## Examples
-///
-/// **Valid enum values:**
-/// ```text
-/// RED              // Simple enum value
-/// BLUE             // Simple enum value
-/// LARGE_SIZE       // Underscore allowed
-/// HTTP_200         // Contains digits
-/// _internal        // Starting underscore allowed
-/// True             // Different case than reserved 'true'
-/// FALSE            // Different case than reserved 'false'
-/// NULL             // Different case than reserved 'null'
-/// trueValue        // Contains but not exactly 'true'
-/// nullish          // Contains but not exactly 'null'
-/// myEnum123        // Mixed letters and digits
-/// ```
-///
-/// **Invalid enum values:**
-/// ```text
-/// true             // Reserved keyword
-/// false            // Reserved keyword
-/// null             // Reserved keyword
-/// 123ABC           // Cannot start with digit
-/// my-enum          // Hyphens not allowed
-/// my.enum          // Dots not allowed
-/// my enum          // Spaces not allowed
-/// @directive       // Special characters not allowed
-/// ```
-///
-/// ## Usage in GraphQL
-///
-/// Enum values appear in various GraphQL contexts:
-/// - **Enum definitions**: `enum Color { RED GREEN BLUE }`
-/// - **Query arguments**: `user(status: ACTIVE)`
-/// - **Variable values**: `{ "status": "PENDING" }`
-/// - **Default values**: `field(sort: DESC = ASC)`
-/// - **Input object fields**: `{ filter: { type: PREMIUM } }`
-///
-/// ## Lexical vs Semantic Validation
-///
-/// This parser performs **lexical validation only**:
-/// - ✅ Checks if the identifier is a valid name
-/// - ✅ Checks if it avoids reserved keywords
-/// - ❌ Does **not** validate against specific enum type definitions
-/// - ❌ Does **not** check if the value exists in any particular enum
-///
-/// Semantic validation (checking against actual enum types) should be performed
-/// at a higher level during schema validation or query execution.
-///
-/// ## Case Sensitivity
-///
-/// GraphQL enum values are case-sensitive:
-/// - `RED` and `red` are different enum values
-/// - Only lowercase `true`, `false`, `null` are reserved
-/// - `True`, `FALSE`, `NULL` are valid enum value names
-///
-/// ## Design Notes
-///
-/// This parser does not handle whitespace, comments, or other GraphQL syntax
-/// elements. The calling parser is responsible for handling any necessary
-/// whitespace skipping or comment processing around the enum value.
-///
 /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumValue<Span> {
-  /// The name of the enum value
-  name: Name<Span>,
-}
+pub struct EnumValue<Span>(Span);
 
 impl<Span> EnumValue<Span> {
   /// Returns the source span of the enum value.
@@ -109,17 +44,7 @@ impl<Span> EnumValue<Span> {
   /// and extracting the actual string content of the enum value name.
   #[inline]
   pub const fn span(&self) -> &Span {
-    self.name.span()
-  }
-
-  /// Returns the name component of the enum value.
-  ///
-  /// This provides access to the underlying [`Name`] that represents the enum
-  /// value identifier. The name contains the parsed identifier with its source
-  /// location information.
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    &self.name
+    &self.0
   }
 
   /// Creates a parser for GraphQL enum values.
@@ -128,6 +53,14 @@ impl<Span> EnumValue<Span> {
   /// first parsing a valid name, then filtering out the reserved keywords.
   /// The filtering ensures compliance with GraphQL's lexical rules while
   /// maintaining good error messages.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the enum value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -143,9 +76,14 @@ impl<Span> EnumValue<Span> {
           || slice.equivalent(true_tokens::<I::Token>().into_iter())
           || slice.equivalent(false_tokens::<I::Token>().into_iter()))
       })
-      .map_with(|_, sp| Self {
-        name: Name(Span::from_map_extra(sp)),
-      })
+      .map_with(|_, sp| Self(Span::from_map_extra(sp)))
+  }
+}
+
+impl<Span> From<EnumValue<Span>> for Name<Span> {
+  #[inline]
+  fn from(enum_value: EnumValue<Span>) -> Self {
+    Self(enum_value.into_span())
   }
 }
 
@@ -158,8 +96,8 @@ impl<Span> AsRef<Span> for EnumValue<Span> {
 
 impl<Span> IntoSpan<Span> for EnumValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
-    self.name.into_spanned()
+  fn into_span(self) -> Span {
+    self.0
   }
 }
 
@@ -168,7 +106,7 @@ impl<Span> IntoComponents for EnumValue<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.name
+    self.into()
   }
 }
 
@@ -229,11 +167,7 @@ mod tests {
     ];
     for s in ok {
       let ev = enum_parser().parse(s).into_result().unwrap();
-      assert_eq!(
-        ev.name().span().source(),
-        &s,
-        "name source mismatch for `{s}`"
-      );
+      assert_eq!(ev.span().source(), &s, "name source mismatch for `{s}`");
       assert_eq!(
         ev.span().source(),
         &s,
@@ -297,11 +231,11 @@ mod tests {
     // Parse once to inspect, once to move.
     let s = "MY_ENUM";
     let ev1 = enum_parser().parse(s).into_result().unwrap();
-    assert_eq!(ev1.name().span().source(), &s);
+    assert_eq!(ev1.span().source(), &s);
 
     // Parse again to test into_span (consumes the value).
     let ev2 = enum_parser().parse(s).into_result().unwrap();
-    let owned_span = ev2.into_spanned();
+    let owned_span = ev2.into_span();
     assert_eq!(owned_span.source(), &s);
   }
 

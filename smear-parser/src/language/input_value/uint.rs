@@ -32,51 +32,6 @@ use crate::{
 /// ```text
 /// UintValue ::= '0' | [1-9][0-9]*
 /// ```
-///
-/// ## Examples
-///
-/// **Valid unsigned integers:**
-/// ```text
-/// 0              // Zero is always valid
-/// 1              // Single non-zero digit
-/// 42             // Multiple digits starting with non-zero
-/// 123456789      // Long sequence
-/// 999999999999   // Very long sequence
-/// ```
-///
-/// **Invalid formats:**
-/// ```text
-/// 01             // Leading zero forbidden
-/// 007            // Leading zeros forbidden  
-/// 00             // Multiple zeros forbidden
-/// +1             // Plus sign not handled here
-/// -1             // Minus sign not handled here
-/// 1.0            // Decimal notation not handled here
-/// 1e10           // Scientific notation not handled here
-/// ```
-///
-/// ## Usage in GraphQL
-///
-/// This component appears in:
-/// - **Integer literals**: `42`, `0`, `123456` (combined with optional minus sign)
-/// - **Float integer parts**: In `3.14`, the `3` is parsed as a `UintValue`
-/// - **Float exponent values**: In `1e42`, the `42` is parsed as a `UintValue`
-///
-/// ## Design Philosophy
-///
-/// This parser implements GraphQL's "no leading zeros" rule, which prevents
-/// ambiguity about numeric base and ensures consistent formatting across
-/// different GraphQL implementations. The rule exists because:
-/// - Leading zeros might suggest octal notation in some languages
-/// - Consistent formatting improves readability and prevents confusion
-/// - It matches common JSON numeric formatting expectations
-///
-/// ## Error Prevention
-///
-/// Common mistakes this parser prevents:
-/// - Using octal-style notation (`077`)
-/// - Copy-pasting zero-padded numbers (`001`, `042`)
-/// - Including unnecessary leading zeros from other systems
 #[derive(Debug, Clone, Copy)]
 pub struct UintValue<Span>(Span);
 
@@ -96,6 +51,14 @@ impl<Span> UintValue<Span> {
   /// This parser implements GraphQL's unsigned integer specification with
   /// strict validation of leading zero rules. It uses an alternation strategy
   /// to handle the two valid cases: zero and non-zero integers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the uint value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -121,7 +84,7 @@ impl<Span> AsRef<Span> for UintValue<Span> {
 
 impl<Span> IntoSpan<Span> for UintValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.0
   }
 }
@@ -131,7 +94,7 @@ impl<Span> IntoComponents for UintValue<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }
 

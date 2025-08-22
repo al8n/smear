@@ -66,6 +66,14 @@ impl<Span> ExponentSign<Span> {
   /// +  // -> ExponentSign::Positive
   /// -  // -> ExponentSign::Negative
   /// ```
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the exponent sign.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -89,10 +97,10 @@ impl<Span> AsRef<Span> for ExponentSign<Span> {
 
 impl<Span> IntoSpan<Span> for ExponentSign<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     match self {
-      Self::Positive(plus) => plus.into_spanned(),
-      Self::Negative(minus) => minus.into_spanned(),
+      Self::Positive(plus) => plus.into_span(),
+      Self::Negative(minus) => minus.into_span(),
     }
   }
 }
@@ -102,7 +110,7 @@ impl<Span> IntoComponents for ExponentSign<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }
 
@@ -129,7 +137,7 @@ impl<Span> AsRef<Span> for ExponentIdentifier<Span> {
 
 impl<Span> IntoSpan<Span> for ExponentIdentifier<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.0
   }
 }
@@ -139,7 +147,7 @@ impl<Span> IntoComponents for ExponentIdentifier<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }
 
@@ -158,6 +166,14 @@ impl<Span> ExponentIdentifier<Span> {
   /// This parser matches either lowercase `e` or uppercase `E`, which are
   /// both valid exponent indicators in GraphQL float literals according to
   /// the specification.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the exponent identifier.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -214,7 +230,7 @@ impl<Span> AsRef<Span> for Exponent<Span> {
 
 impl<Span> IntoSpan<Span> for Exponent<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -275,6 +291,14 @@ impl<Span> Exponent<Span> {
   /// This parser expects the complete exponent structure: an identifier (`e` or `E`),
   /// an optional sign (`+` or `-`), followed by at least one digit. The parser will
   /// fail if any required component is missing.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the exponent part.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -335,7 +359,7 @@ impl<Span> AsRef<Span> for Fractional<Span> {
 
 impl<Span> IntoSpan<Span> for Fractional<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -382,6 +406,14 @@ impl<Span> Fractional<Span> {
   /// This parser expects a decimal point (`.`) immediately followed by one or
   /// more digits. The parser will fail if the decimal point is not followed
   /// by at least one digit.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the fractional part.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -466,7 +498,7 @@ impl<Span> AsRef<Span> for FloatValue<Span> {
 
 impl<Span> IntoSpan<Span> for FloatValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -534,15 +566,6 @@ impl<Span> FloatValue<Span> {
   /// required digits after decimal points and exponent indicators, and proper
   /// sign usage.
   ///
-  /// ## Parsing Strategy
-  ///
-  /// The parser uses an alternation between two patterns:
-  /// 1. First tries to parse: `IntValue` + `Fractional` + optional `Exponent`
-  /// 2. Falls back to: `IntValue` + required `Exponent`
-  ///
-  /// This ensures that literals like `1e10` are parsed correctly (as integer + exponent)
-  /// rather than failing when looking for a fractional part.
-  ///
   /// ## Examples
   ///
   /// ```text
@@ -557,7 +580,13 @@ impl<Span> FloatValue<Span> {
   /// "1e"       -> Error: missing exponent digits
   /// ```
   ///
-  /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the float value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,

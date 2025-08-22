@@ -283,7 +283,7 @@ impl<Span> AsRef<Span> for Name<Span> {
 
 impl<Span> IntoSpan<Span> for Name<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.0
   }
 }
@@ -293,6 +293,6 @@ impl<Span> IntoComponents for Name<Span> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_spanned()
+    self.into_span()
   }
 }

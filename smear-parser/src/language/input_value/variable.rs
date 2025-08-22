@@ -55,15 +55,6 @@ use super::{
 /// }
 /// ```
 ///
-/// ## Trait Implementations
-///
-/// This type implements the standard span traits:
-/// - [`AsSpan`]: Provides access to the source span
-/// - [`IntoSpan`]: Enables consuming the variable to extract its span
-/// - [`IntoComponents`]: Allows decomposition into constituent parts
-///
-/// The component tuple contains: `(span, dollar, name)`
-///
 /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
 #[derive(Debug, Clone, Copy)]
 pub struct Variable<Span> {
@@ -112,6 +103,14 @@ impl<Span> Variable<Span> {
   /// according to GraphQL's lexical rules.
   ///
   /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the variable.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -140,7 +139,7 @@ impl<Span> AsRef<Span> for Variable<Span> {
 
 impl<Span> IntoSpan<Span> for Variable<Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }

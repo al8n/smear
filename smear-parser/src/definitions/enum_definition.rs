@@ -32,7 +32,7 @@ impl<Directives, Span> AsRef<Span> for EnumValueDefinition<Directives, Span> {
 
 impl<Directives, Span> IntoSpan<Span> for EnumValueDefinition<Directives, Span> {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -129,7 +129,7 @@ impl<EnumValueDefinition, Span, Container> IntoSpan<Span>
   for EnumValuesDefinition<EnumValueDefinition, Span, Container>
 {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
@@ -228,7 +228,7 @@ impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
   for EnumDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
-  fn into_spanned(self) -> Span {
+  fn into_span(self) -> Span {
     self.span
   }
 }
