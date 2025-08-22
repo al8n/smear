@@ -1,19 +1,19 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use chumsky::{container::Container, extra::ParserExtra, prelude::*};
+use either::Either;
 
 use super::{
   super::{
     convert::*,
-    language::punct::Equal,
+    language::punct::{Equal, Colon, LAngle},
     source::{Char, Slice, Source},
     spanned::Spanned,
   },
-  ignored,
+  ignored::{self, ignored},
 };
 
 /// Groto input value and const input value parsers
 pub mod groto;
 
-pub use angle::*;
 pub use boolean::*;
 pub use enum_::*;
 pub use float::*;
@@ -27,7 +27,6 @@ pub use string::*;
 pub use uint::*;
 pub use variable::*;
 
-mod angle;
 mod boolean;
 mod enum_;
 mod float;
@@ -187,4 +186,44 @@ impl<Value, Span> IntoComponents for DefaultInputValue<Value, Span> {
   fn into_components(self) -> Self::Components {
     (self.span, self.eq, self.value)
   }
+}
+
+/// Returns a parser which can parse either a set or a map.
+pub fn map_or_set_parser<'src, I, E, Key, Value, Item, KP, VP, IP, CS, CM>(
+  key_parser: impl Fn() -> KP,
+  value_parser: impl Fn() -> VP,
+  item_parser: impl Fn() -> IP,
+) -> impl Parser<'src, I, Either<Set<Item, I::Span, CS>, Map<Key, Value, I::Span, CM>>, E> + Clone
+where
+  I: Source<'src>,
+  I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
+  I::Span: Spanned<'src, I, E>,
+  E: ParserExtra<'src, I>,
+  KP: Parser<'src, I, Key, E> + Clone,
+  VP: Parser<'src, I, Value, E> + Clone,
+  IP: Parser<'src, I, Item, E> + Clone,
+  CM: Container<MapEntry<Key, Value, I::Span>>,
+  CS: Container<Item>,
+{
+  // Non-consuming guard:
+  // after '<' and ws, either a ':' (i.e. "<:>") or "value ':'" => it's a Map.
+  let map_guard = LAngle::<I::Span>::parser()
+    .ignore_then(ignored())
+    .ignore_then(choice((
+      Colon::<I::Span>::parser().to(()), // "<:>"
+      key_parser()
+        .then_ignore(ignored())
+        .then_ignore(Colon::<I::Span>::parser())
+        .to(()), // "< value :"
+    )))
+    .rewind();
+
+  map_guard
+    .ignore_then(Map::<Key, Value, _, CM>::parser_with(
+      key_parser(),
+      value_parser(),
+    ))
+    .map(Either::Right)
+    .or(Set::<Item, _, CS>::parser_with(item_parser()).map(Either::Left))
 }
