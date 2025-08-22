@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef
 use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
-  language::{directives, punct::At},
+  lang::{directives, punct::At},
   Char, Span,
 };
 

@@ -27,7 +27,7 @@ use crate::{
 /// - **No signs**: Values like `+1`, `-1` are handled at a higher level
 /// - **Decimal digits only**: Base-10 representation required
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// UintValue ::= '0' | [1-9][0-9]*

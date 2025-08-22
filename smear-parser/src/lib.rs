@@ -69,23 +69,15 @@ macro_rules! word {
   };
 }
 
-/// Language constructs
-pub mod language;
+/// Language related parsers.
+///
+/// This module implements all content belongs to the GraphQL language specification.
+///
+/// Spec: [Language spec](https://spec.graphql.org/draft/#sec-Language)
+pub mod lang;
 
 /// Definations parsers
 pub mod definitions;
-
-/// The common keywords
-pub mod keywords;
-
-/// The name
-pub mod name;
-
-/// The digits
-pub mod digits;
-
-/// The parser
-pub mod parser;
 
 /// The spanned
 pub mod spanned;

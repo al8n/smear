@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{
+use crate::{
   convert::*,
   source::{Char, Slice, Source},
 };
@@ -20,7 +20,7 @@ use super::{
 /// - Be at least one character long
 /// - Be case-sensitive (`myField` and `MyField` are different names)
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Name ::= [_A-Za-z][_0-9A-Za-z]*
@@ -49,16 +49,6 @@ use super::{
 /// my@field       // Special characters not allowed
 /// ""             // Empty string not allowed
 /// ```
-///
-/// ## Usage in GraphQL
-///
-/// Names appear in various contexts within GraphQL:
-/// - **Field names**: `{ user { name email } }`
-/// - **Type names**: `type User { ... }`
-/// - **Argument names**: `field(limit: 10)`
-/// - **Directive names**: `@deprecated`
-/// - **Variable names**: `query($userId: ID)`
-/// - **Fragment names**: `fragment UserInfo on User`
 ///
 /// ## Implementation Notes
 ///

@@ -2,8 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  digits::Digits,
-  language::punct::{Dot, Minus, Plus},
+  lang::{
+    punct::{Dot, Minus, Plus},
+    Digits,
+  },
   source::{Char, Slice, Source},
 };
 

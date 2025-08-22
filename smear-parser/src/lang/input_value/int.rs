@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  language::{input_value::UintValue, punct::Minus},
+  lang::{punct::Minus, UintValue},
   source::{Char, Slice, Source},
 };
 
@@ -22,7 +22,7 @@ use crate::{
 /// - **Integer only**: No decimal points (`.`) or exponents (`e`) - those create floats
 /// - **Zero handling**: Both `0` and `-0` are syntactically valid
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// IntValue ::= '-'? ('0' | [1-9][0-9]*)

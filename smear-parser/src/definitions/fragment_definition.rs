@@ -2,12 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   convert::*,
-  keywords::Fragment,
-  language::{
-    fragment::{FragmentName, TypeCondition},
-    ignored::ignored,
-    input_value::StringValue,
-  },
+  lang::{ignored, keywords::Fragment, FragmentName, StringValue, TypeCondition},
   source::{Char, Slice, Source},
 };
 

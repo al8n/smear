@@ -1,15 +1,13 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{
+use super::super::{
   super::{
-    super::{
-      convert::*,
-      name::Name,
-      source::{Char, Slice, Source},
-    },
-    punct::Dollar,
+    convert::*,
+    source::{Char, Slice, Source},
   },
-  ignored::ignored,
+  ignored,
+  punct::Dollar,
+  Name,
 };
 
 /// A GraphQL variable reference.
@@ -28,7 +26,7 @@ use super::{
 /// - **Case-sensitive**: Variable names are case-sensitive identifiers
 /// - **Scope-aware**: Variables must be declared in the operation signature
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Variable ::= '$' Name

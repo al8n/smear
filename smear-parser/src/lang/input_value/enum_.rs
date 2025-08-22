@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  name::Name,
+  lang::Name,
   source::{Char, Slice, Source},
 };
 
@@ -26,7 +26,7 @@ use crate::{
 /// - `false` - Reserved for boolean literals  
 /// - `null` - Reserved for null literals
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// EnumValue ::= Name but not (`true` | `false` | `null`)

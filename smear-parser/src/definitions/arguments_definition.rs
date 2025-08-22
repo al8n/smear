@@ -5,8 +5,8 @@ use std::vec::Vec;
 
 use super::super::{
   convert::*,
-  language::{
-    ignored::ignored,
+  lang::{
+    ignored,
     punct::{LParen, RParen},
   },
   source::{Char, Slice, Source},

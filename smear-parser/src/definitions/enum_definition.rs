@@ -2,13 +2,11 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   convert::*,
-  keywords,
-  language::{
-    ignored::ignored,
-    input_value::{EnumValue, StringValue},
+  lang::{
+    ignored, keywords,
     punct::{LBrace, RBrace},
+    EnumValue, Name, StringValue,
   },
-  name::Name,
   source::{Char, Slice, Source},
 };
 

@@ -19,7 +19,7 @@ use crate::{
 /// - Does not validate numeric range or overflow
 /// - Does not handle signs, decimal points, or exponent notation
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Digits ::= [0-9]+

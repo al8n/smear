@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef
 use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
-  language::{
+  lang::{
     field::{self, Alias, TypeCondition},
     punct::{Ellipsis, LBrace, RBrace},
   },

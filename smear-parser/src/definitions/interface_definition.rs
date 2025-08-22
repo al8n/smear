@@ -1,9 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
-  keywords,
-  language::{ignored::ignored, input_value::StringValue, punct::Ampersand},
-  name::Name,
+use crate::{
+  lang::{ignored, keywords, punct::Ampersand, Name, StringValue},
   source::{Char, Slice, Source},
 };
 

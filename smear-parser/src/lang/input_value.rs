@@ -4,10 +4,10 @@ use either::Either;
 use super::{
   super::{
     convert::*,
-    language::punct::{Colon, Equal, LAngle},
     source::{Char, Slice, Source},
   },
-  ignored::{self, ignored},
+  ignored,
+  punct::{Colon, Equal, LAngle},
 };
 
 /// Groto input value and const input value parsers
@@ -131,7 +131,7 @@ pub trait InputValue<const CONST: bool> {}
 /// - **Nullability handling**: Non-null types can have null defaults (making them effectively nullable)
 /// - **Whitespace flexibility**: Optional whitespace around the `=` token
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// DefaultValue ::= '=' Value

@@ -1,13 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  keywords,
-  language::{
-    ignored::ignored,
-    input_value::StringValue,
+  lang::{
+    ignored, keywords,
     punct::{Equal, Pipe},
+    Name, StringValue,
   },
-  name::Name,
   source::{Char, Slice, Source},
 };
 

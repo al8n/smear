@@ -1,11 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
-  language::{
-    ignored::ignored,
+use crate::{
+  lang::{
+    ignored,
     punct::{Colon, LBrace, RBrace},
+    Name,
   },
-  name::Name,
   source::{Char, Slice, Source},
 };
 

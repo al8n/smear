@@ -3,11 +3,11 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use super::super::{
   super::{
     convert::*,
-    language::ignored::ignored,
-    name::Name,
     source::{Char, Slice, Source},
   },
+  ignored,
   punct::{Colon, LBrace, RBrace},
+  Name,
 };
 
 /// A single field within a GraphQL input object literal.
@@ -17,7 +17,7 @@ use super::super::{
 /// a field name, a colon separator, and a value, with optional whitespace
 /// and comments allowed around each component.
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// ObjectField ::= Name ':' Value
@@ -164,7 +164,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 /// - **Unique names**: Field names should be unique within the object (semantic validation)
 /// - **Flexible whitespace**: Whitespace and comments allowed throughout
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// ObjectValue ::= '{' ObjectFields? '}'

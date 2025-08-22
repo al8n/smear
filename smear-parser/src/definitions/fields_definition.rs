@@ -3,12 +3,11 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  language::{
-    ignored::ignored,
-    input_value::StringValue,
+  lang::{
+    ignored,
     punct::{Colon, LBrace, RBrace},
+    Name, StringValue,
   },
-  name::Name,
   source::{Char, Slice, Source},
 };
 

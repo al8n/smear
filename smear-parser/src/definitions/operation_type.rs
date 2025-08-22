@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  keywords::{Mutation, Query, Subscription},
+  lang::keywords::{Mutation, Query, Subscription},
   source::{Char, Slice, Source},
 };
 

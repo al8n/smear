@@ -4,8 +4,8 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use super::super::{
-  language::{
-    ignored::ignored,
+  lang::{
+    ignored,
     punct::{LBrace, RBrace},
   },
   source::{Char, Slice, Source},

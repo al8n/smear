@@ -3,11 +3,11 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use super::{
   super::{
     convert::*,
-    language::ignored::ignored,
-    name::Name,
     source::{Char, Slice, Source},
   },
+  ignored,
   punct::{Colon, LParen, RParen},
+  Name,
 };
 
 use core::marker::PhantomData;
@@ -19,7 +19,7 @@ use std::vec::Vec;
 /// directives, or other language constructs. Arguments follow the standard
 /// GraphQL syntax of a name identifier followed by a colon and a value.
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Argument ::= Name ':' Value
@@ -148,7 +148,7 @@ impl<Value, Span> Argument<Value, Span> {
 /// - **Flexible whitespace**: Whitespace and comments allowed throughout
 /// - **Unique names**: Argument names should be unique within the list (semantic validation)
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Arguments ::= '(' Argument+ ')'

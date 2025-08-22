@@ -19,7 +19,7 @@ use crate::{
 /// - **Complete word**: Must be the complete sequence `n-u-l-l`
 /// - **No variations**: No alternative spellings or abbreviations allowed
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// NullValue ::= 'null'

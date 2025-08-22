@@ -3,10 +3,10 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  language::{
-    ignored::ignored,
-    input_value::{DefaultInputValue, StringValue, Variable},
+  lang::{
+    ignored,
     punct::{Colon, LParen, RParen},
+    DefaultInputValue, StringValue, Variable,
   },
   source::{Char, Slice, Source},
 };
@@ -98,7 +98,7 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
-    Value: crate::language::input_value::InputValue<true>,
+    Value: crate::lang::InputValue<true>,
   {
     StringValue::parser()
       .or_not()

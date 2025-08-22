@@ -1,12 +1,12 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
-use super::super::{
-  super::{
-    convert::*,
-    language::ignored::ignored,
-    source::{Char, Slice, Source},
+use crate::{
+  convert::*,
+  lang::{
+    ignored,
+    punct::{Colon, LAngle, RAngle},
   },
-  punct::{Colon, LAngle, RAngle},
+  source::{Char, Slice, Source},
 };
 
 use core::marker::PhantomData;
@@ -18,7 +18,7 @@ use core::marker::PhantomData;
 /// key, a colon separator, and a value, with optional whitespace and
 /// comments allowed around each component.
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// MapEntry ::= Key ':' Value
@@ -143,7 +143,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
 /// - **Empty map syntax**: Empty maps use `<:>` sentinel syntax
 /// - **Flexible whitespace**: Whitespace and comments allowed throughout
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Map ::= '<' MapEntries? | ':' '>'

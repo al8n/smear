@@ -1,8 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
 
 use super::{
-  language::{
-    ignored::ignored,
+  lang::{
+    ignored,
     input_value::{self, *},
     punct::Equal,
   },

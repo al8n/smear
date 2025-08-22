@@ -1,12 +1,12 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
-  super::{
-    convert::*,
-    language::ignored::ignored,
-    source::{Char, Slice, Source},
+use crate::{
+  convert::*,
+  lang::{
+    ignored,
+    punct::{LBracket, RBracket},
   },
-  punct::{LBracket, RBracket},
+  source::{Char, Slice, Source},
 };
 
 use std::vec::Vec;
@@ -27,7 +27,7 @@ use std::vec::Vec;
 /// - **Empty lists**: `[]` is a valid empty list
 /// - **Whitespace handling**: Flexible whitespace and comments between elements
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// List ::= '[' Values? ']'
@@ -128,7 +128,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
-    Value: crate::language::input_value::InputValue<CONST>,
+    Value: crate::lang::input_value::InputValue<CONST>,
   {
     // '[' ws? ( ']' | elem+ ']' )
     LBracket::parser()

@@ -1,12 +1,12 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
-use super::super::{
-  super::{
-    convert::*,
-    language::ignored::ignored,
-    source::{Char, Slice, Source},
+use crate::{
+  convert::*,
+  lang::{
+    ignored,
+    punct::{LAngle, RAngle},
   },
-  punct::{LAngle, RAngle},
+  source::{Char, Slice, Source},
 };
 
 /// A set literal with angle bracket delimiters.
@@ -25,7 +25,7 @@ use super::super::{
 /// - **Flexible whitespace**: Whitespace and comments allowed throughout
 /// - **No duplicate checking**: Parser allows duplicates (semantic validation handles uniqueness)
 ///
-/// ## Format
+/// ## Grammar
 ///
 /// ```text
 /// Set ::= '<' Values? '>'
