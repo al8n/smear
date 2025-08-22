@@ -19,23 +19,22 @@ use super::super::{
 #[derive(Debug, Clone)]
 pub struct InputFieldsDefinition<
   InputValueDefinition,
-  Src,
   Span,
   Container = Vec<InputValueDefinition>,
 > {
-  span: Spanned<Src, Span>,
+  span: Span,
   values: Container,
-  l_brace: LBrace<Src, Span>,
-  r_brace: RBrace<Src, Span>,
+  l_brace: LBrace<Span>,
+  r_brace: RBrace<Span>,
   _input_value_definition: PhantomData<InputValueDefinition>,
 }
 
-impl<InputValueDefinition, Src, Span, Container>
-  InputFieldsDefinition<InputValueDefinition, Src, Span, Container>
+impl<InputValueDefinition, Span, Container>
+  InputFieldsDefinition<InputValueDefinition, Span, Container>
 {
   /// The span of the arguments definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -47,13 +46,13 @@ impl<InputValueDefinition, Src, Span, Container>
 
   /// The left brace of the input fields definition.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
+  pub const fn l_brace(&self) -> &LBrace<Span> {
     &self.l_brace
   }
 
   /// The right brace of the input fields definition.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
+  pub const fn r_brace(&self) -> &RBrace<Span> {
     &self.r_brace
   }
 
@@ -63,32 +62,23 @@ impl<InputValueDefinition, Src, Span, Container>
     input_value_definition_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
-    let ws = ignored();
-    let open = LBrace::parser();
-    let close = RBrace::parser();
-
-    // Each item is padded by Ignored so commas/newlines/etc work naturally
-    let item = input_value_definition_parser.padded_by(ws.clone());
-
-    open
+    LBrace::parser()
       // allow Ignored right after '{' (e.g., newlines/commas)
-      .then_ignore(ws.clone())
+      .then_ignore(ignored())
       // one-or-more items, collected into `Container`
-      .then(item.repeated().at_least(1).collect())
+      .then(input_value_definition_parser.padded_by(ignored()).repeated().at_least(1).collect())
       // optional Ignored before '}'
-      .then_ignore(ws.clone())
-      .then(close)
+      .then_ignore(ignored())
+      .then(RBrace::parser())
       .map_with(|((l_brace, values), r_brace), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         values,
         l_brace,
         r_brace,

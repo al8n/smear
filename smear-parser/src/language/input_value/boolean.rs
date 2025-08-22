@@ -13,14 +13,14 @@ use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 /// and only focus on the boolean literals themselves.
 /// Invoker should handle any necessary whitespace or comment skipping.
 #[derive(Debug, Clone, Copy)]
-pub struct BooleanValue<Src, Span> {
+pub struct BooleanValue<Span> {
   /// The original span of the boolean value
-  span: Spanned<Src, Span>,
+  span: Span,
   /// The value of the boolean
   value: bool,
 }
 
-impl<Src, Span> BooleanValue<Src, Span> {
+impl<Span> BooleanValue<Span> {
   /// Returns the parsed boolean value.
   ///
   /// This is the actual boolean value (`true` or `false`) that was parsed
@@ -36,7 +36,7 @@ impl<Src, Span> BooleanValue<Src, Span> {
   /// original source, useful for error reporting, source mapping, and
   /// syntax highlighting.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -52,9 +52,10 @@ impl<Src, Span> BooleanValue<Src, Span> {
   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     just([I::Token::t, I::Token::r, I::Token::u, I::Token::e])
       .to(true)
@@ -69,28 +70,28 @@ impl<Src, Span> BooleanValue<Src, Span> {
         .to(false),
       )
       .map_with(|data, span| Self {
-        span: Spanned::from(span),
+        span: Spanned::from_map_extra(span),
         value: data,
       })
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for BooleanValue<Src, Span> {
+impl<Span> AsRef<Span> for BooleanValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for BooleanValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for BooleanValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Src, Span> IntoComponents for BooleanValue<Src, Span> {
-  type Components = (Spanned<Src, Span>, bool);
+impl<Span> IntoComponents for BooleanValue<Span> {
+  type Components = (Span, bool);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -102,11 +103,12 @@ impl<Src, Span> IntoComponents for BooleanValue<Src, Span> {
 mod tests {
   use super::*;
   use chumsky::{error::Simple, extra};
+  use crate::spanned::WithSource;
 
   fn boolean_parser<'a>(
-  ) -> impl Parser<'a, &'a str, BooleanValue<&'a str, SimpleSpan>, extra::Err<Simple<'a, char>>> + Clone
+  ) -> impl Parser<'a, &'a str, BooleanValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
   {
-    BooleanValue::<&str, SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+    BooleanValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
   }
 
   #[test]

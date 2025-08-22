@@ -10,35 +10,35 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct InputObjectDefinition<FieldsDefinition, Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  input: keywords::Input<Src, Span>,
-  name: Name<Src, Span>,
+pub struct InputObjectDefinition<FieldsDefinition, Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  input: keywords::Input<Span>,
+  name: Name<Span>,
   directives: Option<Directives>,
   fields: Option<FieldsDefinition>,
 }
 
-impl<FieldsDefinition, Directives, Src, Span>
-  InputObjectDefinition<FieldsDefinition, Directives, Src, Span>
+impl<FieldsDefinition, Directives, Span>
+  InputObjectDefinition<FieldsDefinition, Directives, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   #[inline]
-  pub const fn input_keyword(&self) -> &keywords::Input<Src, Span> {
+  pub const fn input_keyword(&self) -> &keywords::Input<Span> {
     &self.input
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -56,10 +56,10 @@ impl<FieldsDefinition, Directives, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    keywords::Input<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Input<Span>,
+    Name<Span>,
     Option<Directives>,
     Option<FieldsDefinition>,
   ) {
@@ -79,11 +79,10 @@ impl<FieldsDefinition, Directives, Src, Span>
     directives_parser: impl FnOnce() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -101,7 +100,7 @@ impl<FieldsDefinition, Directives, Src, Span>
       )
       .map_with(
         |((((description, input), name), directives), fields), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           name,
           input,
@@ -147,34 +146,34 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
 }
 
 #[derive(Debug, Clone)]
-pub struct InputObjectExtension<Directives, FieldsDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  input: keywords::Input<Src, Span>,
-  name: Name<Src, Span>,
+pub struct InputObjectExtension<Directives, FieldsDefinition, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  input: keywords::Input<Span>,
+  name: Name<Span>,
   content: InputObjectExtensionContent<Directives, FieldsDefinition>,
 }
 
-impl<Directives, FieldsDefinition, Src, Span>
-  InputObjectExtension<Directives, FieldsDefinition, Src, Span>
+impl<Directives, FieldsDefinition, Span>
+  InputObjectExtension<Directives, FieldsDefinition, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
 
   #[inline]
-  pub const fn input_keyword(&self) -> &keywords::Input<Src, Span> {
+  pub const fn input_keyword(&self) -> &keywords::Input<Span> {
     &self.input
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -187,10 +186,10 @@ impl<Directives, FieldsDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Input<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Input<Span>,
+    Name<Span>,
     InputObjectExtensionContent<Directives, FieldsDefinition>,
   ) {
     (self.span, self.extend, self.input, self.name, self.content)
@@ -202,11 +201,10 @@ impl<Directives, FieldsDefinition, Src, Span>
     directives_parser: impl Fn() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -221,7 +219,7 @@ impl<Directives, FieldsDefinition, Src, Span>
         input_fields_definition_parser,
       ))
       .map_with(|(((extend, input), name), content), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         input,
         name,

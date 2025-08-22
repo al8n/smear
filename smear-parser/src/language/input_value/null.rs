@@ -24,9 +24,9 @@ use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 ///
 /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct NullValue<Src, Span>(Spanned<Src, Span>);
+pub struct NullValue<Span>(Span);
 
-impl<Src, Span> NullValue<Src, Span> {
+impl<Span> NullValue<Span> {
   /// Returns the source span of the null literal.
   ///
   /// This provides access to the exact location in the source where the `null`
@@ -34,7 +34,7 @@ impl<Src, Span> NullValue<Src, Span> {
   /// highlighting, and other tooling that needs to relate the null value back
   /// to its original source position.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.0
   }
 
@@ -47,31 +47,32 @@ impl<Src, Span> NullValue<Src, Span> {
   /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     just([I::Token::n, I::Token::u, I::Token::l, I::Token::l])
-      .map_with(|_, span| Self(Spanned::from(span)))
+      .map_with(|_, span| Self(Spanned::from_map_extra(span)))
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for NullValue<Src, Span> {
+impl<Span> AsRef<Span> for NullValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for NullValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for NullValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.0
   }
 }
 
-impl<Src, Span> IntoComponents for NullValue<Src, Span> {
-  type Components = Spanned<Src, Span>;
+impl<Span> IntoComponents for NullValue<Span> {
+  type Components = Span;
 
   #[inline]
   fn into_components(self) -> Self::Components {

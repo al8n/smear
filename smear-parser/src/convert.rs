@@ -1,36 +1,3 @@
-use super::spanned::Spanned;
-
-/// Provides access to source span information for parsed GraphQL elements.
-///
-/// This trait is implemented by all parsed GraphQL constructs that retain
-/// source location information. It provides a consistent interface for accessing
-/// span data across different types of parsed elements.
-///
-/// ## Usage
-///
-/// This trait is primarily used for:
-/// - **Error reporting**: Providing precise source locations for parse errors
-/// - **Source mapping**: Mapping parsed elements back to original source text
-/// - **Syntax highlighting**: Identifying source ranges for different language constructs
-/// - **IDE support**: Enabling features like hover information and go-to-definition
-/// - **Debugging**: Tracing parsed elements back to their source
-///
-/// ## Implementation Notes
-///
-/// Types implementing this trait should ensure that:
-/// - The returned span accurately represents the source location
-/// - The span covers the complete element including any sub-components
-/// - The reference remains valid for the lifetime of the implementing type
-pub trait AsSpanned<Src, Span> {
-  /// Returns a reference to the source span of this parsed element.
-  ///
-  /// The span provides the exact source location where this element was parsed,
-  /// including start and end positions. This information is essential for error
-  /// reporting, source mapping, and other tooling that needs to relate parsed
-  /// elements back to their original source text.
-  fn as_spanned(&self) -> &Spanned<Src, Span>;
-}
-
 /// Enables consuming a parsed element to extract its source span.
 ///
 /// This trait provides a way to take ownership of the span information from
@@ -52,14 +19,14 @@ pub trait AsSpanned<Src, Span> {
 /// - The returned span is equivalent to what `AsSpanned::spanned()` would return
 /// - All span information is preserved during the conversion
 /// - The conversion is efficient (ideally zero-cost)
-pub trait IntoSpanned<Src, Span>: AsSpanned<Src, Span> {
+pub trait IntoSpanned<Spanned>: AsRef<Spanned> {
   /// Consumes this element and returns the owned source span.
   ///
   /// This method takes ownership of the element and extracts its span information
   /// as an owned value. This is useful when you need to transfer ownership of
   /// the span data to another data structure or when the element itself is no
   /// longer needed but the location information should be preserved.
-  fn into_spanned(self) -> Spanned<Src, Span>;
+  fn into_spanned(self) -> Spanned;
 }
 
 /// Enables destructuring a parsed element into its constituent components.
@@ -138,3 +105,4 @@ pub trait IntoComponents {
   /// returned components is defined by the `Components` associated type.
   fn into_components(self) -> Self::Components;
 }
+

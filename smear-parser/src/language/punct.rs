@@ -3,32 +3,32 @@ macro_rules! punct {
     paste::paste! {
       #[doc = "The `" $token "`" " punctuator."]
       #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-      pub struct [< $token_name:upper:camel >]<Src, Span>($crate::__private::Spanned<Src, Span>);
+      pub struct [< $token_name:upper:camel >]<Span>(Span);
 
-      impl<Src, Span> $crate::__private::AsSpanned<Src, Span> for [< $token_name:upper:camel >]<Src, Span> {
+      impl<Span> ::core::convert::AsRef<Span> for [< $token_name:upper:camel >]<Span> {
         #[inline]
-        fn as_spanned(&self) -> &$crate::__private::Spanned<Src, Span> {
+        fn as_ref(&self) -> &Span {
           self.span()
         }
       }
 
-      impl<Src, Span> $crate::__private::IntoSpanned<Src, Span> for [< $token_name:upper:camel >]<Src, Span> {
+      impl<Span> $crate::__private::IntoSpanned<Span> for [< $token_name:upper:camel >]<Span> {
         #[inline]
-        fn into_spanned(self) -> $crate::__private::Spanned<Src, Span> {
+        fn into_spanned(self) -> Span {
           self.0
         }
       }
 
-      impl<Src, Span> $crate::__private::IntoComponents for [< $token_name:upper:camel >]<Src, Span> {
-        type Components = $crate::__private::Spanned<Src, Span>;
+      impl<Span> $crate::__private::IntoComponents for [< $token_name:upper:camel >]<Span> {
+        type Components = Span;
 
         #[inline]
         fn into_components(self) -> Self::Components {
-          <Self as $crate::__private::IntoSpanned<Src, Span>>::into_spanned(self)
+          <Self as $crate::__private::IntoSpanned<Span>>::into_spanned(self)
         }
       }
 
-      impl<Src, Span> [< $token_name:upper:camel >]<Src, Span> {
+      impl<Span> [< $token_name:upper:camel >]<Span> {
         #[doc = "Returns the raw string literal of the `" $token "` punctuator."]
         #[inline]
         pub const fn raw() -> &'static ::core::primitive::str {
@@ -37,21 +37,22 @@ macro_rules! punct {
 
         #[doc = "Returns the span of the `" $token "` punctuator."]
         #[inline]
-        pub const fn span(&self) -> &$crate::__private::Spanned<Src, Span> {
+        pub const fn span(&self) -> &Span {
           &self.0
         }
 
         #[doc = "Returns the parser for the `" $token "` punctuator."]
         pub fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
         where
-          I: $crate::__private::Source<'src, Slice = Src, Span = Span>,
+          I: $crate::__private::Source<'src>,
           I::Token: $crate::__private::Char + 'src,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+          Span: $crate::__private::Spanned<'src, I, E>,
         {
           use $crate::__private::{chumsky::prelude::*, Char};
 
           just($tokens)
-            .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
+            .map_with(|_, sp| Self($crate::__private::Spanned::from_map_extra(sp)))
         }
       }
     }

@@ -11,35 +11,59 @@ use super::super::{
   name::Name,
   source::Source,
   spanned::Spanned,
+  convert::*,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct EnumValueDefinition<Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  enum_value: EnumValue<Src, Span>,
+pub struct EnumValueDefinition<Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  enum_value: EnumValue<Span>,
   directives: Option<Directives>,
 }
 
-impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
+impl<Directives, Span> AsRef<Span> for EnumValueDefinition<Directives, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directives, Span> IntoSpanned<Span> for EnumValueDefinition<Directives, Span> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directives, Span> IntoComponents for EnumValueDefinition<Directives, Span> {
+  type Components = (Span, Option<StringValue<Span>>, EnumValue<Span>, Option<Directives>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.description, self.enum_value, self.directives)
+  }
+}
+
+impl<Directives, Span> EnumValueDefinition<Directives, Span> {
   /// The span of the enum value definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The description of the enum value definition.
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   /// The enum value of the enum value definition.
   #[inline]
-  pub const fn enum_value(&self) -> &EnumValue<Src, Span> {
+  pub const fn enum_value(&self) -> &EnumValue<Span> {
     &self.enum_value
   }
 
@@ -53,22 +77,20 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
       .then_ignore(ignored())
-      .then(EnumValue::<Src, Span>::parser())
+      .then(EnumValue::<Span>::parser())
       .then_ignore(ignored())
       .then(directives_parser.or_not())
       .map_with(|((description, enum_value), directives), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         description,
         enum_value,
         directives,
@@ -79,35 +101,63 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
 #[derive(Debug, Clone)]
 pub struct EnumValuesDefinition<
   EnumValueDefinition,
-  Src,
   Span,
   Container = Vec<EnumValueDefinition>,
 > {
-  span: Spanned<Src, Span>,
-  l_brace: LBrace<Src, Span>,
-  r_brace: RBrace<Src, Span>,
+  span: Span,
+  l_brace: LBrace<Span>,
+  r_brace: RBrace<Span>,
   enum_values: Container,
   _m: PhantomData<EnumValueDefinition>,
 }
 
-impl<EnumValueDefinition, Src, Span, Container>
-  EnumValuesDefinition<EnumValueDefinition, Src, Span, Container>
+impl<EnumValueDefinition, Span, Container>
+  AsRef<Span> for EnumValuesDefinition<EnumValueDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<EnumValueDefinition, Span, Container>
+  IntoSpanned<Span> for EnumValuesDefinition<EnumValueDefinition, Span, Container>
+{
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<EnumValueDefinition, Span, Container> IntoComponents
+  for EnumValuesDefinition<EnumValueDefinition, Span, Container>
+{
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_brace, self.enum_values, self.r_brace)
+  }
+}
+
+impl<EnumValueDefinition, Span, Container>
+  EnumValuesDefinition<EnumValueDefinition, Span, Container>
 {
   /// The span of the enum values definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The left brace of the enum values definition.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
+  pub const fn l_brace(&self) -> &LBrace<Span> {
     &self.l_brace
   }
 
   /// The right brace of the enum values definition.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
+  pub const fn r_brace(&self) -> &RBrace<Span> {
     &self.r_brace
   }
 
@@ -117,29 +167,14 @@ impl<EnumValueDefinition, Src, Span, Container>
     &self.enum_values
   }
 
-  /// Consumes the enum values definition, returning its components
-  #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Spanned<Src, Span>,
-    LBrace<Src, Span>,
-    RBrace<Src, Span>,
-    Container,
-  ) {
-    (self.span, self.l_brace, self.r_brace, self.enum_values)
-  }
-
   /// Returns a parser for the enum definition.
   #[inline]
   pub fn parser_with<'src, I, E, P>(enum_value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -155,7 +190,7 @@ impl<EnumValueDefinition, Src, Span, Container>
       .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, enum_values), r_brace), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         l_brace,
         r_brace,
         enum_values,
@@ -165,39 +200,82 @@ impl<EnumValueDefinition, Src, Span, Container>
 }
 
 #[derive(Debug, Clone)]
-pub struct EnumDefinition<Directives, EnumValuesDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  keyword: keywords::Enum<Src, Span>,
-  name: Name<Src, Span>,
-  enum_values: Option<EnumValuesDefinition>,
+pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  keyword: keywords::Enum<Span>,
+  name: Name<Span>,
   directives: Option<Directives>,
+  enum_values: Option<EnumValuesDefinition>,
 }
 
-impl<Directives, EnumValuesDefinition, Src, Span>
-  EnumDefinition<Directives, EnumValuesDefinition, Src, Span>
+impl<Directives, EnumValuesDefinition, Span>
+  AsRef<Span> for EnumDefinition<Directives, EnumValuesDefinition, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directives, EnumValuesDefinition, Span>
+  IntoSpanned<Span> for EnumDefinition<Directives, EnumValuesDefinition, Span>
+{
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directives, EnumValuesDefinition, Span> IntoComponents
+  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+{
+  type Components = (
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Enum<Span>,
+    Name<Span>,
+    Option<Directives>,
+    Option<EnumValuesDefinition>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.description,
+      self.keyword,
+      self.name,
+      self.directives,
+      self.enum_values,
+    )
+  }
+}
+
+impl<Directives, EnumValuesDefinition, Span>
+  EnumDefinition<Directives, EnumValuesDefinition, Span>
 {
   /// The span of the enum definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The description of the enum definition.
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   /// The span of the name of the enum definition
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   /// The enum keyword of the enum definition.
   #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Src, Span> {
+  pub const fn enum_keyword(&self) -> &keywords::Enum<Span> {
     &self.keyword
   }
 
@@ -218,10 +296,10 @@ impl<Directives, EnumValuesDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    keywords::Enum<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Enum<Span>,
+    Name<Span>,
     Option<EnumValuesDefinition>,
     Option<Directives>,
   ) {
@@ -242,11 +320,10 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     directives_parser: DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -259,14 +336,14 @@ impl<Directives, EnumValuesDefinition, Src, Span>
       .or_not()
       .then(keywords::Enum::parser())
       .then_ignore(ws.clone())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::<Span>::parser())
       .then_ignore(ws.clone())
       .then(directives_parser.or_not())
       .then_ignore(ws.clone())
       .then(enum_values_definition.or_not())
       .map_with(
         |((((description, keyword), name), directives), enum_values), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           keyword,
           name,
@@ -312,38 +389,38 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
 }
 
 #[derive(Debug, Clone)]
-pub struct EnumExtension<Directives, EnumValuesDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  keyword: keywords::Enum<Src, Span>,
-  name: Name<Src, Span>,
+pub struct EnumExtension<Directives, EnumValuesDefinition, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  keyword: keywords::Enum<Span>,
+  name: Name<Span>,
   content: EnumExtensionContent<Directives, EnumValuesDefinition>,
 }
 
-impl<Directives, EnumValuesDefinition, Src, Span>
-  EnumExtension<Directives, EnumValuesDefinition, Src, Span>
+impl<Directives, EnumValuesDefinition, Span>
+  EnumExtension<Directives, EnumValuesDefinition, Span>
 {
   /// The span of the enum definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The span of the name of the enum definition
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   /// The extend keyword of the enum extension
   #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
 
   /// The enum keyword of the enum definition.
   #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Src, Span> {
+  pub const fn enum_keyword(&self) -> &keywords::Enum<Span> {
     &self.keyword
   }
 
@@ -358,10 +435,10 @@ impl<Directives, EnumValuesDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Enum<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Enum<Span>,
+    Name<Span>,
     EnumExtensionContent<Directives, EnumValuesDefinition>,
   ) {
     (
@@ -380,11 +457,10 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     enum_values_definition: impl Fn() -> EVP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -393,13 +469,13 @@ impl<Directives, EnumValuesDefinition, Src, Span>
       .then_ignore(ignored())
       .then(keywords::Enum::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser().then_ignore(ignored()))
+      .then(Name::<Span>::parser().then_ignore(ignored()))
       .then(EnumExtensionContent::parser_with(
         directives_parser,
         enum_values_definition,
       ))
       .map_with(|(((extend, keyword), name), content), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         keyword,
         name,

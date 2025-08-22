@@ -1,129 +1,159 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, source::Source, spanned::Spanned},
-  punct::{LAngle, RAngle},
+  super::{char::Char, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
+  punct::{LAngle, RAngle, Colon},
 };
 
+use core::marker::PhantomData;
+
 #[derive(Debug, Clone)]
-pub struct MapValueEntry<T, Src, Span> {
-  span: Spanned<Src, Span>,
-  colon: Spanned<Src, Span>,
-  key: T,
-  value: T,
+pub struct MapEntry<Key, Value, Span> {
+  span: Span,
+  key: Key,
+  colon: Colon<Span>,
+  value: Value,
 }
 
-impl<T, Src, Span> MapValueEntry<T, Src, Span> {
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+impl<Key, Value, Span> AsRef<Span> for MapEntry<Key, Value, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Key, Value, Span> IntoSpanned<Span> for MapEntry<Key, Value, Span> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Key, Value, Span> IntoComponents for MapEntry<Key, Value, Span> {
+  type Components = (Span, Key, Colon<Span>, Value);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.key, self.colon, self.value)
+  }
+}
+
+impl<Key, Value, Span> MapEntry<Key, Value, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
-  pub const fn colon(&self) -> &Spanned<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Span> {
     &self.colon
   }
-  pub const fn key(&self) -> &T {
+  pub const fn key(&self) -> &Key {
     &self.key
   }
-  pub const fn value(&self) -> &T {
+  pub const fn value(&self) -> &Value {
     &self.value
   }
-
   /// key ':' value  (only **trailing** ignored so repeats stop cleanly at '>')
-  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, KP, VP>(
+    key_parser: KP,
+    value_parser: VP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
-    P: Parser<'src, I, T, E> + Clone,
+    Span: Spanned<'src, I, E>,
+    KP: Parser<'src, I, Key, E> + Clone,
+    VP: Parser<'src, I, Value, E> + Clone,
   {
-    let ws = super::ignored::ignored();
-
-    value
-      .clone()
-      .then(
-        just(I::Token::COLON)
-          .map_with(|_, sp| Spanned::from(sp))
-          .padded_by(ws.clone()), // padding around ':'
-      )
-      .then(value)
+    key_parser
+      .then(Colon::parser().padded_by(ignored()))
+      .then(value_parser)
       .map_with(|((key, colon), value), sp| Self {
         key,
         colon,
         value,
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
       })
-      .then_ignore(ws) // trailing ignored (incl. commas)
   }
 }
 
 #[derive(Debug, Clone)]
-pub struct MapValue<T, Src, Span, C = Vec<MapValueEntry<T, Src, Span>>> {
-  span: Spanned<Src, Span>,
-  l_angle: LAngle<Src, Span>,
-  r_angle: RAngle<Src, Span>,
+pub struct Map<Key, Value, Span, C = Vec<MapEntry<Key, Value, Span>>> {
+  span: Span,
+  l_angle: LAngle<Span>,
   fields: C,
-  _value: core::marker::PhantomData<T>,
+  r_angle: RAngle<Span>,
+  _key: PhantomData<Key>,
+  _value: PhantomData<Value>,
 }
 
-impl<T, Src, Span, C> MapValue<T, Src, Span, C> {
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+impl<Key, Value, Span, C> AsRef<Span> for Map<Key, Value, Span, C> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Key, Value, Span, C> IntoSpanned<Span> for Map<Key, Value, Span, C> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Key, Value, Span, C> IntoComponents for Map<Key, Value, Span, C> {
+  type Components = (Span, LAngle<Span>, C, RAngle<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_angle, self.fields, self.r_angle)
+  }
+}
+
+impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
-  pub const fn l_angle(&self) -> &LAngle<Src, Span> {
+  pub const fn l_angle(&self) -> &LAngle<Span> {
     &self.l_angle
   }
-  pub const fn r_angle(&self) -> &RAngle<Src, Span> {
+  pub const fn r_angle(&self) -> &RAngle<Span> {
     &self.r_angle
   }
   pub const fn fields(&self) -> &C {
     &self.fields
   }
-}
 
-impl<T, Src, Span, C> MapValue<T, Src, Span, C>
-where
-  C: Container<MapValueEntry<T, Src, Span>>,
-{
-  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, KP, VP>(key_parser: KP, value_parser: VP) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
-    P: Parser<'src, I, T, E> + Clone,
+    Span: Spanned<'src, I, E>,
+    KP: Parser<'src, I, Key, E> + Clone,
+    VP: Parser<'src, I, Value, E> + Clone,
+    C: Container<MapEntry<Key, Value, Span>>,
   {
-    let ws = super::ignored::ignored();
-    let colon = just(I::Token::COLON);
-
-    let open = LAngle::parser();
-    let close = RAngle::parser();
-
-    let entry = MapValueEntry::<T, Src, Span>::parser_with(value);
-
-    open
-      .then_ignore(ws.clone())
+    LAngle::<Span>::parser()
+      .then_ignore(ignored())
       .then(choice((
         // Empty sentinel: "<:>"
-        colon
-          .clone()
-          .then_ignore(ws.clone())
-          .then_ignore(just(I::Token::GREATER_THAN).rewind())
+        Colon::<Span>::parser()
+          .padded_by(ignored())
+          .then(RAngle::<Span>::parser())
           .map(|_| C::default()),
         // Non-empty: one-or-more entries; commas live in `ws`
-        entry.repeated().at_least(1).collect::<C>(),
+        MapEntry::<Key, Value, Span>::parser_with(key_parser, value_parser).padded_by(ignored()).repeated().at_least(1).collect::<C>(),
       )))
-      .then_ignore(ws)
-      .then(close)
+      .then_ignore(ignored())
+      .then(RAngle::parser())
       .map_with(|((l_angle, fields), r_angle), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         l_angle,
         r_angle,
         fields,
-        _value: core::marker::PhantomData,
+        _key: PhantomData,
+        _value: PhantomData,
       })
   }
 }
+

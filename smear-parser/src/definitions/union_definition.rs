@@ -16,46 +16,45 @@ use super::super::{
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct UnionMemberType<Src, Span> {
-  span: Spanned<Src, Span>,
-  pipe: Option<Pipe<Src, Span>>,
-  name: Name<Src, Span>,
+pub struct UnionMemberType<Span> {
+  span: Span,
+  pipe: Option<Pipe<Span>>,
+  name: Name<Span>,
 }
 
-impl<Src, Span> UnionMemberType<Src, Span> {
+impl<Span> UnionMemberType<Span> {
   /// The span of the union member type.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The pipe of the union member type.
   #[inline]
-  pub const fn pipe(&self) -> Option<&Pipe<Src, Span>> {
+  pub const fn pipe(&self) -> Option<&Pipe<Span>> {
     self.pipe.as_ref()
   }
 
   /// The name of the union member type.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   /// First member: `|? Name`  (pipe is optional)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Pipe::parser()
       .or_not()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         pipe,
         name,
       })
@@ -64,17 +63,16 @@ impl<Src, Span> UnionMemberType<Src, Span> {
   /// Subsequent members: `| Name`  (pipe is **required**)
   pub fn parser_with_pipe<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         pipe: Some(pipe),
         name,
       })
@@ -83,19 +81,19 @@ impl<Src, Span> UnionMemberType<Src, Span> {
 
 /// `= |? NamedType ('|' NamedType)*`
 #[derive(Debug, Clone)]
-pub struct UnionMemberTypes<Src, Span, Container = Vec<UnionMemberType<Src, Span>>> {
-  span: Spanned<Src, Span>,
-  eq: Equal<Src, Span>,
+pub struct UnionMemberTypes<Span, Container = Vec<UnionMemberType<Span>>> {
+  span: Span,
+  eq: Equal<Span>,
   members: Container,
 }
 
-impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
+impl<Span, Container> UnionMemberTypes<Span, Container> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
   #[inline]
-  pub const fn eq(&self) -> &Equal<Src, Span> {
+  pub const fn eq(&self) -> &Equal<Span> {
     &self.eq
   }
   #[inline]
@@ -105,13 +103,12 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
-    Container: chumsky::container::Container<UnionMemberType<Src, Span>>,
+    Container: chumsky::container::Container<UnionMemberType<Span>>,
   {
     Equal::parser()
       .then_ignore(ignored())
@@ -123,7 +120,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
           .collect(),
       )
       .map_with(|(eq, members), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         eq,
         members,
       })
@@ -134,30 +131,30 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
 ///
 /// Spec: [UnionTypeDefinition](https://spec.graphql.org/draft/#UnionTypeDefinition)
 #[derive(Debug, Clone)]
-pub struct UnionDefinition<Directives, MemberTypes, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  keyword: keywords::Union<Src, Span>,
-  name: Name<Src, Span>,
+pub struct UnionDefinition<Directives, MemberTypes, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  keyword: keywords::Union<Span>,
+  name: Name<Span>,
   directives: Option<Directives>,
   members: Option<MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes, Src, Span> {
+impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
   #[inline]
-  pub const fn union_keyword(&self) -> &keywords::Union<Src, Span> {
+  pub const fn union_keyword(&self) -> &keywords::Union<Span> {
     &self.keyword
   }
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
   #[inline]
@@ -174,11 +171,10 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
     member_types: MP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
@@ -189,14 +185,14 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
       .then_ignore(ignored())
       .then(keywords::Union::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::<Span>::parser())
       .then_ignore(ignored())
       .then(directives_parser.or_not())
       .then_ignore(ignored())
       .then(member_types.or_not())
       .map_with(
         |((((description, keyword), name), directives), members), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           keyword,
           name,
@@ -248,29 +244,29 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
 ///
 /// Spec: [UnionTypeExtension](https://spec.graphql.org/draft/#UnionTypeExtension)
 #[derive(Debug, Clone)]
-pub struct UnionExtension<Directives, MemberTypes, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  keyword: keywords::Union<Src, Span>,
-  name: Name<Src, Span>,
+pub struct UnionExtension<Directives, MemberTypes, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  keyword: keywords::Union<Span>,
+  name: Name<Span>,
   content: UnionExtensionContent<Directives, MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes, Src, Span> {
+impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
   #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
   #[inline]
-  pub const fn union_keyword(&self) -> &keywords::Union<Src, Span> {
+  pub const fn union_keyword(&self) -> &keywords::Union<Span> {
     &self.keyword
   }
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
   #[inline]
@@ -282,10 +278,10 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Union<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Union<Span>,
+    Name<Span>,
     UnionExtensionContent<Directives, MemberTypes>,
   ) {
     (
@@ -302,11 +298,10 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
     member_types: impl Fn() -> MP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
@@ -321,7 +316,7 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
         member_types,
       ))
       .map_with(|(((extend, keyword), name), content), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         keyword,
         name,

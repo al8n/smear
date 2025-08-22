@@ -13,41 +13,40 @@ use super::value::{ConstInputValue, InputValue};
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Argument<Src, Span>(arguments::Argument<InputValue<Src, Span>, Src, Span>);
+pub struct Argument<Span>(arguments::Argument<InputValue<Span>, Span>);
 
-impl<Src, Span> Argument<Src, Span> {
+impl<Span> Argument<Span> {
   /// Returns the span of the argument.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
   /// Returns the span of the colon
   #[inline]
-  pub const fn colon(&self) -> &Spanned<Src, Span> {
+  pub const fn colon(&self) -> &Span {
     self.0.colon()
   }
 
   /// Returns the name of the argument.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     self.0.name()
   }
 
   /// Returns the value of the argument.
   #[inline]
-  pub const fn value(&self) -> &InputValue<Src, Span> {
+  pub const fn value(&self) -> &InputValue<Span> {
     self.0.value()
   }
 
   /// Returns a parser for the argument.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     arguments::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
@@ -55,40 +54,39 @@ impl<Src, Span> Argument<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstArgument<Src, Span>(arguments::Argument<ConstInputValue<Src, Span>, Src, Span>);
+pub struct ConstArgument<Span>(arguments::Argument<ConstInputValue<Span>, Span>);
 
-impl<Src, Span> ConstArgument<Src, Span> {
+impl<Span> ConstArgument<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
   /// Returns the span of the colon
   #[inline]
-  pub const fn colon(&self) -> &Spanned<Src, Span> {
+  pub const fn colon(&self) -> &Span {
     self.0.colon()
   }
 
   /// Returns the name of the argument.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     self.0.name()
   }
 
   /// Returns the value of the argument.
   #[inline]
-  pub const fn value(&self) -> &ConstInputValue<Src, Span> {
+  pub const fn value(&self) -> &ConstInputValue<Span> {
     self.0.value()
   }
 
   /// Returns a parser for the argument.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     arguments::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
@@ -96,47 +94,46 @@ impl<Src, Span> ConstArgument<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Arguments<Src, Span>(arguments::Arguments<Argument<Src, Span>, Src, Span>);
+pub struct Arguments<Span>(arguments::Arguments<Argument<Span>, Span>);
 
-impl<Src, Span> Arguments<Src, Span> {
+impl<Span> Arguments<Span> {
   /// Returns the span of the arguments.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Src, Span> {
+  pub const fn l_paren(&self) -> &LParen<Span> {
     self.0.l_paren()
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Src, Span> {
+  pub const fn r_paren(&self) -> &RParen<Span> {
     self.0.r_paren()
   }
 
   /// Returns the list of arguments
   #[inline]
-  pub const fn arguments(&self) -> &[Argument<Src, Span>] {
+  pub const fn arguments(&self) -> &[Argument<Span>] {
     self.0.arguments().as_slice()
   }
 
   /// Returns the arguments
   #[inline]
-  pub fn into_arguments(self) -> Vec<Argument<Src, Span>> {
+  pub fn into_arguments(self) -> Vec<Argument<Span>> {
     self.0.into_arguments()
   }
 
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     arguments::Arguments::parser_with(Argument::parser()).map(Self)
   }
@@ -144,47 +141,46 @@ impl<Src, Span> Arguments<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstArguments<Src, Span>(arguments::Arguments<ConstArgument<Src, Span>, Src, Span>);
+pub struct ConstArguments<Span>(arguments::Arguments<ConstArgument<Span>, Span>);
 
-impl<Src, Span> ConstArguments<Src, Span> {
+impl<Span> ConstArguments<Span> {
   /// Returns the span of the arguments.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Src, Span> {
+  pub const fn l_paren(&self) -> &LParen<Span> {
     self.0.l_paren()
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Src, Span> {
+  pub const fn r_paren(&self) -> &RParen<Span> {
     self.0.r_paren()
   }
 
   /// Returns the list of arguments
   #[inline]
-  pub const fn arguments(&self) -> &[ConstArgument<Src, Span>] {
+  pub const fn arguments(&self) -> &[ConstArgument<Span>] {
     self.0.arguments().as_slice()
   }
 
   /// Returns the arguments
   #[inline]
-  pub fn into_arguments(self) -> Vec<ConstArgument<Src, Span>> {
+  pub fn into_arguments(self) -> Vec<ConstArgument<Span>> {
     self.0.into_arguments()
   }
 
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     arguments::Arguments::parser_with(ConstArgument::parser()).map(Self)
   }

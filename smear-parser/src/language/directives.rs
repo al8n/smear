@@ -1,31 +1,55 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, name::Name, source::Source, spanned::Spanned},
+  super::{char::Char, name::Name, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
   punct::At,
 };
 
+use core::marker::PhantomData;
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct Directive<Args, Src, Span> {
-  span: Spanned<Src, Span>,
-  at: At<Src, Span>,
-  name: Name<Src, Span>,
+pub struct Directive<Args, Span> {
+  span: Span,
+  at: At<Span>,
+  name: Name<Span>,
   arguments: Option<Args>,
 }
 
-impl<Args, Src, Span> Directive<Args, Src, Span> {
+impl<Args, Span> AsRef<Span> for Directive<Args, Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Args, Span> IntoSpanned<Span> for Directive<Args, Span> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Args, Span> IntoComponents for Directive<Args, Span> {
+  type Components = (Span, At<Span>, Name<Span>, Option<Args>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.at, self.name, self.arguments)
+  }
+}
+
+impl<Args, Span> Directive<Args, Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
     &self.span
   }
   #[inline]
-  pub const fn at(&self) -> &At<Src, Span> {
+  pub const fn at(&self) -> &At<Span> {
     &self.at
   }
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -40,46 +64,62 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
   }
 }
 
-impl<Args, Src, Span> Directive<Args, Src, Span> {
-  pub fn parser_with<'src, I, E, P>(args: P) -> impl Parser<'src, I, Self, E> + Clone
+impl<Args, Span> Directive<Args, Span> {
+  pub fn parser_with<'src, I, E, P>(args_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Args, E> + Clone,
   {
-    let ws = super::ignored::ignored();
-    let name = Name::<Src, Span>::parser();
-    let args = args.or_not();
-
     At::parser()
-      .then_ignore(ws.clone())     // allow ignored between '@' and the name
-      .then(name)
-      .then_ignore(ws.clone())     // allow ignored before optional '('
-      .then(args)
+      .then_ignore(ignored())
+      .then(Name::parser())
+      .then_ignore(ignored())
+      .then(args_parser.or_not())
       .map_with(|((at, name), arguments), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         at,
         name,
         arguments,
       })
-      .then_ignore(ws) // trailing ignored so lists of directives repeat cleanly
   }
 }
 
 #[derive(Debug, Clone)]
-pub struct Directives<Directive, Src, Span, Container = Vec<Directive>> {
-  span: Spanned<Src, Span>,
+pub struct Directives<Directive, Span, Container = Vec<Directive>> {
+  span: Span,
   directives: Container,
-  _directive: core::marker::PhantomData<Directive>,
+  _directive: PhantomData<Directive>,
 }
 
-impl<Directive, Src, Span, Container> Directives<Directive, Src, Span, Container> {
+impl<Directive, Span, Container> AsRef<Span> for Directives<Directive, Span, Container> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directive, Span, Container> IntoSpanned<Span> for Directives<Directive, Span, Container> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directive, Span, Container> IntoComponents for Directives<Directive, Span, Container> {
+  type Components = (Span, Container);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.directives)
+  }
+}
+
+impl<Directive, Span, Container> Directives<Directive, Span, Container> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
     &self.span
   }
   #[inline]
@@ -90,31 +130,25 @@ impl<Directive, Src, Span, Container> Directives<Directive, Src, Span, Container
   pub fn into_directives(self) -> Container {
     self.directives
   }
-}
-
-impl<Directive, Src, Span, Container> Directives<Directive, Src, Span, Container>
-where
-  Container: chumsky::container::Container<Directive>,
-{
   /// `Directive+` (the nonterminal `Directives` in the spec is one-or-more).
   pub fn parser_with<'src, I, E, P>(directive: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Directive, E> + Clone,
+    Container: chumsky::container::Container<Directive>,
   {
     directive
       .repeated()
       .at_least(1)
       .collect()
       .map_with(|directives, sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         directives,
-        _directive: core::marker::PhantomData,
+        _directive: PhantomData,
       })
   }
 }
+

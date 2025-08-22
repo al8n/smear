@@ -14,28 +14,27 @@ pub struct NamedOperationDefinition<
   VariableDefinitions,
   Directives,
   SelectionSet,
-  Src,
   Span,
 > {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
+  span: Span,
+  description: Option<StringValue<Span>>,
   operation_type: OperationType,
-  name: Option<Name<Src, Span>>,
+  name: Option<Name<Span>>,
   variable_definitions: Option<VariableDefinitions>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
-  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
@@ -45,7 +44,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
   }
 
   #[inline]
-  pub const fn name(&self) -> Option<&Name<Src, Span>> {
+  pub const fn name(&self) -> Option<&Name<Span>> {
     self.name.as_ref()
   }
 
@@ -68,10 +67,10 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
+    Span,
+    Option<StringValue<Span>>,
     OperationType,
-    Option<Name<Src, Span>>,
+    Option<Name<Span>>,
     Option<VariableDefinitions>,
     Option<Directives>,
     SelectionSet,
@@ -95,12 +94,10 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
     selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -122,7 +119,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
         ),
          sp| {
           Self {
-            span: Spanned::from(sp),
+            span: Spanned::from_map_extra(sp),
             description,
             operation_type,
             name,
@@ -150,7 +147,6 @@ pub enum OperationDefinition<
   VariableDefinitions,
   Directives,
   SelectionSet,
-  Src,
   Span,
 > {
   Named(
@@ -159,15 +155,14 @@ pub enum OperationDefinition<
       VariableDefinitions,
       Directives,
       SelectionSet,
-      Src,
       Span,
     >,
   ),
   Shorten(SelectionSet),
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
-  OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+  OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 {
   #[inline]
   pub fn parser_with<'src, I, E, OP, VP, DP, SP>(
@@ -177,11 +172,10 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
     selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,

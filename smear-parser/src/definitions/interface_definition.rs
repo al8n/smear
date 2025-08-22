@@ -10,43 +10,42 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ImplementInterface<Src, Span> {
-  span: Spanned<Src, Span>,
-  amp: Option<Ampersand<Src, Span>>,
-  name: Name<Src, Span>,
+pub struct ImplementInterface<Span> {
+  span: Span,
+  amp: Option<Ampersand<Span>>,
+  name: Name<Span>,
 }
 
-impl<Src, Span> ImplementInterface<Src, Span> {
+impl<Span> ImplementInterface<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn ampersand(&self) -> Option<&Ampersand<Src, Span>> {
+  pub const fn ampersand(&self) -> Option<&Ampersand<Span>> {
     self.amp.as_ref()
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   /// First member: `|? Name`  (pipe is optional)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Ampersand::parser()
       .or_not()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(amp, name), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         amp,
         name,
       })
@@ -55,17 +54,16 @@ impl<Src, Span> ImplementInterface<Src, Span> {
   /// Subsequent members: `& Name`  (amp is **required**)
   pub fn parser_with_amp<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Ampersand::parser()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(amp, name), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         amp: Some(amp),
         name,
       })
@@ -73,20 +71,20 @@ impl<Src, Span> ImplementInterface<Src, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ImplementInterfaces<Src, Span, Container = Vec<ImplementInterface<Src, Span>>> {
-  span: Spanned<Src, Span>,
-  implements: keywords::Implements<Src, Span>,
+pub struct ImplementInterfaces<Span, Container = Vec<ImplementInterface<Span>>> {
+  span: Span,
+  implements: keywords::Implements<Span>,
   interfaces: Container,
 }
 
-impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
+impl<Span, Container> ImplementInterfaces<Span, Container> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn implements(&self) -> &keywords::Implements<Src, Span> {
+  pub const fn implements(&self) -> &keywords::Implements<Span> {
     &self.implements
   }
 
@@ -104,8 +102,8 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Implements<Src, Span>,
+    Span,
+    keywords::Implements<Span>,
     Container,
   ) {
     (self.span, self.implements, self.interfaces)
@@ -114,17 +112,16 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
   /// Parses a list of implemented interfaces.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
-    Container: chumsky::container::Container<ImplementInterface<Src, Span>>,
+    Container: chumsky::container::Container<ImplementInterface<Span>>,
   {
     let ws = ignored();
 
-    keywords::Implements::<Src, Span>::parser()
+    keywords::Implements::<Span>::parser()
       .then_ignore(ws.clone())
       .then(
         ImplementInterface::parser()
@@ -134,7 +131,7 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
           .collect(),
       )
       .map_with(|(implements, interfaces), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         implements,
         interfaces,
       })
@@ -142,36 +139,36 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
 }
 
 #[derive(Debug, Clone)]
-pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  interface: keywords::Interface<Src, Span>,
-  name: Name<Src, Span>,
+pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  interface: keywords::Interface<Span>,
+  name: Name<Span>,
   implements: Option<ImplementInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
-  InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   #[inline]
-  pub const fn interface(&self) -> &keywords::Interface<Src, Span> {
+  pub const fn interface(&self) -> &keywords::Interface<Span> {
     &self.interface
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -194,10 +191,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    keywords::Interface<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Interface<Span>,
+    Name<Span>,
     Option<ImplementInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
@@ -219,11 +216,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     implement_interfaces_parser: impl Fn() -> IP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -240,7 +236,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
       .then(fields_definition_parser().padded_by(ignored()).or_not())
       .map_with(
         |(((((description, interface), name), implements), directives), fields), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           name,
           directives,
@@ -309,34 +305,34 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 }
 
 #[derive(Debug, Clone)]
-pub struct InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  interface: keywords::Interface<Src, Span>,
-  name: Name<Src, Span>,
+pub struct InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  interface: keywords::Interface<Span>,
+  name: Name<Span>,
   content: InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
-  InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn extend(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
 
   #[inline]
-  pub const fn interface(&self) -> &keywords::Interface<Src, Span> {
+  pub const fn interface(&self) -> &keywords::Interface<Span> {
     &self.interface
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -351,10 +347,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Interface<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Interface<Span>,
+    Name<Span>,
     InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
   ) {
     (
@@ -372,11 +368,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     fields_definition_parser: impl Fn() -> FDP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -397,7 +392,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
         fields_definition_parser,
       ))
       .map_with(|(((extend, interface), name), content), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         interface,
         name,

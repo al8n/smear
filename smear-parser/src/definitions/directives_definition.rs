@@ -70,29 +70,29 @@ word!(
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ExecutableDirectiveLocation<Src, Span> {
+pub enum ExecutableDirectiveLocation<Span> {
   /// `QUERY`
-  Query(QueryLocation<Src, Span>),
+  Query(QueryLocation<Span>),
   /// `MUTATION`
-  Mutation(MutationLocation<Src, Span>),
+  Mutation(MutationLocation<Span>),
   /// `SUBSCRIPTION`
-  Subscription(SubscriptionLocation<Src, Span>),
+  Subscription(SubscriptionLocation<Span>),
   /// `FIELD`
-  Field(FieldLocation<Src, Span>),
+  Field(FieldLocation<Span>),
   /// `FRAGMENT_DEFINITION`
-  FragmentDefinition(FragmentDefinitionLocation<Src, Span>),
+  FragmentDefinition(FragmentDefinitionLocation<Span>),
   /// `FRAGMENT_SPREAD`
-  FragmentSpread(FragmentSpreadLocation<Src, Span>),
+  FragmentSpread(FragmentSpreadLocation<Span>),
   /// `INLINE_FRAGMENT`
-  InlineFragment(InlineFragmentLocation<Src, Span>),
+  InlineFragment(InlineFragmentLocation<Span>),
   /// `VARIABLE_DEFINITION`
-  VariableDefinition(VariableDefinitionLocation<Src, Span>),
+  VariableDefinition(VariableDefinitionLocation<Span>),
 }
 
-impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
+impl<Span> ExecutableDirectiveLocation<Span> {
   /// Returns the span of the location.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     match self {
       Self::Query(loc) => loc.span(),
       Self::Mutation(loc) => loc.span(),
@@ -108,9 +108,10 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
   /// Returns a parser to parse the location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -139,35 +140,35 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeSystemDirectiveLocation<Src, Span> {
+pub enum TypeSystemDirectiveLocation<Span> {
   /// `SCHEMA`
-  Schema(SchemaLocation<Src, Span>),
+  Schema(SchemaLocation<Span>),
   /// `SCALAR`
-  Scalar(ScalarLocation<Src, Span>),
+  Scalar(ScalarLocation<Span>),
   /// `OBJECT`
-  Object(ObjectLocation<Src, Span>),
+  Object(ObjectLocation<Span>),
   /// `FIELD_DEFINITION`
-  FieldDefinition(FieldDefinitionLocation<Src, Span>),
+  FieldDefinition(FieldDefinitionLocation<Span>),
   /// `ARGUMENT_DEFINITION`
-  ArgumentDefinition(ArgumentDefinitionLocation<Src, Span>),
+  ArgumentDefinition(ArgumentDefinitionLocation<Span>),
   /// `INTERFACE`
-  Interface(InterfaceLocation<Src, Span>),
+  Interface(InterfaceLocation<Span>),
   /// `UNION`
-  Union(UnionLocation<Src, Span>),
+  Union(UnionLocation<Span>),
   /// `ENUM`
-  Enum(EnumLocation<Src, Span>),
+  Enum(EnumLocation<Span>),
   /// `ENUM_VALUE`
-  EnumValue(EnumValueLocation<Src, Span>),
+  EnumValue(EnumValueLocation<Span>),
   /// `INPUT_OBJECT`
-  InputObject(InputObjectLocation<Src, Span>),
+  InputObject(InputObjectLocation<Span>),
   /// `INPUT_FIELD_DEFINITION`
-  InputFieldDefinition(InputFieldDefinitionLocation<Src, Span>),
+  InputFieldDefinition(InputFieldDefinitionLocation<Span>),
 }
 
-impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
+impl<Span> TypeSystemDirectiveLocation<Span> {
   /// Returns the span of the location.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     match self {
       Self::Schema(loc) => loc.span(),
       Self::Scalar(loc) => loc.span(),
@@ -186,9 +187,10 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
   /// Returns a parser to parse the location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -222,17 +224,17 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum Location<Src, Span> {
+pub enum Location<Span> {
   /// Executable directive location
-  Executable(ExecutableDirectiveLocation<Src, Span>),
+  Executable(ExecutableDirectiveLocation<Span>),
   /// Type system directive location
-  TypeSystem(TypeSystemDirectiveLocation<Src, Span>),
+  TypeSystem(TypeSystemDirectiveLocation<Span>),
 }
 
-impl<Src, Span> Location<Src, Span> {
+impl<Span> Location<Span> {
   /// Returns the span of the location.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     match self {
       Self::Executable(loc) => loc.span(),
       Self::TypeSystem(loc) => loc.span(),
@@ -242,9 +244,10 @@ impl<Src, Span> Location<Src, Span> {
   /// Returns a parser to parse the directive location.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -257,8 +260,8 @@ macro_rules! from_location {
   ($($variant:ident: [$($sub_variant:ident),+$(,)?]), +$(,)?) => {
     $(
       $(
-        impl<Src, Span> From<$sub_variant<Src, Span>> for Location<Src, Span> {
-          fn from(location: $sub_variant<Src, Span>) -> Self {
+        impl<Span> From<$sub_variant<Span>> for Location<Span> {
+          fn from(location: $sub_variant<Span>) -> Self {
             Self::$variant(location.into())
           }
         }
@@ -294,19 +297,19 @@ from_location!(
 );
 
 #[derive(Debug, Clone, Copy)]
-pub struct DirectiveLocation<Location, Src, Span> {
+pub struct DirectiveLocation<Location, Span> {
   /// The span of the location
-  span: Spanned<Src, Span>,
+  span: Span,
   /// The location of the directive.
   location: Location,
   /// The pipe token.
-  pipe: Option<Pipe<Src, Span>>,
+  pipe: Option<Pipe<Span>>,
 }
 
-impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
+impl<Location, Span> DirectiveLocation<Location, Span> {
   /// Returns the span of the directive location.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -318,7 +321,7 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
 
   /// Returns the pipe token if present.
   #[inline]
-  pub const fn pipe(&self) -> Option<&Pipe<Src, Span>> {
+  pub const fn pipe(&self) -> Option<&Pipe<Span>> {
     self.pipe.as_ref()
   }
 
@@ -327,16 +330,17 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
     location_parser: impl Parser<'src, I, Location, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Pipe::parser()
       .or_not()
       .then_ignore(ignored())
       .then(location_parser)
       .map_with(|(pipe, location), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         location,
         pipe,
       })
@@ -344,18 +348,18 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct DirectiveLocations<Location, Src, Span, Container = Vec<Location>> {
+pub struct DirectiveLocations<Location, Span, Container = Vec<Location>> {
   /// The span of the directive locations.
-  span: Spanned<Src, Span>,
+  span: Span,
   /// The directive locations.
   locations: Container,
   _location: PhantomData<Location>,
 }
 
-impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Container> {
+impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   /// Returns the span of the directive locations.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -370,10 +374,10 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
     directive_location_parser: impl Parser<'src, I, Location, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     Container: chumsky::container::Container<Location>,
   {
     directive_location_parser
@@ -381,7 +385,7 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
       .at_least(1)
       .collect::<Container>()
       .map_with(|locs, sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         locations: locs,
         _location: PhantomData,
       })
@@ -392,40 +396,40 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
 ///
 /// Spec: [DirectiveDefinition](https://spec.graphql.org/draft/#DirectiveDefinition)
 #[derive(Debug, Clone)]
-pub struct DirectiveDefinition<Args, Locations, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  keyword: keywords::Directive<Src, Span>,
-  at: At<Src, Span>,
-  name: Name<Src, Span>,
+pub struct DirectiveDefinition<Args, Locations, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  keyword: keywords::Directive<Span>,
+  at: At<Span>,
+  name: Name<Span>,
   arguments_definition: Option<Args>,
-  repeateable: Option<keywords::Repeatable<Src, Span>>,
-  on: keywords::On<Src, Span>,
+  repeateable: Option<keywords::Repeatable<Span>>,
+  on: keywords::On<Span>,
   directive_locations: Locations,
 }
 
-impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span> {
+impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   /// Returns the span of the directive definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the at punctuation of the directive definition.
   #[inline]
-  pub const fn at(&self) -> &At<Src, Span> {
+  pub const fn at(&self) -> &At<Span> {
     &self.at
   }
 
   /// Returns the description of the directive definition
   #[inline]
-  pub const fn description(&self) -> &Option<StringValue<Src, Span>> {
+  pub const fn description(&self) -> &Option<StringValue<Span>> {
     &self.description
   }
 
   /// Returns the directive keyword of the directive definition.
   #[inline]
-  pub const fn directive(&self) -> &keywords::Directive<Src, Span> {
+  pub const fn directive(&self) -> &keywords::Directive<Span> {
     &self.keyword
   }
 
@@ -437,19 +441,19 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
 
   /// Returns the repeatable keyword of the directive definition.
   #[inline]
-  pub const fn repeatable(&self) -> Option<&keywords::Repeatable<Src, Span>> {
+  pub const fn repeatable(&self) -> Option<&keywords::Repeatable<Span>> {
     self.repeateable.as_ref()
   }
 
   /// Returns the on keyword of the directive definition.
   #[inline]
-  pub const fn on(&self) -> &keywords::On<Src, Span> {
+  pub const fn on(&self) -> &keywords::On<Span> {
     &self.on
   }
 
   /// Returns the name of the derictive definition
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -465,11 +469,10 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
     args_parser: impl Parser<'src, I, Args, E> + Clone,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()
@@ -495,7 +498,7 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
         ),
          sp| {
           Self {
-            span: Spanned::from(sp),
+            span: Spanned::from_map_extra(sp),
             description,
             keyword,
             at,

@@ -48,7 +48,7 @@ use super::super::{
 ///
 /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
 #[derive(Debug, Clone, Copy)]
-pub enum StringDelimiter<Src, Span> {
+pub enum StringDelimiter<Span> {
   /// Triple-quoted block string delimiters: `"""`
   ///
   /// Block strings provide a more natural way to write multi-line text
@@ -61,9 +61,9 @@ pub enum StringDelimiter<Src, Span> {
   /// Spec: [Block String](https://spec.graphql.org/draft/#BlockString)
   TripleQuote {
     /// The opening triple-quote delimiter (`"""`) with its source location.
-    l_triple_quote: TripleQuote<Src, Span>,
+    l_triple_quote: TripleQuote<Span>,
     /// The closing triple-quote delimiter (`"""`) with its source location.
-    r_triple_quote: TripleQuote<Src, Span>,
+    r_triple_quote: TripleQuote<Span>,
   },
   /// Single-quoted string delimiters: `"`
   ///
@@ -78,44 +78,44 @@ pub enum StringDelimiter<Src, Span> {
   /// Spec: [String](https://spec.graphql.org/draft/#String)
   Quote {
     /// The opening quote delimiter (`"`) with its source location.
-    l_quote: Quote<Src, Span>,
+    l_quote: Quote<Span>,
     /// The closing quote delimiter (`"`) with its source location.
-    r_quote: Quote<Src, Span>,
+    r_quote: Quote<Span>,
   },
 }
 
 /// A GraphQL string literal content (the raw text between delimiters).
 #[derive(Debug, Clone, Copy)]
-pub struct StringContent<Src, Span>(Spanned<Src, Span>);
+pub struct StringContent<Span>(Span);
 
-impl<Src, Span> StringContent<Src, Span> {
+impl<Span> StringContent<Span> {
   /// Returns the underlying span of the string content.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.0
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for StringContent<Src, Span> {
+impl<Span> AsRef<Span> for StringContent<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for StringContent<Src, Span> {
+impl<Span> IntoSpanned<Span> for StringContent<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.0
   }
 }
 
-impl<Src, Span> IntoComponents for StringContent<Src, Span> {
-  type Components = Spanned<Src, Span>;
+impl<Span> IntoComponents for StringContent<Span> {
+  type Components = Span;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.0
+    self.into_spanned()
   }
 }
 
@@ -230,16 +230,16 @@ impl<Src, Span> IntoComponents for StringContent<Src, Span> {
 ///
 /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct StringValue<Src, Span> {
+pub struct StringValue<Span> {
   /// Entire literal, including opening and closing delimiters.
   ///
   /// Example:
   /// - `"hello"` → covers 0..7
   /// - `"""hi"""` → covers 10..18
-  span: Spanned<Src, Span>,
+  span: Span,
 
   /// The delimiter form (single quote vs triple quote) and their spans.
-  delimiters: StringDelimiter<Src, Span>,
+  delimiters: StringDelimiter<Span>,
 
   /// Content between the delimiters, with no surrounding quotes.
   ///
@@ -250,10 +250,10 @@ pub struct StringValue<Src, Span> {
   /// Note: For block strings this is the raw slice; spec-defined block string
   /// processing (common indentation removal, newline normalization) is not
   /// applied here.
-  content: StringContent<Src, Span>,
+  content: StringContent<Span>,
 }
 
-impl<Src, Span> StringValue<Src, Span> {
+impl<Span> StringValue<Span> {
   /// Returns the source span of the entire string literal.
   ///
   /// This span covers from the opening delimiter through the closing delimiter,
@@ -267,7 +267,7 @@ impl<Src, Span> StringValue<Src, Span> {
   /// """world""" // span covers all 9 characters
   /// ```
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -288,7 +288,7 @@ impl<Src, Span> StringValue<Src, Span> {
   /// """               // content: "\nline 1\nline 2\n" (raw)
   /// ```
   #[inline]
-  pub const fn content(&self) -> &StringContent<Src, Span> {
+  pub const fn content(&self) -> &StringContent<Span> {
     &self.content
   }
 
@@ -299,7 +299,7 @@ impl<Src, Span> StringValue<Src, Span> {
   /// delimiters. Useful for syntax highlighting, re-emission, and understanding
   /// the original format.
   #[inline]
-  pub const fn delimiters(&self) -> &StringDelimiter<Src, Span> {
+  pub const fn delimiters(&self) -> &StringDelimiter<Span> {
     &self.delimiters
   }
 
@@ -311,15 +311,11 @@ impl<Src, Span> StringValue<Src, Span> {
   /// extraction while maintaining zero-copy efficiency.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
-    // let quote = Quote::<Src, Span>::parser();
-
-    // // `"""` → TripleQuote<S>
-    // let triple_quote = TripleQuote::<Src, Span>::parser();
-
     // \uXXXX (exactly 4 hex digits)
     let hex_digit = one_of([
       I::Token::ZERO,
@@ -376,29 +372,29 @@ impl<Src, Span> StringValue<Src, Span> {
       .or(esc_char)
       .or(unescaped_scalar)
       .repeated()
-      .map_with(|_, sp| StringContent(Spanned::from(sp)));
+      .map_with(|_, sp| StringContent(Spanned::from_map_extra(sp)));
 
     // Block content: consume either an escaped triple quote, or any single token
     // that is NOT the start of a raw closing `"""`.
     let escaped_triple = just(I::Token::BACKSLASH)
-      .then(TripleQuote::parser())
+      .then(TripleQuote::<Span>::parser())
       .ignored();
 
     let any_token = any().ignored();
-    let not_closing_triple = TripleQuote::parser().not().ignore_then(any_token);
+    let not_closing_triple = TripleQuote::<Span>::parser().not().ignore_then(any_token);
 
     let block_piece = escaped_triple.or(not_closing_triple);
 
     let block_content_parser = block_piece
       .repeated()
-      .map_with(|_, sp| StringContent(Spanned::from(sp)));
+      .map_with(|_, sp| StringContent(Spanned::from_map_extra(sp)));
 
     // " ... "
     let inline_string = Quote::parser()
       .then(inline_content_parser)
       .then(Quote::parser())
       .map_with(|((lq, content), rq), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         delimiters: StringDelimiter::Quote {
           l_quote: lq,
           r_quote: rq,
@@ -411,7 +407,7 @@ impl<Src, Span> StringValue<Src, Span> {
       .then(block_content_parser)
       .then(TripleQuote::parser())
       .map_with(|((ltq, content), rtq), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         delimiters: StringDelimiter::TripleQuote {
           l_triple_quote: ltq,
           r_triple_quote: rtq,
@@ -423,25 +419,25 @@ impl<Src, Span> StringValue<Src, Span> {
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for StringValue<Src, Span> {
+impl<Span> AsRef<Span> for StringValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for StringValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for StringValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Src, Span> IntoComponents for StringValue<Src, Span> {
+impl<Span> IntoComponents for StringValue<Span> {
   type Components = (
-    Spanned<Src, Span>,
-    StringDelimiter<Src, Span>,
-    StringContent<Src, Span>,
+    Span,
+    StringDelimiter<Span>,
+    StringContent<Span>,
   );
 
   #[inline]
@@ -452,14 +448,16 @@ impl<Src, Span> IntoComponents for StringValue<Src, Span> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::spanned::WithSource;
+
+use super::*;
   use chumsky::{error::Simple, extra};
 
   type Err<'a> = extra::Err<Simple<'a, char>>;
   type Span = SimpleSpan;
 
-  fn string_parser<'a>() -> impl Parser<'a, &'a str, StringValue<&'a str, Span>, Err<'a>> + Clone {
-    StringValue::<&str, Span>::parser::<&str, Err>().then_ignore(end())
+  fn string_parser<'a>() -> impl Parser<'a, &'a str, StringValue<WithSource<&'a str, Span>>, Err<'a>> + Clone {
+    StringValue::<WithSource<&str, Span>>::parser::<&str, Err>().then_ignore(end())
   }
 
   // ---------- Inline (") ----------

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, input::SliceInput};
+use chumsky::{extra::ParserExtra, input::{Input, SliceInput, MapExtra}};
 
 /// A value paired with its source span information.
 ///
@@ -16,28 +16,28 @@ use chumsky::{extra::ParserExtra, input::SliceInput};
 ///
 /// ## Generic Parameters
 ///
-/// - `Src`: The source slice type (typically `&str` for string input)
+/// - `Source`: The source slice type (typically `&str` for string input)
 /// - `Span`: The span type representing position information (e.g., byte ranges, line/column pairs)
 ///
 /// ## Memory Layout
 ///
 /// `Spanned` is designed to be efficient:
-/// - Zero-cost when `Src` is a reference type like `&str`
-/// - Can be copied when both `Src` and `Span` are `Copy`
+/// - Zero-cost when `Source` is a reference type like `&str`
+/// - Can be copied when both `Source` and `Span` are `Copy`
 /// - Minimal memory overhead (just the source and span data)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Spanned<Src, Span> {
-  src: Src,
+pub struct WithSource<Source, Span> {
+  src: Source,
   span: Span,
 }
 
-impl<Src, Span> Spanned<Src, Span> {
+impl<Source, Span> WithSource<Source, Span> {
   /// Creates a new spanned value from source data and span information.
   ///
   /// This constructor pairs source data with its location information,
   /// creating the fundamental building block for location-aware parsing.
   #[inline]
-  pub const fn new(src: Src, span: Span) -> Self {
+  pub const fn new(src: Source, span: Span) -> Self {
     Self { src, span }
   }
 
@@ -46,7 +46,7 @@ impl<Src, Span> Spanned<Src, Span> {
   /// This provides access to the actual parsed content without the span
   /// information. The source data represents what was parsed from the
   /// original input at the location specified by the span.
-  pub const fn source(&self) -> &Src {
+  pub const fn source(&self) -> &Source {
     &self.src
   }
 
@@ -64,8 +64,8 @@ impl<Src, Span> Spanned<Src, Span> {
   /// This method applies a transformation function to the source data while
   /// keeping the same span information. This is useful when converting between
   /// different representations of the same logical data.
-  pub fn map_source<U>(self, f: impl FnOnce(Src) -> U) -> Spanned<U, Span> {
-    Spanned::new(f(self.src), self.span)
+  pub fn map_source<U>(self, f: impl FnOnce(Source) -> U) -> WithSource<U, Span> {
+    WithSource::new(f(self.src), self.span)
   }
 
   /// Transforms the span information while preserving the source data.
@@ -73,8 +73,8 @@ impl<Src, Span> Spanned<Src, Span> {
   /// This method applies a transformation function to the span information while
   /// keeping the same source data. This is useful when adjusting the location
   /// information without modifying the underlying data.
-  pub fn map_span<U>(self, f: impl FnOnce(Span) -> U) -> Spanned<Src, U> {
-    Spanned::new(self.src, f(self.span))
+  pub fn map_span<U>(self, f: impl FnOnce(Span) -> U) -> WithSource<Source, U> {
+    WithSource::new(self.src, f(self.span))
   }
 
   /// Transforms both the source data and span information.
@@ -84,17 +84,53 @@ impl<Src, Span> Spanned<Src, Span> {
   /// systems or when both the data and its location need adjustment.
   pub fn map<U, NewSpan>(
     self,
-    src: impl FnOnce(Src) -> U,
+    src: impl FnOnce(Source) -> U,
     span: impl FnOnce(Span) -> NewSpan,
-  ) -> Spanned<U, NewSpan> {
-    Spanned::new(src(self.src), span(self.span))
+  ) -> WithSource<U, NewSpan> {
+    WithSource::new(src(self.src), span(self.span))
   }
 }
 
 impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>>
-  From<&mut chumsky::input::MapExtra<'src, 'b, I, E>> for Spanned<I::Slice, I::Span>
+  From<&mut MapExtra<'src, 'b, I, E>> for WithSource<I::Slice, I::Span>
 {
-  fn from(value: &mut chumsky::input::MapExtra<'src, 'b, I, E>) -> Self {
+  #[inline]
+  fn from(value: &mut MapExtra<'src, 'b, I, E>) -> Self {
     Self::new(value.slice(), value.span())
+  }
+}
+
+impl<'src, I, E> Spanned<'src, I, E> for WithSource<I::Slice, I::Span>
+where
+  I: SliceInput<'src>,
+  E: ParserExtra<'src, I>,
+{
+  #[inline]
+  fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
+  where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>
+  {
+    Self::from(value)
+  }
+}
+
+pub trait Spanned<'src, I: Input<'src>, E: ParserExtra<'src, I>> {
+  fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self;
+}
+
+impl<'src, I, E, T> Spanned<'src, I, E> for T
+where
+  I: Input<'src, Span = T>,
+  E: ParserExtra<'src, I>,
+  T: chumsky::span::Span,
+{
+  #[inline]
+  fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
+  where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>
+  {
+    value.span()
   }
 }

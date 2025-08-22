@@ -10,40 +10,39 @@ use super::arguments::{Arguments, ConstArguments};
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Directive<Src, Span>(directives::Directive<Arguments<Src, Span>, Src, Span>);
+pub struct Directive<Span>(directives::Directive<Arguments<Span>, Span>);
 
-impl<Src, Span> Directive<Src, Span> {
+impl<Span> Directive<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
   #[inline]
-  pub const fn at(&self) -> &At<Src, Span> {
+  pub const fn at(&self) -> &At<Span> {
     self.0.at()
   }
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     self.0.name()
   }
 
   #[inline]
-  pub const fn arguments(&self) -> Option<&Arguments<Src, Span>> {
+  pub const fn arguments(&self) -> Option<&Arguments<Span>> {
     self.0.arguments()
   }
 
   #[inline]
-  pub fn into_arguments(self) -> Option<Arguments<Src, Span>> {
+  pub fn into_arguments(self) -> Option<Arguments<Span>> {
     self.0.into_arguments()
   }
 
   /// Returns a parser for the directive.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     directives::Directive::parser_with(Arguments::parser()).map(Self)
   }
@@ -51,40 +50,39 @@ impl<Src, Span> Directive<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstDirective<Src, Span>(directives::Directive<ConstArguments<Src, Span>, Src, Span>);
+pub struct ConstDirective<Span>(directives::Directive<ConstArguments<Span>, Span>);
 
-impl<Src, Span> ConstDirective<Src, Span> {
+impl<Span> ConstDirective<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
   #[inline]
-  pub const fn at(&self) -> &At<Src, Span> {
+  pub const fn at(&self) -> &At<Span> {
     self.0.at()
   }
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     self.0.name()
   }
 
   #[inline]
-  pub const fn arguments(&self) -> Option<&ConstArguments<Src, Span>> {
+  pub const fn arguments(&self) -> Option<&ConstArguments<Span>> {
     self.0.arguments()
   }
 
   #[inline]
-  pub fn into_arguments(self) -> Option<ConstArguments<Src, Span>> {
+  pub fn into_arguments(self) -> Option<ConstArguments<Span>> {
     self.0.into_arguments()
   }
 
   /// Returns a parser for the directive.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     directives::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
@@ -92,30 +90,29 @@ impl<Src, Span> ConstDirective<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Directives<Src, Span>(directives::Directives<Directive<Src, Span>, Src, Span>);
+pub struct Directives<Span>(directives::Directives<Directive<Span>, Span>);
 
-impl<Src, Span> Directives<Src, Span> {
+impl<Span> Directives<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
   #[inline]
-  pub const fn directives(&self) -> &[Directive<Src, Span>] {
+  pub const fn directives(&self) -> &[Directive<Span>] {
     self.0.directives().as_slice()
   }
   #[inline]
-  pub fn into_directives(self) -> Vec<Directive<Src, Span>> {
+  pub fn into_directives(self) -> Vec<Directive<Span>> {
     self.0.into_directives()
   }
 
   /// Returns a parser for the directive.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     directives::Directives::parser_with(Directive::parser()).map(Self)
   }
@@ -123,30 +120,29 @@ impl<Src, Span> Directives<Src, Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstDirectives<Src, Span>(directives::Directives<ConstDirective<Src, Span>, Src, Span>);
+pub struct ConstDirectives<Span>(directives::Directives<ConstDirective<Span>, Span>);
 
-impl<Src, Span> ConstDirectives<Src, Span> {
+impl<Span> ConstDirectives<Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
   #[inline]
-  pub const fn directives(&self) -> &[ConstDirective<Src, Span>] {
+  pub const fn directives(&self) -> &[ConstDirective<Span>] {
     self.0.directives().as_slice()
   }
   #[inline]
-  pub fn into_directives(self) -> Vec<ConstDirective<Src, Span>> {
+  pub fn into_directives(self) -> Vec<ConstDirective<Span>> {
     self.0.into_directives()
   }
 
   /// Returns a parser for the directive.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     directives::Directives::parser_with(ConstDirective::parser()).map(Self)
   }

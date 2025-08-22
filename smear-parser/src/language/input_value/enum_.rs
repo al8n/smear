@@ -2,6 +2,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned};
 
+use super::{NullValue, BooleanValue};
+
 /// A GraphQL enum value identifier.
 ///
 /// Represents a valid enum value as defined by the GraphQL specification. Enum
@@ -92,19 +94,19 @@ use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned
 ///
 /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumValue<Src, Span> {
+pub struct EnumValue<Span> {
   /// The name of the enum value
-  name: Name<Src, Span>,
+  name: Name<Span>,
 }
 
-impl<Src, Span> EnumValue<Src, Span> {
+impl<Span> EnumValue<Span> {
   /// Returns the source span of the enum value.
   ///
   /// This provides access to the original source location and text of the
   /// enum value, useful for error reporting, source mapping, syntax highlighting,
   /// and extracting the actual string content of the enum value name.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     self.name.span()
   }
 
@@ -114,7 +116,7 @@ impl<Src, Span> EnumValue<Src, Span> {
   /// value identifier. The name contains the parsed identifier with its source
   /// location information.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -126,37 +128,38 @@ impl<Src, Span> EnumValue<Src, Span> {
   /// maintaining good error messages.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
-    Name::<Src, Span>::parser()
-      .filter(|name| {
-        let src = name.span().source();
-        !(I::is_true_slice(src) || I::is_false_slice(src) || I::is_null_slice(src))
-      })
-      .map(|name| Self { name })
+    choice((
+      BooleanValue::<Span>::parser().ignored(),
+      NullValue::<Span>::parser().ignored(),
+    ))
+    .not()
+    .rewind()
+    .then(Name::parser())
+    .map(|(_, name)| Self { name })
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for EnumValue<Src, Span> {
+impl<Span> AsRef<Span> for EnumValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for EnumValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for EnumValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.name.into_spanned()
   }
 }
 
-impl<Src, Span> IntoComponents for EnumValue<Src, Span> {
-  type Components = Name<Src, Span>;
+impl<Span> IntoComponents for EnumValue<Span> {
+  type Components = Name<Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -168,11 +171,12 @@ impl<Src, Span> IntoComponents for EnumValue<Src, Span> {
 mod tests {
   use super::*;
   use chumsky::{error::Simple, extra};
+  use crate::spanned::WithSource;
 
   fn enum_parser<'a>(
-  ) -> impl Parser<'a, &'a str, EnumValue<&'a str, SimpleSpan>, extra::Err<Simple<'a, char>>> + Clone
+  ) -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
   {
-    EnumValue::<&str, SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+    EnumValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
   }
 
   #[test]

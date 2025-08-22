@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, source::Source, spanned::Spanned},
+  super::{char::Char, convert::*, source::Source, spanned::Spanned, language::ignored::ignored},
   punct::{LBracket, RBracket},
 };
 
@@ -26,7 +26,7 @@ use std::vec::Vec;
 /// ## Format
 ///
 /// ```text
-/// ListValue ::= '[' Values? ']'
+/// List ::= '[' Values? ']'
 /// Values    ::= Value+
 /// ```
 ///
@@ -78,22 +78,22 @@ use std::vec::Vec;
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
 #[derive(Debug, Clone)]
-pub struct ListValue<Value, Src, Span, Container = Vec<Value>> {
-  span: Spanned<Src, Span>,
-  l_bracket: LBracket<Src, Span>,
-  r_bracket: RBracket<Src, Span>,
+pub struct List<Value, Span, Container = Vec<Value>> {
+  span: Span,
+  l_bracket: LBracket<Span>,
+  r_bracket: RBracket<Span>,
   values: Container,
   _value: core::marker::PhantomData<Value>,
 }
 
-impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
+impl<Value, Span, Container> List<Value, Span, Container> {
   /// Returns the source span of the entire list literal.
   ///
   /// This span covers from the opening bracket through the closing bracket,
   /// including all whitespace and elements within. Useful for error reporting,
   /// source mapping, and extracting the complete list text.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -103,7 +103,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   /// including its exact source position. Useful for syntax highlighting,
   /// bracket matching, and precise error reporting at list boundaries.
   #[inline]
-  pub const fn l_bracket(&self) -> &LBracket<Src, Span> {
+  pub const fn l_bracket(&self) -> &LBracket<Span> {
     &self.l_bracket
   }
 
@@ -113,7 +113,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   /// including its exact source position. Useful for syntax highlighting,
   /// bracket matching, and detecting incomplete lists.
   #[inline]
-  pub const fn r_bracket(&self) -> &RBracket<Src, Span> {
+  pub const fn r_bracket(&self) -> &RBracket<Span> {
     &self.r_bracket
   }
 
@@ -135,40 +135,30 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
     value: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
-    Src: 'src,
-    Span: 'src,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
     Value: crate::language::input_value::InputValue<CONST>,
   {
-    let ws = super::ignored::ignored();
-
-    // Keep bracket token spans precise; don't pad the tokens themselves.
-    let open = LBracket::parser();
-    let close = RBracket::parser();
-
-    // Each element owns only *trailing* ignored (incl. commas).
-    let elem = value.then_ignore(ws.clone());
-
     // '[' ws? ( ']' | elem+ ']' )
-    open
-      .then_ignore(ws.clone())
+    LBracket::parser() 
+      .then_ignore(ignored())
       .then(choice((
         // Empty fast path: immediately see ']'
-        close.clone().map(|r| (Container::default(), r)),
+        RBracket::parser().map(|r| (Container::default(), r)),
         // Non-empty: one-or-more elements; trailing commas handled by elem’s trailing ws
-        elem
+        value
+          .padded_by(ignored())
           .repeated()
           .at_least(1)
           .collect::<Container>()
-          .then(close),
+          .then(RBracket::parser()),
       )))
       .map_with(|(l_bracket, (values, r_bracket)), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         l_bracket,
         r_bracket,
         values,
@@ -177,32 +167,30 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
   }
 }
 
-impl<Value, Src, Span, Container> AsSpanned<Src, Span> for ListValue<Value, Src, Span, Container> {
+impl<Value, Span, Container> AsRef<Span> for List<Value, Span, Container> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Value, Src, Span, Container> IntoSpanned<Src, Span>
-  for ListValue<Value, Src, Span, Container>
-{
+impl<Value, Span, Container> IntoSpanned<Span> for List<Value, Span, Container> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Value, Src, Span, Container> IntoComponents for ListValue<Value, Src, Span, Container> {
+impl<Value, Span, Container> IntoComponents for List<Value, Span, Container> {
   type Components = (
-    Spanned<Src, Span>,
-    LBracket<Src, Span>,
-    RBracket<Src, Span>,
+    Span,
+    LBracket<Span>,
     Container,
+    RBracket<Span>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.l_bracket, self.r_bracket, self.values)
+    (self.span, self.l_bracket, self.values, self.r_bracket)
   }
 }

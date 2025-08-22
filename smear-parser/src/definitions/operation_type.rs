@@ -17,19 +17,19 @@ use super::super::{
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum OperationType<Src, Span> {
+pub enum OperationType<Span> {
   /// `query`
-  Query(Query<Src, Span>),
+  Query(Query<Span>),
   /// `mutation`
-  Mutation(Mutation<Src, Span>),
+  Mutation(Mutation<Span>),
   /// `subscription`
-  Subscription(Subscription<Src, Span>),
+  Subscription(Subscription<Span>),
 }
 
-impl<Src, Span> OperationType<Src, Span> {
+impl<Span> OperationType<Span> {
   /// Returns the span of the operation type.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     match self {
       Self::Query(q) => q.span(),
       Self::Mutation(m) => m.span(),
@@ -41,11 +41,10 @@ impl<Src, Span> OperationType<Src, Span> {
   #[inline]
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     choice((
       Query::parser().map(Self::Query),

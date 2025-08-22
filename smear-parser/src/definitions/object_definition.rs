@@ -10,36 +10,36 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  ty: keywords::Type<Src, Span>,
-  name: Name<Src, Span>,
+pub struct ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  ty: keywords::Type<Span>,
+  name: Name<Span>,
   implements: Option<ImplementInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
-  ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   #[inline]
-  pub const fn type_keyword(&self) -> &keywords::Type<Src, Span> {
+  pub const fn type_keyword(&self) -> &keywords::Type<Span> {
     &self.ty
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -62,10 +62,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    keywords::Type<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Type<Span>,
+    Name<Span>,
     Option<ImplementInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
@@ -87,11 +87,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     implement_interfaces_parser: impl Fn() -> IP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -108,7 +107,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
       .then(fields_definition_parser().padded_by(ignored()).or_not())
       .map_with(
         |(((((description, ty), name), implements), directives), fields), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           name,
           directives,
@@ -177,34 +176,34 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 }
 
 #[derive(Debug, Clone)]
-pub struct ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  interface: keywords::Type<Src, Span>,
-  name: Name<Src, Span>,
+pub struct ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  interface: keywords::Type<Span>,
+  name: Name<Span>,
   content: ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
-  ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn extend(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
 
   #[inline]
-  pub const fn interface(&self) -> &keywords::Type<Src, Span> {
+  pub const fn interface(&self) -> &keywords::Type<Span> {
     &self.interface
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -219,10 +218,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Type<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Type<Span>,
+    Name<Span>,
     ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
   ) {
     (
@@ -240,11 +239,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     fields_definition_parser: impl Fn() -> FDP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -265,7 +263,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
         fields_definition_parser,
       ))
       .map_with(|(((extend, interface), name), content), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         interface,
         name,

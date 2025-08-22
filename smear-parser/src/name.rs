@@ -65,16 +65,16 @@ use super::{char::Char, convert::*, source::Source, spanned::Spanned};
 ///
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Name<Src, Span>(pub(crate) Spanned<Src, Span>);
+pub struct Name<Span>(pub(crate) Span);
 
-impl<Src, Span> Name<Src, Span> {
+impl<Span> Name<Span> {
   /// Returns the source span of the name.
   ///
   /// This provides access to the original source location and text of the name,
   /// useful for error reporting, source mapping, syntax highlighting, and
   /// extracting the actual string content of the name.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.0
   }
 
@@ -131,11 +131,10 @@ impl<Src, Span> Name<Src, Span> {
   /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     // [_A-Za-z]
     let start = one_of([
@@ -264,27 +263,28 @@ impl<Src, Span> Name<Src, Span> {
     .ignored()
     .repeated();
 
-    start.then(cont).map_with(|_, sp| Name(Spanned::from(sp)))
+    start.then(cont).map_with(|_, sp| Name(Spanned::from_map_extra(sp)))
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for Name<Src, Span> {
+impl<Span> AsRef<Span> for Name<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for Name<Src, Span> {
+impl<Span> IntoSpanned<Span> for Name<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.0
   }
 }
 
-impl<Src, Span> IntoComponents for Name<Src, Span> {
-  type Components = Spanned<Src, Span>;
+impl<Span> IntoComponents for Name<Span> {
+  type Components = Span;
 
+  #[inline]
   fn into_components(self) -> Self::Components {
     self.into_spanned()
   }

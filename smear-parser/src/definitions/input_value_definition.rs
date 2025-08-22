@@ -12,34 +12,34 @@ use super::super::{
 ///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
 #[derive(Debug, Clone)]
-pub struct InputValueDefinition<Type, DefaultValue, Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  name: Name<Src, Span>,
-  colon: Colon<Src, Span>,
+pub struct InputValueDefinition<Type, DefaultValue, Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  name: Name<Span>,
+  colon: Colon<Span>,
   ty: Type,
   default_value: Option<DefaultValue>,
   directives: Option<Directives>,
 }
 
-impl<Type, DefaultValue, Directives, Src, Span>
-  InputValueDefinition<Type, DefaultValue, Directives, Src, Span>
+impl<Type, DefaultValue, Directives, Span>
+  InputValueDefinition<Type, DefaultValue, Directives, Span>
 {
   /// The description of the input value definition.
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   /// The name of the input value definition.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   /// The colon of the input value definition.
   #[inline]
-  pub const fn colon(&self) -> &Colon<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Span> {
     &self.colon
   }
 
@@ -66,10 +66,10 @@ impl<Type, DefaultValue, Directives, Src, Span>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    Name<Src, Span>,
-    Colon<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    Name<Span>,
+    Colon<Span>,
     Type,
     Option<DefaultValue>,
     Option<Directives>,
@@ -93,11 +93,10 @@ impl<Type, DefaultValue, Directives, Src, Span>
     const_directives_parser: DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -115,7 +114,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
       .then(const_directives_parser.or_not())
       .map_with(
         |(((((description, name), colon), ty), default_value), directives), span| Self {
-          span: Spanned::from(span),
+          span: Spanned::from_map_extra(span),
           description,
           name,
           colon,

@@ -96,31 +96,31 @@ use crate::{
 ///
 /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)
 #[derive(Debug, Clone, Copy)]
-pub struct IntValue<Src, Span> {
-  span: Spanned<Src, Span>,
-  sign: Option<Minus<Src, Span>>,
-  digits: UintValue<Src, Span>,
+pub struct IntValue<Span> {
+  span: Span,
+  sign: Option<Minus<Span>>,
+  digits: UintValue<Span>,
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for IntValue<Src, Span> {
+impl<Span> AsRef<Span> for IntValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for IntValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for IntValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Src, Span> IntoComponents for IntValue<Src, Span> {
+impl<Span> IntoComponents for IntValue<Span> {
   type Components = (
-    Spanned<Src, Span>,
-    Option<Minus<Src, Span>>,
-    UintValue<Src, Span>,
+    Span,
+    Option<Minus<Span>>,
+    UintValue<Span>,
   );
 
   #[inline]
@@ -129,13 +129,13 @@ impl<Src, Span> IntoComponents for IntValue<Src, Span> {
   }
 }
 
-impl<Src, Span> IntValue<Src, Span> {
+impl<Span> IntValue<Span> {
   /// Returns the source span of the entire integer literal.
   ///
   /// This span covers from the first character (sign or first digit) through
   /// the last digit, providing the complete source location for error reporting,
   /// source mapping, and extracting the full literal text.
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -153,7 +153,7 @@ impl<Src, Span> IntValue<Src, Span> {
   /// 0       // Returns None  
   /// -0      // Returns Some(Minus)
   /// ```
-  pub const fn sign(&self) -> Option<&Minus<Src, Span>> {
+  pub const fn sign(&self) -> Option<&Minus<Span>> {
     self.sign.as_ref()
   }
 
@@ -171,7 +171,7 @@ impl<Src, Span> IntValue<Src, Span> {
   /// 0       // digits = UintValue("0")
   /// -0      // digits = UintValue("0")
   /// ```
-  pub const fn digits(&self) -> &UintValue<Src, Span> {
+  pub const fn digits(&self) -> &UintValue<Span> {
     &self.digits
   }
 
@@ -183,15 +183,16 @@ impl<Src, Span> IntValue<Src, Span> {
   /// signed integer literals.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     Minus::parser()
       .or_not()
       .then(UintValue::parser())
       .map_with(|(sign, digits), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         sign,
         digits,
       })
@@ -201,11 +202,12 @@ impl<Src, Span> IntValue<Src, Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::spanned::WithSource;
 
   fn int_parser<'a>(
-  ) -> impl Parser<'a, &'a str, IntValue<&'a str, SimpleSpan>, extra::Err<Simple<'a, char>>> + Clone
+  ) -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
   {
-    IntValue::<&str, SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+    IntValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
   }
 
   #[test]

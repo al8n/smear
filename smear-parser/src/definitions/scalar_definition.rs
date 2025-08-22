@@ -10,36 +10,36 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ScalarDefinition<Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  scalar: keywords::Scalar<Src, Span>,
-  name: Name<Src, Span>,
+pub struct ScalarDefinition<Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  scalar: keywords::Scalar<Span>,
+  name: Name<Span>,
   directives: Option<Directives>,
 }
 
-impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
+impl<Directives, Span> ScalarDefinition<Directives, Span> {
   /// The span of the scalar definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The description of the scalar definition.
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   /// The keyword of the scalar definition.
   #[inline]
-  pub const fn scalar_keyword(&self) -> &keywords::Scalar<Src, Span> {
+  pub const fn scalar_keyword(&self) -> &keywords::Scalar<Span> {
     &self.scalar
   }
 
   /// The name of the scalar definition.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -53,10 +53,10 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    keywords::Scalar<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Scalar<Span>,
+    Name<Span>,
     Option<Directives>,
   ) {
     (
@@ -72,24 +72,23 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
       .then_ignore(ignored())
-      .then(keywords::Scalar::<Src, Span>::parser())
+      .then(keywords::Scalar::<Span>::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::<Span>::parser())
       .then_ignore(ignored())
       .then(directives_parser.or_not())
       .map_with(|(((description, scalar), name), directives), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         description,
         scalar,
         name,
@@ -100,36 +99,36 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ScalarExtension<Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  extend: keywords::Extend<Src, Span>,
-  scalar: keywords::Scalar<Src, Span>,
-  name: Name<Src, Span>,
+pub struct ScalarExtension<Directives, Span> {
+  span: Span,
+  extend: keywords::Extend<Span>,
+  scalar: keywords::Scalar<Span>,
+  name: Name<Span>,
   directives: Directives,
 }
 
-impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
+impl<Directives, Span> ScalarExtension<Directives, Span> {
   /// The span of the scalar definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// The extend keyword of the scalar extension.
   #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Src, Span> {
+  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
     &self.extend
   }
 
   /// The scalar keyword of the scalar extension.
   #[inline]
-  pub const fn scalar_keyword(&self) -> &keywords::Scalar<Src, Span> {
+  pub const fn scalar_keyword(&self) -> &keywords::Scalar<Span> {
     &self.scalar
   }
 
   /// The name of the scalar extension.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -143,10 +142,10 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    keywords::Extend<Src, Span>,
-    keywords::Scalar<Src, Span>,
-    Name<Src, Span>,
+    Span,
+    keywords::Extend<Span>,
+    keywords::Scalar<Span>,
+    Name<Span>,
     Directives,
   ) {
     (
@@ -164,22 +163,21 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
     directives_parser: impl FnOnce() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then(keywords::Scalar::<Src, Span>::parser())
+      .then(keywords::Scalar::<Span>::parser())
       .padded_by(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::<Span>::parser())
       .then_ignore(ignored())
       .then(directives_parser())
       .map_with(|(((extend, scalar), name), directives), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         extend,
         scalar,
         name,

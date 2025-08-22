@@ -15,17 +15,17 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct RootOperationTypeDefinition<OperationType, Src, Span> {
-  span: Spanned<Src, Span>,
+pub struct RootOperationTypeDefinition<OperationType, Span> {
+  span: Span,
   operation_type: OperationType,
-  colon: Colon<Src, Span>,
-  name: Name<Src, Span>,
+  colon: Colon<Span>,
+  name: Name<Span>,
 }
 
-impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, Span> {
+impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
   /// Returns the span of the operation type definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -37,13 +37,13 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
 
   /// Returns the colon span.
   #[inline]
-  pub const fn colon(&self) -> &Colon<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Span> {
     &self.colon
   }
 
   /// Returns the name of the operation type definition.
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -51,10 +51,10 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
+    Span,
     OperationType,
-    Colon<Src, Span>,
-    Name<Src, Span>,
+    Colon<Span>,
+    Name<Span>,
   ) {
     (self.span, self.operation_type, self.colon, self.name)
   }
@@ -64,11 +64,10 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
     operation_type_parser: impl FnOnce() -> P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     P: Parser<'src, I, OperationType, E> + Clone,
   {
@@ -76,7 +75,7 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
       .then(Colon::parser().padded_by(ignored()))
       .then(Name::parser())
       .map_with(|((operation_type, colon), name), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         operation_type,
         colon,
         name,
@@ -87,29 +86,28 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
 #[derive(Debug, Clone)]
 pub struct RootOperationTypesDefinition<
   OperationTypeDefinition,
-  Src,
   Span,
   Container = Vec<OperationTypeDefinition>,
 > {
-  span: Spanned<Src, Span>,
-  l_brace: LBrace<Src, Span>,
+  span: Span,
+  l_brace: LBrace<Span>,
   operation_type_definitions: Container,
-  r_brace: RBrace<Src, Span>,
+  r_brace: RBrace<Span>,
   _m: PhantomData<OperationTypeDefinition>,
 }
 
-impl<OperationTypeDefinition, Src, Span, Container>
-  RootOperationTypesDefinition<OperationTypeDefinition, Src, Span, Container>
+impl<OperationTypeDefinition, Span, Container>
+  RootOperationTypesDefinition<OperationTypeDefinition, Span, Container>
 {
   /// Returns the span of the operation types definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the left brace span.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
+  pub const fn l_brace(&self) -> &LBrace<Span> {
     &self.l_brace
   }
 
@@ -121,7 +119,7 @@ impl<OperationTypeDefinition, Src, Span, Container>
 
   /// Returns the right brace span.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
+  pub const fn r_brace(&self) -> &RBrace<Span> {
     &self.r_brace
   }
 
@@ -129,10 +127,10 @@ impl<OperationTypeDefinition, Src, Span, Container>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    LBrace<Src, Span>,
+    Span,
+    LBrace<Span>,
     Container,
-    RBrace<Src, Span>,
+    RBrace<Span>,
   ) {
     (
       self.span,
@@ -147,12 +145,10 @@ impl<OperationTypeDefinition, Src, Span, Container>
     operation_type_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, OperationTypeDefinition, E> + Clone,
     Container: chumsky::container::Container<OperationTypeDefinition>,
   {
@@ -168,7 +164,7 @@ impl<OperationTypeDefinition, Src, Span, Container>
       .then(RBrace::parser())
       .map_with(
         |((l_brace, operation_type_definitions), r_brace), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           l_brace,
           operation_type_definitions,
           r_brace,

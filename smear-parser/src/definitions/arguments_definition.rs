@@ -11,6 +11,7 @@ use super::super::{
   },
   source::Source,
   spanned::Spanned,
+  convert::*,
 };
 
 /// The arguments definition.
@@ -19,23 +20,51 @@ use super::super::{
 #[derive(Debug, Clone)]
 pub struct ArgumentsDefinition<
   InputValueDefinition,
-  Src,
   Span,
   Container = Vec<InputValueDefinition>,
 > {
-  span: Spanned<Src, Span>,
+  span: Span,
+  l_paren: LParen<Span>,
   values: Container,
-  l_paren: LParen<Src, Span>,
-  r_paren: RParen<Src, Span>,
+  r_paren: RParen<Span>,
   _input_value_definition: PhantomData<InputValueDefinition>,
 }
 
-impl<InputValueDefinition, Src, Span, Container>
-  ArgumentsDefinition<InputValueDefinition, Src, Span, Container>
+impl<InputValueDefinition, Span, Container> AsRef<Span>
+  for ArgumentsDefinition<InputValueDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<InputValueDefinition, Span, Container> IntoSpanned<Span>
+  for ArgumentsDefinition<InputValueDefinition, Span, Container>
+{
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<InputValueDefinition, Span, Container> IntoComponents
+  for ArgumentsDefinition<InputValueDefinition, Span, Container>
+{
+  type Components = (Span, LParen<Span>, Container, RParen<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_paren, self.values, self.r_paren)
+  }
+}
+
+impl<InputValueDefinition, Span, Container>
+  ArgumentsDefinition<InputValueDefinition, Span, Container>
 {
   /// The span of the arguments definition.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
@@ -47,13 +76,13 @@ impl<InputValueDefinition, Src, Span, Container>
 
   /// The left parenthesis of the arguments definition.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Src, Span> {
+  pub const fn l_paren(&self) -> &LParen<Span> {
     &self.l_paren
   }
 
   /// The right parenthesis of the arguments definition.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Src, Span> {
+  pub const fn r_paren(&self) -> &RParen<Span> {
     &self.r_paren
   }
 
@@ -63,32 +92,23 @@ impl<InputValueDefinition, Src, Span, Container>
     input_value_definition_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
-    let ws = ignored();
-    let open = LParen::parser();
-    let close = RParen::parser();
-
-    // Each item is padded by Ignored so commas/newlines/etc work naturally
-    let item = input_value_definition_parser.padded_by(ws.clone());
-
-    open
+    LParen::parser()
       // allow Ignored right after '(' (e.g., newlines/commas)
-      .then_ignore(ws.clone())
+      .then_ignore(ignored())
       // one-or-more items, collected into `Container`
-      .then(item.repeated().at_least(1).collect())
+      .then(input_value_definition_parser.padded_by(ignored()).repeated().at_least(1).collect())
       // optional Ignored before ')'
-      .then_ignore(ws.clone())
-      .then(close)
+      .then_ignore(ignored())
+      .then(RParen::parser())
       .map_with(|((l_paren, values), r_paren), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         values,
         l_paren,
         r_paren,

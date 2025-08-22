@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, language::punct::Equal, source::Source, spanned::Spanned},
+  super::{char::Char, language::punct::Equal, source::Source, spanned::Spanned, convert::*},
   ignored,
 };
 
@@ -114,22 +114,22 @@ pub trait InputValue<const CONST: bool> {}
 
 /// Default input value
 #[derive(Debug, Clone)]
-pub struct DefaultInputValue<Value, Src, Span> {
-  span: Spanned<Src, Span>,
-  eq: Equal<Src, Span>,
+pub struct DefaultInputValue<Value, Span> {
+  span: Span,
+  eq: Equal<Span>,
   value: Value,
 }
 
-impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
+impl<Value, Span> DefaultInputValue<Value, Span> {
   /// Returns the span of the default input value
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns a reference to the equal token
   #[inline]
-  pub const fn eq(&self) -> &Equal<Src, Span> {
+  pub const fn eq(&self) -> &Equal<Span> {
     &self.eq
   }
 
@@ -142,12 +142,10 @@ impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
   /// Returns a parser of default input value.
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
     Value: InputValue<true>,
   {
@@ -155,10 +153,32 @@ impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
       .then_ignore(ignored::ignored())
       .then(value)
       .map_with(|(eq, value), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         eq,
         value,
       })
-      .then_ignore(ignored::ignored())
+  }
+}
+
+impl<Value, Span> AsRef<Span> for DefaultInputValue<Value, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Value, Span> IntoSpanned<Span> for DefaultInputValue<Value, Span> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Value, Span> IntoComponents for DefaultInputValue<Value, Span> {
+  type Components = (Span, Equal<Span>, Value);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.eq, self.value)
   }
 }

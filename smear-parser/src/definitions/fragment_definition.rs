@@ -10,39 +10,39 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct FragmentDefinition<SelectionSet, Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  fragment: Fragment<Src, Span>,
-  name: Name<Src, Span>,
-  type_condition: TypeCondition<Src, Span>,
+pub struct FragmentDefinition<SelectionSet, Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  fragment: Fragment<Span>,
+  name: Name<Span>,
+  type_condition: TypeCondition<Span>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Directives, Src, Span> {
+impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives, Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   #[inline]
-  pub const fn fragment_keyword(&self) -> &Fragment<Src, Span> {
+  pub const fn fragment_keyword(&self) -> &Fragment<Span> {
     &self.fragment
   }
 
   #[inline]
-  pub const fn type_condition(&self) -> &TypeCondition<Src, Span> {
+  pub const fn type_condition(&self) -> &TypeCondition<Span> {
     &self.type_condition
   }
 
@@ -60,10 +60,10 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    Option<StringValue<Src, Span>>,
-    Name<Src, Span>,
-    TypeCondition<Src, Span>,
+    Span,
+    Option<StringValue<Span>>,
+    Name<Span>,
+    TypeCondition<Span>,
     Option<Directives>,
     SelectionSet,
   ) {
@@ -83,11 +83,10 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
     directives_parser: impl FnOnce() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -99,7 +98,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
       .then_ignore(ignored())
       .then(Fragment::parser())
       .then_ignore(ignored())
-      .then(Name::<Src, Span>::parser())
+      .then(Name::<Span>::parser())
       .then_ignore(ignored())
       .then(TypeCondition::parser())
       .then_ignore(ignored())
@@ -115,7 +114,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
             type_condition,
             directives,
             selection_set,
-            span: Spanned::from(sp),
+            span: Spanned::from_map_extra(sp),
           }
         },
       )

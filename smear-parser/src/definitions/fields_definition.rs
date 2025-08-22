@@ -15,29 +15,29 @@ use super::super::{
 };
 
 #[derive(Debug, Clone)]
-pub struct FieldDefinition<Args, Type, Directives, Src, Span> {
-  span: Spanned<Src, Span>,
-  description: Option<StringValue<Src, Span>>,
-  name: Name<Src, Span>,
+pub struct FieldDefinition<Args, Type, Directives, Span> {
+  span: Span,
+  description: Option<StringValue<Span>>,
+  name: Name<Span>,
   arguments_definition: Option<Args>,
-  colon: Colon<Src, Span>,
+  colon: Colon<Span>,
   ty: Type,
   directives: Option<Directives>,
 }
 
-impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, Src, Span> {
+impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span> {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Src, Span>> {
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
     self.description.as_ref()
   }
 
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -47,7 +47,7 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   }
 
   #[inline]
-  pub const fn colon(&self) -> &Colon<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Span> {
     &self.colon
   }
 
@@ -65,10 +65,10 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
   pub fn into_components(
     self,
   ) -> (
-    Option<StringValue<Src, Span>>,
-    Name<Src, Span>,
+    Option<StringValue<Span>>,
+    Name<Span>,
     Option<Args>,
-    Colon<Src, Span>,
+    Colon<Span>,
     Type,
     Option<Directives>,
   ) {
@@ -90,11 +90,10 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
     directives_parser: impl FnOnce() -> DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
@@ -111,7 +110,7 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
       .then(directives_parser().or_not())
       .map_with(
         |(((((description, name), arguments_definition), colon), ty), directives), sp| Self {
-          span: Spanned::from(sp),
+          span: Spanned::from_map_extra(sp),
           description,
           name,
           arguments_definition,
@@ -124,29 +123,29 @@ impl<Args, Type, Directives, Src, Span> FieldDefinition<Args, Type, Directives, 
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldsDefinition<FieldDefinition, Src, Span, Container = Vec<FieldDefinition>> {
-  span: Spanned<Src, Span>,
-  l_brace: LBrace<Src, Span>,
-  r_brace: RBrace<Src, Span>,
+pub struct FieldsDefinition<FieldDefinition, Span, Container = Vec<FieldDefinition>> {
+  span: Span,
+  l_brace: LBrace<Span>,
+  r_brace: RBrace<Span>,
   fields: Container,
   _m: PhantomData<FieldDefinition>,
 }
 
-impl<FieldDefinition, Src, Span, Container>
-  FieldsDefinition<FieldDefinition, Src, Span, Container>
+impl<FieldDefinition, Span, Container>
+  FieldsDefinition<FieldDefinition, Span, Container>
 {
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Src, Span> {
+  pub const fn l_brace(&self) -> &LBrace<Span> {
     &self.l_brace
   }
 
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Src, Span> {
+  pub const fn r_brace(&self) -> &RBrace<Span> {
     &self.r_brace
   }
 
@@ -164,9 +163,9 @@ impl<FieldDefinition, Src, Span, Container>
   pub fn into_components(
     self,
   ) -> (
-    Spanned<Src, Span>,
-    LBrace<Src, Span>,
-    RBrace<Src, Span>,
+    Span,
+    LBrace<Span>,
+    RBrace<Span>,
     Container,
   ) {
     (self.span, self.l_brace, self.r_brace, self.fields)
@@ -176,11 +175,10 @@ impl<FieldDefinition, Src, Span, Container>
     field_definition_parser: impl FnOnce() -> P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
 
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
@@ -197,7 +195,7 @@ impl<FieldDefinition, Src, Span, Container>
       .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, fields), r_brace), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         l_brace,
         r_brace,
         fields,

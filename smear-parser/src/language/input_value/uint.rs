@@ -75,16 +75,16 @@ use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 /// - Copy-pasting zero-padded numbers (`001`, `042`)
 /// - Including unnecessary leading zeros from other systems
 #[derive(Debug, Clone, Copy)]
-pub struct UintValue<Src, Span>(Spanned<Src, Span>);
+pub struct UintValue<Span>(Span);
 
-impl<Src, Span> UintValue<Src, Span> {
+impl<Span> UintValue<Span> {
   /// Returns the source span of the unsigned integer.
   ///
   /// This provides access to the original source location and text of the
   /// unsigned integer, useful for error reporting, source mapping, extracting
   /// the actual numeric string for conversion, and building higher-level
   /// numeric AST nodes.
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.0
   }
 
@@ -95,34 +95,35 @@ impl<Src, Span> UintValue<Src, Span> {
   /// to handle the two valid cases: zero and non-zero integers.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     one_of(I::NON_ZERO_DIGITS)
       .then(one_of(I::DIGITS).repeated().ignored())
       .ignored()
-      .map_with(|_, sp| Self(Spanned::from(sp)))
-      .or(just(I::Token::ZERO).map_with(|_, sp| Self(Spanned::from(sp))))
+      .map_with(|_, sp| Self(Spanned::from_map_extra(sp)))
+      .or(just(I::Token::ZERO).map_with(|_, sp| Self(Spanned::from_map_extra(sp))))
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for UintValue<Src, Span> {
+impl<Span> AsRef<Span> for UintValue<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for UintValue<Src, Span> {
+impl<Span> IntoSpanned<Span> for UintValue<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.0
   }
 }
 
-impl<Src, Span> IntoComponents for UintValue<Src, Span> {
-  type Components = Spanned<Src, Span>;
+impl<Span> IntoComponents for UintValue<Span> {
+  type Components = Span;
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -132,12 +133,14 @@ impl<Src, Span> IntoComponents for UintValue<Src, Span> {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use crate::spanned::WithSource;
+
+use super::*;
 
   fn uint_parser<'a>(
-  ) -> impl Parser<'a, &'a str, UintValue<&'a str, SimpleSpan>, extra::Err<Simple<'a, char>>> + Clone
+  ) -> impl Parser<'a, &'a str, UintValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
   {
-    UintValue::<&str, SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+    UintValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
   }
 
   #[test]

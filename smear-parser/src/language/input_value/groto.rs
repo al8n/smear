@@ -20,41 +20,41 @@
 // #[unwrap(ref, ref_mut)]
 // #[try_unwrap(ref, ref_mut)]
 // #[non_exhaustive]
-// pub enum InputValue<Src, Span> {
+// pub enum InputValue<Span> {
 //   /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
-//   Variable(Variable<Src, Span>),
+//   Variable(Variable<Span>),
 //   /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)
 //   ///
 //   /// Instead of giving a type of number, keep the raw string representation, let the
 //   /// upper layers handle the conversion.
-//   Int(IntValue<Src, Span>),
+//   Int(IntValue<Span>),
 //   /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
 //   ///
 //   /// Instead of giving a type of float, keep the raw string representation, let the
 //   /// upper layers handle the conversion.
-//   Float(FloatValue<Src, Span>),
+//   Float(FloatValue<Span>),
 //   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
-//   Boolean(BooleanValue<Src, Span>),
+//   Boolean(BooleanValue<Span>),
 //   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
-//   String(StringValue<Src, Span>),
+//   String(StringValue<Span>),
 //   /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
-//   Null(NullValue<Src, Span>),
+//   Null(NullValue<Span>),
 //   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
-//   Enum(EnumValue<Src, Span>),
+//   Enum(EnumValue<Span>),
 //   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-//   List(List<Self, Src, Span>),
+//   List(List<Self, Span>),
 //   /// Spec: [Set Value](https://spec.graphql.org/draft/#sec-Set-Value)
-//   Set(Set<Self, Src, Span>),
+//   Set(Set<Self, Span>),
 //   /// Spec: [Map Value](https://spec.graphql.org/draft/#sec-Map-Value)
-//   Map(Map<Self, Src, Span>),
+//   Map(Map<Self, Span>),
 //   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
-//   Object(Object<Self, Src, Span>),
+//   Object(Object<Self, Span>),
 // }
 
-// impl<Src, Span> InputValue<Src, Span> {
+// impl<Span> InputValue<Span> {
 //   /// Returns the span of the input value.
 //   #[inline]
-//   pub const fn span(&self) -> &Spanned<Src, Span> {
+//   pub const fn span(&self) -> &Span {
 //     match self {
 //       Self::Variable(value) => value.span(),
 //       Self::Int(value) => value.span(),
@@ -71,13 +71,13 @@
 //   }
 // }
 
-// impl<Src, Span> InputValue<Src, Span> {
+// impl<Span> InputValue<Span> {
 //   /// Returns a parser for the input value.
 //   ///
 //   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
 //   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
 //   where
-//     I: Source<'src, Slice = Src, Span = Span>,
+//     I: Source<'src>,
 //     I::Token: Char + 'src,
 //     Src: 'src,
 //     Span: 'src,
@@ -131,39 +131,39 @@
 // #[unwrap(ref, ref_mut)]
 // #[try_unwrap(ref, ref_mut)]
 // #[non_exhaustive]
-// pub enum ConstInputValue<Src, Span> {
+// pub enum ConstInputValue<Span> {
 //   /// Spec: [Int Value](https://spec.graphql.org/draft/#sec-Int-Value)
 //   ///
 //   /// Instead of giving a type of number, keep the raw string representation, let the
 //   /// upper layers handle the conversion.
-//   Int(IntValue<Src, Span>),
+//   Int(IntValue<Span>),
 //   /// Spec: [Float Value](https://spec.graphql.org/draft/#sec-Float-Value)
 //   ///
 //   /// Instead of giving a type of float, keep the raw string representation, let the
 //   /// upper layers handle the conversion.
-//   Float(FloatValue<Src, Span>),
+//   Float(FloatValue<Span>),
 //   /// Spec: [Boolean Value](https://spec.graphql.org/draft/#sec-Boolean-Value)
-//   Boolean(BooleanValue<Src, Span>),
+//   Boolean(BooleanValue<Span>),
 //   /// Spec: [String Value](https://spec.graphql.org/draft/#sec-String-Value)
-//   String(StringValue<Src, Span>),
+//   String(StringValue<Span>),
 //   /// Spec: [Null Value](https://spec.graphql.org/draft/#sec-Null-Value)
-//   Null(NullValue<Src, Span>),
+//   Null(NullValue<Span>),
 //   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
-//   Enum(EnumValue<Src, Span>),
+//   Enum(EnumValue<Span>),
 //   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-//   List(List<Self, Src, Span>),
+//   List(List<Self, Span>),
 //   /// Spec: [Set Value](https://spec.graphql.org/draft/#sec-Set-Value)
-//   Set(Set<Self, Src, Span>),
+//   Set(Set<Self, Span>),
 //   /// Spec: [Map Value](https://spec.graphql.org/draft/#sec-Map-Value)
-//   Map(Map<Self, Src, Span>),
+//   Map(Map<Self, Span>),
 //   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
-//   Object(Object<Self, Src, Span>),
+//   Object(Object<Self, Span>),
 // }
 
-// impl<Src, Span> ConstInputValue<Src, Span> {
+// impl<Span> ConstInputValue<Span> {
 //   /// Returns the span of the input value.
 //   #[inline]
-//   pub const fn span(&self) -> &Spanned<Src, Span> {
+//   pub const fn span(&self) -> &Span {
 //     match self {
 //       Self::Int(value) => value.span(),
 //       Self::Float(value) => value.span(),
@@ -179,13 +179,13 @@
 //   }
 // }
 
-// impl<Src, Span> ConstInputValue<Src, Span> {
+// impl<Span> ConstInputValue<Span> {
 //   /// Returns a parser for the input value.
 //   ///
 //   /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
 //   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
 //   where
-//     I: Source<'src, Slice = Src, Span = Span>,
+//     I: Source<'src>,
 //     I::Token: Char + 'src,
 //     Src: 'src,
 //     Span: 'src,

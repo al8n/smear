@@ -1,36 +1,60 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, name::Name, source::Source, spanned::Spanned},
-  punct::{LParen, RParen},
+  super::{char::Char, name::Name, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
+  punct::{LParen, RParen, Colon},
 };
 
+use core::marker::PhantomData;
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct Argument<Value, Src, Span> {
-  span: Spanned<Src, Span>,
-  name: Name<Src, Span>,
-  colon: Spanned<Src, Span>,
+pub struct Argument<Value, Span> {
+  span: Span,
+  name: Name<Span>,
+  colon: Colon<Span>,
   value: Value,
 }
 
-impl<Value, Src, Span> Argument<Value, Src, Span> {
+impl<Value, Span> AsRef<Span> for Argument<Value, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Value, Span> IntoSpanned<Span> for Argument<Value, Span> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Value, Span> IntoComponents for Argument<Value, Span> {
+  type Components = (Span, Name<Span>, Colon<Span>, Value);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.name, self.colon, self.value)
+  }
+}
+
+impl<Value, Span> Argument<Value, Span> {
   /// Returns the span of the argument.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the span of the colon
   #[inline]
-  pub const fn colon(&self) -> &Spanned<Src, Span> {
+  pub const fn colon(&self) -> &Colon<Span> {
     &self.colon
   }
 
   /// Returns the span of the argument name
   #[inline]
-  pub const fn name(&self) -> &Name<Src, Span> {
+  pub const fn name(&self) -> &Name<Span> {
     &self.name
   }
 
@@ -43,58 +67,75 @@ impl<Value, Src, Span> Argument<Value, Src, Span> {
   /// Returns a parser for the argument.
   pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
   {
-    let ws = super::ignored::ignored();
-
-    Name::<Src, Span>::parser()
+    Name::parser()
       .then(
-        just(I::Token::COLON)
-          .map_with(|_, sp| Spanned::from(sp))
-          .padded_by(ws.clone()), // padding around the colon
+        Colon::parser()
+          .padded_by(ignored()),
       )
       .then(value)
       .map_with(|((name, colon), value), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         name,
         colon,
         value,
       })
-      .then_ignore(ws)
   }
 }
 
 #[derive(Debug, Clone)]
-pub struct Arguments<Arg, Src, Span, Container = Vec<Arg>> {
-  span: Spanned<Src, Span>,
-  l_paren: LParen<Src, Span>,
+pub struct Arguments<Arg, Span, Container = Vec<Arg>> {
+  span: Span,
+  l_paren: LParen<Span>,
   arguments: Container,
-  r_paren: RParen<Src, Span>,
-  _arg: core::marker::PhantomData<Arg>,
+  r_paren: RParen<Span>,
+  _arg: PhantomData<Arg>,
 }
 
-impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container> {
+impl<Arg, Span, Container> AsRef<Span> for Arguments<Arg, Span, Container> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Arg, Span, Container> IntoSpanned<Span> for Arguments<Arg, Span, Container> {
+  #[inline]
+  fn into_spanned(self) -> Span {
+    self.span
+  }
+}
+
+impl<Arg, Span, Container> IntoComponents for Arguments<Arg, Span, Container> {
+  type Components = (Span, LParen<Span>, Container, RParen<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_paren, self.arguments, self.r_paren)
+  }
+}
+
+impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
   /// Returns the span of the arguments.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the left parenthesis of the arguments.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Src, Span> {
+  pub const fn l_paren(&self) -> &LParen<Span> {
     &self.l_paren
   }
 
   /// Returns the right parenthesis of the arguments.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Src, Span> {
+  pub const fn r_paren(&self) -> &RParen<Span> {
     &self.r_paren
   }
 
@@ -109,49 +150,39 @@ impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container> {
   pub fn into_arguments(self) -> Container {
     self.arguments
   }
-}
 
-impl<Value, Src, Span, Container> Arguments<Value, Src, Span, Container>
-where
-  Container: AsRef<[Argument<Value, Src, Span>]>,
-{
-  /// Returns the arguments as a slice.
-  #[inline]
-  pub fn arguments_slice(&self) -> &[Argument<Value, Src, Span>] {
-    self.arguments().as_ref()
-  }
-}
-
-impl<Arg, Src, Span, Container> Arguments<Arg, Src, Span, Container>
-where
-  Container: chumsky::container::Container<Arg>,
-{
   /// Returns a parser to parse arguments.
-  pub fn parser_with<'src, I, E, P>(arg: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(arg_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
-    Src: 'src,
-    Span: 'src,
     E: ParserExtra<'src, I>,
-
+    Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Arg, E> + Clone,
+    Container: chumsky::container::Container<Arg>,
   {
-    let ws = super::ignored::ignored();
-    let open = LParen::parser();
-    let close = RParen::parser();
-
     // '(' ws? arg+ ')'
-    open
-      .then_ignore(ws.clone())
-      .then(arg.repeated().at_least(1).collect())
-      .then(close)
+    LParen::parser()
+      .then_ignore(ignored())
+      .then(arg_parser.padded_by(ignored()).repeated().at_least(1).collect())
+      .then(RParen::parser())
       .map_with(|((l_paren, arguments), r_paren), sp| Self {
-        span: Spanned::from(sp),
+        span: Spanned::from_map_extra(sp),
         l_paren,
         arguments,
         r_paren,
-        _arg: core::marker::PhantomData,
+        _arg: PhantomData,
       })
+  }
+}
+
+impl<Value, Span, Container> Arguments<Value, Span, Container>
+where
+  Container: AsRef<[Argument<Value, Span>]>,
+{
+  /// Returns the arguments as a slice.
+  #[inline]
+  pub fn arguments_slice(&self) -> &[Argument<Value, Span>] {
+    self.arguments().as_ref()
   }
 }

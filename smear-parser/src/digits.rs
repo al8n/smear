@@ -64,16 +64,12 @@ use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 /// Higher-level parsers combine this with other components to build complete
 /// numeric literals with proper validation and semantic meaning.
 #[derive(Debug, Clone, Copy)]
-pub struct Digits<Src, Span>(Spanned<Src, Span>);
+pub struct Digits<Span>(Span);
 
-impl<Src, Span> Digits<Src, Span> {
+impl<Span> Digits<Span> {
   /// Returns the source span of the digit sequence.
-  ///
-  /// This provides access to the original source location and text of the
-  /// digits, useful for error reporting, source mapping, extracting the
-  /// actual numeric string, and building higher-level numeric types.
   #[inline]
-  pub const fn span(&self) -> &Spanned<Src, Span> {
+  pub const fn span(&self) -> &Span {
     &self.0
   }
 
@@ -84,34 +80,35 @@ impl<Src, Span> Digits<Src, Span> {
   /// numeric parsers in GraphQL literals.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src, Slice = Src, Span = Span>,
+    I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
+    Span: Spanned<'src, I, E>,
   {
     one_of(I::DIGITS)
       .repeated()
       .at_least(1)
       .ignored()
-      .map_with(|_, sp| Self(Spanned::from(sp)))
+      .map_with(|_, sp| Self(Spanned::from_map_extra(sp)))
   }
 }
 
-impl<Src, Span> AsSpanned<Src, Span> for Digits<Src, Span> {
+impl<Span> AsRef<Span> for Digits<Span> {
   #[inline]
-  fn as_spanned(&self) -> &Spanned<Src, Span> {
+  fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Src, Span> IntoSpanned<Src, Span> for Digits<Src, Span> {
+impl<Span> IntoSpanned<Span> for Digits<Span> {
   #[inline]
-  fn into_spanned(self) -> Spanned<Src, Span> {
+  fn into_spanned(self) -> Span {
     self.0
   }
 }
 
-impl<Src, Span> IntoComponents for Digits<Src, Span> {
-  type Components = Spanned<Src, Span>;
+impl<Span> IntoComponents for Digits<Span> {
+  type Components = Span;
 
   #[inline]
   fn into_components(self) -> Self::Components {

@@ -17,50 +17,50 @@ macro_rules! word {
       $(
         $(#[$meta])*
         #[derive(Debug, Clone, Copy)]
-        pub struct $name<Src, Span>($crate::__private::Spanned<Src, Span>);
+        pub struct $name<Span>(Span);
 
-        impl<Src, Span> $crate::__private::AsSpanned<Src, Span> for $name<Src, Span> {
+        impl<Span> ::core::convert::AsRef<Span> for $name<Span> {
           #[inline]
-          fn as_spanned(&self) -> &$crate::__private::Spanned<Src, Span> {
+          fn as_ref(&self) -> &Span {
             self.span()
           }
         }
 
-        impl<Src, Span> $crate::__private::IntoSpanned<Src, Span> for $name<Src, Span> {
+        impl<Span> $crate::__private::IntoSpanned<Span> for $name<Span> {
           #[inline]
-          fn into_spanned(self) -> $crate::__private::Spanned<Src, Span> {
+          fn into_spanned(self) -> Span {
             self.0
           }
         }
 
-        impl<Src, Span> $crate::__private::IntoComponents for $name<Src, Span> {
-          type Components = $crate::__private::Spanned<Src, Span>;
+        impl<Span> $crate::__private::IntoComponents for $name<Span> {
+          type Components = Span;
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            self.0
+            <$name<Span> as $crate::__private::IntoSpanned<Span>>::into_spanned(self)
           }
         }
 
-        impl<Src, Span> $name<Src, Span> {
+        impl<Span> $name<Span> {
           #[doc = "Returns the span of the `" $label "`."]
           #[inline]
-          pub const fn span(&self) -> &$crate::__private::Spanned<Src, Span> {
+          pub const fn span(&self) -> &Span {
             &self.0
           }
 
           #[doc = "Returns the parser for the `" $label "`."]
           pub fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
           where
-            I: $crate::__private::Source<'src, Slice = Src, Span = Span>,
+            I: $crate::__private::Source<'src>,
             I::Token: $crate::__private::Char + 'src,
             E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+            Span: $crate::__private::Spanned<'src, I, E>,
           {
-            use ::core::convert::From;
             use $crate::__private::{Char as _, chumsky::Parser as _};
 
             $crate::__private::chumsky::prelude::just($expr)
-              .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
+              .map_with(|_, sp| Self($crate::__private::Spanned::from_map_extra(sp)))
           }
         }
       )*
