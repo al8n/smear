@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -58,7 +58,7 @@ impl<Directives, Src, Span> EnumValueDefinition<Directives, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -139,7 +139,7 @@ impl<EnumValueDefinition, Src, Span, Container>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -247,7 +247,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -296,7 +296,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
     I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
   {
@@ -385,7 +385,7 @@ impl<Directives, EnumValuesDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

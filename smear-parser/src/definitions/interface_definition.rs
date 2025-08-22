@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -40,7 +40,6 @@ impl<Src, Span> ImplementInterface<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Ampersand::parser()
       .or_not()
@@ -61,7 +60,6 @@ impl<Src, Span> ImplementInterface<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Ampersand::parser()
       .then_ignore(ignored())
@@ -121,7 +119,7 @@ impl<Src, Span, Container> ImplementInterfaces<Src, Span, Container> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     Container: chumsky::container::Container<ImplementInterface<Src, Span>>,
   {
     let ws = ignored();
@@ -226,7 +224,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -281,7 +279,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
     I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -379,7 +377,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,

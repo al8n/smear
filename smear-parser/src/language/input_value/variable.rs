@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{
@@ -49,7 +49,6 @@ impl<Src, Span> Variable<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Dollar::parser()
       .then_ignore(ignored())
@@ -59,6 +58,5 @@ impl<Src, Span> Variable<Src, Span> {
         span: Spanned::from(sp),
         dollar,
       })
-      .labelled("variable value")
   }
 }

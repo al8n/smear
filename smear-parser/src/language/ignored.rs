@@ -1,6 +1,6 @@
 use crate::{char::Char, source::Source};
 
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 /// LineTerminator  ::  <LF> | <CR> [<LF>]
 /// Treat CR and CRLF as a single terminator.
@@ -9,7 +9,6 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
   choice((
     just(I::Token::LINE_FEED).ignored(),
@@ -17,7 +16,6 @@ where
       .then(just(I::Token::LINE_FEED).or_not())
       .ignored(),
   ))
-  .labelled("line terminator")
 }
 
 /// Comment  ::  '#' CommentChar*
@@ -28,7 +26,6 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
   just(I::Token::HASH)
     .ignore_then(
@@ -40,7 +37,6 @@ where
         .repeated(),
     )
     .ignored()
-    .labelled("comment")
 }
 
 /// WhiteSpace  :: U+0009 (TAB) | U+0020 (SPACE)
@@ -49,11 +45,8 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
-  choice((just(I::Token::SPACE), just(I::Token::TAB)))
-    .ignored()
-    .labelled("white space")
+  choice((just(I::Token::SPACE), just(I::Token::TAB))).ignored()
 }
 
 /// Comma is insignificant in GraphQL (treat like whitespace).
@@ -62,9 +55,8 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
-  just(I::Token::COMMA).ignored().labelled("comma ,")
+  just(I::Token::COMMA).ignored()
 }
 
 /// Unicode BOM — may appear *at the start of the source*.
@@ -74,9 +66,8 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
-  just(I::Token::bom()).ignored().labelled("BOM")
+  just(I::Token::bom()).ignored()
 }
 
 /// Ignored tokens *between* meaningful tokens (no BOM here).
@@ -86,10 +77,8 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
 {
   choice((bom(), white_space(), line_terminator(), comment(), comma()))
     .repeated()
     .ignored()
-    .labelled("ignored tokens")
 }

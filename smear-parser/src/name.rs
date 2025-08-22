@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{char::Char, convert::*, source::Source, spanned::Spanned};
 
@@ -136,7 +136,6 @@ impl<Src, Span> Name<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     // [_A-Za-z]
     let start = one_of([
@@ -194,7 +193,6 @@ impl<Src, Span> Name<Src, Span> {
       I::Token::y,
       I::Token::z,
     ])
-    .labelled("name start")
     .ignored();
 
     // [_0-9A-Za-z]*
@@ -266,10 +264,7 @@ impl<Src, Span> Name<Src, Span> {
     .ignored()
     .repeated();
 
-    start
-      .then(cont)
-      .map_with(|_, sp| Name(Spanned::from(sp)))
-      .labelled("name")
+    start.then(cont).map_with(|_, sp| Name(Spanned::from(sp)))
   }
 }
 

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
@@ -98,14 +98,12 @@ impl<Src, Span> UintValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     one_of(I::NON_ZERO_DIGITS)
       .then(one_of(I::DIGITS).repeated().ignored())
       .ignored()
       .map_with(|_, sp| Self(Spanned::from(sp)))
       .or(just(I::Token::ZERO).map_with(|_, sp| Self(Spanned::from(sp))))
-      .labelled("uint value")
   }
 }
 

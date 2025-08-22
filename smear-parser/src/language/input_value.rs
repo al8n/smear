@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{char::Char, language::punct::Equal, source::Source, spanned::Spanned},
@@ -147,7 +147,7 @@ impl<Value, Src, Span> DefaultInputValue<Value, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, Value, E> + Clone,
     Value: InputValue<true>,
   {

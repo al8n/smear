@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -46,7 +46,6 @@ impl<Src, Span> OperationType<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       Query::parser().map(Self::Query),

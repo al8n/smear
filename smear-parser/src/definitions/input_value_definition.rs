@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -98,7 +98,7 @@ impl<Type, DefaultValue, Directives, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, DefaultValue, E> + Clone,

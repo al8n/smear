@@ -1,6 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
 use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
@@ -37,7 +35,6 @@ impl<Src, Span> FragmentSpread<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     field::FragmentSpread::parser_with(Directives::parser()).map(Self)
   }
@@ -82,7 +79,6 @@ impl<Src, Span> InlineFragment<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     field::InlineFragment::parser_with(SelectionSet::parser(), Directives::parser()).map(Self)
   }
@@ -138,7 +134,6 @@ impl<Src, Span> Field<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     field::Field::parser_with(
       Arguments::parser(),
@@ -173,7 +168,6 @@ impl<Src, Span> Selection<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|selection| {
       let selset =
@@ -236,7 +230,6 @@ impl<Src, Span> SelectionSetValue<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|selset| {
       let field_p =

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -100,7 +100,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -182,7 +182,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,

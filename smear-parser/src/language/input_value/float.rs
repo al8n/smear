@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   char::Char,
@@ -73,12 +73,10 @@ impl<Src, Span> ExponentSign<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Minus::parser()
       .map(Self::Negative)
       .or(Plus::parser().map(Self::Positive))
-      .labelled("sign")
   }
 }
 
@@ -165,12 +163,10 @@ impl<Src, Span> ExponentIdentifier<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     just(I::Token::e)
       .or(just(I::Token::E))
       .map_with(|_, span| Self(Spanned::from(span)))
-      .labelled("exponent identifier")
   }
 }
 
@@ -282,7 +278,6 @@ impl<Src, Span> Exponent<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     ExponentIdentifier::parser()
       .then(ExponentSign::parser().or_not())
@@ -293,7 +288,6 @@ impl<Src, Span> Exponent<Src, Span> {
         sign,
         digits,
       })
-      .labelled("exponent")
   }
 }
 
@@ -389,7 +383,6 @@ impl<Src, Span> Fractional<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Dot::parser()
       .then(Digits::parser())
@@ -398,7 +391,6 @@ impl<Src, Span> Fractional<Src, Span> {
         dot,
         digits,
       })
-      .labelled("fractional")
   }
 }
 
@@ -565,7 +557,6 @@ impl<Src, Span> FloatValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     IntValue::<Src, Span>::parser()
       .then(Fractional::parser().then(Exponent::parser().or_not()))
@@ -585,7 +576,6 @@ impl<Src, Span> FloatValue<Src, Span> {
             exponent: Some(exp),
           }),
       )
-      .labelled("float value")
   }
 }
 

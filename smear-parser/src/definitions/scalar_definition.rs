@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -77,7 +77,7 @@ impl<Directives, Src, Span> ScalarDefinition<Directives, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -169,7 +169,7 @@ impl<Directives, Src, Span> ScalarExtension<Directives, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()

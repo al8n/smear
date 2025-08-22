@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -49,7 +49,6 @@ impl<Src, Span> UnionMemberType<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Pipe::parser()
       .or_not()
@@ -70,7 +69,6 @@ impl<Src, Span> UnionMemberType<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Pipe::parser()
       .then_ignore(ignored())
@@ -112,7 +110,7 @@ impl<Src, Span, Container> UnionMemberTypes<Src, Span, Container> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     Container: chumsky::container::Container<UnionMemberType<Src, Span>>,
   {
     Equal::parser()
@@ -181,7 +179,7 @@ impl<Directives, MemberTypes, Src, Span> UnionDefinition<Directives, MemberTypes
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -228,7 +226,7 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
     I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -309,7 +307,7 @@ impl<Directives, MemberTypes, Src, Span> UnionExtension<Directives, MemberTypes,
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {

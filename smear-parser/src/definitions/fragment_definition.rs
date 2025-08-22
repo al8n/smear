@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -88,7 +88,7 @@ impl<SelectionSet, Directives, Src, Span> FragmentDefinition<SelectionSet, Direc
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

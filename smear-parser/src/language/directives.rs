@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{char::Char, name::Name, source::Source, spanned::Spanned},
@@ -48,7 +48,7 @@ impl<Args, Src, Span> Directive<Args, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, Args, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -104,7 +104,7 @@ where
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, Directive, E> + Clone,
   {
     directive

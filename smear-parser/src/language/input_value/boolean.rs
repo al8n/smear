@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
@@ -55,7 +55,6 @@ impl<Src, Span> BooleanValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     just([I::Token::t, I::Token::r, I::Token::u, I::Token::e])
       .to(true)
@@ -73,7 +72,6 @@ impl<Src, Span> BooleanValue<Src, Span> {
         span: Spanned::from(span),
         value: data,
       })
-      .labelled("boolean value")
   }
 }
 

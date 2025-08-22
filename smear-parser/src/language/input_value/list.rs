@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   super::{char::Char, convert::*, source::Source, spanned::Spanned},
@@ -140,7 +140,7 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
     Span: 'src,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
     Value: crate::language::input_value::InputValue<CONST>,
@@ -173,11 +173,6 @@ impl<Value, Src, Span, Container> ListValue<Value, Src, Span, Container> {
         r_bracket,
         values,
         _value: core::marker::PhantomData,
-      })
-      .labelled(if CONST {
-        "const list value"
-      } else {
-        "list value"
       })
   }
 }

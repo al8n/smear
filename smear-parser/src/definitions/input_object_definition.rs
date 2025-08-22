@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -84,7 +84,7 @@ impl<FieldsDefinition, Directives, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -131,7 +131,7 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
     I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
   {
@@ -207,7 +207,7 @@ impl<Directives, FieldsDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

@@ -1,6 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
 use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
@@ -46,7 +44,6 @@ impl<Src, Span> Directive<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     directives::Directive::parser_with(Arguments::parser()).map(Self)
   }
@@ -88,7 +85,6 @@ impl<Src, Span> ConstDirective<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     directives::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
@@ -120,7 +116,6 @@ impl<Src, Span> Directives<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     directives::Directives::parser_with(Directive::parser()).map(Self)
   }
@@ -152,7 +147,6 @@ impl<Src, Span> ConstDirectives<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     directives::Directives::parser_with(ConstDirective::parser()).map(Self)
   }

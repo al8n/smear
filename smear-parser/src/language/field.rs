@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{char::Char, keywords, name::Name, source::Source, spanned::Spanned},
@@ -37,7 +37,6 @@ impl<Src, Span> TypeCondition<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     let ws = super::ignored::ignored();
 
@@ -81,7 +80,7 @@ impl<Directives, Src, Span> FragmentSpread<Directives, Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, Directives, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -156,7 +155,7 @@ impl<SelectionSet, Directives, Src, Span> InlineFragment<SelectionSet, Directive
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     PS: Parser<'src, I, SelectionSet, E> + Clone,
     P: Parser<'src, I, Directives, E> + Clone,
   {
@@ -213,7 +212,6 @@ impl<Src, Span> Alias<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     let ws = super::ignored::ignored();
 
@@ -228,7 +226,6 @@ impl<Src, Span> Alias<Src, Span> {
         name,
         colon,
       })
-      .labelled("alias")
   }
 }
 
@@ -285,7 +282,7 @@ where
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     PS: Parser<'src, I, S, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -308,7 +305,6 @@ where
         r_brace,
         _marker: PhantomData,
       })
-      .labelled("selection set")
   }
 }
 
@@ -371,7 +367,7 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     AP: Parser<'src, I, Args, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
@@ -398,6 +394,5 @@ impl<Args, Directives, SelectionSet, Src, Span> Field<Args, Directives, Selectio
           selection_set,
         },
       )
-      .labelled("field")
   }
 }

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   super::{char::Char, convert::*, source::Source, spanned::Spanned},
@@ -314,7 +314,6 @@ impl<Src, Span> StringValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     // let quote = Quote::<Src, Span>::parser();
 
@@ -420,7 +419,7 @@ impl<Src, Span> StringValue<Src, Span> {
         content,
       });
 
-    block_string.or(inline_string).labelled("string value")
+    block_string.or(inline_string)
   }
 }
 

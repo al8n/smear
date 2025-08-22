@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -68,7 +68,7 @@ impl<InputValueDefinition, Src, Span, Container>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {

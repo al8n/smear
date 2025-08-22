@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -92,7 +92,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -147,7 +147,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
     I: Source<'src>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -245,7 +245,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,

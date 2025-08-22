@@ -1,6 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
 use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
@@ -50,7 +48,6 @@ impl<Src, Span> Argument<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
@@ -92,7 +89,6 @@ impl<Src, Span> ConstArgument<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
@@ -141,7 +137,6 @@ impl<Src, Span> Arguments<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Arguments::parser_with(Argument::parser()).map(Self)
   }
@@ -190,7 +185,6 @@ impl<Src, Span> ConstArguments<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     arguments::Arguments::parser_with(ConstArgument::parser()).map(Self)
   }

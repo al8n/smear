@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -97,7 +97,7 @@ impl<Type, Directives, Value, Src, Span> VariableDefinition<Type, Directives, Va
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
@@ -182,7 +182,7 @@ impl<VariableDefinition, Src, Span, Container>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     Container: chumsky::container::Container<VariableDefinition>,
     P: Parser<'src, I, VariableDefinition, E> + Clone,
   {

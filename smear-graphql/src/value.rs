@@ -1,6 +1,4 @@
-use chumsky::{
-  extra::ParserExtra, label::LabelError, prelude::*, text::TextExpected, util::MaybeRef,
-};
+use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
 
 use super::{
   language::{
@@ -84,7 +82,6 @@ impl<Src, Span> InputValue<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|value| {
       let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
@@ -177,7 +174,6 @@ impl<Src, Span> ConstInputValue<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     recursive(|value| {
       // scalars (whatever you already have)
@@ -241,7 +237,6 @@ impl<Src, Span> DefaultInputValue<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     input_value::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }

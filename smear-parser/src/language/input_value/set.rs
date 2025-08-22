@@ -1,4 +1,4 @@
-use chumsky::{container::Container, extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
   super::{char::Char, source::Source, spanned::Spanned},
@@ -40,7 +40,7 @@ where
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, T, E> + Clone,
   {
     let ws = super::ignored::ignored();

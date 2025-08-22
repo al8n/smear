@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   char::Char,
@@ -186,7 +186,6 @@ impl<Src, Span> IntValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Minus::parser()
       .or_not()
@@ -196,7 +195,6 @@ impl<Src, Span> IntValue<Src, Span> {
         sign,
         digits,
       })
-      .labelled("int value")
   }
 }
 

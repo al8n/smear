@@ -47,14 +47,11 @@ macro_rules! punct {
           I: $crate::__private::Source<'src, Slice = Src, Span = Span>,
           I::Token: $crate::__private::Char + 'src,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
-          E::Error:
-            $crate::__private::chumsky::label::LabelError<'src, I, &'static ::core::primitive::str>,
         {
           use $crate::__private::{chumsky::prelude::*, Char};
 
           just($tokens)
             .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
-            .labelled(::core::concat!(::core::stringify!($token_name), " ", $token))
         }
       }
     }

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned};
 
@@ -131,7 +131,6 @@ impl<Src, Span> EnumValue<Src, Span> {
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Name::<Src, Span>::parser()
       .filter(|name| {
@@ -139,7 +138,6 @@ impl<Src, Span> EnumValue<Src, Span> {
         !(I::is_true_slice(src) || I::is_false_slice(src) || I::is_null_slice(src))
       })
       .map(|name| Self { name })
-      .labelled("enum value")
   }
 }
 

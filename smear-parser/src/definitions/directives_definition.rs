@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -111,7 +111,6 @@ impl<Src, Span> ExecutableDirectiveLocation<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -190,7 +189,6 @@ impl<Src, Span> TypeSystemDirectiveLocation<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -247,7 +245,6 @@ impl<Src, Span> Location<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -333,7 +330,6 @@ impl<Location, Src, Span> DirectiveLocation<Location, Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     Pipe::parser()
       .or_not()
@@ -377,7 +373,7 @@ impl<Location, Src, Span, Container> DirectiveLocations<Location, Src, Span, Con
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     Container: chumsky::container::Container<Location>,
   {
     directive_location_parser
@@ -474,7 +470,6 @@ impl<Args, Locations, Src, Span> DirectiveDefinition<Args, Locations, Src, Span>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()

@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
@@ -87,7 +87,6 @@ impl<Src, Span> Digits<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     one_of(I::DIGITS)
       .repeated()

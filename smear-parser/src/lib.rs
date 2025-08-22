@@ -55,15 +55,12 @@ macro_rules! word {
             I: $crate::__private::Source<'src, Slice = Src, Span = Span>,
             I::Token: $crate::__private::Char + 'src,
             E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
-            E::Error:
-              $crate::__private::chumsky::label::LabelError<'src, I, &'static ::core::primitive::str>
           {
             use ::core::convert::From;
             use $crate::__private::{Char as _, chumsky::Parser as _};
 
             $crate::__private::chumsky::prelude::just($expr)
               .map_with(|_, sp| Self($crate::__private::Spanned::from(sp)))
-              .labelled($label)
           }
         }
       )*

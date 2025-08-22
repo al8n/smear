@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
@@ -69,7 +69,7 @@ impl<OperationType, Src, Span> RootOperationTypeDefinition<OperationType, Src, S
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, OperationType, E> + Clone,
   {
     operation_type_parser()
@@ -152,7 +152,7 @@ impl<OperationTypeDefinition, Src, Span, Container>
     Src: 'src,
     Span: 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
+
     P: Parser<'src, I, OperationTypeDefinition, E> + Clone,
     Container: chumsky::container::Container<OperationTypeDefinition>,
   {

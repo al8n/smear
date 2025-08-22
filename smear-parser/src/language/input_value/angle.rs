@@ -1,4 +1,4 @@
-use chumsky::{container::Container, extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 use either::Either;
 
 use super::super::{
@@ -21,7 +21,6 @@ where
   I::Slice: 'src,
   I::Span: 'src,
   E: ParserExtra<'src, I>,
-  E::Error: LabelError<'src, I, &'static str>,
   P: Parser<'src, I, T, E> + Clone,
   CM: Container<MapValueEntry<T, I::Slice, I::Span>>,
   CS: Container<T>,
@@ -44,11 +43,7 @@ where
     .rewind();
 
   map_guard
-    .ignore_then(MapValue::<T, _, _, CM>::parser_with(value.clone()).labelled("map value"))
+    .ignore_then(MapValue::<T, _, _, CM>::parser_with(value.clone()))
     .map(Either::Right)
-    .or(
-      SetValue::<T, _, _, CS>::parser_with(value)
-        .labelled("set value")
-        .map(Either::Left),
-    )
+    .or(SetValue::<T, _, _, CS>::parser_with(value).map(Either::Left))
 }

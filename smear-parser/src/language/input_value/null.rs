@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, label::LabelError, prelude::*};
+use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
 
@@ -50,11 +50,9 @@ impl<Src, Span> NullValue<Src, Span> {
     I: Source<'src, Slice = Src, Span = Span>,
     I::Token: Char + 'src,
     E: ParserExtra<'src, I>,
-    E::Error: LabelError<'src, I, &'static str>,
   {
     just([I::Token::n, I::Token::u, I::Token::l, I::Token::l])
       .map_with(|_, span| Self(Spanned::from(span)))
-      .labelled("null value")
   }
 }
 
