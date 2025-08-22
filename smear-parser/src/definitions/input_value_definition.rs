@@ -1,10 +1,9 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   language::{ignored::ignored, input_value::StringValue, punct::Colon},
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -95,6 +94,7 @@ impl<Type, DefaultValue, Directives, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

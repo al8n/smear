@@ -1,8 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned};
-
-use super::{BooleanValue, NullValue};
+use crate::{
+  convert::*,
+  name::Name,
+  source::{Char, Slice, Source},
+  spanned::Spanned,
+};
 
 /// A GraphQL enum value identifier.
 ///
@@ -130,17 +133,20 @@ impl<Span> EnumValue<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
-    choice((
-      BooleanValue::<Span>::parser().ignored(),
-      NullValue::<Span>::parser().ignored(),
-    ))
-    .not()
-    .rewind()
-    .then(Name::parser())
-    .map(|(_, name)| Self { name })
+    Name::<Span>::parser()
+      .to_slice()
+      .filter(|slice| {
+        !(slice.equivalent(null_tokens::<I::Token>().into_iter())
+          || slice.equivalent(true_tokens::<I::Token>().into_iter())
+          || slice.equivalent(false_tokens::<I::Token>().into_iter()))
+      })
+      .map_with(|_, sp| Self {
+        name: Name(Spanned::from_map_extra(sp)),
+      })
   }
 }
 
@@ -165,6 +171,30 @@ impl<Span> IntoComponents for EnumValue<Span> {
   fn into_components(self) -> Self::Components {
     self.name
   }
+}
+
+#[inline]
+const fn true_tokens<T>() -> [T; 4]
+where
+  T: Char,
+{
+  [T::t, T::r, T::u, T::e]
+}
+
+#[inline]
+const fn false_tokens<T>() -> [T; 5]
+where
+  T: Char,
+{
+  [T::f, T::a, T::l, T::s, T::e]
+}
+
+#[inline]
+const fn null_tokens<T>() -> [T; 4]
+where
+  T: Char,
+{
+  [T::n, T::u, T::l, T::l]
 }
 
 #[cfg(test)]

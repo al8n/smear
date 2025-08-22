@@ -1,11 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   keywords,
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -74,6 +73,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -165,6 +165,7 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

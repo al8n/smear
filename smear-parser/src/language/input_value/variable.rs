@@ -2,7 +2,12 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{
-    super::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned},
+    super::{
+      convert::*,
+      name::Name,
+      source::{Char, Slice, Source},
+      spanned::Spanned,
+    },
     punct::Dollar,
   },
   ignored::ignored,
@@ -112,6 +117,7 @@ impl<Span> Variable<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

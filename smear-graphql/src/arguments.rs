@@ -45,6 +45,7 @@ impl<Span> Argument<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -85,6 +86,7 @@ impl<Span> ConstArgument<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -132,6 +134,7 @@ impl<Span> Arguments<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -179,6 +182,7 @@ impl<Span> ConstArguments<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

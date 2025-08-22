@@ -3,7 +3,6 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   keywords,
   language::{
     ignored::ignored,
@@ -11,7 +10,7 @@ use super::super::{
     punct::{At, Pipe},
   },
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -110,6 +109,7 @@ impl<Span> ExecutableDirectiveLocation<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -189,6 +189,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -246,6 +247,7 @@ impl<Span> Location<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -332,6 +334,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -376,6 +379,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     Container: chumsky::container::Container<Location>,
@@ -471,6 +475,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

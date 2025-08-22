@@ -1,11 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   keywords,
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -79,6 +78,7 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -127,6 +127,7 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -199,6 +200,7 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

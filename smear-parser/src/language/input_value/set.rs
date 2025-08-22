@@ -1,12 +1,17 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, language::ignored::ignored, source::Source, spanned::Spanned},
+  super::{
+    convert::*,
+    language::ignored::ignored,
+    source::{Char, Slice, Source},
+    spanned::Spanned,
+  },
   punct::{LAngle, RAngle},
 };
 
 #[derive(Debug, Clone)]
-pub struct SetValue<T, Span, C = Vec<T>> {
+pub struct Set<T, Span, C = Vec<T>> {
   span: Span,
   l_angle: LAngle<Span>,
   r_angle: RAngle<Span>,
@@ -14,21 +19,21 @@ pub struct SetValue<T, Span, C = Vec<T>> {
   _marker: core::marker::PhantomData<T>,
 }
 
-impl<T, Span, C> AsRef<Span> for SetValue<T, Span, C> {
+impl<T, Span, C> AsRef<Span> for Set<T, Span, C> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<T, Span, C> IntoSpanned<Span> for SetValue<T, Span, C> {
+impl<T, Span, C> IntoSpanned<Span> for Set<T, Span, C> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<T, Span, C> IntoComponents for SetValue<T, Span, C> {
+impl<T, Span, C> IntoComponents for Set<T, Span, C> {
   type Components = (Span, LAngle<Span>, C, RAngle<Span>);
 
   #[inline]
@@ -37,7 +42,7 @@ impl<T, Span, C> IntoComponents for SetValue<T, Span, C> {
   }
 }
 
-impl<T, Span, C> SetValue<T, Span, C> {
+impl<T, Span, C> Set<T, Span, C> {
   pub const fn span(&self) -> &Span {
     &self.span
   }
@@ -54,6 +59,7 @@ impl<T, Span, C> SetValue<T, Span, C> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, T, E> + Clone,

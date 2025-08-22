@@ -4,7 +4,7 @@
 // };
 // use either::Either;
 
-// use super::{char::Char, spanned::Spanned, source::Source};
+// use super::{spanned::Spanned, source::Source};
 
 // use super::*;
 
@@ -79,6 +79,7 @@
 //   where
 //     I: Source<'src>,
 //     I::Token: Char + 'src,
+//     I::Slice: Slice<Token = I::Token>,
 //     Src: 'src,
 //     Span: 'src,
 //     E: ParserExtra<'src, I>,
@@ -187,6 +188,7 @@
 //   where
 //     I: Source<'src>,
 //     I::Token: Char + 'src,
+//  I::Slice: Slice<Token = I::Token>,
 //     Src: 'src,
 //     Span: 'src,
 //     E: ParserExtra<'src, I>,

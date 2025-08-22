@@ -3,13 +3,12 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   language::{
     ignored::ignored,
     input_value::{DefaultInputValue, StringValue, Variable},
     punct::{Colon, LParen, RParen},
   },
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -94,6 +93,7 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     TP: Parser<'src, I, Type, E> + Clone,
@@ -168,6 +168,7 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

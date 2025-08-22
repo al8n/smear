@@ -1,6 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{char::Char, convert::*, source::Source, spanned::Spanned};
+use super::{
+  convert::*,
+  source::{Char, Slice, Source},
+  spanned::Spanned,
+};
 
 /// A GraphQL name identifier.
 ///
@@ -133,6 +137,8 @@ impl<Span> Name<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

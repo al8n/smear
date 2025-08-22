@@ -1,11 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  char::Char,
   convert::*,
   digits::Digits,
   language::punct::{Dot, Minus, Plus},
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -72,6 +71,7 @@ impl<Span> ExponentSign<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -163,6 +163,7 @@ impl<Span> ExponentIdentifier<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -279,6 +280,7 @@ impl<Span> Exponent<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -385,6 +387,7 @@ impl<Span> Fractional<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -560,6 +563,7 @@ impl<Span> FloatValue<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

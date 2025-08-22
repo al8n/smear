@@ -4,12 +4,11 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use super::super::{
-  char::Char,
   language::{
     ignored::ignored,
     punct::{LBrace, RBrace},
   },
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -61,6 +60,7 @@ impl<InputValueDefinition, Span, Container>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,

@@ -1,10 +1,9 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -96,6 +95,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     OP: Parser<'src, I, OperationType, E> + Clone,
@@ -162,6 +162,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

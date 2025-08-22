@@ -1,11 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   keywords,
   language::{ignored::ignored, input_value::StringValue, punct::Ampersand},
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -37,6 +36,7 @@ impl<Span> ImplementInterface<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -56,6 +56,7 @@ impl<Span> ImplementInterface<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -108,6 +109,7 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -212,6 +214,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -268,6 +271,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
 
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -364,6 +368,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

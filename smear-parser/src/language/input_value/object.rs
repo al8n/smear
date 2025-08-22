@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   super::{
-    char::Char, convert::*, language::ignored::ignored, name::Name, source::Source,
+    convert::*,
+    language::ignored::ignored,
+    name::Name,
+    source::{Char, Slice, Source},
     spanned::Spanned,
   },
   punct::{Colon, LBrace, RBrace},
@@ -130,6 +133,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, InputValue, E> + Clone,
@@ -324,6 +328,7 @@ impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Field, E> + Clone,

@@ -1,7 +1,13 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, convert::*, keywords, name::Name, source::Source, spanned::Spanned},
+  super::{
+    convert::*,
+    keywords,
+    name::Name,
+    source::{Char, Slice, Source},
+    spanned::Spanned,
+  },
   ignored::ignored,
   punct::{Colon, Ellipsis, LBrace, RBrace},
 };
@@ -34,6 +40,7 @@ impl<Span> TypeCondition<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -119,6 +126,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Directives, E> + Clone,
@@ -232,6 +240,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
@@ -309,6 +318,7 @@ impl<Span> Alias<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -368,6 +378,7 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Selection, E> + Clone,
@@ -492,6 +503,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,

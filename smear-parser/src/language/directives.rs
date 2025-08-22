@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{
-    char::Char, convert::*, language::ignored::ignored, name::Name, source::Source,
+    convert::*,
+    language::ignored::ignored,
+    name::Name,
+    source::{Char, Slice, Source},
     spanned::Spanned,
   },
   punct::At,
@@ -72,6 +75,7 @@ impl<Args, Span> Directive<Args, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Args, E> + Clone,
@@ -138,6 +142,7 @@ impl<Directive, Span, Container> Directives<Directive, Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Directive, E> + Clone,

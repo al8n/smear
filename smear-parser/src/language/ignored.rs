@@ -1,4 +1,4 @@
-use crate::{char::Char, source::Source};
+use crate::source::{Char, Slice, Source};
 
 use chumsky::{extra::ParserExtra, prelude::*};
 
@@ -8,6 +8,7 @@ pub fn line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   choice((
@@ -25,6 +26,7 @@ pub fn comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   just(I::Token::HASH)
@@ -44,6 +46,7 @@ pub fn white_space<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   choice((just(I::Token::SPACE), just(I::Token::TAB))).ignored()
@@ -54,6 +57,7 @@ pub fn comma<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   just(I::Token::COMMA).ignored()
@@ -65,6 +69,7 @@ pub fn bom<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   just(I::Token::bom()).ignored()
@@ -76,6 +81,7 @@ pub fn ignored<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
 where
   I: Source<'src>,
   I::Token: Char + 'src,
+  I::Slice: Slice<Token = I::Token>,
   E: ParserExtra<'src, I>,
 {
   choice((bom(), white_space(), line_terminator(), comment(), comma()))

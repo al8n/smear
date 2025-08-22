@@ -3,14 +3,13 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   language::{
     ignored::ignored,
     input_value::StringValue,
     punct::{Colon, LBrace, RBrace},
   },
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -92,6 +91,7 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -168,6 +168,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

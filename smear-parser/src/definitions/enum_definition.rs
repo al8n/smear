@@ -1,7 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   convert::*,
   keywords,
   language::{
@@ -10,7 +9,7 @@ use super::super::{
     punct::{LBrace, RBrace},
   },
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -89,6 +88,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -179,6 +179,7 @@ impl<EnumValueDefinition, Span, Container>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
@@ -328,6 +329,7 @@ impl<Directives, EnumValuesDefinition, Span>
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -378,6 +380,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -463,6 +466,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

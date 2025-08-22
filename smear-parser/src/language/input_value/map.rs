@@ -1,7 +1,12 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, language::ignored::ignored, source::Source, spanned::Spanned},
+  super::{
+    convert::*,
+    language::ignored::ignored,
+    source::{Char, Slice, Source},
+    spanned::Spanned,
+  },
   punct::{Colon, LAngle, RAngle},
 };
 
@@ -59,6 +64,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
@@ -130,6 +136,7 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,

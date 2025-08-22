@@ -1,7 +1,12 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, convert::*, language::punct::Equal, source::Source, spanned::Spanned},
+  super::{
+    convert::*,
+    language::punct::Equal,
+    source::{Char, Slice, Source},
+    spanned::Spanned,
+  },
   ignored,
 };
 
@@ -144,6 +149,7 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,

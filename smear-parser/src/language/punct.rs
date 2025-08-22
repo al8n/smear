@@ -46,6 +46,7 @@ macro_rules! punct {
         where
           I: $crate::__private::Source<'src>,
           I::Token: $crate::__private::Char + 'src,
+          I::Slice: $crate::__private::Slice<Token = I::Token>,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
           Span: $crate::__private::Spanned<'src, I, E>,
         {

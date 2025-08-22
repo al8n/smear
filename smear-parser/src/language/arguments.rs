@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{
-    char::Char, convert::*, language::ignored::ignored, name::Name, source::Source,
+    convert::*,
+    language::ignored::ignored,
+    name::Name,
+    source::{Char, Slice, Source},
     spanned::Spanned,
   },
   punct::{Colon, LParen, RParen},
@@ -72,6 +75,7 @@ impl<Value, Span> Argument<Value, Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
@@ -156,6 +160,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
     P: Parser<'src, I, Arg, E> + Clone,

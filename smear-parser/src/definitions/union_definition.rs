@@ -1,7 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  char::Char,
   keywords,
   language::{
     ignored::ignored,
@@ -9,7 +8,7 @@ use super::super::{
     punct::{Equal, Pipe},
   },
   name::Name,
-  source::Source,
+  source::{Char, Slice, Source},
   spanned::Spanned,
 };
 
@@ -46,6 +45,7 @@ impl<Span> UnionMemberType<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -65,6 +65,7 @@ impl<Span> UnionMemberType<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {
@@ -105,6 +106,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -173,6 +175,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 
@@ -221,6 +224,7 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -300,6 +304,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
 

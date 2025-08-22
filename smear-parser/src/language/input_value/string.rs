@@ -1,7 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, source::Source, spanned::Spanned},
+  super::{
+    convert::*,
+    source::{Char, Slice, Source},
+    spanned::Spanned,
+  },
   punct::{Quote, TripleQuote},
 };
 
@@ -313,6 +317,7 @@ impl<Span> StringValue<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

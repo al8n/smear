@@ -1,6 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{char::Char, convert::*, source::Source, spanned::Spanned};
+use crate::{
+  convert::*,
+  source::{Char, Slice, Source},
+  spanned::Spanned,
+};
 
 /// A parsed GraphQL **Boolean Value** (`true` or `false`).
 ///
@@ -54,6 +58,7 @@ impl<Span> BooleanValue<Span> {
   where
     I: Source<'src>,
     I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: Spanned<'src, I, E>,
   {

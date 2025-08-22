@@ -54,6 +54,7 @@ macro_rules! word {
           where
             I: $crate::__private::Source<'src>,
             I::Token: $crate::__private::Char + 'src,
+            I::Slice: $crate::__private::Slice<Token = I::Token>,
             E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
             Span: $crate::__private::Spanned<'src, I, E>,
           {
@@ -89,9 +90,6 @@ pub mod parser;
 /// The spanned
 pub mod spanned;
 
-/// Character trait and implementations
-pub mod char;
-
 /// Conversion related traits
 pub mod convert;
 
@@ -104,7 +102,7 @@ mod utils;
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{char::Char, convert::*, source::Source, spanned::Spanned};
+  pub use super::{convert::*, source::*, spanned::Spanned};
 }
 
 #[cfg(all(feature = "std", test))]
