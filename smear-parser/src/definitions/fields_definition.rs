@@ -131,9 +131,7 @@ pub struct FieldsDefinition<FieldDefinition, Span, Container = Vec<FieldDefiniti
   _m: PhantomData<FieldDefinition>,
 }
 
-impl<FieldDefinition, Span, Container>
-  FieldsDefinition<FieldDefinition, Span, Container>
-{
+impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -160,14 +158,7 @@ impl<FieldDefinition, Span, Container>
   }
 
   #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    LBrace<Span>,
-    RBrace<Span>,
-    Container,
-  ) {
+  pub fn into_components(self) -> (Span, LBrace<Span>, RBrace<Span>, Container) {
     (self.span, self.l_brace, self.r_brace, self.fields)
   }
 

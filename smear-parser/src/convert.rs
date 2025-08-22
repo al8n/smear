@@ -105,4 +105,3 @@ pub trait IntoComponents {
   /// returned components is defined by the `Components` associated type.
   fn into_components(self) -> Self::Components;
 }
-

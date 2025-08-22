@@ -2,6 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   char::Char,
+  convert::*,
   keywords,
   language::{
     ignored::ignored,
@@ -11,7 +12,6 @@ use super::super::{
   name::Name,
   source::Source,
   spanned::Spanned,
-  convert::*,
 };
 
 use core::marker::PhantomData;
@@ -40,11 +40,21 @@ impl<Directives, Span> IntoSpanned<Span> for EnumValueDefinition<Directives, Spa
 }
 
 impl<Directives, Span> IntoComponents for EnumValueDefinition<Directives, Span> {
-  type Components = (Span, Option<StringValue<Span>>, EnumValue<Span>, Option<Directives>);
+  type Components = (
+    Span,
+    Option<StringValue<Span>>,
+    EnumValue<Span>,
+    Option<Directives>,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.description, self.enum_value, self.directives)
+    (
+      self.span,
+      self.description,
+      self.enum_value,
+      self.directives,
+    )
   }
 }
 
@@ -99,11 +109,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct EnumValuesDefinition<
-  EnumValueDefinition,
-  Span,
-  Container = Vec<EnumValueDefinition>,
-> {
+pub struct EnumValuesDefinition<EnumValueDefinition, Span, Container = Vec<EnumValueDefinition>> {
   span: Span,
   l_brace: LBrace<Span>,
   r_brace: RBrace<Span>,
@@ -111,8 +117,8 @@ pub struct EnumValuesDefinition<
   _m: PhantomData<EnumValueDefinition>,
 }
 
-impl<EnumValueDefinition, Span, Container>
-  AsRef<Span> for EnumValuesDefinition<EnumValueDefinition, Span, Container>
+impl<EnumValueDefinition, Span, Container> AsRef<Span>
+  for EnumValuesDefinition<EnumValueDefinition, Span, Container>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -120,8 +126,8 @@ impl<EnumValueDefinition, Span, Container>
   }
 }
 
-impl<EnumValueDefinition, Span, Container>
-  IntoSpanned<Span> for EnumValuesDefinition<EnumValueDefinition, Span, Container>
+impl<EnumValueDefinition, Span, Container> IntoSpanned<Span>
+  for EnumValuesDefinition<EnumValueDefinition, Span, Container>
 {
   #[inline]
   fn into_spanned(self) -> Span {
@@ -209,8 +215,8 @@ pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
   enum_values: Option<EnumValuesDefinition>,
 }
 
-impl<Directives, EnumValuesDefinition, Span>
-  AsRef<Span> for EnumDefinition<Directives, EnumValuesDefinition, Span>
+impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
+  for EnumDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -218,8 +224,8 @@ impl<Directives, EnumValuesDefinition, Span>
   }
 }
 
-impl<Directives, EnumValuesDefinition, Span>
-  IntoSpanned<Span> for EnumDefinition<Directives, EnumValuesDefinition, Span>
+impl<Directives, EnumValuesDefinition, Span> IntoSpanned<Span>
+  for EnumDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn into_spanned(self) -> Span {
@@ -397,9 +403,7 @@ pub struct EnumExtension<Directives, EnumValuesDefinition, Span> {
   content: EnumExtensionContent<Directives, EnumValuesDefinition>,
 }
 
-impl<Directives, EnumValuesDefinition, Span>
-  EnumExtension<Directives, EnumValuesDefinition, Span>
-{
+impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValuesDefinition, Span> {
   /// The span of the enum definition.
   #[inline]
   pub const fn span(&self) -> &Span {

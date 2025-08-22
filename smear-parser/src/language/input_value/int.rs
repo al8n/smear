@@ -117,11 +117,7 @@ impl<Span> IntoSpanned<Span> for IntValue<Span> {
 }
 
 impl<Span> IntoComponents for IntValue<Span> {
-  type Components = (
-    Span,
-    Option<Minus<Span>>,
-    UintValue<Span>,
-  );
+  type Components = (Span, Option<Minus<Span>>, UintValue<Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -205,9 +201,10 @@ mod tests {
   use crate::spanned::WithSource;
 
   fn int_parser<'a>(
-  ) -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
-  {
-    IntValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+  ) -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
+       + Clone {
+    IntValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
+      .then_ignore(end())
   }
 
   #[test]

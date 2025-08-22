@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned};
 
-use super::{NullValue, BooleanValue};
+use super::{BooleanValue, NullValue};
 
 /// A GraphQL enum value identifier.
 ///
@@ -170,13 +170,14 @@ impl<Span> IntoComponents for EnumValue<Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chumsky::{error::Simple, extra};
   use crate::spanned::WithSource;
+  use chumsky::{error::Simple, extra};
 
   fn enum_parser<'a>(
-  ) -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
-  {
-    EnumValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+  ) -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
+       + Clone {
+    EnumValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
+      .then_ignore(end())
   }
 
   #[test]

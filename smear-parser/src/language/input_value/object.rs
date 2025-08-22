@@ -1,7 +1,10 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned, language::ignored::ignored},
+  super::{
+    char::Char, convert::*, language::ignored::ignored, name::Name, source::Source,
+    spanned::Spanned,
+  },
   punct::{Colon, LBrace, RBrace},
 };
 
@@ -68,12 +71,7 @@ impl<InputValue, Span> IntoSpanned<Span> for ObjectValueField<InputValue, Span> 
 }
 
 impl<InputValue, Span> IntoComponents for ObjectValueField<InputValue, Span> {
-  type Components = (
-    Span,
-    Name<Span>,
-    Colon<Span>,
-    InputValue,
-  );
+  type Components = (Span, Name<Span>, Colon<Span>, InputValue);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -83,7 +81,7 @@ impl<InputValue, Span> IntoComponents for ObjectValueField<InputValue, Span> {
 
 impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   /// Returns the source span of the entire field.
-  /// 
+  ///
   /// This span covers from the first character of the field name through
   /// the last character of the field value, providing the complete source
   /// location for error reporting and source mapping.
@@ -93,7 +91,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   }
 
   /// Returns the colon separator token.
-  /// 
+  ///
   /// This provides access to the `:` character that separates the field
   /// name from its value, including its exact source position. Useful
   /// for syntax highlighting and precise error reporting.
@@ -103,7 +101,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   }
 
   /// Returns the field name.
-  /// 
+  ///
   /// This provides access to the GraphQL name that identifies this field
   /// within the object. The name follows standard GraphQL identifier rules
   /// and cannot be a reserved keyword.
@@ -113,7 +111,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
   }
 
   /// Returns the field value.
-  /// 
+  ///
   /// This provides access to the value assigned to this field. The value
   /// can be any valid GraphQL input value type including scalars, enums,
   /// lists, nested objects, or null.
@@ -193,14 +191,14 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 ///   age: 25,
 ///   active: true
 /// }                           // Multi-line format
-/// 
+///
 /// // Constant context (default values)
 /// {
 ///   name: "default",
 ///   count: 10,
 ///   enabled: true
 /// }
-/// 
+///
 /// // Variable context (query arguments)
 /// {
 ///   name: $userName,
@@ -251,18 +249,14 @@ pub struct ObjectValue<Field, Span, Container = std::vec::Vec<Field>> {
   _field: core::marker::PhantomData<Field>,
 }
 
-impl<Field, Span, Container> AsRef<Span>
-  for ObjectValue<Field, Span, Container>
-{
+impl<Field, Span, Container> AsRef<Span> for ObjectValue<Field, Span, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Field, Span, Container> IntoSpanned<Span>
-  for ObjectValue<Field, Span, Container>
-{
+impl<Field, Span, Container> IntoSpanned<Span> for ObjectValue<Field, Span, Container> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -270,12 +264,7 @@ impl<Field, Span, Container> IntoSpanned<Span>
 }
 
 impl<Field, Span, Container> IntoComponents for ObjectValue<Field, Span, Container> {
-  type Components = (
-    Span,
-    LBrace<Span>,
-    Container,
-    RBrace<Span>,
-  );
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -340,7 +329,7 @@ impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
     P: Parser<'src, I, Field, E> + Clone,
     Container: chumsky::container::Container<Field>,
   {
-    LBrace::parser() 
+    LBrace::parser()
       .then_ignore(ignored())
       .then(choice((
         // Empty fast path: immediately '}'

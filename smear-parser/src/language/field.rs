@@ -1,9 +1,9 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, keywords, name::Name, source::Source, spanned::Spanned, convert::*},
+  super::{char::Char, convert::*, keywords, name::Name, source::Source, spanned::Spanned},
   ignored::ignored,
-  punct::{Ellipsis, LBrace, RBrace, Colon},
+  punct::{Colon, Ellipsis, LBrace, RBrace},
 };
 
 use core::marker::PhantomData;
@@ -158,26 +158,44 @@ pub struct InlineFragment<Directives, SelectionSet, Span> {
   selection_set: SelectionSet,
 }
 
-impl<Directives, SelectionSet, Span> AsRef<Span> for InlineFragment<Directives, SelectionSet, Span> {
+impl<Directives, SelectionSet, Span> AsRef<Span>
+  for InlineFragment<Directives, SelectionSet, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoSpanned<Span> for InlineFragment<Directives, SelectionSet, Span> {
+impl<Directives, SelectionSet, Span> IntoSpanned<Span>
+  for InlineFragment<Directives, SelectionSet, Span>
+{
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoComponents for InlineFragment<Directives, SelectionSet, Span> {
-  type Components = (Span, Ellipsis<Span>, Option<TypeCondition<Span>>, Option<Directives>, SelectionSet);
+impl<Directives, SelectionSet, Span> IntoComponents
+  for InlineFragment<Directives, SelectionSet, Span>
+{
+  type Components = (
+    Span,
+    Ellipsis<Span>,
+    Option<TypeCondition<Span>>,
+    Option<Directives>,
+    SelectionSet,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ellipsis, self.type_condition, self.directives, self.selection_set)
+    (
+      self.span,
+      self.ellipsis,
+      self.type_condition,
+      self.directives,
+      self.selection_set,
+    )
   }
 }
 
@@ -385,26 +403,46 @@ pub struct Field<Args, Directives, SelectionSet, Span> {
   selection_set: Option<SelectionSet>,
 }
 
-impl<Args, Directives, SelectionSet, Span> AsRef<Span> for Field<Args, Directives, SelectionSet, Span> {
+impl<Args, Directives, SelectionSet, Span> AsRef<Span>
+  for Field<Args, Directives, SelectionSet, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> IntoSpanned<Span> for Field<Args, Directives, SelectionSet, Span> {
+impl<Args, Directives, SelectionSet, Span> IntoSpanned<Span>
+  for Field<Args, Directives, SelectionSet, Span>
+{
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> IntoComponents for Field<Args, Directives, SelectionSet, Span> {
-  type Components = (Span, Option<Alias<Span>>, Name<Span>, Option<Args>, Option<Directives>, Option<SelectionSet>);
+impl<Args, Directives, SelectionSet, Span> IntoComponents
+  for Field<Args, Directives, SelectionSet, Span>
+{
+  type Components = (
+    Span,
+    Option<Alias<Span>>,
+    Name<Span>,
+    Option<Args>,
+    Option<Directives>,
+    Option<SelectionSet>,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.alias, self.name, self.arguments, self.directives, self.selection_set)
+    (
+      self.span,
+      self.alias,
+      self.name,
+      self.arguments,
+      self.directives,
+      self.selection_set,
+    )
   }
 }
 

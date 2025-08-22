@@ -434,11 +434,7 @@ impl<Span> IntoSpanned<Span> for StringValue<Span> {
 }
 
 impl<Span> IntoComponents for StringValue<Span> {
-  type Components = (
-    Span,
-    StringDelimiter<Span>,
-    StringContent<Span>,
-  );
+  type Components = (Span, StringDelimiter<Span>, StringContent<Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -450,13 +446,14 @@ impl<Span> IntoComponents for StringValue<Span> {
 mod tests {
   use crate::spanned::WithSource;
 
-use super::*;
+  use super::*;
   use chumsky::{error::Simple, extra};
 
   type Err<'a> = extra::Err<Simple<'a, char>>;
   type Span = SimpleSpan;
 
-  fn string_parser<'a>() -> impl Parser<'a, &'a str, StringValue<WithSource<&'a str, Span>>, Err<'a>> + Clone {
+  fn string_parser<'a>(
+  ) -> impl Parser<'a, &'a str, StringValue<WithSource<&'a str, Span>>, Err<'a>> + Clone {
     StringValue::<WithSource<&str, Span>>::parser::<&str, Err>().then_ignore(end())
   }
 

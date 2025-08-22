@@ -142,21 +142,9 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum OperationDefinition<
-  OperationType,
-  VariableDefinitions,
-  Directives,
-  SelectionSet,
-  Span,
-> {
+pub enum OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span> {
   Named(
-    NamedOperationDefinition<
-      OperationType,
-      VariableDefinitions,
-      Directives,
-      SelectionSet,
-      Span,
-    >,
+    NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>,
   ),
   Shorten(SelectionSet),
 }

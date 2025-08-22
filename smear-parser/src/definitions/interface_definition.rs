@@ -99,13 +99,7 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
   }
 
   #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    keywords::Implements<Span>,
-    Container,
-  ) {
+  pub fn into_components(self) -> (Span, keywords::Implements<Span>, Container) {
     (self.span, self.implements, self.interfaces)
   }
 

@@ -263,7 +263,9 @@ impl<Span> Name<Span> {
     .ignored()
     .repeated();
 
-    start.then(cont).map_with(|_, sp| Name(Spanned::from_map_extra(sp)))
+    start
+      .then(cont)
+      .map_with(|_, sp| Name(Spanned::from_map_extra(sp)))
   }
 }
 

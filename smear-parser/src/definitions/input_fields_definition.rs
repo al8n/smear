@@ -17,11 +17,8 @@ use super::super::{
 ///
 /// Spec: [InputFieldsDefinition](https://spec.graphql.org/draft/#InputFieldsDefinition)
 #[derive(Debug, Clone)]
-pub struct InputFieldsDefinition<
-  InputValueDefinition,
-  Span,
-  Container = Vec<InputValueDefinition>,
-> {
+pub struct InputFieldsDefinition<InputValueDefinition, Span, Container = Vec<InputValueDefinition>>
+{
   span: Span,
   values: Container,
   l_brace: LBrace<Span>,

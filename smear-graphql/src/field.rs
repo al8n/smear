@@ -85,13 +85,7 @@ impl<Span> InlineFragment<Span> {
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
 pub struct Field<Span>(
-  field::Field<
-    Arguments<Span>,
-    Directives<Span>,
-    SelectionSetValue<Span>,
-    Src,
-    Span,
-  >,
+  field::Field<Arguments<Span>, Directives<Span>, SelectionSetValue<Span>, Src, Span>,
 );
 
 impl<Span> Field<Span> {
@@ -166,8 +160,7 @@ impl<Span> Selection<Span> {
     Span: Spanned<'src, I, E>,
   {
     recursive(|selection| {
-      let selset =
-        field::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
+      let selset = field::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
 
       let field_p =
         field::Field::parser_with(Arguments::parser(), Directives::parser(), selset.clone())

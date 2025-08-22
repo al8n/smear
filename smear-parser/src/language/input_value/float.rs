@@ -590,10 +590,14 @@ mod tests {
   use crate::spanned::WithSource;
   use chumsky::{error::Simple, extra};
 
-  fn float_parser<'a>(
-  ) -> impl Parser<'a, &'a str, FloatValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
-  {
-    FloatValue::<WithSource<&'a str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+  fn float_parser<'a>() -> impl Parser<
+    'a,
+    &'a str,
+    FloatValue<WithSource<&'a str, SimpleSpan>>,
+    extra::Err<Simple<'a, char>>,
+  > + Clone {
+    FloatValue::<WithSource<&'a str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
+      .then_ignore(end())
   }
 
   #[test]

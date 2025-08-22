@@ -102,13 +102,17 @@ impl<Span> IntoComponents for BooleanValue<Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chumsky::{error::Simple, extra};
   use crate::spanned::WithSource;
+  use chumsky::{error::Simple, extra};
 
-  fn boolean_parser<'a>(
-  ) -> impl Parser<'a, &'a str, BooleanValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>> + Clone
-  {
-    BooleanValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>().then_ignore(end())
+  fn boolean_parser<'a>() -> impl Parser<
+    'a,
+    &'a str,
+    BooleanValue<WithSource<&'a str, SimpleSpan>>,
+    extra::Err<Simple<'a, char>>,
+  > + Clone {
+    BooleanValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
+      .then_ignore(end())
   }
 
   #[test]

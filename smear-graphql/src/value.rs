@@ -13,8 +13,7 @@ pub type ListValue<Span> = input_value::ListValue<InputValue<Span>, Span>;
 pub type ConstListValue<Span> = input_value::ListValue<ConstInputValue<Span>, Span>;
 
 pub type ObjectValue<Span> = input_value::ObjectValue<InputValue<Span>, Span>;
-pub type ConstObjectValue<Span> =
-  input_value::ObjectValue<ConstInputValue<Span>, Span>;
+pub type ConstObjectValue<Span> = input_value::ObjectValue<ConstInputValue<Span>, Span>;
 
 /// Input value
 ///
@@ -204,9 +203,7 @@ impl<Span> ConstInputValue<Span> {
 
 /// Default input value
 #[derive(Debug, Clone)]
-pub struct DefaultInputValue<Span>(
-  input_value::DefaultInputValue<ConstInputValue<Span>, Span>,
-);
+pub struct DefaultInputValue<Span>(input_value::DefaultInputValue<ConstInputValue<Span>, Span>);
 
 impl<Span> DefaultInputValue<Span> {
   /// Returns the span of the default input value

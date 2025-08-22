@@ -48,14 +48,7 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
   }
 
   /// Consumes the operation type definition.
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    OperationType,
-    Colon<Span>,
-    Name<Span>,
-  ) {
+  pub fn into_components(self) -> (Span, OperationType, Colon<Span>, Name<Span>) {
     (self.span, self.operation_type, self.colon, self.name)
   }
 
@@ -124,14 +117,7 @@ impl<OperationTypeDefinition, Span, Container>
   }
 
   /// Consumes the operation types definition.
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    LBrace<Span>,
-    Container,
-    RBrace<Span>,
-  ) {
+  pub fn into_components(self) -> (Span, LBrace<Span>, Container, RBrace<Span>) {
     (
       self.span,
       self.l_brace,

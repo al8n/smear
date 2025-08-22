@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, convert::*, source::Source, spanned::Spanned, language::ignored::ignored},
+  super::{char::Char, convert::*, language::ignored::ignored, source::Source, spanned::Spanned},
   punct::{LBracket, RBracket},
 };
 
@@ -144,7 +144,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
     Value: crate::language::input_value::InputValue<CONST>,
   {
     // '[' ws? ( ']' | elem+ ']' )
-    LBracket::parser() 
+    LBracket::parser()
       .then_ignore(ignored())
       .then(choice((
         // Empty fast path: immediately see ']'
@@ -182,12 +182,7 @@ impl<Value, Span, Container> IntoSpanned<Span> for List<Value, Span, Container> 
 }
 
 impl<Value, Span, Container> IntoComponents for List<Value, Span, Container> {
-  type Components = (
-    Span,
-    LBracket<Span>,
-    Container,
-    RBracket<Span>,
-  );
+  type Components = (Span, LBracket<Span>, Container, RBracket<Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {

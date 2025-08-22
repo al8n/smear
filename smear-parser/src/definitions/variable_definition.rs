@@ -133,9 +133,7 @@ pub struct VariablesDefinition<VariableDefinition, Span, Container = Vec<Variabl
   _v: PhantomData<VariableDefinition>,
 }
 
-impl<VariableDefinition, Span, Container>
-  VariablesDefinition<VariableDefinition, Span, Container>
-{
+impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition, Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -162,14 +160,7 @@ impl<VariableDefinition, Span, Container>
   }
 
   #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    LParen<Span>,
-    RParen<Span>,
-    Container,
-  ) {
+  pub fn into_components(self) -> (Span, LParen<Span>, RParen<Span>, Container) {
     (self.span, self.l_paren, self.r_paren, self.variables)
   }
 

@@ -1,8 +1,8 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
-  punct::{LAngle, RAngle, Colon},
+  super::{char::Char, convert::*, language::ignored::ignored, source::Source, spanned::Spanned},
+  punct::{Colon, LAngle, RAngle},
 };
 
 use core::marker::PhantomData;
@@ -123,7 +123,10 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
     &self.fields
   }
 
-  pub fn parser_with<'src, I, E, KP, VP>(key_parser: KP, value_parser: VP) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, KP, VP>(
+    key_parser: KP,
+    value_parser: VP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -142,7 +145,11 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
           .then(RAngle::<Span>::parser())
           .map(|_| C::default()),
         // Non-empty: one-or-more entries; commas live in `ws`
-        MapEntry::<Key, Value, Span>::parser_with(key_parser, value_parser).padded_by(ignored()).repeated().at_least(1).collect::<C>(),
+        MapEntry::<Key, Value, Span>::parser_with(key_parser, value_parser)
+          .padded_by(ignored())
+          .repeated()
+          .at_least(1)
+          .collect::<C>(),
       )))
       .then_ignore(ignored())
       .then(RAngle::parser())
@@ -156,4 +163,3 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
       })
   }
 }
-

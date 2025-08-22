@@ -5,24 +5,20 @@ use std::vec::Vec;
 
 use super::super::{
   char::Char,
+  convert::*,
   language::{
     ignored::ignored,
     punct::{LParen, RParen},
   },
   source::Source,
   spanned::Spanned,
-  convert::*,
 };
 
 /// The arguments definition.
 ///
 /// Spec: [ArgumentsDefinition](https://spec.graphql.org/draft/#ArgumentsDefinition)
 #[derive(Debug, Clone)]
-pub struct ArgumentsDefinition<
-  InputValueDefinition,
-  Span,
-  Container = Vec<InputValueDefinition>,
-> {
+pub struct ArgumentsDefinition<InputValueDefinition, Span, Container = Vec<InputValueDefinition>> {
   span: Span,
   l_paren: LParen<Span>,
   values: Container,

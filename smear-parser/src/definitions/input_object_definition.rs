@@ -19,9 +19,7 @@ pub struct InputObjectDefinition<FieldsDefinition, Directives, Span> {
   fields: Option<FieldsDefinition>,
 }
 
-impl<FieldsDefinition, Directives, Span>
-  InputObjectDefinition<FieldsDefinition, Directives, Span>
-{
+impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition, Directives, Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -154,9 +152,7 @@ pub struct InputObjectExtension<Directives, FieldsDefinition, Span> {
   content: InputObjectExtensionContent<Directives, FieldsDefinition>,
 }
 
-impl<Directives, FieldsDefinition, Span>
-  InputObjectExtension<Directives, FieldsDefinition, Span>
-{
+impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, FieldsDefinition, Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span

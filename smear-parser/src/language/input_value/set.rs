@@ -1,7 +1,7 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{char::Char, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
+  super::{char::Char, convert::*, language::ignored::ignored, source::Source, spanned::Spanned},
   punct::{LAngle, RAngle},
 };
 
@@ -65,7 +65,11 @@ impl<T, Span, C> SetValue<T, Span, C> {
         // Empty: "<>"
         just(I::Token::GREATER_THAN).rewind().map(|_| C::default()),
         // Non-empty: one-or-more elems; commas are in `ws`
-        value_parser.padded_by(ignored()).repeated().at_least(1).collect::<C>(),
+        value_parser
+          .padded_by(ignored())
+          .repeated()
+          .at_least(1)
+          .collect::<C>(),
       )))
       .then_ignore(ignored())
       .then(RAngle::parser())
@@ -78,4 +82,3 @@ impl<T, Span, C> SetValue<T, Span, C> {
       })
   }
 }
-

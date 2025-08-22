@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, language::punct::Equal, source::Source, spanned::Spanned, convert::*},
+  super::{char::Char, convert::*, language::punct::Equal, source::Source, spanned::Spanned},
   ignored,
 };
 

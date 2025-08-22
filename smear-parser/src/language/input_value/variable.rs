@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::{
-    super::{char::Char, name::Name, source::Source, spanned::Spanned, convert::*},
+    super::{char::Char, convert::*, name::Name, source::Source, spanned::Spanned},
     punct::Dollar,
   },
   ignored::ignored,
@@ -72,7 +72,7 @@ pub struct Variable<Span> {
 
 impl<Span> Variable<Span> {
   /// Returns the variable name identifier.
-  /// 
+  ///
   /// This provides access to the GraphQL name that identifies this variable.
   /// The name follows standard GraphQL identifier rules and is used to match
   /// the variable with values provided during execution.
@@ -82,7 +82,7 @@ impl<Span> Variable<Span> {
   }
 
   /// Returns the dollar prefix token.
-  /// 
+  ///
   /// This provides access to the `$` character that prefixes all variable
   /// references, including its exact source position. Useful for syntax
   /// highlighting and precise error reporting.
@@ -92,7 +92,7 @@ impl<Span> Variable<Span> {
   }
 
   /// Returns the source span of the entire variable reference.
-  /// 
+  ///
   /// This span covers from the `$` character through the last character of
   /// the variable name, providing the complete source location for error
   /// reporting and source mapping.

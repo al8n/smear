@@ -1,4 +1,7 @@
-use chumsky::{extra::ParserExtra, input::{Input, SliceInput, MapExtra}};
+use chumsky::{
+  extra::ParserExtra,
+  input::{Input, MapExtra, SliceInput},
+};
 
 /// A value paired with its source span information.
 ///
@@ -91,8 +94,8 @@ impl<Source, Span> WithSource<Source, Span> {
   }
 }
 
-impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>>
-  From<&mut MapExtra<'src, 'b, I, E>> for WithSource<I::Slice, I::Span>
+impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>> From<&mut MapExtra<'src, 'b, I, E>>
+  for WithSource<I::Slice, I::Span>
 {
   #[inline]
   fn from(value: &mut MapExtra<'src, 'b, I, E>) -> Self {
@@ -109,7 +112,7 @@ where
   fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
   where
     I: Input<'src>,
-    E: ParserExtra<'src, I>
+    E: ParserExtra<'src, I>,
   {
     Self::from(value)
   }
@@ -129,7 +132,7 @@ where
   fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
   where
     I: Input<'src>,
-    E: ParserExtra<'src, I>
+    E: ParserExtra<'src, I>,
   {
     value.span()
   }

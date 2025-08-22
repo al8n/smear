@@ -1,8 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{char::Char, name::Name, source::Source, spanned::Spanned, convert::*, language::ignored::ignored},
-  punct::{LParen, RParen, Colon},
+  super::{
+    char::Char, convert::*, language::ignored::ignored, name::Name, source::Source,
+    spanned::Spanned,
+  },
+  punct::{Colon, LParen, RParen},
 };
 
 use core::marker::PhantomData;
@@ -74,10 +77,7 @@ impl<Value, Span> Argument<Value, Span> {
     P: Parser<'src, I, Value, E> + Clone,
   {
     Name::parser()
-      .then(
-        Colon::parser()
-          .padded_by(ignored()),
-      )
+      .then(Colon::parser().padded_by(ignored()))
       .then(value)
       .map_with(|((name, colon), value), sp| Self {
         span: Spanned::from_map_extra(sp),
@@ -164,7 +164,13 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
     // '(' ws? arg+ ')'
     LParen::parser()
       .then_ignore(ignored())
-      .then(arg_parser.padded_by(ignored()).repeated().at_least(1).collect())
+      .then(
+        arg_parser
+          .padded_by(ignored())
+          .repeated()
+          .at_least(1)
+          .collect(),
+      )
       .then(RParen::parser())
       .map_with(|((l_paren, arguments), r_paren), sp| Self {
         span: Spanned::from_map_extra(sp),
