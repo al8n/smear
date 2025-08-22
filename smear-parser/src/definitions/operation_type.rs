@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use super::super::{
   keywords::{Mutation, Query, Subscription},
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(
@@ -44,7 +43,7 @@ impl<Span> OperationType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     choice((
       Query::parser().map(Self::Query),

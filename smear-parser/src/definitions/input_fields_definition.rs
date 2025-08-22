@@ -9,7 +9,6 @@ use super::super::{
     punct::{LBrace, RBrace},
   },
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// The arguments definition.
@@ -62,7 +61,7 @@ impl<InputValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
@@ -75,7 +74,7 @@ impl<InputValueDefinition, Span, Container>
       .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, values), r_brace), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         values,
         l_brace,
         r_brace,

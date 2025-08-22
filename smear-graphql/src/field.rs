@@ -6,7 +6,7 @@ use super::{
     field::{self, Alias, TypeCondition},
     punct::{Ellipsis, LBrace, RBrace},
   },
-  Char, Spanned,
+  Char, Span,
 };
 
 use super::{arguments::Arguments, directives::Directives};
@@ -34,7 +34,7 @@ impl<Span> FragmentSpread<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     field::FragmentSpread::parser_with(Directives::parser()).map(Self)
   }
@@ -78,7 +78,7 @@ impl<Span> InlineFragment<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     field::InlineFragment::parser_with(SelectionSet::parser(), Directives::parser()).map(Self)
   }
@@ -127,7 +127,7 @@ impl<Span> Field<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     field::Field::parser_with(
       Arguments::parser(),
@@ -161,7 +161,7 @@ impl<Span> Selection<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     recursive(|selection| {
       let selset = field::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
@@ -222,7 +222,7 @@ impl<Span> SelectionSetValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     recursive(|selset| {
       let field_p =

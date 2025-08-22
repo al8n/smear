@@ -5,7 +5,6 @@ use super::super::{
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -90,7 +89,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -107,7 +106,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
       .then(fields_definition_parser().padded_by(ignored()).or_not())
       .map_with(
         |(((((description, ty), name), implements), directives), fields), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           name,
           directives,
@@ -244,7 +243,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -265,7 +264,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
         fields_definition_parser,
       ))
       .map_with(|(((extend, interface), name), content), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend,
         interface,
         name,

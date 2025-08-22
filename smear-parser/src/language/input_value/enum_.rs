@@ -4,7 +4,6 @@ use crate::{
   convert::*,
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A GraphQL enum value identifier.
@@ -135,7 +134,7 @@ impl<Span> EnumValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Name::<Span>::parser()
       .to_slice()
@@ -145,7 +144,7 @@ impl<Span> EnumValue<Span> {
           || slice.equivalent(false_tokens::<I::Token>().into_iter()))
       })
       .map_with(|_, sp| Self {
-        name: Name(Spanned::from_map_extra(sp)),
+        name: Name(Span::from_map_extra(sp)),
       })
   }
 }
@@ -157,7 +156,7 @@ impl<Span> AsRef<Span> for EnumValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for EnumValue<Span> {
+impl<Span> IntoSpan<Span> for EnumValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.name.into_spanned()

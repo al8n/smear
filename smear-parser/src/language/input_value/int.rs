@@ -4,7 +4,6 @@ use crate::{
   convert::*,
   language::{input_value::UintValue, punct::Minus},
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A GraphQL integer literal value.
@@ -108,7 +107,7 @@ impl<Span> AsRef<Span> for IntValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for IntValue<Span> {
+impl<Span> IntoSpan<Span> for IntValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -182,13 +181,13 @@ impl<Span> IntValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Minus::parser()
       .or_not()
       .then(UintValue::parser())
       .map_with(|(sign, digits), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         sign,
         digits,
       })

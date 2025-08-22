@@ -9,7 +9,6 @@ use super::super::{
   },
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 use std::vec::Vec;
@@ -47,14 +46,14 @@ impl<Span> UnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Pipe::parser()
       .or_not()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         pipe,
         name,
       })
@@ -67,13 +66,13 @@ impl<Span> UnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         pipe: Some(pipe),
         name,
       })
@@ -108,7 +107,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     Container: chumsky::container::Container<UnionMemberType<Span>>,
   {
@@ -122,7 +121,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
           .collect(),
       )
       .map_with(|(eq, members), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         eq,
         members,
       })
@@ -177,7 +176,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
@@ -195,7 +194,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
       .then(member_types.or_not())
       .map_with(
         |((((description, keyword), name), directives), members), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           keyword,
           name,
@@ -306,7 +305,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
@@ -321,7 +320,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
         member_types,
       ))
       .map_with(|(((extend, keyword), name), content), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend,
         keyword,
         name,

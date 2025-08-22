@@ -6,7 +6,6 @@ use super::super::{
     language::ignored::ignored,
     name::Name,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{Colon, LBrace, RBrace},
 };
@@ -46,8 +45,8 @@ use super::super::{
 /// ## Trait Implementations
 ///
 /// This type implements the standard span traits:
-/// - [`AsSpanned`]: Provides access to the source span
-/// - [`IntoSpanned`]: Enables consuming the field to extract its span
+/// - [`AsSpan`]: Provides access to the source span
+/// - [`IntoSpan`]: Enables consuming the field to extract its span
 /// - [`IntoComponents`]: Allows decomposition into constituent parts
 ///
 /// The component tuple contains: `(span, name, colon, value)`
@@ -66,7 +65,7 @@ impl<InputValue, Span> AsRef<Span> for ObjectValueField<InputValue, Span> {
   }
 }
 
-impl<InputValue, Span> IntoSpanned<Span> for ObjectValueField<InputValue, Span> {
+impl<InputValue, Span> IntoSpan<Span> for ObjectValueField<InputValue, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -135,14 +134,14 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, InputValue, E> + Clone,
   {
     Name::parser()
       .then(Colon::parser().padded_by(ignored()))
       .then(value)
       .map_with(|((name, colon), value), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         name,
         colon,
         value,
@@ -229,8 +228,8 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 /// ## Trait Implementations
 ///
 /// This type implements the standard span traits:
-/// - [`AsSpanned`]: Provides access to the source span
-/// - [`IntoSpanned`]: Enables consuming the object to extract its span
+/// - [`AsSpan`]: Provides access to the source span
+/// - [`IntoSpan`]: Enables consuming the object to extract its span
 /// - [`IntoComponents`]: Allows decomposition into constituent parts
 ///
 /// The component tuple contains: `(span, l_brace, fields, r_brace)`
@@ -260,7 +259,7 @@ impl<Field, Span, Container> AsRef<Span> for ObjectValue<Field, Span, Container>
   }
 }
 
-impl<Field, Span, Container> IntoSpanned<Span> for ObjectValue<Field, Span, Container> {
+impl<Field, Span, Container> IntoSpan<Span> for ObjectValue<Field, Span, Container> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -330,7 +329,7 @@ impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Field, E> + Clone,
     Container: chumsky::container::Container<Field>,
   {
@@ -348,7 +347,7 @@ impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
           .then(RBrace::parser()),
       )))
       .map_with(|(l_brace, (fields, r_brace)), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_brace,
         r_brace,
         fields,

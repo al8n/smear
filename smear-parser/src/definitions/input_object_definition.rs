@@ -5,7 +5,6 @@ use super::super::{
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -80,7 +79,7 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -98,7 +97,7 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
       )
       .map_with(
         |((((description, input), name), directives), fields), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           name,
           input,
@@ -202,7 +201,7 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -217,7 +216,7 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
         input_fields_definition_parser,
       ))
       .map_with(|(((extend, input), name), content), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend,
         input,
         name,

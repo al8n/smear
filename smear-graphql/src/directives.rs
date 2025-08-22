@@ -3,7 +3,7 @@ use derive_more::{AsMut, AsRef, From, Into};
 
 use super::{
   language::{directives, punct::At},
-  Char, Spanned,
+  Char, Span,
 };
 
 use super::arguments::{Arguments, ConstArguments};
@@ -43,7 +43,7 @@ impl<Span> Directive<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     directives::Directive::parser_with(Arguments::parser()).map(Self)
   }
@@ -84,7 +84,7 @@ impl<Span> ConstDirective<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     directives::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
@@ -115,7 +115,7 @@ impl<Span> Directives<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     directives::Directives::parser_with(Directive::parser()).map(Self)
   }
@@ -146,7 +146,7 @@ impl<Span> ConstDirectives<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     directives::Directives::parser_with(ConstDirective::parser()).map(Self)
   }

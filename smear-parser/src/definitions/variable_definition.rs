@@ -9,7 +9,6 @@ use super::super::{
     punct::{Colon, LParen, RParen},
   },
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -95,7 +94,7 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
@@ -112,7 +111,7 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
       .then(DefaultInputValue::parser_with(value_parser()).or_not())
       .map_with(
         |(((((description, variable), colon), ty), directives), default_value), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           variable,
           description,
           colon,
@@ -170,7 +169,7 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     Container: chumsky::container::Container<VariableDefinition>,
     P: Parser<'src, I, VariableDefinition, E> + Clone,
@@ -181,7 +180,7 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
       .then_ignore(ignored())
       .then(RParen::parser())
       .map_with(|((l_paren, variables), r_paren), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_paren,
         r_paren,
         variables,

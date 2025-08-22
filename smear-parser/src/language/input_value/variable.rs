@@ -6,7 +6,6 @@ use super::{
       convert::*,
       name::Name,
       source::{Char, Slice, Source},
-      spanned::Spanned,
     },
     punct::Dollar,
   },
@@ -59,8 +58,8 @@ use super::{
 /// ## Trait Implementations
 ///
 /// This type implements the standard span traits:
-/// - [`AsSpanned`]: Provides access to the source span
-/// - [`IntoSpanned`]: Enables consuming the variable to extract its span
+/// - [`AsSpan`]: Provides access to the source span
+/// - [`IntoSpan`]: Enables consuming the variable to extract its span
 /// - [`IntoComponents`]: Allows decomposition into constituent parts
 ///
 /// The component tuple contains: `(span, dollar, name)`
@@ -119,14 +118,14 @@ impl<Span> Variable<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Dollar::parser()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(dollar, name), sp| Self {
         name,
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         dollar,
       })
   }
@@ -139,7 +138,7 @@ impl<Span> AsRef<Span> for Variable<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Variable<Span> {
+impl<Span> IntoSpan<Span> for Variable<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span

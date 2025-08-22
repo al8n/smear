@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   convert::*,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A parsed GraphQL **Boolean Value** (`true` or `false`).
@@ -60,7 +59,7 @@ impl<Span> BooleanValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     just([I::Token::t, I::Token::r, I::Token::u, I::Token::e])
       .to(true)
@@ -75,7 +74,7 @@ impl<Span> BooleanValue<Span> {
         .to(false),
       )
       .map_with(|data, span| Self {
-        span: Spanned::from_map_extra(span),
+        span: Span::from_map_extra(span),
         value: data,
       })
   }
@@ -88,7 +87,7 @@ impl<Span> AsRef<Span> for BooleanValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for BooleanValue<Span> {
+impl<Span> IntoSpan<Span> for BooleanValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span

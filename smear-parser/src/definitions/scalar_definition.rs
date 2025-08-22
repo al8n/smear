@@ -5,7 +5,6 @@ use super::super::{
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -88,7 +87,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
       .then_ignore(ignored())
       .then(directives_parser.or_not())
       .map_with(|(((description, scalar), name), directives), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         description,
         scalar,
         name,
@@ -167,7 +166,7 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -178,7 +177,7 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
       .then_ignore(ignored())
       .then(directives_parser())
       .map_with(|(((extend, scalar), name), directives), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend,
         scalar,
         name,

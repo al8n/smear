@@ -5,7 +5,6 @@ use super::super::{
   language::{field::TypeCondition, ignored::ignored, input_value::StringValue},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -86,7 +85,7 @@ impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -114,7 +113,7 @@ impl<SelectionSet, Directives, Span> FragmentDefinition<SelectionSet, Directives
             type_condition,
             directives,
             selection_set,
-            span: Spanned::from_map_extra(sp),
+            span: Span::from_map_extra(sp),
           }
         },
       )

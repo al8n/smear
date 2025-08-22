@@ -10,7 +10,6 @@ use super::super::{
     punct::{LParen, RParen},
   },
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// The arguments definition.
@@ -34,7 +33,7 @@ impl<InputValueDefinition, Span, Container> AsRef<Span>
   }
 }
 
-impl<InputValueDefinition, Span, Container> IntoSpanned<Span>
+impl<InputValueDefinition, Span, Container> IntoSpan<Span>
   for ArgumentsDefinition<InputValueDefinition, Span, Container>
 {
   #[inline]
@@ -91,7 +90,7 @@ impl<InputValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
@@ -104,7 +103,7 @@ impl<InputValueDefinition, Span, Container>
       .then_ignore(ignored())
       .then(RParen::parser())
       .map_with(|((l_paren, values), r_paren), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         values,
         l_paren,
         r_paren,

@@ -5,7 +5,6 @@ use super::super::{
     convert::*,
     language::ignored::ignored,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{LBracket, RBracket},
 };
@@ -144,7 +143,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
     Value: crate::language::input_value::InputValue<CONST>,
@@ -164,7 +163,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
           .then(RBracket::parser()),
       )))
       .map_with(|(l_bracket, (values, r_bracket)), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_bracket,
         r_bracket,
         values,
@@ -180,7 +179,7 @@ impl<Value, Span, Container> AsRef<Span> for List<Value, Span, Container> {
   }
 }
 
-impl<Value, Span, Container> IntoSpanned<Span> for List<Value, Span, Container> {
+impl<Value, Span, Container> IntoSpan<Span> for List<Value, Span, Container> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span

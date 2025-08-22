@@ -12,7 +12,7 @@ macro_rules! punct {
         }
       }
 
-      impl<Span> $crate::__private::IntoSpanned<Span> for [< $token_name:upper:camel >]<Span> {
+      impl<Span> $crate::__private::IntoSpan<Span> for [< $token_name:upper:camel >]<Span> {
         #[inline]
         fn into_spanned(self) -> Span {
           self.0
@@ -24,7 +24,7 @@ macro_rules! punct {
 
         #[inline]
         fn into_components(self) -> Self::Components {
-          <Self as $crate::__private::IntoSpanned<Span>>::into_spanned(self)
+          <Self as $crate::__private::IntoSpan<Span>>::into_spanned(self)
         }
       }
 
@@ -48,12 +48,12 @@ macro_rules! punct {
           I::Token: $crate::__private::Char + 'src,
           I::Slice: $crate::__private::Slice<Token = I::Token>,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
-          Span: $crate::__private::Spanned<'src, I, E>,
+          Span: $crate::__private::Span<'src, I, E>,
         {
           use $crate::__private::{chumsky::prelude::*, Char};
 
           just($tokens)
-            .map_with(|_, sp| Self($crate::__private::Spanned::from_map_extra(sp)))
+            .map_with(|_, sp| Self($crate::__private::Span::from_map_extra(sp)))
         }
       }
     }

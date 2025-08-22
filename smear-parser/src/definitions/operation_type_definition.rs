@@ -7,7 +7,6 @@ use super::super::{
   },
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 use core::marker::PhantomData;
@@ -60,7 +59,7 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     P: Parser<'src, I, OperationType, E> + Clone,
   {
@@ -68,7 +67,7 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
       .then(Colon::parser().padded_by(ignored()))
       .then(Name::parser())
       .map_with(|((operation_type, colon), name), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         operation_type,
         colon,
         name,
@@ -135,7 +134,7 @@ impl<OperationTypeDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, OperationTypeDefinition, E> + Clone,
     Container: chumsky::container::Container<OperationTypeDefinition>,
   {
@@ -151,7 +150,7 @@ impl<OperationTypeDefinition, Span, Container>
       .then(RBrace::parser())
       .map_with(
         |((l_brace, operation_type_definitions), r_brace), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           l_brace,
           operation_type_definitions,
           r_brace,

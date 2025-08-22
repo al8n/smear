@@ -5,7 +5,6 @@ use crate::{
   digits::Digits,
   language::punct::{Dot, Minus, Plus},
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 use super::IntValue;
@@ -73,7 +72,7 @@ impl<Span> ExponentSign<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Minus::parser()
       .map(Self::Negative)
@@ -88,7 +87,7 @@ impl<Span> AsRef<Span> for ExponentSign<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for ExponentSign<Span> {
+impl<Span> IntoSpan<Span> for ExponentSign<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     match self {
@@ -128,7 +127,7 @@ impl<Span> AsRef<Span> for ExponentIdentifier<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for ExponentIdentifier<Span> {
+impl<Span> IntoSpan<Span> for ExponentIdentifier<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0
@@ -165,11 +164,11 @@ impl<Span> ExponentIdentifier<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     just(I::Token::e)
       .or(just(I::Token::E))
-      .map_with(|_, span| Self(Spanned::from_map_extra(span)))
+      .map_with(|_, span| Self(Span::from_map_extra(span)))
   }
 }
 
@@ -213,7 +212,7 @@ impl<Span> AsRef<Span> for Exponent<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Exponent<Span> {
+impl<Span> IntoSpan<Span> for Exponent<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -282,13 +281,13 @@ impl<Span> Exponent<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     ExponentIdentifier::parser()
       .then(ExponentSign::parser().or_not())
       .then(Digits::parser())
       .map_with(|((e, sign), digits), span| Exponent {
-        span: Spanned::from_map_extra(span),
+        span: Span::from_map_extra(span),
         e,
         sign,
         digits,
@@ -334,7 +333,7 @@ impl<Span> AsRef<Span> for Fractional<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Fractional<Span> {
+impl<Span> IntoSpan<Span> for Fractional<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -389,12 +388,12 @@ impl<Span> Fractional<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Dot::parser()
       .then(Digits::parser())
       .map_with(|(dot, digits), span| Fractional {
-        span: Spanned::from_map_extra(span),
+        span: Span::from_map_extra(span),
         dot,
         digits,
       })
@@ -465,7 +464,7 @@ impl<Span> AsRef<Span> for FloatValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for FloatValue<Span> {
+impl<Span> IntoSpan<Span> for FloatValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -565,12 +564,12 @@ impl<Span> FloatValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     IntValue::parser()
       .then(Fractional::parser().then(Exponent::parser().or_not()))
       .map_with(|(int, (frac, exp)), span| Self {
-        span: Spanned::from_map_extra(span),
+        span: Span::from_map_extra(span),
         int,
         fractional: Some(frac),
         exponent: exp,
@@ -579,7 +578,7 @@ impl<Span> FloatValue<Span> {
         IntValue::parser()
           .then(Exponent::parser())
           .map_with(|(int, exp), span| Self {
-            span: Spanned::from_map_extra(span),
+            span: Span::from_map_extra(span),
             int,
             fractional: None,
             exponent: Some(exp),

@@ -4,7 +4,6 @@ use super::super::{
   keywords,
   language::{ignored::ignored, input_value::StringValue},
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -76,7 +75,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
@@ -89,7 +88,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
       .then(root_operation_types_definition_parser)
       .map_with(
         |(((description, schema), directives), operation_type_definitions), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           schema,
           directives,
@@ -191,7 +190,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     DP: Parser<'src, I, Directives, E> + Clone,
     RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
@@ -207,7 +206,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
         root_operation_types_definition_parser,
       ))
       .map_with(|((extend_keyword, schema_keyword), content), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend: extend_keyword,
         schema: schema_keyword,
         content,

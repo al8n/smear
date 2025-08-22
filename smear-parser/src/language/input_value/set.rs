@@ -5,7 +5,6 @@ use super::super::{
     convert::*,
     language::ignored::ignored,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{LAngle, RAngle},
 };
@@ -26,7 +25,7 @@ impl<T, Span, C> AsRef<Span> for Set<T, Span, C> {
   }
 }
 
-impl<T, Span, C> IntoSpanned<Span> for Set<T, Span, C> {
+impl<T, Span, C> IntoSpan<Span> for Set<T, Span, C> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -61,7 +60,7 @@ impl<T, Span, C> Set<T, Span, C> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, T, E> + Clone,
     C: Container<T>,
   {
@@ -80,7 +79,7 @@ impl<T, Span, C> Set<T, Span, C> {
       .then_ignore(ignored())
       .then(RAngle::parser())
       .map_with(|((l_angle, values), r_angle), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_angle,
         r_angle,
         values,

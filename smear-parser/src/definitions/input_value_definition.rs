@@ -4,7 +4,6 @@ use super::super::{
   language::{ignored::ignored, input_value::StringValue, punct::Colon},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// Represents a GraphQL input value definition.
@@ -96,7 +95,7 @@ impl<Type, DefaultValue, Directives, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -114,7 +113,7 @@ impl<Type, DefaultValue, Directives, Span>
       .then(const_directives_parser.or_not())
       .map_with(
         |(((((description, name), colon), ty), default_value), directives), span| Self {
-          span: Spanned::from_map_extra(span),
+          span: Span::from_map_extra(span),
           description,
           name,
           colon,

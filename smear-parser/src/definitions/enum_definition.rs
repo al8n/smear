@@ -10,7 +10,6 @@ use super::super::{
   },
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 use core::marker::PhantomData;
@@ -31,7 +30,7 @@ impl<Directives, Span> AsRef<Span> for EnumValueDefinition<Directives, Span> {
   }
 }
 
-impl<Directives, Span> IntoSpanned<Span> for EnumValueDefinition<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for EnumValueDefinition<Directives, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -90,7 +89,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -100,7 +99,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
       .then_ignore(ignored())
       .then(directives_parser.or_not())
       .map_with(|((description, enum_value), directives), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         description,
         enum_value,
         directives,
@@ -126,7 +125,7 @@ impl<EnumValueDefinition, Span, Container> AsRef<Span>
   }
 }
 
-impl<EnumValueDefinition, Span, Container> IntoSpanned<Span>
+impl<EnumValueDefinition, Span, Container> IntoSpan<Span>
   for EnumValuesDefinition<EnumValueDefinition, Span, Container>
 {
   #[inline]
@@ -181,7 +180,7 @@ impl<EnumValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -197,7 +196,7 @@ impl<EnumValueDefinition, Span, Container>
       .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, enum_values), r_brace), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_brace,
         r_brace,
         enum_values,
@@ -225,7 +224,7 @@ impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
   }
 }
 
-impl<Directives, EnumValuesDefinition, Span> IntoSpanned<Span>
+impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
   for EnumDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
@@ -331,7 +330,7 @@ impl<Directives, EnumValuesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -351,7 +350,7 @@ impl<Directives, EnumValuesDefinition, Span>
       .then(enum_values_definition.or_not())
       .map_with(
         |((((description, keyword), name), directives), enum_values), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           keyword,
           name,
@@ -468,7 +467,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -483,7 +482,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
         enum_values_definition,
       ))
       .map_with(|(((extend, keyword), name), content), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         extend,
         keyword,
         name,

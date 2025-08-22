@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   convert::*,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A GraphQL null literal value.
@@ -55,10 +54,10 @@ impl<Span> NullValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     just([I::Token::n, I::Token::u, I::Token::l, I::Token::l])
-      .map_with(|_, span| Self(Spanned::from_map_extra(span)))
+      .map_with(|_, span| Self(Span::from_map_extra(span)))
   }
 }
 
@@ -69,7 +68,7 @@ impl<Span> AsRef<Span> for NullValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for NullValue<Span> {
+impl<Span> IntoSpan<Span> for NullValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0

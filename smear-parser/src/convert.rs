@@ -16,17 +16,17 @@
 /// ## Implementation Notes
 ///
 /// Implementing types should ensure that:
-/// - The returned span is equivalent to what `AsSpanned::spanned()` would return
+/// - The returned span is equivalent to what `AsSpan::spanned()` would return
 /// - All span information is preserved during the conversion
 /// - The conversion is efficient (ideally zero-cost)
-pub trait IntoSpanned<Spanned>: AsRef<Spanned> {
+pub trait IntoSpan<Span>: AsRef<Span> {
   /// Consumes this element and returns the owned source span.
   ///
   /// This method takes ownership of the element and extracts its span information
   /// as an owned value. This is useful when you need to transfer ownership of
   /// the span data to another data structure or when the element itself is no
   /// longer needed but the location information should be preserved.
-  fn into_spanned(self) -> Spanned;
+  fn into_spanned(self) -> Span;
 }
 
 /// Enables destructuring a parsed element into its constituent components.

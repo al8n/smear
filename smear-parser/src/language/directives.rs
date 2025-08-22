@@ -6,7 +6,6 @@ use super::{
     language::ignored::ignored,
     name::Name,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::At,
 };
@@ -29,7 +28,7 @@ impl<Args, Span> AsRef<Span> for Directive<Args, Span> {
   }
 }
 
-impl<Args, Span> IntoSpanned<Span> for Directive<Args, Span> {
+impl<Args, Span> IntoSpan<Span> for Directive<Args, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -77,7 +76,7 @@ impl<Args, Span> Directive<Args, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Args, E> + Clone,
   {
     At::parser()
@@ -86,7 +85,7 @@ impl<Args, Span> Directive<Args, Span> {
       .then_ignore(ignored())
       .then(args_parser.or_not())
       .map_with(|((at, name), arguments), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         at,
         name,
         arguments,
@@ -108,7 +107,7 @@ impl<Directive, Span, Container> AsRef<Span> for Directives<Directive, Span, Con
   }
 }
 
-impl<Directive, Span, Container> IntoSpanned<Span> for Directives<Directive, Span, Container> {
+impl<Directive, Span, Container> IntoSpan<Span> for Directives<Directive, Span, Container> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -144,7 +143,7 @@ impl<Directive, Span, Container> Directives<Directive, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Directive, E> + Clone,
     Container: chumsky::container::Container<Directive>,
   {
@@ -153,7 +152,7 @@ impl<Directive, Span, Container> Directives<Directive, Span, Container> {
       .at_least(1)
       .collect()
       .map_with(|directives, sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         directives,
         _directive: PhantomData,
       })

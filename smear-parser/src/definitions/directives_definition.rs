@@ -11,7 +11,6 @@ use super::super::{
   },
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 word!(
@@ -111,7 +110,7 @@ impl<Span> ExecutableDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -191,7 +190,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -249,7 +248,7 @@ impl<Span> Location<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -336,14 +335,14 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Pipe::parser()
       .or_not()
       .then_ignore(ignored())
       .then(location_parser)
       .map_with(|(pipe, location), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         location,
         pipe,
       })
@@ -381,7 +380,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     Container: chumsky::container::Container<Location>,
   {
     directive_location_parser
@@ -389,7 +388,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
       .at_least(1)
       .collect::<Container>()
       .map_with(|locs, sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         locations: locs,
         _location: PhantomData,
       })
@@ -477,7 +476,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()
@@ -503,7 +502,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
         ),
          sp| {
           Self {
-            span: Spanned::from_map_extra(sp),
+            span: Span::from_map_extra(sp),
             description,
             keyword,
             at,

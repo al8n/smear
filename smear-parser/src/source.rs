@@ -1,207 +1,401 @@
-use chumsky::{input::StrInput, text::Char as ChumskyChar};
+use chumsky::{
+  extra::ParserExtra,
+  input::{Input, MapExtra, StrInput},
+  text::Char as ChumskyChar,
+};
 
-/// Providing some extra methods for working with `Char`.
+/// Trait for types that can be created from Chumsky's parser extra information.
+///
+/// This trait provides a unified interface for creating spanned values and span
+/// types from the extra information available during parsing. It enables generic
+/// parsing code that can work with different span representations while maintaining
+/// consistent creation patterns.
+///
+/// ## Design Purpose
+///
+/// The trait serves several key purposes:
+/// - **Abstraction**: Unified interface for creating different spanned types
+/// - **Flexibility**: Support for both complex spanned values and simple spans
+/// - **Integration**: Seamless integration with Chumsky's parsing infrastructure
+/// - **Polymorphism**: Enable generic parsing functions over different span types
+///
+/// ## Usage Patterns
+///
+/// ```ignore
+/// // Generic parser that works with any spanned type
+/// fn parse_with_span<'src, I, E, S>() -> impl Parser<'src, I, S, E>
+/// where
+///     I: Input<'src>,
+///     E: ParserExtra<'src, I>,
+///     S: Span<'src, I, E>,
+/// {
+///     just("example").map_with(|_, extra| S::from_map_extra(extra))
+/// }
+///
+/// // Can be used with both WithSource and raw spans
+/// let with_source_parser = parse_with_span::<_, _, _, WithSource<_, _>>();
+/// let span_only_parser = parse_with_span::<_, _, _, SimpleSpan>();
+/// ```
+///
+/// ## Implementation Types
+///
+/// The trait is implemented for:
+/// - **`WithSource<Source, Span>`**: Creates source+span pairs
+/// - **Any span type implementing `chumsky::span::Span`**: Creates raw spans
+///
+/// This allows the same parsing interface to work with different levels of
+/// detail in span tracking.
+pub trait Span<'src, I: Input<'src>, E: ParserExtra<'src, I>> {
+  /// Creates a spanned value from Chumsky's parser extra information.
+  ///
+  /// This method extracts the necessary information from the parser's extra
+  /// state to create the appropriate spanned representation. The exact behavior
+  /// depends on the implementing type:
+  /// - `WithSource` creates a source+span pair
+  /// - Raw span types extract just the span information
+  fn from_map_extra<'b>(extra: &mut MapExtra<'src, 'b, I, E>) -> Self;
+}
+
+impl<'src, I, E, T> Span<'src, I, E> for T
+where
+  I: Input<'src, Span = T>,
+  E: ParserExtra<'src, I>,
+  T: chumsky::span::Span,
+{
+  #[inline]
+  fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
+  where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+  {
+    value.span()
+  }
+}
+
+/// Extension trait providing standardized character constants for GraphQL parsing.
+///
+/// This trait extends Chumsky's `Char` trait with a comprehensive set of ASCII
+/// character constants and utility methods specifically designed for GraphQL
+/// parsing. It provides a character-agnostic interface that works with both
+/// `char` and `u8` tokens, enabling efficient parsing of both UTF-8 strings
+/// and byte arrays.
 #[allow(non_upper_case_globals)]
 pub trait Char: ChumskyChar {
-  /// Returns a sequence representing the BOM
+  /// Returns a token sequence representing the Byte Order Mark (BOM).
+  ///
+  /// The BOM is used to identify the encoding and byte order of text files.
+  /// This method returns the appropriate BOM sequence for the character type:
+  /// - For `char`: Returns `['\u{FEFF}']` (Unicode BOM)
+  /// - For `u8`: Returns `[0xEF, 0xBB, 0xBF]` (UTF-8 BOM)
   fn bom<'a>() -> &'a [Self];
 
-  /// The ASCII null character (`\0`)
+  // Control and Special Characters
+  /// The ASCII null character (`\0`, U+0000).
+  ///
+  /// Used in some text processing contexts, though not typically
+  /// encountered in GraphQL documents.
   const NULL: Self;
-  /// The ASCII exclamation mark character (`!`).
+
+  // Punctuation Characters (GraphQL Syntax)
+  /// The ASCII exclamation mark character (`!`, U+0021).
+  ///
+  /// Used in GraphQL for non-null type indicators: `String!`, `[Int!]!`
   const EXCLAMATION: Self;
-  /// The ASCII quotation mark character (`"`).
+
+  /// The ASCII quotation mark character (`"`, U+0022).
+  ///
+  /// Used for string literal delimiters: `"hello world"`
   const QUOTATION: Self;
-  /// The ASCII hash character (`#`).
+
+  /// The ASCII hash character (`#`, U+0023).
+  ///
+  /// Used for GraphQL comments: `# This is a comment`
   const HASH: Self;
-  /// The ASCII dollar sign character (`$`).
+
+  /// The ASCII dollar sign character (`$`, U+0024).
+  ///
+  /// Used for variable references: `$userId`, `$filter`
   const DOLLAR: Self;
-  /// The ASCII percent character (`%`).
+
+  /// The ASCII percent character (`%`, U+0025).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const PERCENT: Self;
-  /// The ASCII ampersand character (`&`).
+
+  /// The ASCII ampersand character (`&`, U+0026).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const AMPERSAND: Self;
-  /// The ASCII apostrophe character (`'`).
+
+  /// The ASCII apostrophe character (`'`, U+0027).
+  ///
+  /// Not used in GraphQL (which uses double quotes for strings).
   const APOSTROPHE: Self;
-  /// The ASCII left paren character (`(`).
+
+  /// The ASCII left parenthesis character (`(`, U+0028).
+  ///
+  /// Used for grouping in field arguments: `user(id: 123)`
   const PAREN_OPEN: Self;
-  /// The ASCII right paren character (`)`).
+
+  /// The ASCII right parenthesis character (`)`, U+0029).
+  ///
+  /// Used for closing argument groups: `user(id: 123)`
   const PAREN_CLOSE: Self;
-  /// The ASCII left bracket character (`[`).
+
+  /// The ASCII left square bracket character (`[`, U+005B).
+  ///
+  /// Used for list literals and list types: `[1, 2, 3]`, `[String]`
   const BRACKET_OPEN: Self;
-  /// The ASCII right bracket character (`]`).
+
+  /// The ASCII right square bracket character (`]`, U+005D).
+  ///
+  /// Used for closing lists: `[1, 2, 3]`, `[String]`
   const BRACKET_CLOSE: Self;
-  /// The ASCII asterisk character (`*`).
+
+  /// The ASCII asterisk character (`*`, U+002A).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const ASTERISK: Self;
-  /// The ASCII plus character (`+`).
+
+  /// The ASCII plus character (`+`, U+002B).
+  ///
+  /// Used in numeric literals for positive exponents: `1.23e+4`
   const PLUS: Self;
-  /// The ASCII comma character (`,`).
+
+  /// The ASCII comma character (`,`, U+002C).
+  ///
+  /// Used for separating list elements and field arguments: `[1, 2, 3]`
   const COMMA: Self;
-  /// The ASCII minus character (`-`).
+
+  /// The ASCII minus character (`-`, U+002D).
+  ///
+  /// Used for negative numbers and exponents: `-123`, `1.23e-4`
   const MINUS: Self;
-  /// The ASCII dot character (`.`).
+
+  /// The ASCII period/dot character (`.`, U+002E).
+  ///
+  /// Used in float literals for decimal points: `3.14`, `0.5`
   const DOT: Self;
-  /// The ASCII slash character (`/`).
+
+  /// The ASCII forward slash character (`/`, U+002F).
+  ///
+  /// Used in escape sequences: `\"`, `\/` and potentially in custom scalars.
   const SLASH: Self;
-  /// The ASCII colon character (`:`).
+
+  /// The ASCII colon character (`:`, U+003A).
+  ///
+  /// Used for field-value separation and type annotations: `name: "John"`, `$id: Int`
   const COLON: Self;
-  /// The ASCII semicolon character (`;`).
+
+  /// The ASCII semicolon character (`;`, U+003B).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const SEMICOLON: Self;
-  /// The ASCII less than character (`<`).
+
+  /// The ASCII less-than character (`<`, U+003C).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const LESS_THAN: Self;
-  /// The ASCII equal character (`=`).
+
+  /// The ASCII equals character (`=`, U+003D).
+  ///
+  /// Used for default values in variable declarations: `$limit: Int = 10`
   const EQUAL: Self;
-  /// The ASCII greater than character (`>`).
+
+  /// The ASCII greater-than character (`>`, U+003E).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const GREATER_THAN: Self;
-  /// The ASCII question mark character (`?`).
+
+  /// The ASCII question mark character (`?`, U+003F).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const QUESTION: Self;
-  /// The ASCII at symbol character (`@`).
+
+  /// The ASCII at symbol character (`@`, U+0040).
+  ///
+  /// Used for directive applications: `@include(if: $showDetails)`
   const AT: Self;
-  /// The ASCII backslash character (`\`).
+
+  /// The ASCII backslash character (`\`, U+005C).
+  ///
+  /// Used for escape sequences in strings: `\"`, `\\`, `\n`, `\uXXXX`
   const BACKSLASH: Self;
-  /// The ASCII curly brace open character (`{`)
+
+  /// The ASCII left curly brace character (`{`, U+007B).
+  ///
+  /// Used for object literals and selection sets: `{ name age }`, `{ id: 1 }`
   const CURLY_BRACE_OPEN: Self;
-  /// The ASCII curly brace close character (`}`)
+
+  /// The ASCII right curly brace character (`}`, U+007D).
+  ///
+  /// Used for closing objects and selection sets: `{ name age }`
   const CURLY_BRACE_CLOSE: Self;
-  /// The ASCII tilde character (`~`).
+
+  /// The ASCII tilde character (`~`, U+007E).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const TILDE: Self;
-  /// The ASCII vertical bar character (`|`).
+
+  /// The ASCII vertical bar character (`|`, U+007C).
+  ///
+  /// Not used in standard GraphQL syntax but included for completeness.
   const VERTICAL_BAR: Self;
-  /// The ASCII underscore character (`_`).
+
+  /// The ASCII underscore character (`_`, U+005F).
+  ///
+  /// Used in identifiers and names: `user_name`, `_private`, `__typename`
   const UNDERSCORE: Self;
 
-  /// The ASCII space character (` `).
+  // Whitespace Characters
+  /// The ASCII space character (` `, U+0020).
+  ///
+  /// Standard whitespace for separating tokens in GraphQL.
   const SPACE: Self;
-  /// The ASCII tab character (`\t`).
+
+  /// The ASCII tab character (`\t`, U+0009).
+  ///
+  /// Horizontal tab, treated as whitespace in GraphQL.
   const TAB: Self;
-  /// The ASCII line feed character (`\n`).
+
+  /// The ASCII line feed character (`\n`, U+000A).
+  ///
+  /// Line terminator, used to end lines and terminate comments.
   const LINE_FEED: Self;
-  /// The ASCII carriage return character (`\r`).
+
+  /// The ASCII carriage return character (`\r`, U+000D).
+  ///
+  /// Line terminator (Windows-style), often paired with line feed.
   const CARRIAGE_RETURN: Self;
 
-  /// The ASCII '0' character.
+  // Digit Characters (0-9)
+  /// The ASCII '0' character (U+0030).
   const ZERO: Self;
-  /// The ASCII '1' character.
+  /// The ASCII '1' character (U+0031).
   const ONE: Self;
-  /// The ASCII '2' character.
+  /// The ASCII '2' character (U+0032).
   const TWO: Self;
-  /// The ASCII '3' character.
+  /// The ASCII '3' character (U+0033).
   const THREE: Self;
-  /// The ASCII '4' character.
+  /// The ASCII '4' character (U+0034).
   const FOUR: Self;
-  /// The ASCII '5' character.
+  /// The ASCII '5' character (U+0035).
   const FIVE: Self;
-  /// The ASCII '6' character.
+  /// The ASCII '6' character (U+0036).
   const SIX: Self;
-  /// The ASCII '7' character.
+  /// The ASCII '7' character (U+0037).
   const SEVEN: Self;
-  /// The ASCII '8' character.
+  /// The ASCII '8' character (U+0038).
   const EIGHT: Self;
-  /// The ASCII '9' character.
+  /// The ASCII '9' character (U+0039).
   const NINE: Self;
 
-  /// The ASCII 'A' character.
+  // Uppercase Letters (A-Z)
+  /// The ASCII 'A' character (U+0041).
   const A: Self;
-  /// The ASCII 'B' character.
+  /// The ASCII 'B' character (U+0042).
   const B: Self;
-  /// The ASCII 'C' character.
+  /// The ASCII 'C' character (U+0043).
   const C: Self;
-  /// The ASCII 'D' character.
+  /// The ASCII 'D' character (U+0044).
   const D: Self;
-  /// The ASCII 'E' character.
+  /// The ASCII 'E' character (U+0045).
   const E: Self;
-  /// The ASCII 'F' character.
+  /// The ASCII 'F' character (U+0046).
   const F: Self;
-  /// The ASCII 'G' character.
+  /// The ASCII 'G' character (U+0047).
   const G: Self;
-  /// The ASCII 'H' character.
+  /// The ASCII 'H' character (U+0048).
   const H: Self;
-  /// The ASCII 'I' character.
+  /// The ASCII 'I' character (U+0049).
   const I: Self;
-  /// The ASCII 'J' character.
+  /// The ASCII 'J' character (U+004A).
   const J: Self;
-  /// The ASCII 'K' character.
+  /// The ASCII 'K' character (U+004B).
   const K: Self;
-  /// The ASCII 'L' character.
+  /// The ASCII 'L' character (U+004C).
   const L: Self;
-  /// The ASCII 'M' character.
+  /// The ASCII 'M' character (U+004D).
   const M: Self;
-  /// The ASCII 'N' character.
+  /// The ASCII 'N' character (U+004E).
   const N: Self;
-  /// The ASCII 'O' character.
+  /// The ASCII 'O' character (U+004F).
   const O: Self;
-  /// The ASCII 'P' character.
+  /// The ASCII 'P' character (U+0050).
   const P: Self;
-  /// The ASCII 'Q' character.
+  /// The ASCII 'Q' character (U+0051).
   const Q: Self;
-  /// The ASCII 'R' character.
+  /// The ASCII 'R' character (U+0052).
   const R: Self;
-  /// The ASCII 'S' character.
+  /// The ASCII 'S' character (U+0053).
   const S: Self;
-  /// The ASCII 'T' character.
+  /// The ASCII 'T' character (U+0054).
   const T: Self;
-  /// The ASCII 'U' character.
+  /// The ASCII 'U' character (U+0055).
   const U: Self;
-  /// The ASCII 'V' character.
+  /// The ASCII 'V' character (U+0056).
   const V: Self;
-  /// The ASCII 'W' character.
+  /// The ASCII 'W' character (U+0057).
   const W: Self;
-  /// The ASCII 'X' character.
+  /// The ASCII 'X' character (U+0058).
   const X: Self;
-  /// The ASCII 'Y' character.
+  /// The ASCII 'Y' character (U+0059).
   const Y: Self;
-  /// The ASCII 'Z' character.
+  /// The ASCII 'Z' character (U+005A).
   const Z: Self;
-  /// The ASCII 'a' character.
+
+  // Lowercase Letters (a-z)
+  /// The ASCII 'a' character (U+0061).
   const a: Self;
-  /// The ASCII 'b' character.
+  /// The ASCII 'b' character (U+0062).
   const b: Self;
-  /// The ASCII 'c' character.
+  /// The ASCII 'c' character (U+0063).
   const c: Self;
-  /// The ASCII 'd' character.
+  /// The ASCII 'd' character (U+0064).
   const d: Self;
-  /// The ASCII 'e' character.
+  /// The ASCII 'e' character (U+0065).
   const e: Self;
-  /// The ASCII 'f' character.
+  /// The ASCII 'f' character (U+0066).
   const f: Self;
-  /// The ASCII 'g' character.
+  /// The ASCII 'g' character (U+0067).
   const g: Self;
-  /// The ASCII 'h' character.
+  /// The ASCII 'h' character (U+0068).
   const h: Self;
-  /// The ASCII 'i' character.
+  /// The ASCII 'i' character (U+0069).
   const i: Self;
-  /// The ASCII 'j' character.
+  /// The ASCII 'j' character (U+006A).
   const j: Self;
-  /// The ASCII 'k' character.
+  /// The ASCII 'k' character (U+006B).
   const k: Self;
-  /// The ASCII 'l' character.
+  /// The ASCII 'l' character (U+006C).
   const l: Self;
-  /// The ASCII 'm' character.
+  /// The ASCII 'm' character (U+006D).
   const m: Self;
-  /// The ASCII 'n' character.
+  /// The ASCII 'n' character (U+006E).
   const n: Self;
-  /// The ASCII 'o' character.
+  /// The ASCII 'o' character (U+006F).
   const o: Self;
-  /// The ASCII 'p' character.
+  /// The ASCII 'p' character (U+0070).
   const p: Self;
-  /// The ASCII 'q' character.
+  /// The ASCII 'q' character (U+0071).
   const q: Self;
-  /// The ASCII 'r' character.
+  /// The ASCII 'r' character (U+0072).
   const r: Self;
-  /// The ASCII 's' character.
+  /// The ASCII 's' character (U+0073).
   const s: Self;
-  /// The ASCII 't' character.
+  /// The ASCII 't' character (U+0074).
   const t: Self;
-  /// The ASCII 'u' character.
+  /// The ASCII 'u' character (U+0075).
   const u: Self;
-  /// The ASCII 'v' character.
+  /// The ASCII 'v' character (U+0076).
   const v: Self;
-  /// The ASCII 'w' character.
+  /// The ASCII 'w' character (U+0077).
   const w: Self;
-  /// The ASCII 'x' character.
+  /// The ASCII 'x' character (U+0078).
   const x: Self;
-  /// The ASCII 'y' character.
+  /// The ASCII 'y' character (U+0079).
   const y: Self;
-  /// The ASCII 'z' character.
+  /// The ASCII 'z' character (U+007A).
   const z: Self;
 }
 
@@ -416,11 +610,34 @@ impl Char for u8 {
   const z: Self = b'z';
 }
 
+/// Trait for types that can be treated as token slices in parsing.
+///
+/// This trait provides a unified interface for working with different slice
+/// types that contain sequences of tokens. It enables generic parsing code
+/// that works with various input representations while maintaining efficient
+/// iteration and comparison operations.
 pub trait Slice {
+  /// The type of individual tokens contained in this slice.
+  ///
+  /// This determines what kind of elements the slice contains:
+  /// - `char` for string slices
+  /// - `u8` for byte slices
+  /// - Custom types for specialized parsing scenarios
   type Token;
 
+  /// Returns an iterator over the tokens in this slice.
+  ///
+  /// The iterator should provide efficient access to each token without
+  /// unnecessary copying or allocation. Implementations should prefer
+  /// zero-copy iteration when possible.
   fn iter<'a>(&'a self) -> impl Iterator<Item = Self::Token> + 'a;
 
+  /// Returns `true` if this slice is equivalent to a sequence of tokens.
+  ///
+  /// This method provides an efficient way to compare the slice contents
+  /// with an iterator of tokens, typically used for pattern matching in
+  /// parsing contexts. The comparison should short-circuit on the first
+  /// mismatch for optimal performance.
   fn equivalent(&self, other: impl Iterator<Item = Self::Token>) -> bool;
 }
 
@@ -481,13 +698,21 @@ impl Slice for bytes::Bytes {
   }
 }
 
-/// An extension trait over [`chumsky::StrInput`]
+/// Extension trait providing GraphQL-specific functionality for input sources.
+///
+/// This trait extends Chumsky's [`StrInput`] with predefined character sets and
+/// utility constants specifically designed for GraphQL parsing. It provides
+/// efficient access to commonly used character groups, enabling fast and
+/// readable parser construction.
 pub trait Source<'src>: StrInput<'src>
 where
   Self::Token: Char + 'src,
   Self::Slice: Slice<Token = Self::Token>,
 {
-  /// The character tokens for the digits 0-9.
+  /// Character tokens for all decimal digits (0-9).
+  ///
+  /// This array contains all ten decimal digit characters in ascending order.
+  /// Used for parsing any numeric content in GraphQL literals.
   const DIGITS: [Self::Token; 10] = [
     Self::Token::ZERO,
     Self::Token::ONE,
@@ -501,7 +726,11 @@ where
     Self::Token::NINE,
   ];
 
-  /// The character tokens for the digits 1-9.
+  /// Character tokens for non-zero digits (1-9).
+  ///
+  /// This array excludes '0' and is specifically used for GraphQL's "no leading
+  /// zeros" rule in integer literals. According to the GraphQL specification,
+  /// multi-digit numbers cannot start with '0' (except for the literal '0' itself).
   const NON_ZERO_DIGITS: [Self::Token; 9] = [
     Self::Token::ONE,
     Self::Token::TWO,
@@ -514,7 +743,11 @@ where
     Self::Token::NINE,
   ];
 
-  /// The character tokens for the letters
+  /// Character tokens for all ASCII letters (A-Z, a-z).
+  ///
+  /// This array contains all 52 ASCII letters, with uppercase letters first
+  /// followed by lowercase letters. Used for parsing GraphQL identifiers,
+  /// names, and keywords.
   const LETTERS: [Self::Token; 52] = [
     Self::Token::A,
     Self::Token::B,
@@ -571,7 +804,11 @@ where
     Self::Token::z,
   ];
 
-  /// The character tokens for the lower case letters
+  /// Character tokens for lowercase ASCII letters (a-z).
+  ///
+  /// This array contains only the 26 lowercase ASCII letters. Useful for
+  /// case-sensitive parsing where only lowercase letters are expected,
+  /// such as GraphQL keywords and reserved words.
   const LOWERCASE_LETTERS: [Self::Token; 26] = [
     Self::Token::a,
     Self::Token::b,
@@ -601,7 +838,10 @@ where
     Self::Token::z,
   ];
 
-  /// The character tokens for the upper case letters
+  /// Character tokens for uppercase ASCII letters (A-Z).
+  ///
+  /// This array contains only the 26 uppercase ASCII letters. Useful for
+  /// case-sensitive parsing where only uppercase letters are expected.
   const UPPERCASE_LETTERS: [Self::Token; 26] = [
     Self::Token::A,
     Self::Token::B,

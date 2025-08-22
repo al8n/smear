@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   convert::*,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A sequence of decimal digits (`0-9`).
@@ -88,13 +87,13 @@ impl<Span> Digits<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     one_of(I::DIGITS)
       .repeated()
       .at_least(1)
       .ignored()
-      .map_with(|_, sp| Self(Spanned::from_map_extra(sp)))
+      .map_with(|_, sp| Self(Span::from_map_extra(sp)))
   }
 }
 
@@ -105,7 +104,7 @@ impl<Span> AsRef<Span> for Digits<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Digits<Span> {
+impl<Span> IntoSpan<Span> for Digits<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0

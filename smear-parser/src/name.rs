@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use super::{
   convert::*,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// A GraphQL name identifier.
@@ -140,7 +139,7 @@ impl<Span> Name<Span> {
     I::Slice: Slice<Token = I::Token>,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     // [_A-Za-z]
     let start = one_of([
@@ -271,7 +270,7 @@ impl<Span> Name<Span> {
 
     start
       .then(cont)
-      .map_with(|_, sp| Name(Spanned::from_map_extra(sp)))
+      .map_with(|_, sp| Name(Span::from_map_extra(sp)))
   }
 }
 
@@ -282,7 +281,7 @@ impl<Span> AsRef<Span> for Name<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Name<Span> {
+impl<Span> IntoSpan<Span> for Name<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0

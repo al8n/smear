@@ -26,7 +26,7 @@ macro_rules! word {
           }
         }
 
-        impl<Span> $crate::__private::IntoSpanned<Span> for $name<Span> {
+        impl<Span> $crate::__private::IntoSpan<Span> for $name<Span> {
           #[inline]
           fn into_spanned(self) -> Span {
             self.0
@@ -38,7 +38,7 @@ macro_rules! word {
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <$name<Span> as $crate::__private::IntoSpanned<Span>>::into_spanned(self)
+            <$name<Span> as $crate::__private::IntoSpan<Span>>::into_spanned(self)
           }
         }
 
@@ -56,12 +56,12 @@ macro_rules! word {
             I::Token: $crate::__private::Char + 'src,
             I::Slice: $crate::__private::Slice<Token = I::Token>,
             E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
-            Span: $crate::__private::Spanned<'src, I, E>,
+            Span: $crate::__private::Span<'src, I, E>,
           {
             use $crate::__private::{Char as _, chumsky::Parser as _};
 
             $crate::__private::chumsky::prelude::just($expr)
-              .map_with(|_, sp| Self($crate::__private::Spanned::from_map_extra(sp)))
+              .map_with(|_, sp| Self($crate::__private::Span::from_map_extra(sp)))
           }
         }
       )*
@@ -102,7 +102,7 @@ mod utils;
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{convert::*, source::*, spanned::Spanned};
+  pub use super::{convert::*, source::*};
 }
 
 #[cfg(all(feature = "std", test))]

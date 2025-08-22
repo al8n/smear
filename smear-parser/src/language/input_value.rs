@@ -4,9 +4,8 @@ use either::Either;
 use super::{
   super::{
     convert::*,
-    language::punct::{Equal, Colon, LAngle},
+    language::punct::{Colon, Equal, LAngle},
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   ignored::{self, ignored},
 };
@@ -150,7 +149,7 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
     Value: InputValue<true>,
   {
@@ -158,7 +157,7 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
       .then_ignore(ignored::ignored())
       .then(value)
       .map_with(|(eq, value), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         eq,
         value,
       })
@@ -172,7 +171,7 @@ impl<Value, Span> AsRef<Span> for DefaultInputValue<Value, Span> {
   }
 }
 
-impl<Value, Span> IntoSpanned<Span> for DefaultInputValue<Value, Span> {
+impl<Value, Span> IntoSpan<Span> for DefaultInputValue<Value, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -198,7 +197,7 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   I::Slice: Slice<Token = I::Token>,
-  I::Span: Spanned<'src, I, E>,
+  I::Span: crate::source::Span<'src, I, E>,
   E: ParserExtra<'src, I>,
   KP: Parser<'src, I, Key, E> + Clone,
   VP: Parser<'src, I, Value, E> + Clone,

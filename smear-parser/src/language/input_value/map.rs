@@ -5,7 +5,6 @@ use super::super::{
     convert::*,
     language::ignored::ignored,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{Colon, LAngle, RAngle},
 };
@@ -27,7 +26,7 @@ impl<Key, Value, Span> AsRef<Span> for MapEntry<Key, Value, Span> {
   }
 }
 
-impl<Key, Value, Span> IntoSpanned<Span> for MapEntry<Key, Value, Span> {
+impl<Key, Value, Span> IntoSpan<Span> for MapEntry<Key, Value, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -66,7 +65,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
   {
@@ -77,7 +76,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
         key,
         colon,
         value,
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
       })
   }
 }
@@ -99,7 +98,7 @@ impl<Key, Value, Span, C> AsRef<Span> for Map<Key, Value, Span, C> {
   }
 }
 
-impl<Key, Value, Span, C> IntoSpanned<Span> for Map<Key, Value, Span, C> {
+impl<Key, Value, Span, C> IntoSpan<Span> for Map<Key, Value, Span, C> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -138,7 +137,7 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
     C: Container<MapEntry<Key, Value, Span>>,
@@ -161,7 +160,7 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
       .then_ignore(ignored())
       .then(RAngle::parser())
       .map_with(|((l_angle, fields), r_angle), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_angle,
         r_angle,
         fields,

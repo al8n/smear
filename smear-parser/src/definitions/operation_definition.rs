@@ -4,7 +4,6 @@ use super::super::{
   language::{ignored::ignored, input_value::StringValue},
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -97,7 +96,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -119,7 +118,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
         ),
          sp| {
           Self {
-            span: Spanned::from_map_extra(sp),
+            span: Span::from_map_extra(sp),
             description,
             operation_type,
             name,
@@ -164,7 +163,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,

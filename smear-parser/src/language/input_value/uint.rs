@@ -3,7 +3,6 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   convert::*,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 /// An unsigned decimal integer component for GraphQL numeric literals.
@@ -103,13 +102,13 @@ impl<Span> UintValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     one_of(I::NON_ZERO_DIGITS)
       .then(one_of(I::DIGITS).repeated().ignored())
       .ignored()
-      .map_with(|_, sp| Self(Spanned::from_map_extra(sp)))
-      .or(just(I::Token::ZERO).map_with(|_, sp| Self(Spanned::from_map_extra(sp))))
+      .map_with(|_, sp| Self(Span::from_map_extra(sp)))
+      .or(just(I::Token::ZERO).map_with(|_, sp| Self(Span::from_map_extra(sp))))
   }
 }
 
@@ -120,7 +119,7 @@ impl<Span> AsRef<Span> for UintValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for UintValue<Span> {
+impl<Span> IntoSpan<Span> for UintValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0

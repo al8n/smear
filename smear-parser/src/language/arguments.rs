@@ -6,7 +6,6 @@ use super::{
     language::ignored::ignored,
     name::Name,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{Colon, LParen, RParen},
 };
@@ -29,7 +28,7 @@ impl<Value, Span> AsRef<Span> for Argument<Value, Span> {
   }
 }
 
-impl<Value, Span> IntoSpanned<Span> for Argument<Value, Span> {
+impl<Value, Span> IntoSpan<Span> for Argument<Value, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -77,14 +76,14 @@ impl<Value, Span> Argument<Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
   {
     Name::parser()
       .then(Colon::parser().padded_by(ignored()))
       .then(value)
       .map_with(|((name, colon), value), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         name,
         colon,
         value,
@@ -108,7 +107,7 @@ impl<Arg, Span, Container> AsRef<Span> for Arguments<Arg, Span, Container> {
   }
 }
 
-impl<Arg, Span, Container> IntoSpanned<Span> for Arguments<Arg, Span, Container> {
+impl<Arg, Span, Container> IntoSpan<Span> for Arguments<Arg, Span, Container> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -162,7 +161,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Arg, E> + Clone,
     Container: chumsky::container::Container<Arg>,
   {
@@ -178,7 +177,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
       )
       .then(RParen::parser())
       .map_with(|((l_paren, arguments), r_paren), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_paren,
         arguments,
         r_paren,

@@ -6,7 +6,7 @@ use super::{
     input_value::{self, *},
     punct::Equal,
   },
-  Char, Spanned,
+  Char, Span,
 };
 
 pub type ListValue<Span> = input_value::ListValue<InputValue<Span>, Span>;
@@ -80,7 +80,7 @@ impl<Span> InputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     recursive(|value| {
       let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
@@ -172,7 +172,7 @@ impl<Span> ConstInputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     recursive(|value| {
       // scalars (whatever you already have)
@@ -233,7 +233,7 @@ impl<Span> DefaultInputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     input_value::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }

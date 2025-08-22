@@ -6,7 +6,6 @@ use super::{
     keywords,
     name::Name,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   ignored::ignored,
   punct::{Colon, Ellipsis, LBrace, RBrace},
@@ -42,13 +41,13 @@ impl<Span> TypeCondition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     keywords::On::parser()
       .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(on, type_name), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         on,
         type_name,
       })
@@ -62,7 +61,7 @@ impl<Span> AsRef<Span> for TypeCondition<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for TypeCondition<Span> {
+impl<Span> IntoSpan<Span> for TypeCondition<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -93,7 +92,7 @@ impl<Directives, Span> AsRef<Span> for FragmentSpread<Directives, Span> {
   }
 }
 
-impl<Directives, Span> IntoSpanned<Span> for FragmentSpread<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for FragmentSpread<Directives, Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -128,7 +127,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     let ws = super::ignored::ignored();
@@ -149,7 +148,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
       .then_ignore(ws.clone())
       .then(directives.or_not())
       .map_with(|((ellipsis_sp, name), directives), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         ellipsis: ellipsis_sp,
         name,
         directives,
@@ -175,7 +174,7 @@ impl<Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoSpanned<Span>
+impl<Directives, SelectionSet, Span> IntoSpan<Span>
   for InlineFragment<Directives, SelectionSet, Span>
 {
   #[inline]
@@ -242,7 +241,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
     D: Parser<'src, I, Directives, E> + Clone,
   {
@@ -257,7 +256,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
       .then(selection_set)
       .map_with(
         |(((ell, type_condition), directives), selection_set), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           ellipsis: ell,
           type_condition,
           directives,
@@ -281,7 +280,7 @@ impl<Span> AsRef<Span> for Alias<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for Alias<Span> {
+impl<Span> IntoSpan<Span> for Alias<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
@@ -320,13 +319,13 @@ impl<Span> Alias<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     Name::<Span>::parser()
       .then_ignore(ignored())
       .then(Colon::parser())
       .map_with(|(name, colon), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         name,
         colon,
       })
@@ -380,7 +379,7 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Selection, E> + Clone,
     Container: chumsky::container::Container<Selection>,
   {
@@ -395,7 +394,7 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
           .then(RBrace::parser()),
       )
       .map_with(|(l_brace, (selections, r_brace)), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_brace,
         selections,
         r_brace,
@@ -423,7 +422,7 @@ impl<Args, Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> IntoSpanned<Span>
+impl<Args, Directives, SelectionSet, Span> IntoSpan<Span>
   for Field<Args, Directives, SelectionSet, Span>
 {
   #[inline]
@@ -505,7 +504,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
@@ -522,7 +521,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
       .then(selection_set.or_not())
       .map_with(
         |((((alias, name), arguments), directives), selection_set), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           alias,
           name,
           arguments,

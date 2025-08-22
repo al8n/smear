@@ -10,7 +10,6 @@ use super::super::{
   },
   name::Name,
   source::{Char, Slice, Source},
-  spanned::Spanned,
 };
 
 #[derive(Debug, Clone)]
@@ -93,7 +92,7 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
@@ -110,7 +109,7 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
       .then(directives_parser().or_not())
       .map_with(
         |(((((description, name), arguments_definition), colon), ty), directives), sp| Self {
-          span: Spanned::from_map_extra(sp),
+          span: Span::from_map_extra(sp),
           description,
           name,
           arguments_definition,
@@ -170,7 +169,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
 
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
@@ -187,7 +186,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
       .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, fields), r_brace), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         l_brace,
         r_brace,
         fields,

@@ -6,7 +6,7 @@ use super::{
     arguments,
     punct::{LParen, RParen},
   },
-  Char, Spanned,
+  Char, Span,
 };
 
 use super::value::{ConstInputValue, InputValue};
@@ -47,7 +47,7 @@ impl<Span> Argument<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     arguments::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
@@ -88,7 +88,7 @@ impl<Span> ConstArgument<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     arguments::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
@@ -136,7 +136,7 @@ impl<Span> Arguments<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     arguments::Arguments::parser_with(Argument::parser()).map(Self)
   }
@@ -184,7 +184,7 @@ impl<Span> ConstArguments<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     arguments::Arguments::parser_with(ConstArgument::parser()).map(Self)
   }

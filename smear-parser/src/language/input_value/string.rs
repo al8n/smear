@@ -4,7 +4,6 @@ use super::super::{
   super::{
     convert::*,
     source::{Char, Slice, Source},
-    spanned::Spanned,
   },
   punct::{Quote, TripleQuote},
 };
@@ -107,7 +106,7 @@ impl<Span> AsRef<Span> for StringContent<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for StringContent<Span> {
+impl<Span> IntoSpan<Span> for StringContent<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.0
@@ -319,7 +318,7 @@ impl<Span> StringValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: Spanned<'src, I, E>,
+    Span: crate::source::Span<'src, I, E>,
   {
     // \uXXXX (exactly 4 hex digits)
     let hex_digit = one_of([
@@ -377,7 +376,7 @@ impl<Span> StringValue<Span> {
       .or(esc_char)
       .or(unescaped_scalar)
       .repeated()
-      .map_with(|_, sp| StringContent(Spanned::from_map_extra(sp)));
+      .map_with(|_, sp| StringContent(Span::from_map_extra(sp)));
 
     // Block content: consume either an escaped triple quote, or any single token
     // that is NOT the start of a raw closing `"""`.
@@ -392,14 +391,14 @@ impl<Span> StringValue<Span> {
 
     let block_content_parser = block_piece
       .repeated()
-      .map_with(|_, sp| StringContent(Spanned::from_map_extra(sp)));
+      .map_with(|_, sp| StringContent(Span::from_map_extra(sp)));
 
     // " ... "
     let inline_string = Quote::parser()
       .then(inline_content_parser)
       .then(Quote::parser())
       .map_with(|((lq, content), rq), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         delimiters: StringDelimiter::Quote {
           l_quote: lq,
           r_quote: rq,
@@ -412,7 +411,7 @@ impl<Span> StringValue<Span> {
       .then(block_content_parser)
       .then(TripleQuote::parser())
       .map_with(|((ltq, content), rtq), sp| Self {
-        span: Spanned::from_map_extra(sp),
+        span: Span::from_map_extra(sp),
         delimiters: StringDelimiter::TripleQuote {
           l_triple_quote: ltq,
           r_triple_quote: rtq,
@@ -431,7 +430,7 @@ impl<Span> AsRef<Span> for StringValue<Span> {
   }
 }
 
-impl<Span> IntoSpanned<Span> for StringValue<Span> {
+impl<Span> IntoSpan<Span> for StringValue<Span> {
   #[inline]
   fn into_spanned(self) -> Span {
     self.span
