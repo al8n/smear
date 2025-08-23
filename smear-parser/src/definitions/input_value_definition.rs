@@ -1,51 +1,51 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
+  convert::*,
   lang::{ignored, punct::Colon, Name, StringValue},
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 /// Represents a GraphQL input value definition.
-/// 
+///
 /// An input value definition specifies a parameter that can be provided to a field,
 /// directive, or input object. It defines the parameter's name, type, optional default
 /// value, optional description, and optional directives. Input value definitions are
 /// the building blocks for creating structured input interfaces in GraphQL.
-/// 
+///
 /// Input value definitions are used in multiple contexts within GraphQL:
 /// - **Field arguments**: Parameters for field selection in object and interface types
 /// - **Directive arguments**: Parameters for directive applications
 /// - **Input object fields**: Fields within input object type definitions
 /// - **Variable definitions**: Operation variable specifications
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Simple input value definition (field argument)
 /// id: ID!
-/// 
+///
 /// # Input value with description
 /// """
 /// The unique identifier for the user
 /// """
 /// id: ID!
-/// 
+///
 /// # Input value with default value
 /// first: Int = 10
-/// 
+///
 /// # Input value with directives
 /// email: String @constraint(format: "email")
-/// 
+///
 /// # Complex input value with all components
 /// """
 /// Search query with advanced filtering options.
 /// Supports wildcard matching and field-specific searches.
 /// """
 /// query: String! = "*" @constraint(minLength: 1, maxLength: 1000) @sanitize
-/// 
+///
 /// # Input values in different contexts:
-/// 
+///
 /// # Field arguments
 /// type User {
 ///   posts(
@@ -54,13 +54,13 @@ use crate::{
 ///     filter: PostFilter
 ///   ): PostConnection!
 /// }
-/// 
+///
 /// # Directive arguments
 /// directive @auth(
 ///   requires: Role = USER
 ///   scopes: [String!]
 /// ) on FIELD_DEFINITION
-/// 
+///
 /// # Input object fields
 /// input CreateUserInput {
 ///   name: String!
@@ -71,7 +71,7 @@ use crate::{
 ///     notifications: true
 ///   }
 /// }
-/// 
+///
 /// # Variable definitions
 /// query GetUser(
 ///   $id: ID!
@@ -89,20 +89,20 @@ use crate::{
 ///   }
 /// }
 /// ```
-/// 
+///
 /// ## Type Parameters
-/// 
+///
 /// * `Type` - The type representing the input value's GraphQL type (e.g., String!, [Int], etc.)
 /// * `DefaultValue` - The type representing the optional default value
 /// * `Directives` - The type representing directives applied to the input value
 /// * `Span` - The type representing source location information
-/// 
+///
 /// ## Grammar
-/// 
+///
 /// ```text
 /// InputValueDefinition : Description? Name : Type DefaultValue? Directives?
 /// ```
-/// 
+///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
 #[derive(Debug, Clone)]
 pub struct InputValueDefinition<Type, DefaultValue, Directives, Span> {
@@ -163,7 +163,7 @@ impl<Type, DefaultValue, Directives, Span>
   InputValueDefinition<Type, DefaultValue, Directives, Span>
 {
   /// Returns a reference to the span covering the entire input value definition.
-  /// 
+  ///
   /// The span includes the optional description, name, colon, type, optional
   /// default value, and optional directives.
   #[inline]
@@ -172,7 +172,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the optional description of the input value definition.
-  /// 
+  ///
   /// The description provides documentation for the input value and appears before
   /// the value name. It can be either a single-line string or a block string, and
   /// helps developers understand the purpose and usage of the parameter.
@@ -182,7 +182,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the input value name.
-  /// 
+  ///
   /// This is the identifier used to reference this input value when providing
   /// arguments to fields, directives, or input objects. The name must be a
   /// valid GraphQL identifier and should be unique within its context.
@@ -192,7 +192,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the colon separator between name and type.
-  /// 
+  ///
   /// The colon is a required part of input value definition syntax that separates
   /// the parameter name from its type specification.
   #[inline]
@@ -201,7 +201,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the input value's type.
-  /// 
+  ///
   /// The type specifies what kind of data this input value accepts. It can be
   /// a scalar type, enum, input object, or wrapper types (list, non-null).
   /// The type system ensures type safety for all input data.
@@ -211,7 +211,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the optional default value.
-  /// 
+  ///
   /// The default value is used when the input value is not provided by the client.
   /// Default values must be compatible with the input value's type and are
   /// particularly useful for optional parameters to provide sensible fallbacks.
@@ -221,7 +221,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Returns a reference to the optional directives applied to this input value.
-  /// 
+  ///
   /// Directives provide metadata or specify behavior for the input value,
   /// such as validation rules, constraints, deprecation information, or
   /// custom processing instructions. They are particularly useful for
@@ -232,7 +232,7 @@ impl<Type, DefaultValue, Directives, Span>
   }
 
   /// Creates a parser that can parse a complete input value definition.
-  /// 
+  ///
   /// This parser handles the full input value definition syntax including all
   /// optional and required components. The parsing of type, default value, and
   /// directives is delegated to the provided parsers, allowing for flexibility

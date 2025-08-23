@@ -1,9 +1,9 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
+  convert::*,
   lang::{ignored, keywords, punct::Ampersand, Name, StringValue},
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 #[derive(Debug, Clone)]
@@ -162,7 +162,12 @@ impl<Span, Container> IntoSpan<Span> for ImplementInterfaces<Span, Container> {
 }
 
 impl<Span, Container> IntoComponents for ImplementInterfaces<Span, Container> {
-  type Components = (Span, keywords::Implements<Span>, LeadingImplementInterface<Span>, Container);
+  type Components = (
+    Span,
+    keywords::Implements<Span>,
+    LeadingImplementInterface<Span>,
+    Container,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -230,8 +235,8 @@ pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  AsRef<Span> for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -239,8 +244,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  IntoSpan<Span> for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -248,8 +253,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  IntoComponents
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
   for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
@@ -441,8 +445,8 @@ pub struct InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition,
   content: InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  AsRef<Span> for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -450,8 +454,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  IntoSpan<Span> for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -459,8 +463,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  IntoComponents
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
   for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (

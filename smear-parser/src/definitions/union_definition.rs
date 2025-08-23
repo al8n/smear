@@ -1,13 +1,13 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
+  convert::*,
   lang::{
     ignored, keywords,
     punct::{Equal, Pipe},
     Name, StringValue,
   },
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 use std::vec::Vec;
@@ -70,7 +70,8 @@ impl<Span> LeadingUnionMemberType<Span> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
   {
-    Pipe::parser().then_ignore(ignored())
+    Pipe::parser()
+      .then_ignore(ignored())
       .or_not()
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
@@ -212,15 +213,12 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
   {
     Equal::parser()
       .then_ignore(ignored())
-      .then(
-        LeadingUnionMemberType::parser()
-          .then_ignore(ignored())
-      )
+      .then(LeadingUnionMemberType::parser().then_ignore(ignored()))
       .then(
         UnionMemberType::parser()
           .padded_by(ignored())
           .repeated()
-          .collect() 
+          .collect(),
       )
       .map_with(|((eq, leading), remaining), sp| Self {
         span: Span::from_map_extra(sp),
@@ -251,14 +249,18 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, 
   }
 }
 
-impl<Directives, MemberTypes, Span> IntoSpan<Span> for UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> IntoSpan<Span>
+  for UnionDefinition<Directives, MemberTypes, Span>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, MemberTypes, Span> IntoComponents for UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> IntoComponents
+  for UnionDefinition<Directives, MemberTypes, Span>
+{
   type Components = (
     Span,
     Option<StringValue<Span>>,
@@ -401,14 +403,18 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, M
   }
 }
 
-impl<Directives, MemberTypes, Span> IntoSpan<Span> for UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> IntoSpan<Span>
+  for UnionExtension<Directives, MemberTypes, Span>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, MemberTypes, Span> IntoComponents for UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> IntoComponents
+  for UnionExtension<Directives, MemberTypes, Span>
+{
   type Components = (
     Span,
     keywords::Extend<Span>,

@@ -4,11 +4,11 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use crate::{
+  convert::*,
   lang::{
     ignored,
     punct::{LBrace, RBrace},
   },
-  convert::*,
   source::{Char, Slice, Source},
 };
 
@@ -161,7 +161,6 @@ impl<InputValueDefinition, Span, Container> IntoComponents
     (self.span, self.l_brace, self.fields, self.r_brace)
   }
 }
-
 
 impl<InputValueDefinition, Span, Container>
   InputFieldsDefinition<InputValueDefinition, Span, Container>

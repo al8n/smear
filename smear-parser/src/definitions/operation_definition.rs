@@ -1,34 +1,34 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
+  convert::*,
   lang::{ignored, Name, StringValue},
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
-/// 
+///
 /// Named operations are the full form of GraphQL operations that include an operation type
 /// (query, mutation, or subscription), optional name, variables, directives, and a selection set.
 /// They provide complete control over operation execution and enable advanced features like
 /// variables, directives, and operation identification.
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Simple named query
 /// query GetUser {
 ///   user(id: "123") { name email }
 /// }
-/// 
+///
 /// # Complex operation with all components
 /// """
 /// Retrieves user profile with posts and analytics data.
 /// Used by the dashboard component.
 /// """
-/// query GetUserDashboard($userId: ID!, $includeAnalytics: Boolean = false) 
-///   @cached(ttl: 300) 
-///   @rateLimit(max: 100) 
+/// query GetUserDashboard($userId: ID!, $includeAnalytics: Boolean = false)
+///   @cached(ttl: 300)
+///   @rateLimit(max: 100)
 /// {
 ///   user(id: $userId) {
 ///     name
@@ -43,7 +43,7 @@ use crate::{
 ///     }
 ///   }
 /// }
-/// 
+///
 /// # Mutation with variables
 /// mutation CreatePost($input: CreatePostInput!) {
 ///   createPost(input: $input) {
@@ -52,7 +52,7 @@ use crate::{
 ///     publishedAt
 ///   }
 /// }
-/// 
+///
 /// # Subscription for real-time updates
 /// subscription ChatMessages($channelId: ID!) {
 ///   messageAdded(channelId: $channelId) {
@@ -63,14 +63,14 @@ use crate::{
 ///   }
 /// }
 /// ```
-/// 
+///
 /// ## Grammar
 ///
 /// ```text
 /// OperationDefinition:
 ///   Description? OperationType Name? VariableDefinitions? Directives? SelectionSet
 /// ```
-/// 
+///
 /// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
 #[derive(Debug, Clone)]
 pub struct NamedOperationDefinition<
@@ -144,7 +144,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the optional description of the operation.
-  /// 
+  ///
   /// The description documents the operation's purpose, usage, and any important
   /// implementation details. It's particularly useful for complex operations
   /// that may be used by multiple clients or team members.
@@ -154,7 +154,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the operation type (query, mutation, or subscription).
-  /// 
+  ///
   /// The operation type determines the execution semantics:
   /// - **Query**: Read-only, can be executed in parallel
   /// - **Mutation**: Write operations, executed serially
@@ -165,13 +165,13 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the optional operation name.
-  /// 
+  ///
   /// Operation names serve multiple purposes:
   /// - Client-side operation identification and caching
   /// - Server-side logging and analytics
   /// - Development tools and debugging
   /// - Operation whitelisting and security
-  /// 
+  ///
   /// Names should be descriptive and follow naming conventions like `GetUserProfile`
   /// or `CreateBlogPost`.
   #[inline]
@@ -180,7 +180,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the optional variable definitions.
-  /// 
+  ///
   /// Variable definitions specify the parameters that can be passed to the operation,
   /// enabling parameterized and reusable operations. They include type information
   /// and optional default values.
@@ -190,7 +190,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the optional directives applied to the operation.
-  /// 
+  ///
   /// Operation-level directives can control caching, authentication, rate limiting,
   /// and other cross-cutting concerns. Common examples include `@cached`, `@auth`,
   /// and `@rateLimit`.
@@ -200,7 +200,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Returns a reference to the selection set defining what data to fetch.
-  /// 
+  ///
   /// The selection set is the core of the operation, specifying exactly which
   /// fields and nested data the client wants to retrieve. This is where GraphQL's
   /// "ask for what you need" philosophy is expressed.
@@ -210,7 +210,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 
   /// Creates a parser for named operation definitions.
-  /// 
+  ///
   /// This parser handles the complete syntax for named operations, including all
   /// optional components. It delegates parsing of specific components to the
   /// provided sub-parsers for maximum flexibility.

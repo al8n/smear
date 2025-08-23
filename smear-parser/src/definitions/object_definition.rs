@@ -1,25 +1,25 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
+  convert::*,
   lang::{ignored, keywords, Name, StringValue},
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 /// Represents a GraphQL Object type definition that defines a concrete type with fields.
-/// 
+///
 /// Object types are the most common type in GraphQL schemas and represent entities with
 /// a specific set of fields. They can implement interfaces, have directives applied,
 /// and serve as the building blocks for complex type hierarchies.
-/// 
+///
 /// Object types are fundamental to GraphQL's type system and serve multiple roles:
 /// - Define the shape and behavior of data entities
 /// - Implement interfaces to share common field contracts
 /// - Serve as root types for operations (Query, Mutation, Subscription)
 /// - Enable polymorphic queries through interface and union relationships
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Simple object type
 /// type User {
@@ -27,7 +27,7 @@ use crate::{
 ///   name: String!
 ///   email: String!
 /// }
-/// 
+///
 /// # Object implementing interfaces
 /// type User implements Node & Timestamped {
 ///   id: ID!
@@ -36,7 +36,7 @@ use crate::{
 ///   name: String!
 ///   email: String!
 /// }
-/// 
+///
 /// # Object with description and directives
 /// """
 /// Represents a user account in the system.
@@ -49,17 +49,17 @@ use crate::{
 ///   posts: [Post!]!
 ///   createdAt: DateTime!
 /// }
-/// 
+///
 /// # Object without fields (marker type)
 /// type DeletePayload @deprecated(reason: "Use generic MutationPayload")
 /// ```
-/// 
+///
 /// ## Grammar
 /// ```text
 /// ObjectTypeDefinition:
 ///   Description? type Name ImplementsInterfaces? Directives? FieldsDefinition?
 /// ```
-/// 
+///
 /// Spec: [Object Type Definition](https://spec.graphql.org/draft/#sec-Object-Type-Definition)
 #[derive(Debug, Clone, Copy)]
 pub struct ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
@@ -127,7 +127,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the optional description of the object type.
-  /// 
+  ///
   /// The description documents the object's purpose, usage patterns, and any
   /// important behavioral notes. It's essential for API documentation and
   /// developer understanding of the type's role in the schema.
@@ -137,7 +137,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the `type` keyword token.
-  /// 
+  ///
   /// This provides access to the exact `type` keyword and its source location,
   /// useful for error reporting and tooling integration.
   #[inline]
@@ -146,7 +146,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the name of the object type.
-  /// 
+  ///
   /// The object name becomes part of the schema's public API and should follow
   /// GraphQL naming conventions (PascalCase). The name must be unique within
   /// the schema's type namespace.
@@ -156,7 +156,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the optional interfaces this object implements.
-  /// 
+  ///
   /// Interface implementation creates a contract where the object must provide
   /// all fields defined by the implemented interfaces. This enables polymorphic
   /// queries and shared behavior across different object types.
@@ -166,7 +166,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the optional directives applied to the object type.
-  /// 
+  ///
   /// Object-level directives can control authentication, caching, deprecation,
   /// and other cross-cutting concerns that apply to the entire type.
   #[inline]
@@ -175,7 +175,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the optional fields definition.
-  /// 
+  ///
   /// The fields definition specifies all the fields available on this object type.
   /// Objects without fields are valid (marker types) but uncommon in practice.
   #[inline]
@@ -184,7 +184,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Creates a parser for object type definitions.
-  /// 
+  ///
   /// This parser handles the complete syntax for GraphQL object types, including
   /// all optional components like descriptions, interface implementations,
   /// directives, and field definitions.
@@ -228,26 +228,26 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
 }
 
 /// Represents the content portion of an object type extension.
-/// 
+///
 /// Object extensions can add different types of content to existing object types:
 /// - New interface implementations
 /// - Additional directives
 /// - New field definitions
 /// - Combinations of the above
-/// 
+///
 /// Extensions enable modular schema composition and gradual schema evolution
 /// without breaking existing type definitions.
 #[derive(Debug, Clone)]
 pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds only directives, optionally with new interface implementations.
-  /// 
+  ///
   /// This variant is used when extending an object to add metadata or behavioral
   /// modifiers without changing its field structure.
-  /// 
+  ///
   /// ## Examples
   /// ```text
   /// extend type User @deprecated(reason: "Use UserV2")
-  /// 
+  ///
   /// extend type User implements Auditable @auth(level: "admin")
   /// ```
   Directives {
@@ -258,17 +258,17 @@ pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinitio
   },
 
   /// Extension adds new fields, optionally with interface implementations and directives.
-  /// 
+  ///
   /// This is the most comprehensive form of object extension, allowing the addition
   /// of new fields along with supporting interface implementations and directives.
-  /// 
+  ///
   /// ## Examples
   /// ```text
   /// extend type User {
   ///   avatar: String
   ///   lastLoginAt: DateTime
   /// }
-  /// 
+  ///
   /// extend type User implements Timestamped @cache(maxAge: 600) {
   ///   createdAt: DateTime!
   ///   updatedAt: DateTime!
@@ -285,14 +285,14 @@ pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinitio
   },
 
   /// Extension adds only new interface implementations.
-  /// 
+  ///
   /// This variant is used when an object needs to implement additional interfaces
   /// without adding new fields or directives.
-  /// 
+  ///
   /// ## Examples
   /// ```text
   /// extend type User implements Timestamped
-  /// 
+  ///
   /// extend type Post implements Node & Searchable
   /// ```
   Implements(ImplementInterfaces),
@@ -302,7 +302,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
 {
   /// Creates a parser for object extension content.
-  /// 
+  ///
   /// This parser uses a choice combinator to try different extension patterns,
   /// ensuring that the most specific matches (like fields with directives) are
   /// attempted before more general ones (like directives only).
@@ -345,32 +345,32 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 }
 
 /// Represents a GraphQL Object type extension that adds capabilities to an existing object.
-/// 
+///
 /// Object extensions allow incremental enhancement of existing object types without
 /// modifying the original definition. They support schema evolution, modular composition,
 /// and distributed development workflows.
-/// 
+///
 /// Extensions can add:
 /// - New field definitions
 /// - Additional interface implementations  
 /// - New directives for metadata or behavior
 /// - Combinations of the above
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Add new fields
 /// extend type User {
 ///   avatar: String
 ///   preferences: UserPreferences
 /// }
-/// 
+///
 /// # Add interface implementation
 /// extend type User implements Timestamped
-/// 
+///
 /// # Add directives
 /// extend type User @deprecated(reason: "Use UserV2")
-/// 
+///
 /// # Comprehensive extension
 /// extend type User implements Auditable @cache(maxAge: 300) {
 ///   lastAuditAt: DateTime
@@ -378,7 +378,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///   avatar: String @resize(width: 200, height: 200)
 /// }
 /// ```
-/// 
+///
 /// ## Grammar
 ///
 /// ```text
@@ -387,7 +387,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///   | extend type Name ImplementsInterfaces? Directives
 ///   | extend type Name ImplementsInterfaces
 /// ```
-/// 
+///
 /// Spec: [Object Type Extension](https://spec.graphql.org/draft/#sec-Object-Type-Extension)
 #[derive(Debug, Clone)]
 pub struct ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
@@ -449,7 +449,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the `extend` keyword token.
-  /// 
+  ///
   /// This provides access to the exact `extend` keyword that begins the extension,
   /// useful for error reporting and distinguishing extensions from definitions.
   #[inline]
@@ -458,7 +458,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the `type` keyword token.
-  /// 
+  ///
   /// This provides access to the `type` keyword that follows `extend`,
   /// helping distinguish object extensions from other extension types.
   #[inline]
@@ -467,7 +467,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the name of the object type being extended.
-  /// 
+  ///
   /// This must reference an existing object type defined elsewhere in the schema.
   /// The extension will add new capabilities to the named object type.
   #[inline]
@@ -476,7 +476,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Returns a reference to the content being added by this extension.
-  /// 
+  ///
   /// The content determines what new capabilities are being added to the object:
   /// - New field definitions
   /// - Additional interface implementations
@@ -490,7 +490,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   /// Creates a parser for object type extensions.
-  /// 
+  ///
   /// This parser handles the `extend type` syntax followed by the object name
   /// and extension content. The content parsing is delegated to the
   /// `ObjectExtensionContent` parser for modularity.

@@ -1,25 +1,25 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
+  convert::*,
   lang::keywords::{Mutation, Query, Subscription},
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 /// Represents the three fundamental operation types in GraphQL that define how clients interact with a GraphQL service.
-/// 
+///
 /// Operation types form the foundation of GraphQL's execution model and define the semantic
 /// contract between clients and servers. Each operation type serves a distinct purpose in
 /// the GraphQL ecosystem and follows specific execution semantics that ensure predictable
 /// and reliable API behavior.
 ///
 /// ## Grammar
-/// 
+///
 /// ```text
 /// OperationType : one of
 ///   query mutation subscription
 /// ```
-/// 
+///
 /// Spec: [Operation Type](https://spec.graphql.org/draft/#OperationType)
 #[derive(
   Debug,
@@ -33,21 +33,21 @@ use super::super::{
 #[try_unwrap(ref, ref_mut)]
 pub enum OperationType<Span> {
   /// Represents a GraphQL query operation for read-only data retrieval.
-  /// 
+  ///
   /// Query operations are the most fundamental operation type in GraphQL, designed for
   /// fetching data without causing side effects. They embody GraphQL's approach to
   /// declarative data fetching where clients specify exactly what data they need.
   Query(Query<Span>),
 
   /// Represents a GraphQL mutation operation for write operations and data modification.
-  /// 
+  ///
   /// Mutation operations are designed for operations that modify server state, create
   /// or update data, or trigger side effects. They provide controlled, predictable
   /// mechanisms for changing data while maintaining GraphQL's type safety guarantees.
   Mutation(Mutation<Span>),
 
   /// Represents a GraphQL subscription operation for real-time streaming data.
-  /// 
+  ///
   /// Subscription operations enable real-time communication between clients and servers
   /// by establishing persistent connections that stream data updates over time. They
   /// extend GraphQL's request-response model to support event-driven architectures
@@ -85,7 +85,7 @@ impl<Span> OperationType<Span> {
   }
 
   /// Creates a parser that can recognize any of the three GraphQL operation types.
-  /// 
+  ///
   /// This parser uses a choice combinator to attempt parsing each operation type
   /// keyword in sequence, returning the first successful match. The parser is
   /// designed to be efficient and provide clear error messages when none of

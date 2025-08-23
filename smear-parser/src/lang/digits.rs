@@ -81,7 +81,7 @@ impl<Span> Digits<Span> {
   /// This parser matches one or more consecutive decimal digits (`0-9`).
   /// It is designed to be a reusable component for building more complex
   /// numeric parsers in GraphQL literals.
-  /// 
+  ///
   /// ## Notes
   ///
   /// This parser does not handle surrounding [ignored tokens].
