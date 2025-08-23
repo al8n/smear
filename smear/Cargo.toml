@@ -8,7 +8,9 @@ license.workspace = true
 description = "A graphql query parser and optimizer for over any database."
 
 [features]
-default = []
+default = ["std"]
+alloc = ["smear-graphql/alloc", "smear-parser/alloc"]
+std = ["smear-graphql/std", "smear-parser/std"]
 
 # bigint = ["dep:num-bigint"]
 # bigdecimal = ["dep:bigdecimal"]
@@ -18,10 +20,16 @@ default = []
 # indexmap = ["dep:indexmap"]
 # url = ["dep:url"]
 
+
 [dependencies]
-apollo-parser.workspace = true
-apollo-encoder.workspace = true
-salsa.workspace = true
+smear-parser.workspace = true
+smear-graphql.workspace = true
+
+
+
+# apollo-parser.workspace = true
+# apollo-encoder.workspace = true
+# salsa.workspace = true
 # codespan-reporting = "0.11"
 # smear-derive = { path = "../derive" }
 # smear-types = { path = "../types" }
