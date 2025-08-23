@@ -1,41 +1,14 @@
-// #![cfg_attr(docsrs, feature(doc_cfg))]
-// #![cfg_attr(docsrs, allow(unused_attributes))]
+#![doc = include_str!("../../README.md")]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-// mod db;
-// mod diagnostics;
-// pub use diagnostics::*;
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
 
-// pub use apollo_parser;
-// pub use codespan_reporting;
-// pub use derive_more;
-// pub use smear_derive::*;
+#[cfg(feature = "std")]
+extern crate std;
 
-// #[doc(hidden)]
-// pub mod __exports {
-//   pub use apollo_encoder;
-//   pub use apollo_parser;
-//   pub use once_cell;
-//   pub use viewit;
-//   pub use strum;
-//   pub use smear_types::{Deprecated, Diagnosticable, Encodable};
+/// The GraphQL parser combinators.
+pub use smear_parser as parser;
 
-//   pub mod directive {
-//     pub use smear_types::directive::*;
-//   }
-
-//   pub mod error {
-//     pub use smear_types::error::*;
-//   }
-
-//   pub mod value {
-//     pub use smear_types::value::*;
-//   }
-
-//   pub mod utils {
-//     pub use smear_types::utils::*;
-//   }
-
-//   pub mod definition {
-//     pub use smear_types::definition::*;
-//   }
-// }
+/// The concrete GraphQL parser implementation based on the parser combinators.
+pub use smear_graphql as graphql;
