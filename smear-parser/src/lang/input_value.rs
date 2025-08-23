@@ -23,6 +23,7 @@ pub use null::*;
 pub use object::*;
 pub use set::*;
 pub use string::*;
+pub use tuple::*;
 pub use uint::*;
 pub use variable::*;
 
@@ -36,6 +37,7 @@ mod null;
 mod object;
 mod set;
 mod string;
+mod tuple;
 mod uint;
 mod variable;
 
