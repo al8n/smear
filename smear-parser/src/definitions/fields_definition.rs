@@ -377,7 +377,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P>(
-    field_definition_parser: impl FnOnce() -> P,
+    field_definition_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -392,7 +392,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     LBrace::parser()
       .then_ignore(ignored())
       .then(
-        field_definition_parser()
+        field_definition_parser
           .padded_by(ignored())
           .repeated()
           .at_least(1)

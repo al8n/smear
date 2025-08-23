@@ -7,18 +7,42 @@ use super::super::{
     Name, StringValue,
   },
   source::{Char, Slice, Source},
+  convert::*,
 };
 
 use std::vec::Vec;
 
 #[derive(Debug, Clone)]
-pub struct UnionMemberType<Span> {
+pub struct LeadingUnionMemberType<Span> {
   span: Span,
   pipe: Option<Pipe<Span>>,
   name: Name<Span>,
 }
 
-impl<Span> UnionMemberType<Span> {
+impl<Span> AsRef<Span> for LeadingUnionMemberType<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for LeadingUnionMemberType<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span> IntoComponents for LeadingUnionMemberType<Span> {
+  type Components = (Span, Option<Pipe<Span>>, Name<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.pipe, self.name)
+  }
+}
+
+impl<Span> LeadingUnionMemberType<Span> {
   /// The span of the union member type.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -46,9 +70,8 @@ impl<Span> UnionMemberType<Span> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
   {
-    Pipe::parser()
+    Pipe::parser().then_ignore(ignored())
       .or_not()
-      .then_ignore(ignored())
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
         span: Span::from_map_extra(sp),
@@ -56,9 +79,59 @@ impl<Span> UnionMemberType<Span> {
         name,
       })
   }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionMemberType<Span> {
+  span: Span,
+  pipe: Pipe<Span>,
+  name: Name<Span>,
+}
+
+impl<Span> AsRef<Span> for UnionMemberType<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for UnionMemberType<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span> IntoComponents for UnionMemberType<Span> {
+  type Components = (Span, Pipe<Span>, Name<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.pipe, self.name)
+  }
+}
+
+impl<Span> UnionMemberType<Span> {
+  /// The span of the union member type.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// The pipe of the union member type.
+  #[inline]
+  pub const fn pipe(&self) -> &Pipe<Span> {
+    &self.pipe
+  }
+
+  /// The name of the union member type.
+  #[inline]
+  pub const fn name(&self) -> &Name<Span> {
+    &self.name
+  }
 
   /// Subsequent members: `| Name`  (pipe is **required**)
-  pub fn parser_with_pipe<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -82,7 +155,31 @@ impl<Span> UnionMemberType<Span> {
 pub struct UnionMemberTypes<Span, Container = Vec<UnionMemberType<Span>>> {
   span: Span,
   eq: Equal<Span>,
-  members: Container,
+  leading: LeadingUnionMemberType<Span>,
+  remaining: Container,
+}
+
+impl<Span, Container> AsRef<Span> for UnionMemberTypes<Span, Container> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span, Container> IntoSpan<Span> for UnionMemberTypes<Span, Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span, Container> IntoComponents for UnionMemberTypes<Span, Container> {
+  type Components = (Span, Equal<Span>, LeadingUnionMemberType<Span>, Container);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.eq, self.leading, self.remaining)
+  }
 }
 
 impl<Span, Container> UnionMemberTypes<Span, Container> {
@@ -95,8 +192,13 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
     &self.eq
   }
   #[inline]
-  pub const fn members(&self) -> &Container {
-    &self.members
+  pub const fn leading(&self) -> &LeadingUnionMemberType<Span> {
+    &self.leading
+  }
+
+  #[inline]
+  pub const fn remaining(&self) -> &Container {
+    &self.remaining
   }
 
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
@@ -106,22 +208,25 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
     Container: chumsky::container::Container<UnionMemberType<Span>>,
   {
     Equal::parser()
       .then_ignore(ignored())
       .then(
+        LeadingUnionMemberType::parser()
+          .then_ignore(ignored())
+      )
+      .then(
         UnionMemberType::parser()
           .padded_by(ignored())
           .repeated()
-          .at_least(1)
-          .collect(),
+          .collect() 
       )
-      .map_with(|(eq, members), sp| Self {
+      .map_with(|((eq, leading), remaining), sp| Self {
         span: Span::from_map_extra(sp),
         eq,
-        members,
+        leading,
+        remaining,
       })
   }
 }
@@ -137,6 +242,43 @@ pub struct UnionDefinition<Directives, MemberTypes, Span> {
   name: Name<Span>,
   directives: Option<Directives>,
   members: Option<MemberTypes>,
+}
+
+impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, MemberTypes, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directives, MemberTypes, Span> IntoSpan<Span> for UnionDefinition<Directives, MemberTypes, Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directives, MemberTypes, Span> IntoComponents for UnionDefinition<Directives, MemberTypes, Span> {
+  type Components = (
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Union<Span>,
+    Name<Span>,
+    Option<Directives>,
+    Option<MemberTypes>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.description,
+      self.keyword,
+      self.name,
+      self.directives,
+      self.members,
+    )
+  }
 }
 
 impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Span> {
@@ -175,7 +317,6 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -253,6 +394,41 @@ pub struct UnionExtension<Directives, MemberTypes, Span> {
   content: UnionExtensionContent<Directives, MemberTypes>,
 }
 
+impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, MemberTypes, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Directives, MemberTypes, Span> IntoSpan<Span> for UnionExtension<Directives, MemberTypes, Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Directives, MemberTypes, Span> IntoComponents for UnionExtension<Directives, MemberTypes, Span> {
+  type Components = (
+    Span,
+    keywords::Extend<Span>,
+    keywords::Union<Span>,
+    Name<Span>,
+    UnionExtensionContent<Directives, MemberTypes>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.extend,
+      self.keyword,
+      self.name,
+      self.content,
+    )
+  }
+}
+
 impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -273,25 +449,6 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
   #[inline]
   pub const fn content(&self) -> &UnionExtensionContent<Directives, MemberTypes> {
     &self.content
-  }
-
-  #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
-    Span,
-    keywords::Extend<Span>,
-    keywords::Union<Span>,
-    Name<Span>,
-    UnionExtensionContent<Directives, MemberTypes>,
-  ) {
-    (
-      self.span,
-      self.extend,
-      self.keyword,
-      self.name,
-      self.content,
-    )
   }
 
   pub fn parser_with<'src, I, E, DP, MP>(

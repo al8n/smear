@@ -804,7 +804,6 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

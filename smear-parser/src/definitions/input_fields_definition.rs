@@ -3,11 +3,12 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use super::super::{
+use crate::{
   lang::{
     ignored,
     punct::{LBrace, RBrace},
   },
+  convert::*,
   source::{Char, Slice, Source},
 };
 
@@ -132,6 +133,36 @@ pub struct InputFieldsDefinition<InputValueDefinition, Span, Container = Vec<Inp
   _input_value_definition: PhantomData<InputValueDefinition>,
 }
 
+impl<InputValueDefinition, Span, Container> AsRef<Span>
+  for InputFieldsDefinition<InputValueDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<InputValueDefinition, Span, Container> IntoSpan<Span>
+  for InputFieldsDefinition<InputValueDefinition, Span, Container>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<InputValueDefinition, Span, Container> IntoComponents
+  for InputFieldsDefinition<InputValueDefinition, Span, Container>
+{
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_brace, self.fields, self.r_brace)
+  }
+}
+
+
 impl<InputValueDefinition, Span, Container>
   InputFieldsDefinition<InputValueDefinition, Span, Container>
 {
@@ -209,9 +240,9 @@ impl<InputValueDefinition, Span, Container>
       // optional Ignored before '}'
       .then_ignore(ignored())
       .then(RBrace::parser())
-      .map_with(|((l_brace, values), r_brace), sp| Self {
+      .map_with(|((l_brace, fields), r_brace), sp| Self {
         span: Span::from_map_extra(sp),
-        values,
+        fields,
         l_brace,
         r_brace,
         _input_value_definition: PhantomData,

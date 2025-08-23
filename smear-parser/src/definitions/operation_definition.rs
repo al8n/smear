@@ -3,8 +3,75 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   lang::{ignored, Name, StringValue},
   source::{Char, Slice, Source},
+  convert::*,
 };
 
+/// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
+/// 
+/// Named operations are the full form of GraphQL operations that include an operation type
+/// (query, mutation, or subscription), optional name, variables, directives, and a selection set.
+/// They provide complete control over operation execution and enable advanced features like
+/// variables, directives, and operation identification.
+/// 
+/// ## Examples
+/// 
+/// ```text
+/// # Simple named query
+/// query GetUser {
+///   user(id: "123") { name email }
+/// }
+/// 
+/// # Complex operation with all components
+/// """
+/// Retrieves user profile with posts and analytics data.
+/// Used by the dashboard component.
+/// """
+/// query GetUserDashboard($userId: ID!, $includeAnalytics: Boolean = false) 
+///   @cached(ttl: 300) 
+///   @rateLimit(max: 100) 
+/// {
+///   user(id: $userId) {
+///     name
+///     email
+///     posts(first: 10) {
+///       title
+///       createdAt
+///     }
+///     analytics @include(if: $includeAnalytics) {
+///       viewCount
+///       engagementRate
+///     }
+///   }
+/// }
+/// 
+/// # Mutation with variables
+/// mutation CreatePost($input: CreatePostInput!) {
+///   createPost(input: $input) {
+///     id
+///     title
+///     publishedAt
+///   }
+/// }
+/// 
+/// # Subscription for real-time updates
+/// subscription ChatMessages($channelId: ID!) {
+///   messageAdded(channelId: $channelId) {
+///     id
+///     content
+///     author { name }
+///     timestamp
+///   }
+/// }
+/// ```
+/// 
+/// ## Grammar
+///
+/// ```text
+/// OperationDefinition:
+///   Description? OperationType Name? VariableDefinitions? Directives? SelectionSet
+/// ```
+/// 
+/// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
 #[derive(Debug, Clone)]
 pub struct NamedOperationDefinition<
   OperationType,
@@ -22,48 +89,28 @@ pub struct NamedOperationDefinition<
   selection_set: SelectionSet,
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
-  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OpeartionType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<Span>
+  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 {
   #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
+  fn as_ref(&self) -> &Span {
+    self.span()
   }
+}
 
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoSpan<Span>
+  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+{
   #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.description.as_ref()
+  fn into_span(self) -> Span {
+    self.span
   }
+}
 
-  #[inline]
-  pub const fn operation_type(&self) -> &OperationType {
-    &self.operation_type
-  }
-
-  #[inline]
-  pub const fn name(&self) -> Option<&Name<Span>> {
-    self.name.as_ref()
-  }
-
-  #[inline]
-  pub const fn variable_definitions(&self) -> Option<&VariableDefinitions> {
-    self.variable_definitions.as_ref()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-
-  #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet {
-    &self.selection_set
-  }
-
-  #[inline]
-  pub fn into_components(
-    self,
-  ) -> (
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoComponents
+  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+{
+  type Components = (
     Span,
     Option<StringValue<Span>>,
     OperationType,
@@ -71,7 +118,10 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     Option<VariableDefinitions>,
     Option<Directives>,
     SelectionSet,
-  ) {
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
     (
       self.span,
       self.description,
@@ -82,7 +132,96 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
       self.selection_set,
     )
   }
+}
 
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+{
+  /// Returns a reference to the span covering the entire operation definition.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the optional description of the operation.
+  /// 
+  /// The description documents the operation's purpose, usage, and any important
+  /// implementation details. It's particularly useful for complex operations
+  /// that may be used by multiple clients or team members.
+  #[inline]
+  pub const fn description(&self) -> Option<&StringValue<Span>> {
+    self.description.as_ref()
+  }
+
+  /// Returns a reference to the operation type (query, mutation, or subscription).
+  /// 
+  /// The operation type determines the execution semantics:
+  /// - **Query**: Read-only, can be executed in parallel
+  /// - **Mutation**: Write operations, executed serially
+  /// - **Subscription**: Real-time streaming operations
+  #[inline]
+  pub const fn operation_type(&self) -> &OperationType {
+    &self.operation_type
+  }
+
+  /// Returns a reference to the optional operation name.
+  /// 
+  /// Operation names serve multiple purposes:
+  /// - Client-side operation identification and caching
+  /// - Server-side logging and analytics
+  /// - Development tools and debugging
+  /// - Operation whitelisting and security
+  /// 
+  /// Names should be descriptive and follow naming conventions like `GetUserProfile`
+  /// or `CreateBlogPost`.
+  #[inline]
+  pub const fn name(&self) -> Option<&Name<Span>> {
+    self.name.as_ref()
+  }
+
+  /// Returns a reference to the optional variable definitions.
+  /// 
+  /// Variable definitions specify the parameters that can be passed to the operation,
+  /// enabling parameterized and reusable operations. They include type information
+  /// and optional default values.
+  #[inline]
+  pub const fn variable_definitions(&self) -> Option<&VariableDefinitions> {
+    self.variable_definitions.as_ref()
+  }
+
+  /// Returns a reference to the optional directives applied to the operation.
+  /// 
+  /// Operation-level directives can control caching, authentication, rate limiting,
+  /// and other cross-cutting concerns. Common examples include `@cached`, `@auth`,
+  /// and `@rateLimit`.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns a reference to the selection set defining what data to fetch.
+  /// 
+  /// The selection set is the core of the operation, specifying exactly which
+  /// fields and nested data the client wants to retrieve. This is where GraphQL's
+  /// "ask for what you need" philosophy is expressed.
+  #[inline]
+  pub const fn selection_set(&self) -> &SelectionSet {
+    &self.selection_set
+  }
+
+  /// Creates a parser for named operation definitions.
+  /// 
+  /// This parser handles the complete syntax for named operations, including all
+  /// optional components. It delegates parsing of specific components to the
+  /// provided sub-parsers for maximum flexibility.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the operation definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, OP, VP, DP, SP>(
     operation_type_parser: OP,

@@ -3,16 +3,40 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use crate::{
   lang::{ignored, keywords, punct::Ampersand, Name, StringValue},
   source::{Char, Slice, Source},
+  convert::*,
 };
 
 #[derive(Debug, Clone)]
-pub struct ImplementInterface<Span> {
+pub struct LeadingImplementInterface<Span> {
   span: Span,
   amp: Option<Ampersand<Span>>,
   name: Name<Span>,
 }
 
-impl<Span> ImplementInterface<Span> {
+impl<Span> AsRef<Span> for LeadingImplementInterface<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for LeadingImplementInterface<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span> IntoComponents for LeadingImplementInterface<Span> {
+  type Components = (Span, Option<Ampersand<Span>>, Name<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.amp, self.name)
+  }
+}
+
+impl<Span> LeadingImplementInterface<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -47,9 +71,56 @@ impl<Span> ImplementInterface<Span> {
         name,
       })
   }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplementInterface<Span> {
+  span: Span,
+  amp: Ampersand<Span>,
+  name: Name<Span>,
+}
+
+impl<Span> AsRef<Span> for ImplementInterface<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for ImplementInterface<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span> IntoComponents for ImplementInterface<Span> {
+  type Components = (Span, Ampersand<Span>, Name<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.amp, self.name)
+  }
+}
+
+impl<Span> ImplementInterface<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  #[inline]
+  pub const fn ampersand(&self) -> &Ampersand<Span> {
+    &self.amp
+  }
+
+  #[inline]
+  pub const fn name(&self) -> &Name<Span> {
+    &self.name
+  }
 
   /// Subsequent members: `& Name`  (amp is **required**)
-  pub fn parser_with_amp<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -72,7 +143,31 @@ impl<Span> ImplementInterface<Span> {
 pub struct ImplementInterfaces<Span, Container = Vec<ImplementInterface<Span>>> {
   span: Span,
   implements: keywords::Implements<Span>,
-  interfaces: Container,
+  leading: LeadingImplementInterface<Span>,
+  remaining: Container,
+}
+
+impl<Span, Container> AsRef<Span> for ImplementInterfaces<Span, Container> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span, Container> IntoSpan<Span> for ImplementInterfaces<Span, Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span, Container> IntoComponents for ImplementInterfaces<Span, Container> {
+  type Components = (Span, keywords::Implements<Span>, LeadingImplementInterface<Span>, Container);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.implements, self.leading, self.remaining)
+  }
 }
 
 impl<Span, Container> ImplementInterfaces<Span, Container> {
@@ -87,18 +182,13 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
   }
 
   #[inline]
-  pub const fn interfaces(&self) -> &Container {
-    &self.interfaces
+  pub const fn leading(&self) -> &LeadingImplementInterface<Span> {
+    &self.leading
   }
 
   #[inline]
-  pub fn into_interfaces(self) -> Container {
-    self.interfaces
-  }
-
-  #[inline]
-  pub fn into_components(self) -> (Span, keywords::Implements<Span>, Container) {
-    (self.span, self.implements, self.interfaces)
+  pub const fn remaining(&self) -> &Container {
+    &self.remaining
   }
 
   /// Parses a list of implemented interfaces.
@@ -109,24 +199,22 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
     Container: chumsky::container::Container<ImplementInterface<Span>>,
   {
-    let ws = ignored();
-
     keywords::Implements::<Span>::parser()
-      .then_ignore(ws.clone())
+      .then_ignore(ignored())
+      .then(LeadingImplementInterface::parser())
       .then(
         ImplementInterface::parser()
-          .then_ignore(ws.clone())
+          .padded_by(ignored())
           .repeated()
-          .at_least(1)
           .collect(),
       )
-      .map_with(|(implements, interfaces), sp| Self {
+      .map_with(|((implements, leading), remaining), sp| Self {
         span: Span::from_map_extra(sp),
         implements,
-        interfaces,
+        leading,
+        remaining,
       })
   }
 }
@@ -140,6 +228,52 @@ pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition
   implements: Option<ImplementInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  AsRef<Span> for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  IntoSpan<Span> for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  IntoComponents
+  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  type Components = (
+    Span,
+    Option<StringValue<Span>>,
+    keywords::Interface<Span>,
+    Name<Span>,
+    Option<ImplementInterfaces>,
+    Option<Directives>,
+    Option<FieldsDefinition>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.description,
+      self.interface,
+      self.name,
+      self.implements,
+      self.directives,
+      self.fields_definition,
+    )
+  }
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
@@ -204,9 +338,9 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   }
 
   pub fn parser_with<'src, I, E, FDP, DP, IP>(
-    fields_definition_parser: impl FnOnce() -> FDP,
-    directives_parser: impl Fn() -> DP,
-    implement_interfaces_parser: impl Fn() -> IP,
+    fields_definition_parser: FDP,
+    directives_parser: DP,
+    implement_interfaces_parser: IP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -225,9 +359,9 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
       .then(keywords::Interface::parser())
       .then_ignore(ignored())
       .then(Name::parser())
-      .then(implement_interfaces_parser().padded_by(ignored()).or_not())
-      .then(directives_parser().padded_by(ignored()).or_not())
-      .then(fields_definition_parser().padded_by(ignored()).or_not())
+      .then(implement_interfaces_parser.padded_by(ignored()).or_not())
+      .then(directives_parser.padded_by(ignored()).or_not())
+      .then(fields_definition_parser.padded_by(ignored()).or_not())
       .map_with(
         |(((((description, interface), name), implements), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),
@@ -270,7 +404,6 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
@@ -306,6 +439,48 @@ pub struct InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition,
   interface: keywords::Interface<Span>,
   name: Name<Span>,
   content: InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  AsRef<Span> for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  IntoSpan<Span> for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  IntoComponents
+  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  type Components = (
+    Span,
+    keywords::Extend<Span>,
+    keywords::Interface<Span>,
+    Name<Span>,
+    InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.extend,
+      self.interface,
+      self.name,
+      self.content,
+    )
+  }
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
