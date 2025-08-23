@@ -26,7 +26,7 @@ use std::vec::Vec;
 /// ```
 ///
 /// Spec: [Argument](https://spec.graphql.org/draft/#Argument)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Argument<Value, Span> {
   span: Span,
   name: Name<Span>,
@@ -176,7 +176,7 @@ impl<Value, Span> Argument<Value, Span> {
 /// - **Arguments**: The collection of parsed arguments
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Arguments<Arg, Span, Container = Vec<Arg>> {
   span: Span,
   l_paren: LParen<Span>,

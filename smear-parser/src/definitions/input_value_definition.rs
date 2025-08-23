@@ -104,7 +104,7 @@ use crate::{
 /// ```
 ///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InputValueDefinition<Type, DefaultValue, Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,

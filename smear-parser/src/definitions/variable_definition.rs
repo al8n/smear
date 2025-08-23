@@ -155,7 +155,7 @@ use super::super::{
 /// ```
 ///
 /// Spec: [Variable Definition](https://spec.graphql.org/draft/#sec-Variable-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VariableDefinition<Type, Directives, Value, Span> {
   span: Span,
   description: Option<StringValue<Span>>,

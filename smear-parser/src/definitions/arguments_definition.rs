@@ -76,7 +76,7 @@ use super::super::{
 /// Empty argument lists `()` are not valid in GraphQL schema definitions.
 ///
 /// Spec: [ArgumentsDefinition](https://spec.graphql.org/draft/#ArgumentsDefinition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ArgumentsDefinition<InputValueDefinition, Span, Container = Vec<InputValueDefinition>> {
   span: Span,
   l_paren: LParen<Span>,

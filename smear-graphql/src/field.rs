@@ -138,7 +138,7 @@ impl<Span> Field<Span> {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Selection<Span> {
   Field(Field<Span>),
   FragmentSpread(FragmentSpread<Span>),

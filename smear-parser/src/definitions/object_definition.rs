@@ -237,7 +237,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
 ///
 /// Extensions enable modular schema composition and gradual schema evolution
 /// without breaking existing type definitions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds only directives, optionally with new interface implementations.
   ///
@@ -389,7 +389,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 /// ```
 ///
 /// Spec: [Object Type Extension](https://spec.graphql.org/draft/#sec-Object-Type-Extension)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,

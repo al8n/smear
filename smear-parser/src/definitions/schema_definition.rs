@@ -99,7 +99,7 @@ use crate::{
 /// ```
 ///
 /// Spec: [Schema Definition](https://spec.graphql.org/draft/#sec-Schema)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SchemaDefinition<Directives, RootOperationTypesDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
@@ -300,7 +300,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
 ///
 /// * `Directives` - The type representing directives applied to the schema extension
 /// * `RootOperationTypesDefinition` - The type representing new root operation type definitions
-#[derive(Debug, Clone, derive_more::IsVariant)]
+#[derive(Debug, Clone, Copy, derive_more::IsVariant)]
 pub enum SchemaExtensionContent<Directives, RootOperationTypesDefinition> {
   /// Extension contains only directives applied to the schema.
   ///
@@ -556,7 +556,7 @@ impl<Directives, RootOperationTypesDefinition>
 /// ```
 ///
 /// Spec: [Schema Extension](https://spec.graphql.org/draft/#sec-Schema-Extension)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SchemaExtension<Directives, RootOperationTypesDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,

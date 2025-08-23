@@ -31,7 +31,7 @@ use super::{
 /// ```
 ///
 /// Spec: [Field Alias](https://spec.graphql.org/draft/#sec-Field-Alias)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Alias<Span> {
   span: Span,
   name: Name<Span>,
@@ -168,7 +168,7 @@ impl<Span> Alias<Span> {
 /// ```
 ///
 /// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Field<Args, Directives, SelectionSet, Span> {
   span: Span,
   alias: Option<Alias<Span>>,

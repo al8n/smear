@@ -330,7 +330,7 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
 ///
 /// * `Directives` - The type representing directives applied to the input object extension
 /// * `FieldsDefinition` - The type representing the new input fields being added
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum InputObjectExtensionContent<Directives, FieldsDefinition> {
   /// Extension that adds only directives to the input object type without new fields
   Directives(Directives),
@@ -446,7 +446,7 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
 /// ```
 ///
 /// Spec: [Input Object Type Extension](https://spec.graphql.org/draft/#sec-Input-Object-Type-Extension)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InputObjectExtension<Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,

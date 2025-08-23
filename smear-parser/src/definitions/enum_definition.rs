@@ -54,7 +54,7 @@ use std::vec::Vec;
 /// ```
 ///
 /// Spec: [Enum Value Definition](https://spec.graphql.org/draft/#sec-Enum-Value-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EnumValueDefinition<Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
@@ -220,7 +220,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
 /// Empty enum values definitions `{}` are not valid in GraphQL.
 ///
 /// Spec: [Enum Values Definition](https://spec.graphql.org/draft/#sec-Enum-Values-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EnumValuesDefinition<EnumValueDefinition, Span, Container = Vec<EnumValueDefinition>> {
   span: Span,
   l_brace: LBrace<Span>,
@@ -394,7 +394,7 @@ impl<EnumValueDefinition, Span, Container>
 /// ```
 ///
 /// Spec: [Enum Type Definition](https://spec.graphql.org/draft/#sec-Enum-Type-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
@@ -583,7 +583,7 @@ impl<Directives, EnumValuesDefinition, Span>
 ///
 /// * `Directives` - The type representing directives applied to the enum extension
 /// * `EnumValuesDefinition` - The type representing the new enum values being added
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
   /// Extension that adds new enum values, optionally with additional directives on the type
   Values {
@@ -693,7 +693,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
 /// ```
 ///
 /// Spec: [Enum Type Extension](https://spec.graphql.org/draft/#sec-Enum-Type-Extension)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EnumExtension<Directives, EnumValuesDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,

@@ -111,7 +111,7 @@ use super::super::{
 /// ```
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FragmentDefinition<Directives, SelectionSet, Span> {
   span: Span,
   description: Option<StringValue<Span>>,

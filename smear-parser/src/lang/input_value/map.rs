@@ -23,7 +23,7 @@ use core::marker::PhantomData;
 /// ```text
 /// MapEntry ::= Key ':' Value
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MapEntry<Key, Value, Span> {
   span: Span,
   key: Key,
@@ -172,7 +172,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
 ///   "settings": < "theme": "dark", "debug": "false" >
 /// >
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Map<Key, Value, Span, C = Vec<MapEntry<Key, Value, Span>>> {
   span: Span,
   l_angle: LAngle<Span>,

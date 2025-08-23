@@ -204,7 +204,7 @@ impl<Span> ConstInputValue<Span> {
 }
 
 /// Default input value
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DefaultInputValue<Span>(input_value::DefaultInputValue<ConstInputValue<Span>, Span>);
 
 impl<Span> DefaultInputValue<Span> {

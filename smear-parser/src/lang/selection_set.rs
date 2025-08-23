@@ -80,7 +80,7 @@ use std::vec::Vec;
 /// Empty selection sets `{}` are not valid in GraphQL.
 ///
 /// Spec: [Selection Sets](https://spec.graphql.org/draft/#sec-Selection-Sets)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SelectionSet<Selection, Span, Container = Vec<Selection>> {
   span: Span,
   l_brace: LBrace<Span>,

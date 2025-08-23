@@ -241,7 +241,7 @@ impl<Span> FragmentName<Span> {
 /// ```
 ///
 /// Spec: [Fragment Spreads](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Spreads)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FragmentSpread<Directives, Span> {
   span: Span,
   ellipsis: Ellipsis<Span>,
@@ -398,7 +398,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
 /// ```
 ///
 /// Spec: [Inline Fragments](https://spec.graphql.org/draft/#sec-Inline-Fragments)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InlineFragment<Directives, SelectionSet, Span> {
   span: Span,
   ellipsis: Ellipsis<Span>,

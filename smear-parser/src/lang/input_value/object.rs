@@ -41,7 +41,7 @@ use super::super::{
 /// - **Field name**: A GraphQL name identifier
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ObjectValueField<InputValue, Span> {
   span: Span,
   name: Name<Span>,
@@ -242,7 +242,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 /// - **Nested inputs**: Complex input structures with multiple levels
 ///
 /// Spec: [Input Object Values](https://spec.graphql.org/draft/#sec-Input-Object-Values)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ObjectValue<Field, Span, Container = std::vec::Vec<Field>> {
   span: Span,
   l_brace: LBrace<Span>,

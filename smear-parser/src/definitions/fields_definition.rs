@@ -75,7 +75,7 @@ use super::super::{
 /// ```
 ///
 /// Spec: [Field Definition](https://spec.graphql.org/draft/#sec-Field-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FieldDefinition<Args, Type, Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
@@ -310,7 +310,7 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
 /// Empty fields definitions `{}` are not valid in GraphQL.
 ///
 /// Spec: [Fields Definition](https://spec.graphql.org/draft/#sec-Fields-Definition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FieldsDefinition<FieldDefinition, Span, Container = Vec<FieldDefinition>> {
   span: Span,
   l_brace: LBrace<Span>,

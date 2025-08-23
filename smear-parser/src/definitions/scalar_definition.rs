@@ -300,7 +300,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
 /// Note: Unlike scalar definitions, extensions require directives (they must add something).
 ///
 /// Spec: [Scalar Type Extension](https://spec.graphql.org/draft/#sec-Scalar-Type-Extension)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ScalarExtension<Directives, Span> {
   span: Span,
   extend: keywords::Extend<Span>,

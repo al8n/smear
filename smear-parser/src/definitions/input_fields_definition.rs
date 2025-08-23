@@ -123,7 +123,7 @@ use crate::{
 /// Empty input fields definitions `{}` are not valid in GraphQL.
 ///
 /// Spec: [InputFieldsDefinition](https://spec.graphql.org/draft/#InputFieldsDefinition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InputFieldsDefinition<InputValueDefinition, Span, Container = Vec<InputValueDefinition>>
 {
   span: Span,

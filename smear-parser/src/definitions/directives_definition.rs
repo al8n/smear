@@ -833,7 +833,7 @@ impl<Location, Span> IntoComponents for DirectiveLocation<Location, Span> {
 /// * `Location` - The type representing individual directive locations
 /// * `Span` - The type representing source location information
 /// * `Container` - The container type for storing remaining locations (defaults to `Vec<DirectiveLocation<Location, Span>>`)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DirectiveLocations<Location, Span, Container = Vec<DirectiveLocation<Location, Span>>> {
   span: Span,
   leading: LeadingDirectiveLocation<Location, Span>,
@@ -985,7 +985,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
 /// ```
 ///
 /// Spec: [DirectiveDefinition](https://spec.graphql.org/draft/#DirectiveDefinition)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DirectiveDefinition<Args, Locations, Span> {
   span: Span,
   description: Option<StringValue<Span>>,

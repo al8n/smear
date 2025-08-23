@@ -44,7 +44,7 @@ use crate::{
 /// ( USER, ADMIN, GUEST )       // Enum values
 /// ( "tag1", "tag2", "tag3" )   // Strings
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Tuple<T, Span, C = Vec<T>> {
   span: Span,
   l_paren: LParen<Span>,

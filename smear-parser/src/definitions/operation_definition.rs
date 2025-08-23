@@ -72,7 +72,7 @@ use crate::{
 /// ```
 ///
 /// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct NamedOperationDefinition<
   OperationType,
   VariableDefinitions,

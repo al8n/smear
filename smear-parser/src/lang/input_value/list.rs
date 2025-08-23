@@ -55,7 +55,7 @@ use std::vec::Vec;
 /// - **Values**: The parsed elements in their container
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct List<Value, Span, Container = Vec<Value>> {
   span: Span,
   l_bracket: LBracket<Span>,

@@ -19,7 +19,7 @@ use std::vec::Vec;
 /// For example: `@deprecated`, `@include(if: true)`, `@customDirective(arg1: "value", arg2: 42)`
 ///
 /// Spec: [Directive](https://spec.graphql.org/draft/#Directive)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Directive<Args, Span> {
   span: Span,
   at: At<Span>,
@@ -129,7 +129,7 @@ impl<Args, Span> Directive<Args, Span> {
 /// and providing access to all individual directives.
 ///
 /// Spec: [Directives](https://spec.graphql.org/draft/#Directives)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Directives<Directive, Span, Container = Vec<Directive>> {
   span: Span,
   directives: Container,
