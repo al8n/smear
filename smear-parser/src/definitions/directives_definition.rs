@@ -1,18 +1,18 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
+  convert::*,
   lang::{
     ignored, keywords,
     punct::{At, Pipe},
     Name, StringValue,
   },
   source::{Char, Slice, Source},
-  convert::*,
 };
 
 word!(
   /// `QUERY` location - directives can be applied to query operations.
-  /// 
+  ///
   /// Used when defining where a directive can be placed. Query directives
   /// affect the entire query operation and can be used for things like
   /// authentication, caching, or operation-level configuration.
@@ -24,10 +24,10 @@ word!(
   /// ```
   "query location": QueryLocation: [I::Token::Q, I::Token::U, I::Token::E, I::Token::R, I::Token::Y],
   /// `MUTATION` location - directives can be applied to mutation operations.
-  /// 
+  ///
   /// Mutation directives affect the entire mutation operation and can be used
   /// for authorization, rate limiting, or transaction control.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @rateLimit(max: 10) on MUTATION
@@ -35,10 +35,10 @@ word!(
   /// ```
   "mutation location": MutationLocation: [I::Token::M, I::Token::U, I::Token::T, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SUBSCRIPTION` location - directives can be applied to subscription operations.
-  /// 
+  ///
   /// Subscription directives control real-time data flow and can be used
   /// for filtering, authentication, or subscription management.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @requireSubscription on SUBSCRIPTION
@@ -46,10 +46,10 @@ word!(
   /// ```
   "subscription location": SubscriptionLocation: [I::Token::S, I::Token::U, I::Token::B, I::Token::S, I::Token::C, I::Token::R, I::Token::I, I::Token::P, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD_DEFINITION` location - directives can be applied to field definitions in schemas.
-  /// 
+  ///
   /// Field definition directives control field behavior, validation, authorization,
   /// or provide metadata about fields in type definitions.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on FIELD_DEFINITION
@@ -57,10 +57,10 @@ word!(
   /// ```
   "field definition location": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD` location - directives can be applied to field selections in queries.
-  /// 
+  ///
   /// Field directives control individual field selection behavior, commonly
   /// used for conditional inclusion, skipping, or field-level configuration.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @include(if: Boolean!) on FIELD
@@ -68,10 +68,10 @@ word!(
   /// ```
   "field location": FieldLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D],
   /// `FRAGMENT_DEFINITION` location - directives can be applied to named fragment definitions.
-  /// 
+  ///
   /// Fragment definition directives control fragment behavior and can be used
   /// for conditional fragments, caching, or fragment-level metadata.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @experimental on FRAGMENT_DEFINITION
@@ -79,10 +79,10 @@ word!(
   /// ```
   "fragment definition location": FragmentDefinitionLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FRAGMENT_SPREAD` location - directives can be applied to fragment spreads.
-  /// 
+  ///
   /// Fragment spread directives control when and how fragments are included
   /// in selection sets, commonly used for conditional fragment inclusion.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @include(if: Boolean!) on FRAGMENT_SPREAD
@@ -90,10 +90,10 @@ word!(
   /// ```
   "fragment spread location": FragmentSpreadLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::S, I::Token::P, I::Token::R, I::Token::E, I::Token::A, I::Token::D],
   /// `INLINE_FRAGMENT` location - directives can be applied to inline fragments.
-  /// 
+  ///
   /// Inline fragment directives control conditional type-specific field selections
   /// and can be used for conditional inclusion based on type or other criteria.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @include(if: Boolean!) on INLINE_FRAGMENT
@@ -101,10 +101,10 @@ word!(
   /// ```
   "inline fragement location": InlineFragmentLocation: [I::Token::I, I::Token::N, I::Token::L, I::Token::I, I::Token::N, I::Token::E, I::Token::UNDERSCORE, I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E],
   /// `VARIABLE_DEFINITION` location - directives can be applied to variable definitions.
-  /// 
+  ///
   /// Variable definition directives control variable behavior, validation,
   /// or provide metadata about operation variables.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on VARIABLE_DEFINITION
@@ -112,10 +112,10 @@ word!(
   /// ```
   "variable definition location": VariableDefinitionLocation: [I::Token::V, I::Token::A, I::Token::R, I::Token::I, I::Token::A, I::Token::B, I::Token::L, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SCHEMA` location - directives can be applied to the schema definition.
-  /// 
+  ///
   /// Schema directives provide global schema-level configuration, metadata,
   /// or behavior that applies to the entire GraphQL schema.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @link(url: String!) on SCHEMA
@@ -123,10 +123,10 @@ word!(
   /// ```
   "schema location": SchemaLocation: [I::Token::S, I::Token::C, I::Token::H, I::Token::E, I::Token::M, I::Token::A],
   /// `SCALAR` location - directives can be applied to scalar type definitions.
-  /// 
+  ///
   /// Scalar directives provide validation, serialization, or metadata
   /// for custom scalar types in the schema.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @specifiedBy(url: String!) on SCALAR
@@ -134,10 +134,10 @@ word!(
   /// ```
   "scalar location": ScalarLocation: [I::Token::S, I::Token::C, I::Token::A, I::Token::L, I::Token::A, I::Token::R],
   /// `OBJECT` location - directives can be applied to object type definitions.
-  /// 
+  ///
   /// Object type directives control object behavior, provide metadata,
   /// or enable features like interfaces, caching, or authorization.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @key(fields: String!) on OBJECT
@@ -145,10 +145,10 @@ word!(
   /// ```
   "object location": ObjectLocation: [I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `ARGUMENT_DEFINITION` location - directives can be applied to argument definitions.
-  /// 
+  ///
   /// Argument definition directives control argument validation, transformation,
   /// or provide metadata about field and directive arguments.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on ARGUMENT_DEFINITION
@@ -156,10 +156,10 @@ word!(
   /// ```
   "argument definition location": ArgumentDefinitionLocation: [I::Token::A, I::Token::R, I::Token::G, I::Token::U, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `INTERFACE` location - directives can be applied to interface type definitions.
-  /// 
+  ///
   /// Interface directives control interface behavior, provide metadata,
   /// or enable features for types that implement the interface.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @key(fields: String!) on INTERFACE
@@ -167,10 +167,10 @@ word!(
   /// ```
   "interface location": InterfaceLocation: [I::Token::I, I::Token::N, I::Token::T, I::Token::E, I::Token::R, I::Token::F, I::Token::A, I::Token::C, I::Token::E],
   /// `UNION` location - directives can be applied to union type definitions.
-  /// 
+  ///
   /// Union directives control union behavior, type resolution,
   /// or provide metadata for union types.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @unionMember(type: String!) on UNION
@@ -178,10 +178,10 @@ word!(
   /// ```
   "union location": UnionLocation: [I::Token::U, I::Token::N, I::Token::I, I::Token::O, I::Token::N],
   /// `ENUM_VALUE` location - directives can be applied to enum value definitions.
-  /// 
+  ///
   /// Enum value directives provide metadata, deprecation information,
   /// or control the behavior of specific enum values.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on ENUM_VALUE
@@ -189,10 +189,10 @@ word!(
   /// ```
   "enum value location": EnumValueLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M, I::Token::UNDERSCORE, I::Token::V, I::Token::A, I::Token::L, I::Token::U, I::Token::E],
   /// `ENUM` location - directives can be applied to enum type definitions.
-  /// 
+  ///
   /// Enum directives control enum behavior, validation,
   /// or provide metadata for the entire enum type.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on ENUM
@@ -200,10 +200,10 @@ word!(
   /// ```
   "enum location": EnumLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M],
   /// `INPUT_OBJECT` location - directives can be applied to input object type definitions.
-  /// 
+  ///
   /// Input object directives control input validation, transformation,
   /// or provide metadata for input types used in arguments.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @oneOf on INPUT_OBJECT
@@ -211,10 +211,10 @@ word!(
   /// ```
   "input object location": InputObjectLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `INPUT_FIELD_DEFINITION` location - directives can be applied to input field definitions.
-  /// 
+  ///
   /// Input field directives control input field validation, transformation,
   /// or provide metadata for fields within input object types.
-  /// 
+  ///
   /// # Examples
   /// ```text
   /// directive @deprecated(reason: String) on INPUT_FIELD_DEFINITION
@@ -224,31 +224,31 @@ word!(
 );
 
 /// Represents locations where directives can be applied during GraphQL execution.
-/// 
+///
 /// Executable directive locations specify where directives can be used in GraphQL
 /// operations (queries, mutations, subscriptions) and their components. These
 /// directives are processed during query execution and can control field selection,
 /// fragment inclusion, and operation behavior.
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Query operation directive
 /// query @auth { user { name } }
-/// 
+///
 /// # Field directive
 /// { user { name @deprecated email } }
-/// 
+///
 /// # Fragment spread directive
 /// { ...UserFragment @include(if: $showUser) }
-/// 
+///
 /// # Inline fragment directive
 /// { ... on User @skip(if: $hideUser) { name } }
-/// 
+///
 /// # Variable definition directive
 /// query($id: ID! @validate(pattern: "^[0-9]+$")) { user(id: $id) { name } }
 /// ```
-/// 
+///
 /// Spec: [ExecutableDirectiveLocation](https://spec.graphql.org/draft/#ExecutableDirectiveLocation)
 #[derive(
   Debug,
@@ -262,7 +262,7 @@ word!(
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ExecutableDirectiveLocation<Span> {
- /// `QUERY` - directive can be applied to query operations
+  /// `QUERY` - directive can be applied to query operations
   Query(QueryLocation<Span>),
   /// `MUTATION` - directive can be applied to mutation operations
   Mutation(MutationLocation<Span>),
@@ -297,7 +297,7 @@ impl<Span> ExecutableDirectiveLocation<Span> {
   }
 
   /// Creates a parser that can parse any executable directive location.
-  /// 
+  ///
   /// The parser tries each location type in order and returns the first successful match.
   /// All executable directive locations are keywords that must be matched exactly.
   ///
@@ -330,30 +330,30 @@ impl<Span> ExecutableDirectiveLocation<Span> {
 }
 
 /// Represents locations where directives can be applied in GraphQL schema definitions.
-/// 
+///
 /// Type system directive locations specify where directives can be used in GraphQL
 /// schemas to provide metadata, validation, transformation, or other behaviors
 /// for types, fields, and other schema elements.
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Schema directive
 /// schema @link(url: "https://specs.apollo.dev/federation/v2.0") { query: Query }
-/// 
+///
 /// # Object type directive
 /// type User @key(fields: "id") { id: ID! name: String }
-/// 
+///
 /// # Field definition directive
 /// type User { name: String @deprecated(reason: "Use fullName") }
-/// 
+///
 /// # Scalar directive
 /// scalar DateTime @specifiedBy(url: "https://scalars.graphql.org/andimarek/datetime")
-/// 
+///
 /// # Enum value directive
 /// enum Role { USER @deprecated ADMIN MODERATOR }
 /// ```
-/// 
+///
 /// Spec: [TypeSystemDirectiveLocation](https://spec.graphql.org/draft/#TypeSystemDirectiveLocation)
 #[derive(
   Debug,
@@ -411,7 +411,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
   }
 
   /// Creates a parser that can parse any type system directive location.
-  /// 
+  ///
   /// The parser tries each location type in order and returns the first successful match.
   /// All type system directive locations are keywords that must be matched exactly.
   ///
@@ -447,7 +447,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
 }
 
 /// Represents any location where a directive can be applied in GraphQL.
-/// 
+///
 /// This is the top-level enum that encompasses both executable and type system
 /// directive locations. It provides a unified interface for working with all
 /// possible directive placement locations in GraphQL documents.
@@ -482,7 +482,7 @@ impl<Span> Location<Span> {
   }
 
   /// Creates a parser that can parse any directive location.
-  /// 
+  ///
   /// The parser tries both executable and type system directive locations,
   /// returning the first successful match.
   ///
@@ -549,32 +549,32 @@ from_location!(
 );
 
 /// Represents the first (leading) directive location in a directive definition.
-/// 
+///
 /// According to the GraphQL specification, directive locations are specified as
 /// a pipe-separated list following the `on` keyword. The first location is special
 /// because its pipe separator is optional, while all subsequent locations
 /// must be preceded by a pipe (`|`).
-/// 
+///
 /// This structure represents the leading location, which may optionally have a pipe
 /// if the directive definition uses leading-pipe style formatting.
 ///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Standard format (no leading pipe)
 /// directive @auth on FIELD | FRAGMENT_SPREAD
-/// 
+///
 /// # Leading-pipe format (optional leading pipe)
-/// directive @auth on 
-///   | FIELD 
+/// directive @auth on
+///   | FIELD
 ///   | FRAGMENT_SPREAD
-/// 
+///
 /// # Single location (no pipes needed)
 /// directive @deprecated on FIELD_DEFINITION
 /// ```
-/// 
+///
 /// ## Type Parameters
-/// 
+///
 /// * `Location` - The type representing individual directive locations
 /// * `Span` - The type representing source location information
 #[derive(Debug, Clone, Copy)]
@@ -588,7 +588,7 @@ pub struct LeadingDirectiveLocation<Location, Span> {
 
 impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   /// Returns a reference to the span covering the entire leading directive location entry.
-  /// 
+  ///
   /// The span includes the optional leading pipe separator and the location token.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -602,7 +602,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   }
 
   /// Returns a reference to the optional leading pipe separator.
-  /// 
+  ///
   /// The leading pipe is present when using leading-pipe formatting style,
   /// which is often used for better readability with multiple locations.
   #[inline]
@@ -611,7 +611,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   }
 
   /// Creates a parser that can parse the leading directive location with optional pipe separator.
-  /// 
+  ///
   /// This parser handles the first location in a directive locations list, which according
   /// to the GraphQL specification can optionally start with a pipe separator for formatting.
   ///
@@ -623,9 +623,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   /// whitespace skipping or comment processing around the leading directive location.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(
-    location_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(location_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -653,8 +651,7 @@ impl<Location, Span> AsRef<Span> for LeadingDirectiveLocation<Location, Span> {
   }
 }
 
-impl<Location, Span> IntoSpan<Span> for LeadingDirectiveLocation<Location, Span>
-{
+impl<Location, Span> IntoSpan<Span> for LeadingDirectiveLocation<Location, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
@@ -671,34 +668,34 @@ impl<Location, Span> IntoComponents for LeadingDirectiveLocation<Location, Span>
 }
 
 /// Represents a subsequent (non-leading) directive location in a directive definition.
-/// 
+///
 /// According to the GraphQL specification, all directive locations after the first one
 /// must be preceded by a pipe (`|`) separator. This structure represents these subsequent
 /// locations, which always have a required pipe separator.
-/// 
+///
 /// ## GraphQL Specification Context
-/// 
+///
 /// While the first location in a directive locations list may optionally have a leading pipe,
 /// all subsequent locations must be preceded by a pipe separator. This enforces the proper
 /// pipe-separated list syntax required by the GraphQL specification.
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # In this directive definition:
 /// directive @conditional on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 /// #                               ^                 ^
 /// #                          required pipe      required pipe
-/// 
+///
 /// # Or in leading-pipe format:
 /// directive @conditional on
 ///   | FIELD
 ///   | FRAGMENT_SPREAD    # This is a DirectiveLocation (required pipe)
 ///   | INLINE_FRAGMENT    # This is also a DirectiveLocation (required pipe)
 /// ```
-/// 
+///
 /// ## Type Parameters
-/// 
+///
 /// * `Location` - The type representing individual directive locations
 /// * `Span` - The type representing source location information
 #[derive(Debug, Clone, Copy)]
@@ -713,7 +710,7 @@ pub struct DirectiveLocation<Location, Span> {
 
 impl<Location, Span> DirectiveLocation<Location, Span> {
   /// Returns a reference to the span covering the entire directive location entry.
-  /// 
+  ///
   /// The span includes the required pipe separator and the location token.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -727,7 +724,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   }
 
   /// Returns a reference to the required pipe separator.
-  /// 
+  ///
   /// All subsequent directive locations (after the first) must have a pipe separator
   /// according to the GraphQL specification.
   #[inline]
@@ -736,10 +733,10 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   }
 
   /// Creates a parser that can parse a directive location with required pipe separator.
-  /// 
+  ///
   /// This parser handles subsequent entries in directive location lists, which according
   /// to the GraphQL specification must be preceded by a pipe separator.
-  /// 
+  ///
   /// ## Notes
   ///
   /// This parser does not handle surrounding [ignored tokens] beyond the
@@ -748,9 +745,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   /// whitespace skipping or comment processing around the directive location.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(
-    location_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(location_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -794,47 +789,47 @@ impl<Location, Span> IntoComponents for DirectiveLocation<Location, Span> {
 }
 
 /// Represents a complete collection of directive locations in a directive definition.
-/// 
+///
 /// According to the GraphQL specification, directive locations follow a specific pattern:
 /// - The first location is optional pipe-prefixed (can start with `|` or not)
 /// - All subsequent locations must be pipe-prefixed with `|`
 /// - At least one location is required
-/// 
+///
 /// This structure properly models this specification by separating the leading location
 /// (which handles the optional pipe) from the remaining locations (which require pipes).
-/// 
+///
 /// ## GraphQL Specification Context
-/// 
+///
 /// The GraphQL spec defines:
 /// ```text
 /// DirectiveLocations : | ? DirectiveLocation ( | DirectiveLocation )*
 /// ```
-/// 
+///
 /// This means:
 /// - `+` requires one or more locations
 /// - `|?` means the pipe is optional for each location
 /// - However, in practice, only the first location can omit the pipe
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Standard format
 /// directive @auth on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 /// #                  ^lead  ^remaining       ^remaining
-/// 
+///
 /// # Leading-pipe format  
 /// directive @auth on
 ///   | FIELD              # Leading location with optional pipe
 ///   | FRAGMENT_SPREAD    # Remaining location with required pipe
 ///   | INLINE_FRAGMENT    # Remaining location with required pipe
-/// 
+///
 /// # Single location
 /// directive @deprecated on FIELD_DEFINITION
 /// #                        ^leading location only
 /// ```
-/// 
+///
 /// ## Type Parameters
-/// 
+///
 /// * `Location` - The type representing individual directive locations
 /// * `Span` - The type representing source location information
 /// * `Container` - The container type for storing remaining locations (defaults to `Vec<DirectiveLocation<Location, Span>>`)
@@ -870,7 +865,7 @@ impl<Location, Span, Container> IntoComponents for DirectiveLocations<Location, 
 
 impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   /// Returns a reference to the span covering all directive locations.
-  /// 
+  ///
   /// The span encompasses from the start of the leading location to the end
   /// of the last location, including all pipe separators.
   #[inline]
@@ -879,7 +874,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   }
 
   /// Returns a reference to the leading (first) directive location.
-  /// 
+  ///
   /// The leading location may optionally have a pipe separator, supporting
   /// both standard and leading-pipe formatting styles.
   pub const fn leading_location(&self) -> &LeadingDirectiveLocation<Location, Span> {
@@ -887,7 +882,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   }
 
   /// Returns a reference to the container holding remaining directive locations.
-  /// 
+  ///
   /// Each remaining location must have a pipe separator according to the GraphQL
   /// specification. This container will be empty if there's only one location.
   pub const fn remaining_locations(&self) -> &Container {
@@ -895,7 +890,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   }
 
   /// Creates a parser that can parse a complete directive locations collection.
-  /// 
+  ///
   /// This parser properly handles the GraphQL specification for directive locations,
   /// parsing the leading location (with optional pipe) followed by any remaining
   /// locations (each with required pipe).
@@ -918,8 +913,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
     Container: chumsky::container::Container<DirectiveLocation<Location, Span>>,
-    P: Parser<'src, I, Location, E>
-      + Clone,
+    P: Parser<'src, I, Location, E> + Clone,
   {
     LeadingDirectiveLocation::parser_with(location_parser())
       .then(
@@ -938,26 +932,26 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
 }
 
 /// Represents a complete GraphQL directive definition.
-/// 
+///
 /// A directive definition specifies a custom directive that can be used in GraphQL
 /// documents. It includes the directive's name, optional arguments, whether it's
 /// repeatable, and the locations where it can be applied.
-/// 
+///
 /// Directive definitions are a fundamental part of GraphQL schema definitions,
 /// allowing for extensible metadata and behavior specification.
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Simple directive without arguments
 /// directive @deprecated on FIELD_DEFINITION | ENUM_VALUE
-/// 
+///
 /// # Directive with arguments
 /// directive @auth(
 ///   requires: Role = USER
 ///   scopes: [String!]
 /// ) on OBJECT | FIELD_DEFINITION
-/// 
+///
 /// # Repeatable directive
 /// directive @tag(name: String!) repeatable on
 ///   | FIELD_DEFINITION
@@ -965,7 +959,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
 ///   | INTERFACE
 ///   | UNION
 ///   | ENUM
-/// 
+///
 /// # Directive with description
 /// """
 /// Marks a field as deprecated with an optional reason.
@@ -977,19 +971,19 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
 ///   reason: String = "No longer supported"
 /// ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 /// ```
-/// 
+///
 /// ## Type Parameters
-/// 
+///
 /// * `Args` - The type representing the directive's arguments definition
 /// * `Locations` - The type representing the directive locations collection
 /// * `Span` - The type representing source location information
-/// 
+///
 /// ## Grammar
-/// 
+///
 /// ```text
 /// DirectiveDefinition : Description? directive @ Name ArgumentsDefinition? repeatable? on DirectiveLocations
 /// ```
-/// 
+///
 /// Spec: [DirectiveDefinition](https://spec.graphql.org/draft/#DirectiveDefinition)
 #[derive(Debug, Clone)]
 pub struct DirectiveDefinition<Args, Locations, Span> {
@@ -1047,10 +1041,9 @@ impl<Args, Locations, Span> IntoComponents for DirectiveDefinition<Args, Locatio
   }
 }
 
-
 impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   /// Returns a reference to the span covering the entire directive definition.
-  /// 
+  ///
   /// The span includes the optional description, directive keyword, name,
   /// arguments, repeatable keyword, on keyword, and locations list.
   #[inline]
@@ -1059,7 +1052,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the at symbol (`@`) that prefixes the directive name.
-  /// 
+  ///
   /// This provides access to the exact location and span information of the
   /// at symbol used in the directive definition.
   #[inline]
@@ -1068,7 +1061,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the optional description of the directive definition.
-  /// 
+  ///
   /// The description provides documentation for the directive and is typically
   /// a string value (single or block string) that appears before the directive keyword.
   #[inline]
@@ -1077,7 +1070,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the `directive` keyword.
-  /// 
+  ///
   /// This provides access to the exact location and span information of the
   /// directive keyword that starts the definition.
   #[inline]
@@ -1086,7 +1079,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the optional arguments definition.
-  /// 
+  ///
   /// The arguments definition specifies what parameters can be provided when
   /// using this directive, including their types, default values, and descriptions.
   #[inline]
@@ -1095,7 +1088,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the optional `repeatable` keyword.
-  /// 
+  ///
   /// If present, the repeatable keyword indicates that this directive can be
   /// applied multiple times to the same location.
   #[inline]
@@ -1104,7 +1097,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the `on` keyword.
-  /// 
+  ///
   /// The on keyword precedes the directive locations list and indicates
   /// where the directive can be applied.
   #[inline]
@@ -1113,7 +1106,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the name of the directive definition.
-  /// 
+  ///
   /// The name identifies the directive and is used when applying the directive
   /// in GraphQL documents (preceded by `@`).
   #[inline]
@@ -1122,7 +1115,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Returns a reference to the directive locations specification.
-  /// 
+  ///
   /// The locations specify where this directive can be applied in GraphQL
   /// documents, such as on fields, types, arguments, etc.
   #[inline]
@@ -1131,7 +1124,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   }
 
   /// Creates a parser that can parse a complete directive definition.
-  /// 
+  ///
   /// This parser handles the full directive definition syntax including all
   /// optional components. The parsing of arguments and locations is delegated
   /// to the provided parsers.
