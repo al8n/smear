@@ -145,7 +145,7 @@ impl<Span> UnionMemberType<Span> {
       .then(Name::parser())
       .map_with(|(pipe, name), sp| Self {
         span: Span::from_map_extra(sp),
-        pipe: Some(pipe),
+        pipe,
         name,
       })
   }

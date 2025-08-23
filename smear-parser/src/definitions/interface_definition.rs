@@ -133,7 +133,7 @@ impl<Span> ImplementInterface<Span> {
       .then(Name::parser())
       .map_with(|(amp, name), sp| Self {
         span: Span::from_map_extra(sp),
-        amp: Some(amp),
+        amp,
         name,
       })
   }

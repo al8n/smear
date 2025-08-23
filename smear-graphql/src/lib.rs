@@ -15,3 +15,6 @@ pub mod directives;
 pub mod field;
 /// GraphQL value parsers
 pub mod value;
+
+#[test]
+fn t() {}

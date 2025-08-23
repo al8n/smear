@@ -89,7 +89,7 @@ pub struct NamedOperationDefinition<
   selection_set: SelectionSet,
 }
 
-impl<OpeartionType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<Span>
+impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<Span>
   for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 {
   #[inline]
