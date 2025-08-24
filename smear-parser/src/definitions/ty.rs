@@ -205,7 +205,7 @@ impl<Span> NamedType<Span> {
 /// ```text
 /// ListType : [ Type ] !?
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ListType<Type, Span> {
   span: Span,
   l_bracket: LBracket<Span>,
