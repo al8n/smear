@@ -1,16 +1,18 @@
-use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
+use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{AsMut, AsRef, From, Into};
 
-use super::{
-  lang::{directives, punct::At},
-  Char, Span,
+use smear_parser::{
+  lang::{self, punct::At, Const, Name},
+  source::{self, Char, Slice, Source},
 };
 
 use super::arguments::{Arguments, ConstArguments};
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Directive<Span>(directives::Directive<Arguments<Span>, Span>);
+pub struct Directive<Span>(lang::Directive<Arguments<Span>, Span>);
+
+impl<Span> Const<false> for Directive<Span> {}
 
 impl<Span> Directive<Span> {
   #[inline]
@@ -43,15 +45,17 @@ impl<Span> Directive<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    directives::Directive::parser_with(Arguments::parser()).map(Self)
+    lang::Directive::parser_with(Arguments::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstDirective<Span>(directives::Directive<ConstArguments<Span>, Span>);
+pub struct ConstDirective<Span>(lang::Directive<ConstArguments<Span>, Span>);
+
+impl<Span> Const<true> for ConstDirective<Span> {}
 
 impl<Span> ConstDirective<Span> {
   #[inline]
@@ -84,15 +88,17 @@ impl<Span> ConstDirective<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    directives::Directive::parser_with(ConstArguments::parser()).map(Self)
+    lang::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Directives<Span>(directives::Directives<Directive<Span>, Span>);
+pub struct Directives<Span>(lang::Directives<Directive<Span>, Span>);
+
+impl<Span> Const<false> for Directives<Span> {}
 
 impl<Span> Directives<Span> {
   #[inline]
@@ -115,15 +121,17 @@ impl<Span> Directives<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    directives::Directives::parser_with(Directive::parser()).map(Self)
+    lang::Directives::parser_with(Directive::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstDirectives<Span>(directives::Directives<ConstDirective<Span>, Span>);
+pub struct ConstDirectives<Span>(lang::Directives<ConstDirective<Span>, Span>);
+
+impl<Span> Const<true> for ConstDirectives<Span> {}
 
 impl<Span> ConstDirectives<Span> {
   #[inline]
@@ -146,8 +154,8 @@ impl<Span> ConstDirectives<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    directives::Directives::parser_with(ConstDirective::parser()).map(Self)
+    lang::Directives::parser_with(ConstDirective::parser()).map(Self)
   }
 }

@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, Name, StringValue},
+  lang::{ignored, Const, Name, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -235,6 +235,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -302,7 +303,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
+    Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariableDefinitions, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,

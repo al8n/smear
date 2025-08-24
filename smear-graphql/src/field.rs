@@ -1,50 +1,50 @@
-use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
-use derive_more::{AsMut, AsRef, From, Into};
+use chumsky::{extra::ParserExtra, prelude::*};
+use derive_more::{AsMut, AsRef, From, Into, IsVariant, TryUnwrap, Unwrap};
 
-use super::{
+use smear_parser::{
   lang::{
-    field::{self, Alias, TypeCondition},
+    self,
     punct::{Ellipsis, LBrace, RBrace},
+    *,
   },
-  Char, Span,
+  source::{self, Char, Slice, Source},
 };
 
 use super::{arguments::Arguments, directives::Directives};
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct FragmentSpread<Span>(field::FragmentSpread<Directives<Span>, Span>);
+#[derive(Debug, Clone, derive_more::From, derive_more::Into)]
+pub struct FragmentSpread<Span>(pub(super) lang::FragmentSpread<Directives<Span>, Span>);
 
 impl<Span> FragmentSpread<Span> {
+  #[inline]
   pub const fn span(&self) -> &Span {
     self.0.span()
   }
-  pub const fn name(&self) -> &Name<Span> {
+
+  #[inline]
+  pub const fn name(&self) -> &FragmentName<Span> {
     self.0.name()
   }
-  pub const fn ellipsis(&self) -> &Ellipsis<Span> {
-    self.0.ellipsis()
-  }
+
+  #[inline]
   pub const fn directives(&self) -> Option<&Directives<Span>> {
     self.0.directives()
   }
+
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    field::FragmentSpread::parser_with(Directives::parser()).map(Self)
+    lang::FragmentSpread::parser_with(Directives::parser()).map(Self)
   }
 }
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct InlineFragment<Span>(
-  field::InlineFragment<SelectionSetValue<Span>, Directives<Span>, Span>,
-);
+#[derive(Debug, Clone)]
+pub struct InlineFragment<Span>(lang::InlineFragment<Directives<Span>, SelectionSet<Span>, Span>);
 
 impl<Span> InlineFragment<Span> {
   #[inline]
@@ -67,28 +67,21 @@ impl<Span> InlineFragment<Span> {
     self.0.directives()
   }
 
-  #[inline]
-  pub const fn selection_set(&self) -> &SelectionSetValue<Span> {
-    self.0.selection_set()
-  }
-
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    field::InlineFragment::parser_with(SelectionSet::parser(), Directives::parser()).map(Self)
+    lang::InlineFragment::parser_with(Directives::parser(), SelectionSet::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Field<Span>(
-  field::Field<Arguments<Span>, Directives<Span>, SelectionSetValue<Span>, Src, Span>,
-);
+pub struct Field<Span>(lang::Field<Arguments<Span>, Directives<Span>, SelectionSet<Span>, Span>);
 
 impl<Span> Field<Span> {
   #[inline]
@@ -117,7 +110,7 @@ impl<Span> Field<Span> {
   }
 
   #[inline]
-  pub const fn selection_set(&self) -> Option<&SelectionSetValue<Span>> {
+  pub const fn selection_set(&self) -> Option<&SelectionSet<Span>> {
     self.0.selection_set()
   }
 
@@ -127,18 +120,35 @@ impl<Span> Field<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    field::Field::parser_with(
-      Arguments::parser(),
-      Directives::parser(),
-      SelectionSet::parser(),
-    )
-    .map(Self)
+    recursive(|field_parser| {
+      // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.
+      let selection = recursive(|selection| {
+        // SelectionSet needs a `Selection` parser
+        let selection_set =
+          lang::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
+
+        let spread = lang::FragmentSpread::parser_with(Directives::parser())
+          .map(|fs| Selection::<Span>::FragmentSpread(FragmentSpread::<Span>(fs)));
+
+        let inline = lang::InlineFragment::parser_with(Directives::parser(), selection_set.clone())
+          .map(|f| Selection::<Span>::InlineFragment(InlineFragment::<Span>(f)));
+
+        choice((field_parser.map(Selection::<Span>::Field), spread, inline))
+      });
+
+      // Pass the selection parser to the selection set
+      let selection_set = lang::SelectionSet::parser_with(selection).map(SelectionSet::<Span>);
+
+      lang::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
+    })
   }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Selection<Span> {
   Field(Field<Span>),
   FragmentSpread(FragmentSpread<Span>),
@@ -161,20 +171,24 @@ impl<Span> Selection<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
     recursive(|selection| {
-      let selset = field::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
+      let selsetion_set =
+        lang::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
 
-      let field_p =
-        field::Field::parser_with(Arguments::parser(), Directives::parser(), selset.clone())
-          .map(Field::<Span>);
+      let field_p = lang::Field::parser_with(
+        Arguments::parser(),
+        Directives::parser(),
+        selsetion_set.clone(),
+      )
+      .map(Field::<Span>);
 
-      let inline_p = field::InlineFragment::parser_with(selset.clone(), Directives::parser())
+      let inline_p = lang::InlineFragment::parser_with(Directives::parser(), selsetion_set.clone())
         .map(InlineFragment::<Span>);
 
       let spread_p =
-        field::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
+        lang::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
 
       choice((
         field_p.map(Self::Field),
@@ -187,9 +201,9 @@ impl<Span> Selection<Span> {
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct SelectionSetValue<Span>(field::SelectionSet<Selection<Span>, Span>);
+pub struct SelectionSet<Span>(lang::SelectionSet<Selection<Span>, Span>);
 
-impl<Span> SelectionSetValue<Span> {
+impl<Span> SelectionSet<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     self.0.span()
@@ -222,18 +236,21 @@ impl<Span> SelectionSetValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    recursive(|selset| {
-      let field_p =
-        field::Field::parser_with(Arguments::parser(), Directives::parser(), selset.clone())
-          .map(Field::<Span>);
+    recursive(|selection_set| {
+      let field_p = lang::Field::parser_with(
+        Arguments::parser(),
+        Directives::parser(),
+        selection_set.clone(),
+      )
+      .map(Field::<Span>);
 
-      let inline_p = field::InlineFragment::parser_with(selset.clone(), Directives::parser())
+      let inline_p = lang::InlineFragment::parser_with(Directives::parser(), selection_set)
         .map(InlineFragment::<Span>);
 
       let spread_p =
-        field::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
+        lang::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
 
       let selection = choice((
         field_p.map(Selection::<Span>::Field),
@@ -241,7 +258,7 @@ impl<Span> SelectionSetValue<Span> {
         inline_p.map(Selection::<Span>::InlineFragment),
       ));
 
-      field::SelectionSet::parser_with(selection).map(Self)
+      lang::SelectionSet::parser_with(selection).map(Self)
     })
   }
 }

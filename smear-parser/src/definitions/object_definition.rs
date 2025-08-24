@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, keywords, Name, StringValue},
+  lang::{ignored, keywords, Const, Name, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -188,10 +188,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// This parser handles the complete syntax for GraphQL object types, including
   /// all optional components like descriptions, interface implementations,
   /// directives, and field definitions.
-  pub fn parser_with<'src, I, E, FDP, DP, IP>(
-    fields_definition_parser: FDP,
-    directives_parser: DP,
+  pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -199,8 +199,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
-    FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
   {
     StringValue::parser()
@@ -306,19 +308,21 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   /// This parser uses a choice combinator to try different extension patterns,
   /// ensuring that the most specific matches (like fields with directives) are
   /// attempted before more general ones (like directives only).
-  pub fn parser_with<'src, I, E, IP, FDP, DP>(
+  pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> FDP,
+    fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
-    FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
   {
     choice((
       implement_interfaces_parser()
@@ -494,10 +498,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// This parser handles the `extend type` syntax followed by the object name
   /// and extension content. The content parsing is delegated to the
   /// `ObjectExtensionContent` parser for modularity.
-  pub fn parser_with<'src, I, E, FDP, DP, IP>(
+  pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> FDP,
+    fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -505,8 +509,10 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
-    FDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
   {
     keywords::Extend::parser()

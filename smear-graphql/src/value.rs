@@ -1,19 +1,15 @@
-use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
+use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{
-  lang::{
-    ignored,
-    input_value::{self, *},
-    punct::Equal,
-  },
-  Char, Span,
+use smear_parser::{
+  lang::{self, punct::Equal, *},
+  source::{self, Char, Slice, Source},
 };
 
-pub type ListValue<Span> = input_value::ListValue<InputValue<Span>, Span>;
-pub type ConstListValue<Span> = input_value::ListValue<ConstInputValue<Span>, Span>;
+pub type List<Span> = lang::List<InputValue<Span>, Span>;
+pub type ConstList<Span> = lang::List<ConstInputValue<Span>, Span>;
 
-pub type ObjectValue<Span> = input_value::ObjectValue<InputValue<Span>, Span>;
-pub type ConstObjectValue<Span> = input_value::ObjectValue<ConstInputValue<Span>, Span>;
+pub type Object<Span> = lang::Object<InputValue<Span>, Span>;
+pub type ConstObject<Span> = lang::Object<ConstInputValue<Span>, Span>;
 
 /// Input value
 ///
@@ -49,10 +45,12 @@ pub enum InputValue<Span> {
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
   Enum(EnumValue<Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(ListValue<Span>),
+  List(List<Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
   Object(Object<Span>),
 }
+
+impl<Span> lang::Const<false> for InputValue<Span> {}
 
 impl<Span> InputValue<Span> {
   /// Returns the span of the input value.
@@ -80,19 +78,20 @@ impl<Span> InputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
     recursive(|value| {
-      let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
-      let null_value_parser = Null::parser::<I, E>().map(|v| Self::Null(v));
-      let int_value_parser = Int::parser::<I, E>().map(|v| Self::Int(v));
-      let float_value_parser = Float::parser::<I, E>().map(|v| Self::Float(v));
-      let string_value_parser = String::parser::<I, E>().map(|v| Self::String(v));
-      let enum_value_parser = Enum::parser::<I, E>().map(|v| Self::Enum(v));
+      let boolean_value_parser = BooleanValue::parser::<I, E>().map(|v| Self::Boolean(v));
+      let null_value_parser = NullValue::parser::<I, E>().map(|v| Self::Null(v));
+      let int_value_parser = IntValue::parser::<I, E>().map(|v| Self::Int(v));
+      let float_value_parser = FloatValue::parser::<I, E>().map(|v| Self::Float(v));
+      let string_value_parser = StringValue::parser::<I, E>().map(|v| Self::String(v));
+      let enum_value_parser = EnumValue::parser::<I, E>().map(|v| Self::Enum(v));
       let variable_value_parser = Variable::parser::<I, E>().map(|v| Self::Variable(v));
       let object_value_parser =
-        Object::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
-      let list_value_parser = List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+        Object::parser_with::<I, E, _, false>(value.clone()).map(|v| Self::Object(v));
+      let list_value_parser =
+        List::parser_with::<I, E, _, false>(value.clone()).map(|v| Self::List(v));
 
       choice((
         boolean_value_parser,
@@ -105,7 +104,6 @@ impl<Span> InputValue<Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(ignored())
     })
   }
 }
@@ -142,10 +140,12 @@ pub enum ConstInputValue<Span> {
   /// Spec: [Enum Value](https://spec.graphql.org/draft/#sec-Enum-Value)
   Enum(EnumValue<Span>),
   /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-  List(ConstListValue<Span>),
+  List(ConstList<Span>),
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
   Object(ConstObject<Span>),
 }
+
+impl<Span> lang::Const<true> for ConstInputValue<Span> {}
 
 impl<Span> ConstInputValue<Span> {
   /// Returns the span of the input value.
@@ -172,21 +172,21 @@ impl<Span> ConstInputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
     recursive(|value| {
       // scalars (whatever you already have)
-      let boolean_value_parser = Boolean::parser::<I, E>().map(|v| Self::Boolean(v));
-      let null_value_parser = Null::parser::<I, E>().map(|v| Self::Null(v));
-      let int_value_parser = Int::parser::<I, E>().map(|v| Self::Int(v));
-      let float_value_parser = Float::parser::<I, E>().map(|v| Self::Float(v));
-      let string_value_parser = String::parser::<I, E>().map(|v| Self::String(v));
-      let enum_value_parser = Enum::parser::<I, E>().map(|v| Self::Enum(v));
+      let boolean_value_parser = BooleanValue::parser::<I, E>().map(|v| Self::Boolean(v));
+      let null_value_parser = NullValue::parser::<I, E>().map(|v| Self::Null(v));
+      let int_value_parser = IntValue::parser::<I, E>().map(|v| Self::Int(v));
+      let float_value_parser = FloatValue::parser::<I, E>().map(|v| Self::Float(v));
+      let string_value_parser = StringValue::parser::<I, E>().map(|v| Self::String(v));
+      let enum_value_parser = EnumValue::parser::<I, E>().map(|v| Self::Enum(v));
 
       let object_value_parser =
-        ConstObject::parser_with::<I, E, _>(value.clone()).map(|v| Self::Object(v));
+        ConstObject::parser_with::<I, E, _, true>(value.clone()).map(|v| Self::Object(v));
       let list_value_parser =
-        ConstList::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v));
+        ConstList::parser_with::<I, E, _, true>(value.clone()).map(|v| Self::List(v));
 
       choice((
         boolean_value_parser,
@@ -198,14 +198,13 @@ impl<Span> ConstInputValue<Span> {
         list_value_parser,
         object_value_parser,
       ))
-      .padded_by(ignored())
     })
   }
 }
 
 /// Default input value
-#[derive(Debug, Clone, Copy)]
-pub struct DefaultInputValue<Span>(input_value::DefaultInputValue<ConstInputValue<Span>, Span>);
+#[derive(Debug, Clone)]
+pub struct DefaultInputValue<Span>(lang::DefaultInputValue<ConstInputValue<Span>, Span>);
 
 impl<Span> DefaultInputValue<Span> {
   /// Returns the span of the default input value
@@ -233,8 +232,8 @@ impl<Span> DefaultInputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    input_value::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
+    lang::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }
 }

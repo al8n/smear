@@ -5,6 +5,7 @@ use crate::{
   lang::{
     ignored,
     punct::{LAngle, RAngle},
+    Const,
   },
   source::{Char, Slice, Source},
 };
@@ -61,6 +62,9 @@ pub struct Set<T, Span, C = Vec<T>> {
   r_angle: RAngle<Span>,
   _marker: core::marker::PhantomData<T>,
 }
+
+impl<T, Span, C> Const<true> for Set<T, Span, C> where T: Const<true> {}
+impl<T, Span, C> Const<false> for Set<T, Span, C> where T: Const<false> {}
 
 impl<T, Span, C> AsRef<Span> for Set<T, Span, C> {
   #[inline]
@@ -134,7 +138,9 @@ impl<T, Span, C> Set<T, Span, C> {
   /// whitespace skipping or comment processing around the set.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P, const CONST: bool>(
+    value_parser: P,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -142,6 +148,7 @@ impl<T, Span, C> Set<T, Span, C> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, T, E> + Clone,
+    T: Const<CONST>,
     C: Container<T>,
   {
     LAngle::parser()

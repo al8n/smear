@@ -5,7 +5,7 @@ use super::super::{
   lang::{
     ignored, keywords,
     punct::{Equal, Pipe},
-    Name, StringValue,
+    Const, Name, StringValue,
   },
   source::{Char, Slice, Source},
 };
@@ -563,6 +563,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -643,7 +644,7 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -796,6 +797,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {

@@ -8,6 +8,7 @@ use crate::{
   lang::{
     ignored,
     punct::{LBrace, RBrace},
+    Const,
   },
   source::{Char, Slice, Source},
 };
@@ -229,6 +230,7 @@ impl<InputValueDefinition, Span, Container>
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
+    InputValueDefinition: Const<true>,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
     LBrace::parser()

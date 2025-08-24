@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, keywords, Name, StringValue},
+  lang::{ignored, keywords, Const, Name, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -270,6 +270,8 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -356,18 +358,19 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
   /// whitespace skipping or comment processing around the extension content.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, DP, IFDP>(
+  pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> IFDP,
+    fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
-    IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
   {
     choice((
       directives_parser()
@@ -541,9 +544,9 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
   /// This parser handles the full input object extension syntax including the extend
   /// and input keywords, target input object name, and extension content.
   #[inline]
-  pub fn parser_with<'src, I, E, IFDP, DP>(
-    input_fields_definition_parser: impl Fn() -> IFDP,
+  pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: impl Fn() -> DP,
+    input_fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -551,8 +554,9 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
-    IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    Directives: Const<true>,
+    FieldsDefinition: Const<true>,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()

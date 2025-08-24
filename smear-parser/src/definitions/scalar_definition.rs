@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   convert::*,
-  lang::{ignored, keywords, Name, StringValue},
+  lang::{ignored, keywords, Const, Name, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -210,6 +210,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -414,6 +415,7 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()

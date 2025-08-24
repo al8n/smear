@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   convert::*,
-  lang::{ignored, keywords::Fragment, FragmentName, StringValue, TypeCondition},
+  lang::{ignored, keywords::Fragment, Const, FragmentName, StringValue, TypeCondition},
   source::{Char, Slice, Source},
 };
 
@@ -252,6 +252,7 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<false>,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

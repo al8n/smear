@@ -7,7 +7,7 @@ use super::{
   },
   ignored, keywords,
   punct::Ellipsis,
-  Name,
+  Const, Name,
 };
 
 /// Represents a type condition used in GraphQL fragments.
@@ -323,6 +323,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<false>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
@@ -508,8 +509,8 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, S, D>(
-    selection_set: S,
     directives: D,
+    selection_set: S,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -517,6 +518,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<false>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
     D: Parser<'src, I, Directives, E> + Clone,
   {

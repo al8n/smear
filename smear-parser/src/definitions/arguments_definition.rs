@@ -8,6 +8,7 @@ use super::super::{
   lang::{
     ignored,
     punct::{LParen, RParen},
+    Const,
   },
   source::{Char, Slice, Source},
 };
@@ -83,6 +84,13 @@ pub struct ArgumentsDefinition<InputValueDefinition, Span, Container = Vec<Input
   values: Container,
   r_paren: RParen<Span>,
   _input_value_definition: PhantomData<InputValueDefinition>,
+}
+
+impl<InputValueDefinition, Span, Container> Const<true>
+  for ArgumentsDefinition<InputValueDefinition, Span, Container>
+where
+  InputValueDefinition: Const<true>,
+{
 }
 
 impl<InputValueDefinition, Span, Container> AsRef<Span>
@@ -181,6 +189,7 @@ impl<InputValueDefinition, Span, Container>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    InputValueDefinition: Const<true>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {

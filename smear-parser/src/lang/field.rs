@@ -7,7 +7,7 @@ use super::{
   },
   ignored,
   punct::Colon,
-  Name,
+  Const, Name,
 };
 
 /// Represents a field alias in GraphQL syntax.
@@ -304,20 +304,18 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<false>,
     AP: Parser<'src, I, Args, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
     Alias::parser()
+      .padded_by(ignored())
       .or_not()
-      .then_ignore(ignored())
-      .then(Name::parser())
-      .then_ignore(ignored())
-      .then(args.or_not())
-      .then_ignore(ignored())
-      .then(directives.or_not())
-      .then_ignore(ignored())
-      .then(selection_set.or_not())
+      .then(Name::parser().padded_by(ignored()))
+      .then(args.padded_by(ignored()).or_not())
+      .then(directives.padded_by(ignored()).or_not())
+      .then(selection_set.padded_by(ignored()).or_not())
       .map_with(
         |((((alias, name), arguments), directives), selection_set), sp| Self {
           span: Span::from_map_extra(sp),

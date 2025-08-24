@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, punct::Colon, Name, StringValue},
+  lang::{ignored, punct::Colon, Const, Name, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -260,7 +260,8 @@ impl<Type, DefaultValue, Directives, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
+    Directives: Const<true>,
+    DefaultValue: Const<true>,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, DefaultValue, E> + Clone,

@@ -5,6 +5,7 @@ use crate::{
   lang::{
     ignored,
     punct::{LParen, RParen},
+    Const,
   },
   source::{Char, Slice, Source},
 };
@@ -52,6 +53,9 @@ pub struct Tuple<T, Span, C = Vec<T>> {
   r_paren: RParen<Span>,
   _marker: core::marker::PhantomData<T>,
 }
+
+impl<T, Span, C> Const<true> for Tuple<T, Span, C> where T: Const<true> {}
+impl<T, Span, C> Const<false> for Tuple<T, Span, C> where T: Const<false> {}
 
 impl<T, Span, C> AsRef<Span> for Tuple<T, Span, C> {
   #[inline]
@@ -125,13 +129,16 @@ impl<T, Span, C> Tuple<T, Span, C> {
   /// whitespace skipping or comment processing around the tuple.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P, const CONST: bool>(
+    value_parser: P,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    T: Const<CONST>,
     P: Parser<'src, I, T, E> + Clone,
     C: Container<T>,
   {

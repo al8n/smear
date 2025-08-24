@@ -7,7 +7,7 @@ use super::super::{
   lang::{
     ignored,
     punct::{Colon, LParen, RParen},
-    DefaultInputValue, StringValue, Variable,
+    Const, DefaultInputValue, StringValue, Variable,
   },
   source::{Char, Slice, Source},
 };
@@ -310,7 +310,8 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
-    Value: crate::lang::InputValue<true>,
+    Directives: Const<false>,
+    Value: Const<true>,
   {
     StringValue::parser()
       .then_ignore(ignored())

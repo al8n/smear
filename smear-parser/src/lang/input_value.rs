@@ -115,7 +115,10 @@ mod variable;
 /// - Incorrect directive argument types
 ///
 /// Spec: [Input Values](https://spec.graphql.org/draft/#sec-Input-Values)
-pub trait InputValue<const CONST: bool> {}
+pub trait Const<const CONST: bool> {}
+
+impl<T, const CONST: bool> Const<CONST> for &T {}
+impl<T, const CONST: bool> Const<CONST> for &mut T {}
 
 /// A GraphQL default value assignment for input parameters.
 ///
@@ -144,6 +147,8 @@ pub struct DefaultInputValue<Value, Span> {
   eq: Equal<Span>,
   value: Value,
 }
+
+impl<Value, Span> Const<true> for DefaultInputValue<Value, Span> where Value: Const<true> {}
 
 impl<Value, Span> DefaultInputValue<Value, Span> {
   /// Returns the source span of the entire default value assignment.
@@ -191,7 +196,7 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
-    Value: InputValue<true>,
+    Value: Const<true>,
   {
     Equal::parser()
       .then_ignore(ignored::ignored())
@@ -228,7 +233,7 @@ impl<Value, Span> IntoComponents for DefaultInputValue<Value, Span> {
 }
 
 /// Returns a parser which can parse either a set or a map.
-pub fn map_or_set_parser<'src, I, E, Key, Value, Item, KP, VP, IP, CS, CM>(
+pub fn map_or_set_parser<'src, I, E, Key, Value, Item, KP, VP, IP, CS, CM, const CONST: bool>(
   key_parser: impl Fn() -> KP,
   value_parser: impl Fn() -> VP,
   item_parser: impl Fn() -> IP,
@@ -244,6 +249,9 @@ where
   IP: Parser<'src, I, Item, E> + Clone,
   CM: Container<MapEntry<Key, Value, I::Span>>,
   CS: Container<Item>,
+  Item: Const<CONST>,
+  Key: Const<CONST>,
+  Value: Const<CONST>,
 {
   // Non-consuming guard:
   // after '<' and ws, either a ':' (i.e. "<:>") or "value ':'" => it's a Map.

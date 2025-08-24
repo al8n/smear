@@ -5,7 +5,7 @@ use super::super::{
   lang::{
     ignored, keywords,
     punct::{LBrace, RBrace},
-    EnumValue, Name, StringValue,
+    Const, EnumValue, Name, StringValue,
   },
   source::{Char, Slice, Source},
 };
@@ -152,6 +152,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -316,6 +317,7 @@ impl<EnumValueDefinition, Span, Container>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    EnumValueDefinition: Const<true>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -520,6 +522,7 @@ impl<Directives, EnumValuesDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -618,7 +621,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
+    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
   {
@@ -804,6 +807,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Directives: Const<true>,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

@@ -14,4 +14,6 @@ std = ["smear-parser/std"]
 bytes = ["smear-parser/bytes"]
 
 [dependencies]
+chumsky.workspace = true
+derive_more.workspace = true
 smear-parser.workspace = true

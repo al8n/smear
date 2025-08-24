@@ -2,12 +2,12 @@ use core::marker::PhantomData;
 
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,
     punct::{Colon, LBrace, RBrace},
-    Name, StringValue,
+    Const, Name, StringValue,
   },
   source::{Char, Slice, Source},
 };
@@ -220,6 +220,8 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
+    Args: Const<true>,
+    Directives: Const<true>,
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -385,7 +387,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-
+    FieldDefinition: Const<true>,
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
   {

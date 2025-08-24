@@ -1,19 +1,22 @@
-use chumsky::{extra::ParserExtra, prelude::*, text::TextExpected, util::MaybeRef};
+use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{AsMut, AsRef, From, Into};
 
-use super::{
+use smear_parser::{
   lang::{
-    arguments,
-    punct::{LParen, RParen},
+    self,
+    punct::{Colon, LParen, RParen},
+    Const, Name,
   },
-  Char, Span,
+  source::{self, Char, Slice, Source},
 };
 
 use super::value::{ConstInputValue, InputValue};
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Argument<Span>(arguments::Argument<InputValue<Span>, Span>);
+pub struct Argument<Span>(lang::Argument<InputValue<Span>, Span>);
+
+impl<Span> Const<false> for Argument<Span> {}
 
 impl<Span> Argument<Span> {
   /// Returns the span of the argument.
@@ -24,7 +27,7 @@ impl<Span> Argument<Span> {
 
   /// Returns the span of the colon
   #[inline]
-  pub const fn colon(&self) -> &Span {
+  pub const fn colon(&self) -> &Colon<Span> {
     self.0.colon()
   }
 
@@ -47,15 +50,17 @@ impl<Span> Argument<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    arguments::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
+    lang::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstArgument<Span>(arguments::Argument<ConstInputValue<Span>, Span>);
+pub struct ConstArgument<Span>(lang::Argument<ConstInputValue<Span>, Span>);
+
+impl<Span> Const<true> for ConstArgument<Span> {}
 
 impl<Span> ConstArgument<Span> {
   #[inline]
@@ -65,7 +70,7 @@ impl<Span> ConstArgument<Span> {
 
   /// Returns the span of the colon
   #[inline]
-  pub const fn colon(&self) -> &Span {
+  pub const fn colon(&self) -> &Colon<Span> {
     self.0.colon()
   }
 
@@ -88,15 +93,17 @@ impl<Span> ConstArgument<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    arguments::Argument::parser_with(ConstInputValue::parser()).map(Self)
+    lang::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct Arguments<Span>(arguments::Arguments<Argument<Span>, Span>);
+pub struct Arguments<Span>(lang::Arguments<Argument<Span>, Span>);
+
+impl<Span> Const<false> for Arguments<Span> {}
 
 impl<Span> Arguments<Span> {
   /// Returns the span of the arguments.
@@ -123,12 +130,6 @@ impl<Span> Arguments<Span> {
     self.0.arguments().as_slice()
   }
 
-  /// Returns the arguments
-  #[inline]
-  pub fn into_arguments(self) -> Vec<Argument<Span>> {
-    self.0.into_arguments()
-  }
-
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -136,15 +137,17 @@ impl<Span> Arguments<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    arguments::Arguments::parser_with(Argument::parser()).map(Self)
+    lang::Arguments::parser_with(Argument::parser()).map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
-pub struct ConstArguments<Span>(arguments::Arguments<ConstArgument<Span>, Span>);
+pub struct ConstArguments<Span>(lang::Arguments<ConstArgument<Span>, Span>);
+
+impl<Span> Const<true> for ConstArguments<Span> {}
 
 impl<Span> ConstArguments<Span> {
   /// Returns the span of the arguments.
@@ -171,12 +174,6 @@ impl<Span> ConstArguments<Span> {
     self.0.arguments().as_slice()
   }
 
-  /// Returns the arguments
-  #[inline]
-  pub fn into_arguments(self) -> Vec<ConstArgument<Span>> {
-    self.0.into_arguments()
-  }
-
   /// Returns a parser for the arguments.
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -184,8 +181,8 @@ impl<Span> ConstArguments<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: source::Span<'src, I, E>,
   {
-    arguments::Arguments::parser_with(ConstArgument::parser()).map(Self)
+    lang::Arguments::parser_with(ConstArgument::parser()).map(Self)
   }
 }

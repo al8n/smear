@@ -7,7 +7,7 @@ use super::{
   },
   ignored,
   punct::{Colon, LParen, RParen},
-  Name,
+  Const, Name,
 };
 
 use core::marker::PhantomData;
@@ -33,6 +33,9 @@ pub struct Argument<Value, Span> {
   colon: Colon<Span>,
   value: Value,
 }
+
+impl<Value, Span> Const<true> for Argument<Value, Span> where Value: Const<true> {}
+impl<Value, Span> Const<false> for Argument<Value, Span> where Value: Const<false> {}
 
 impl<Value, Span> AsRef<Span> for Argument<Value, Span> {
   #[inline]
@@ -184,6 +187,9 @@ pub struct Arguments<Arg, Span, Container = Vec<Arg>> {
   r_paren: RParen<Span>,
   _arg: PhantomData<Arg>,
 }
+
+impl<Arg, Span, Container> Const<true> for Arguments<Arg, Span, Container> where Arg: Const<true> {}
+impl<Arg, Span, Container> Const<false> for Arguments<Arg, Span, Container> where Arg: Const<false> {}
 
 impl<Arg, Span, Container> AsRef<Span> for Arguments<Arg, Span, Container> {
   #[inline]
