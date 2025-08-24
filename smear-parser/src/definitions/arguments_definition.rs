@@ -3,7 +3,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,

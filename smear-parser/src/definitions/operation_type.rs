@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::keywords::{Mutation, Query, Subscription},
   source::{Char, Slice, Source},

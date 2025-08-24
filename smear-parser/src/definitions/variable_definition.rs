@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,

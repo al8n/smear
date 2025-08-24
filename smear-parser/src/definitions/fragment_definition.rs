@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{ignored, keywords::Fragment, Const, FragmentName, StringValue, TypeCondition},
   source::{Char, Slice, Source},
