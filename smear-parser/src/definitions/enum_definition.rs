@@ -119,7 +119,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
   /// Enum values must be valid GraphQL names and cannot be the reserved
   /// words `true`, `false`, or `null`.
   #[inline]
-  pub const fn enum_value(&self) -> &EnumValue<Span> {
+  pub const fn value(&self) -> &EnumValue<Span> {
     &self.enum_value
   }
 
@@ -293,7 +293,7 @@ impl<EnumValueDefinition, Span, Container>
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of enum value definitions.
   #[inline]
-  pub const fn enum_values(&self) -> &Container {
+  pub const fn values(&self) -> &Container {
     &self.enum_values
   }
 
@@ -397,7 +397,7 @@ impl<EnumValueDefinition, Span, Container>
 ///
 /// Spec: [Enum Type Definition](https://spec.graphql.org/draft/#sec-Enum-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
+pub struct EnumTypeDefinition<Directives, EnumValuesDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   keyword: keywords::Enum<Span>,
@@ -407,7 +407,7 @@ pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
 }
 
 impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -416,7 +416,7 @@ impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -425,7 +425,7 @@ impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoComponents
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   type Components = (
     Span,
@@ -450,7 +450,7 @@ impl<Directives, EnumValuesDefinition, Span> IntoComponents
 }
 
 impl<Directives, EnumValuesDefinition, Span>
-  EnumDefinition<Directives, EnumValuesDefinition, Span>
+  EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   /// Returns a reference to the span covering the entire enum definition.
   ///
@@ -493,7 +493,7 @@ impl<Directives, EnumValuesDefinition, Span>
   /// The enum values definition contains all the possible values for this enum type.
   /// It may be absent in enum definitions that are meant to be extended later.
   #[inline]
-  pub const fn enum_values(&self) -> Option<&EnumValuesDefinition> {
+  pub const fn enum_values_definition(&self) -> Option<&EnumValuesDefinition> {
     self.enum_values.as_ref()
   }
 
@@ -513,8 +513,8 @@ impl<Directives, EnumValuesDefinition, Span>
   /// provided parsers.
   #[inline]
   pub fn parser_with<'src, I, E, P, DP>(
-    enum_values_definition: P,
     directives_parser: DP,
+    enum_values_definition: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -587,7 +587,7 @@ impl<Directives, EnumValuesDefinition, Span>
 /// * `Directives` - The type representing directives applied to the enum extension
 /// * `EnumValuesDefinition` - The type representing the new enum values being added
 #[derive(Debug, Clone, Copy)]
-pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
+pub enum EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
   /// Extension that adds new enum values, optionally with additional directives on the type
   Values {
     /// Optional directives to add to the enum type itself
@@ -599,7 +599,7 @@ pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
   Directives(Directives),
 }
 
-impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValuesDefinition> {
+impl<Directives, EnumValuesDefinition> EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
   /// Creates a parser that can parse enum extension content.
   ///
   /// This parser handles both types of enum extensions: those that add values
@@ -697,16 +697,16 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
 ///
 /// Spec: [Enum Type Extension](https://spec.graphql.org/draft/#sec-Enum-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumExtension<Directives, EnumValuesDefinition, Span> {
+pub struct EnumTypeExtension<Directives, EnumValuesDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   keyword: keywords::Enum<Span>,
   name: Name<Span>,
-  content: EnumExtensionContent<Directives, EnumValuesDefinition>,
+  content: EnumTypeExtensionContent<Directives, EnumValuesDefinition>,
 }
 
 impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -715,7 +715,7 @@ impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -724,14 +724,14 @@ impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoComponents
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Enum<Span>,
     Name<Span>,
-    EnumExtensionContent<Directives, EnumValuesDefinition>,
+    EnumTypeExtensionContent<Directives, EnumValuesDefinition>,
   );
 
   #[inline]
@@ -746,7 +746,9 @@ impl<Directives, EnumValuesDefinition, Span> IntoComponents
   }
 }
 
-impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValuesDefinition, Span> {
+impl<Directives, EnumValuesDefinition, Span>
+  EnumTypeExtension<Directives, EnumValuesDefinition, Span>
+{
   /// Returns a reference to the span covering the entire enum extension.
   ///
   /// The span includes the extend keyword, enum keyword, name, and all
@@ -788,7 +790,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
   /// The content specifies what is being added to the enum type:
   /// either new values (optionally with directives), or just directives.
   #[inline]
-  pub const fn content(&self) -> &EnumExtensionContent<Directives, EnumValuesDefinition> {
+  pub const fn content(&self) -> &EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
     &self.content
   }
 
@@ -816,7 +818,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
       .then(keywords::Enum::parser())
       .then_ignore(ignored())
       .then(Name::<Span>::parser().then_ignore(ignored()))
-      .then(EnumExtensionContent::parser_with(
+      .then(EnumTypeExtensionContent::parser_with(
         directives_parser,
         enum_values_definition,
       ))

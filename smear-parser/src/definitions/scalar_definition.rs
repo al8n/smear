@@ -103,7 +103,7 @@ use crate::{
 ///
 /// Spec: [Scalar Type Definition](https://spec.graphql.org/draft/#sec-Scalar-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarDefinition<Directives, Span> {
+pub struct ScalarTypeDefinition<Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   scalar: keywords::Scalar<Span>,
@@ -111,21 +111,21 @@ pub struct ScalarDefinition<Directives, Span> {
   directives: Option<Directives>,
 }
 
-impl<Directives, Span> AsRef<Span> for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> AsRef<Span> for ScalarTypeDefinition<Directives, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, Span> IntoSpan<Span> for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for ScalarTypeDefinition<Directives, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, Span> IntoComponents for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> IntoComponents for ScalarTypeDefinition<Directives, Span> {
   type Components = (
     Span,
     Option<StringValue<Span>>,
@@ -146,7 +146,7 @@ impl<Directives, Span> IntoComponents for ScalarDefinition<Directives, Span> {
   }
 }
 
-impl<Directives, Span> ScalarDefinition<Directives, Span> {
+impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
   /// Returns a reference to the span covering the entire scalar definition.
   ///
   /// The span encompasses the complete scalar definition from the optional description
@@ -302,7 +302,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
 ///
 /// Spec: [Scalar Type Extension](https://spec.graphql.org/draft/#sec-Scalar-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarExtension<Directives, Span> {
+pub struct ScalarTypeExtension<Directives, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   scalar: keywords::Scalar<Span>,
@@ -310,21 +310,21 @@ pub struct ScalarExtension<Directives, Span> {
   directives: Directives,
 }
 
-impl<Directives, Span> AsRef<Span> for ScalarExtension<Directives, Span> {
+impl<Directives, Span> AsRef<Span> for ScalarTypeExtension<Directives, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, Span> IntoSpan<Span> for ScalarExtension<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for ScalarTypeExtension<Directives, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, Span> IntoComponents for ScalarExtension<Directives, Span> {
+impl<Directives, Span> IntoComponents for ScalarTypeExtension<Directives, Span> {
   type Components = (
     Span,
     keywords::Extend<Span>,
@@ -345,7 +345,7 @@ impl<Directives, Span> IntoComponents for ScalarExtension<Directives, Span> {
   }
 }
 
-impl<Directives, Span> ScalarExtension<Directives, Span> {
+impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
   /// Returns a reference to the span covering the entire scalar extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through

@@ -243,8 +243,8 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// optional and required components. The parsing of selection set and
   /// directives is delegated to the provided parsers.
   pub fn parser_with<'src, I, E, SP, DP>(
-    selection_set_parser: SP,
     directives_parser: DP,
+    selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,

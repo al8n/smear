@@ -58,7 +58,7 @@ struct Derive {
   field1: String,
 }
 
-#[derive(smear_derive::ObjectDefinition)]
+#[derive(smear_derive::ObjectTypeDefinition)]
 #[smear(
   rename_all = "xxx",
   directive(
@@ -92,7 +92,7 @@ struct Object {
 
 smear::document! {
   objects: [{
-    name: FooObjectDefinition,
+    name: FooObjectTypeDefinition,
     directives: [FooDirective, BarDirective],
   }],
   enums: [{

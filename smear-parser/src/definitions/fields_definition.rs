@@ -321,6 +321,35 @@ pub struct FieldsDefinition<FieldDefinition, Span, Container = Vec<FieldDefiniti
   _m: PhantomData<FieldDefinition>,
 }
 
+impl<FieldDefinition, Span, Container> AsRef<Span>
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<FieldDefinition, Span, Container> IntoSpan<Span>
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<FieldDefinition, Span, Container> IntoComponents
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_brace, self.fields, self.r_brace)
+  }
+}
+
 impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, Container> {
   /// Returns a reference to the span covering the entire fields definition.
   ///

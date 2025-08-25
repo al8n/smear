@@ -62,7 +62,7 @@ use crate::{
 ///
 /// Spec: [Object Type Definition](https://spec.graphql.org/draft/#sec-Object-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct ObjectTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   ty: keywords::Type<Span>,
@@ -73,7 +73,7 @@ pub struct ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, S
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -82,7 +82,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -91,7 +91,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
@@ -118,7 +118,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  ObjectDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  ObjectTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire object definition.
   #[inline]
@@ -240,7 +240,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
 /// Extensions enable modular schema composition and gradual schema evolution
 /// without breaking existing type definitions.
 #[derive(Debug, Clone, Copy)]
-pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds only directives, optionally with new interface implementations.
   ///
   /// This variant is used when extending an object to add metadata or behavioral
@@ -301,7 +301,7 @@ pub enum ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinitio
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition>
-  ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
+  ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
 {
   /// Creates a parser for object extension content.
   ///
@@ -394,16 +394,16 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///
 /// Spec: [Object Type Extension](https://spec.graphql.org/draft/#sec-Object-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct ObjectTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   interface: keywords::Type<Span>,
   name: Name<Span>,
-  content: ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  content: ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -412,7 +412,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -421,14 +421,14 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for ObjectTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Type<Span>,
     Name<Span>,
-    ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+    ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -444,7 +444,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  ObjectExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  ObjectTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire object extension.
   #[inline]
@@ -489,7 +489,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   #[inline]
   pub const fn content(
     &self,
-  ) -> &ObjectExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+  ) -> &ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.content
   }
 
@@ -497,7 +497,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   ///
   /// This parser handles the `extend type` syntax followed by the object name
   /// and extension content. The content parsing is delegated to the
-  /// `ObjectExtensionContent` parser for modularity.
+  /// `ObjectTypeExtensionContent` parser for modularity.
   pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
@@ -520,7 +520,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
       .then(keywords::Type::parser())
       .then_ignore(ignored())
       .then(Name::parser().then_ignore(ignored()))
-      .then(ObjectExtensionContent::<
+      .then(ObjectTypeExtensionContent::<
         ImplementInterfaces,
         Directives,
         FieldsDefinition,

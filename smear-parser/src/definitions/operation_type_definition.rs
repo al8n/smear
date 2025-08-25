@@ -181,19 +181,53 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct RootOperationTypesDefinition<
-  OperationTypeDefinition,
+  RootOperationTypeDefinition,
   Span,
-  Container = Vec<OperationTypeDefinition>,
+  Container = Vec<RootOperationTypeDefinition>,
 > {
   span: Span,
   l_brace: LBrace<Span>,
-  operation_types_definition: Container,
+  root_operation_types: Container,
   r_brace: RBrace<Span>,
-  _m: PhantomData<OperationTypeDefinition>,
+  _m: PhantomData<RootOperationTypeDefinition>,
 }
 
-impl<OperationTypeDefinition, Span, Container>
-  RootOperationTypesDefinition<OperationTypeDefinition, Span, Container>
+impl<RootOperationTypeDefinition, Span, Container> AsRef<Span>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<RootOperationTypeDefinition, Span, Container> IntoSpan<Span>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Span, Container>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<RootOperationTypeDefinition, Span, Container> IntoComponents
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Span, Container>
+{
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.l_brace,
+      self.root_operation_types,
+      self.r_brace,
+    )
+  }
+}
+
+impl<RootOperationTypeDefinition, Span, Container>
+  RootOperationTypesDefinition<RootOperationTypeDefinition, Span, Container>
 {
   /// Returns a reference to the span covering the entire root operation types definition.
   ///
@@ -216,8 +250,8 @@ impl<OperationTypeDefinition, Span, Container>
   /// This collection must contain at least one definition (the query root type) and
   /// may contain up to three definitions (query, mutation, subscription).
   #[inline]
-  pub const fn operation_types_definition(&self) -> &Container {
-    &self.operation_types_definition
+  pub const fn definitions(&self) -> &Container {
+    &self.root_operation_types
   }
 
   /// Returns a reference to the closing right brace token.
@@ -250,8 +284,8 @@ impl<OperationTypeDefinition, Span, Container>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    P: Parser<'src, I, OperationTypeDefinition, E> + Clone,
-    Container: chumsky::container::Container<OperationTypeDefinition>,
+    P: Parser<'src, I, RootOperationTypeDefinition, E> + Clone,
+    Container: chumsky::container::Container<RootOperationTypeDefinition>,
   {
     LBrace::parser()
       .then_ignore(ignored())
@@ -263,14 +297,12 @@ impl<OperationTypeDefinition, Span, Container>
           .collect(),
       )
       .then(RBrace::parser())
-      .map_with(
-        |((l_brace, operation_types_definition), r_brace), sp| Self {
-          span: Span::from_map_extra(sp),
-          l_brace,
-          operation_types_definition,
-          r_brace,
-          _m: PhantomData,
-        },
-      )
+      .map_with(|((l_brace, root_operation_types), r_brace), sp| Self {
+        span: Span::from_map_extra(sp),
+        l_brace,
+        root_operation_types,
+        r_brace,
+        _m: PhantomData,
+      })
   }
 }

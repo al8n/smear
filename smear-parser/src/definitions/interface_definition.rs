@@ -428,7 +428,7 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
 ///
 /// Spec: [Interface Type Definition](https://spec.graphql.org/draft/#sec-Interface-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   interface: keywords::Interface<Span>,
@@ -439,7 +439,7 @@ pub struct InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -448,7 +448,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -457,7 +457,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
@@ -484,7 +484,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  InterfaceDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface definition.
   #[inline]
@@ -525,7 +525,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     self.implements.as_ref()
   }
 
-  // Returns a reference to the optional directives applied to the interface.
+  /// Returns a reference to the optional directives applied to the interface.
   ///
   /// Interface-level directives can specify authorization requirements,
   /// caching behavior, or other metadata that applies to all implementing types.
@@ -598,7 +598,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
 ///
 /// These can be combined in various ways to create comprehensive extensions.
 #[derive(Debug, Clone, Copy)]
-pub enum InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds directives to an interface, optionally with new interface implementations.
   ///
   /// This variant applies metadata or behavioral modifications without changing
@@ -678,7 +678,7 @@ pub enum InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefini
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
 {
   /// Creates a parser for interface extension content with proper precedence handling.
   ///
@@ -753,16 +753,16 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///   | extend interface Name ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   interface: keywords::Interface<Span>,
   name: Name<Span>,
-  content: InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  content: InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -771,7 +771,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -780,14 +780,14 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Interface<Span>,
     Name<Span>,
-    InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+    InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -803,7 +803,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  InterfaceExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface extension.
   ///
@@ -849,7 +849,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   #[inline]
   pub const fn content(
     &self,
-  ) -> &InterfaceExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+  ) -> &InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.content
   }
 
@@ -879,7 +879,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
       .then(keywords::Interface::parser())
       .then_ignore(ignored())
       .then(Name::parser().then_ignore(ignored()))
-      .then(InterfaceExtensionContent::<
+      .then(InterfaceTypeExtensionContent::<
         ImplementInterfaces,
         Directives,
         FieldsDefinition,

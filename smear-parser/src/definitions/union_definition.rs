@@ -455,7 +455,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
 ///
 /// Spec: [Union Type Definition](https://spec.graphql.org/draft/#sec-Union-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionDefinition<Directives, MemberTypes, Span> {
+pub struct UnionTypeDefinition<Directives, MemberTypes, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   keyword: keywords::Union<Span>,
@@ -464,7 +464,9 @@ pub struct UnionDefinition<Directives, MemberTypes, Span> {
   members: Option<MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> AsRef<Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
@@ -472,7 +474,7 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, 
 }
 
 impl<Directives, MemberTypes, Span> IntoSpan<Span>
-  for UnionDefinition<Directives, MemberTypes, Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -481,7 +483,7 @@ impl<Directives, MemberTypes, Span> IntoSpan<Span>
 }
 
 impl<Directives, MemberTypes, Span> IntoComponents
-  for UnionDefinition<Directives, MemberTypes, Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
 {
   type Components = (
     Span,
@@ -505,7 +507,7 @@ impl<Directives, MemberTypes, Span> IntoComponents
   }
 }
 
-impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes, Span> {
   /// Returns a reference to the span covering the entire union definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -597,7 +599,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
 /// Union extensions can add directives or new member types to existing unions,
 /// enabling schema evolution without modifying original definitions.
 #[derive(Debug, Clone, Copy)]
-pub enum UnionExtensionContent<Directives, MemberTypes> {
+pub enum UnionTypeExtensionContent<Directives, MemberTypes> {
   /// Extension adds only directives to the union.
   ///
   /// Used to add metadata or behavioral modifications without changing
@@ -629,7 +631,7 @@ pub enum UnionExtensionContent<Directives, MemberTypes> {
   },
 }
 
-impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
+impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes> {
   /// Creates a parser for union extension content.
   ///
   /// The parser tries member extensions first, then directive-only extensions.
@@ -690,15 +692,17 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
 ///
 /// Spec: [Union Type Extension](https://spec.graphql.org/draft/#sec-Union-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionExtension<Directives, MemberTypes, Span> {
+pub struct UnionTypeExtension<Directives, MemberTypes, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   keyword: keywords::Union<Span>,
   name: Name<Span>,
-  content: UnionExtensionContent<Directives, MemberTypes>,
+  content: UnionTypeExtensionContent<Directives, MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> AsRef<Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
@@ -706,7 +710,7 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, M
 }
 
 impl<Directives, MemberTypes, Span> IntoSpan<Span>
-  for UnionExtension<Directives, MemberTypes, Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -715,14 +719,14 @@ impl<Directives, MemberTypes, Span> IntoSpan<Span>
 }
 
 impl<Directives, MemberTypes, Span> IntoComponents
-  for UnionExtension<Directives, MemberTypes, Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Union<Span>,
     Name<Span>,
-    UnionExtensionContent<Directives, MemberTypes>,
+    UnionTypeExtensionContent<Directives, MemberTypes>,
   );
 
   #[inline]
@@ -737,7 +741,7 @@ impl<Directives, MemberTypes, Span> IntoComponents
   }
 }
 
-impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, Span> {
   /// Returns a reference to the span covering the entire union extension.
   ///
   /// The span includes the `extend union` keywords, union name, and all extension
@@ -778,7 +782,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
 
   /// Returns a reference to the content being added by this extension.
   #[inline]
-  pub const fn content(&self) -> &UnionExtensionContent<Directives, MemberTypes> {
+  pub const fn content(&self) -> &UnionTypeExtensionContent<Directives, MemberTypes> {
     &self.content
   }
 
@@ -806,7 +810,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
       .then(keywords::Union::parser())
       .then_ignore(ignored())
       .then(Name::parser().then_ignore(ignored()))
-      .then(UnionExtensionContent::parser_with(
+      .then(UnionTypeExtensionContent::parser_with(
         directives_parser,
         member_types,
       ))

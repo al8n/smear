@@ -68,14 +68,14 @@ use crate::{
 ///
 /// ```text
 /// OperationDefinition:
-///   Description? OperationType Name? VariableDefinitions? Directives? SelectionSet
+///   Description? OperationType Name? VariablesDefinition? Directives? SelectionSet
 /// ```
 ///
 /// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
 #[derive(Debug, Clone, Copy)]
 pub struct NamedOperationDefinition<
   OperationType,
-  VariableDefinitions,
+  VariablesDefinition,
   Directives,
   SelectionSet,
   Span,
@@ -84,13 +84,13 @@ pub struct NamedOperationDefinition<
   description: Option<StringValue<Span>>,
   operation_type: OperationType,
   name: Option<Name<Span>>,
-  variable_definitions: Option<VariableDefinitions>,
+  variable_definitions: Option<VariablesDefinition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<Span>
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> AsRef<Span>
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -98,8 +98,8 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<S
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoSpan<Span>
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> IntoSpan<Span>
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -107,15 +107,15 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoSpa
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoComponents
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> IntoComponents
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   type Components = (
     Span,
     Option<StringValue<Span>>,
     OperationType,
     Option<Name<Span>>,
-    Option<VariableDefinitions>,
+    Option<VariablesDefinition>,
     Option<Directives>,
     SelectionSet,
   );
@@ -134,8 +134,8 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoCom
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
-  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
+  NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   /// Returns a reference to the span covering the entire operation definition.
   #[inline]
@@ -185,7 +185,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   /// enabling parameterized and reusable operations. They include type information
   /// and optional default values.
   #[inline]
-  pub const fn variable_definitions(&self) -> Option<&VariableDefinitions> {
+  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition> {
     self.variable_definitions.as_ref()
   }
 
@@ -237,7 +237,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     Span: crate::source::Span<'src, I, E>,
     Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariableDefinitions, E> + Clone,
+    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
@@ -280,15 +280,15 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span> {
+pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span> {
   Named(
-    NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>,
+    NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>,
   ),
   Shorten(SelectionSet),
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
-  OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
+  OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   #[inline]
   pub fn parser_with<'src, I, E, OP, VP, DP, SP>(
@@ -305,7 +305,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     Span: crate::source::Span<'src, I, E>,
     Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariableDefinitions, E> + Clone,
+    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {

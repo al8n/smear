@@ -198,7 +198,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
   /// kind of GraphQL operation. They form the foundation of the GraphQL execution
   /// model and define how clients can interact with the service.
   #[inline]
-  pub const fn root_operation_type_definitions(&self) -> &RootOperationTypesDefinition {
+  pub const fn definitions(&self) -> &RootOperationTypesDefinition {
     &self.operation_type_definitions
   }
 

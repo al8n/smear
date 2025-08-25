@@ -9,3 +9,6 @@ extern crate std;
 
 /// Standards-compliant GraphQL parser conbinators.
 pub mod ast;
+
+#[test]
+fn t() {}
