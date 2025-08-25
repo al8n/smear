@@ -310,12 +310,11 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
     Alias::parser()
-      .padded_by(ignored())
       .or_not()
       .then(Name::parser().padded_by(ignored()))
-      .then(args.padded_by(ignored()).or_not())
-      .then(directives.padded_by(ignored()).or_not())
-      .then(selection_set.padded_by(ignored()).or_not())
+      .then(args.or_not())
+      .then(ignored().ignore_then(directives).or_not())
+      .then(ignored().ignore_then(selection_set).or_not())
       .map_with(
         |((((alias, name), arguments), directives), selection_set), sp| Self {
           span: Span::from_map_extra(sp),

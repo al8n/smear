@@ -267,10 +267,10 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
     StringValue::parser()
       .or_not()
       .then(Fragment::parser().padded_by(ignored()))
-      .then(FragmentName::parser().then_ignore(ignored()))
-      .then(TypeCondition::parser())
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(selection_set_parser))
+      .then(FragmentName::parser())
+      .then(TypeCondition::parser().padded_by(ignored()))
+      .then(directives_parser.then_ignore(ignored()).or_not())
+      .then(selection_set_parser)
       .map_with(
         |(((((description, fragment), name), type_condition), directives), selection_set), sp| {
           Self {

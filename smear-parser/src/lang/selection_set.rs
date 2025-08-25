@@ -184,16 +184,15 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
     Container: chumsky::container::Container<Selection>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         selection_parser
           .padded_by(ignored())
           .repeated()
           .at_least(1)
-          .collect()
-          .then(RBrace::parser()),
+          .collect(),
       )
-      .map_with(|(l_brace, (selections, r_brace)), sp| Self {
+      .then(RBrace::parser())
+      .map_with(|((l_brace, selections), r_brace), sp| Self {
         span: Span::from_map_extra(sp),
         l_brace,
         selections,

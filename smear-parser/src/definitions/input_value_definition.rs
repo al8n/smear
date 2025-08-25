@@ -244,9 +244,6 @@ impl<Type, DefaultValue, Directives, Span>
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the input value definition.
   ///
-  /// The parser uses `.padded_by(ignored())` for the colon, type, and default value
-  /// to handle whitespace gracefully around these components.
-  ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, TP, VP, DP>(
@@ -271,8 +268,8 @@ impl<Type, DefaultValue, Directives, Span>
       .then(Name::parser().padded_by(ignored()))
       .then(Colon::parser().then_ignore(ignored()))
       .then(type_parser)
-      .then(ignored().ignore_then(default_const_value_parser.or_not()))
-      .then(ignored().ignore_then(const_directives_parser.or_not()))
+      .then(ignored().ignore_then(default_const_value_parser).or_not())
+      .then(ignored().ignore_then(const_directives_parser).or_not())
       .map_with(
         |(((((description, name), colon), ty), default_value), directives), span| Self {
           span: Span::from_map_extra(span),

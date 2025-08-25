@@ -320,8 +320,8 @@ impl<Type, Directives, DefaultValue, Span>
       .then(Variable::parser().padded_by(ignored()))
       .then(Colon::parser())
       .then(ignored().ignore_then(type_parser))
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(default_value_parser.or_not()))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(default_value_parser).or_not())
       .map_with(
         |(((((description, variable), colon), ty), directives), default_value), sp| Self {
           span: Span::from_map_extra(sp),

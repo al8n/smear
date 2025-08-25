@@ -114,8 +114,7 @@ impl<Args, Span> Directive<Args, Span> {
     At::parser()
       .then_ignore(ignored())
       .then(Name::parser())
-      .then_ignore(ignored())
-      .then(args_parser.or_not())
+      .then(ignored().ignore_then(args_parser).or_not())
       .map_with(|((at, name), arguments), sp| Self {
         span: Span::from_map_extra(sp),
         at,
@@ -216,6 +215,7 @@ impl<Directive, Span, Container> Directives<Directive, Span, Container> {
     Container: chumsky::container::Container<Directive>,
   {
     directive
+      .padded_by(ignored())
       .repeated()
       .at_least(1)
       .collect()

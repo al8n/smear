@@ -245,8 +245,8 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
       .or_not()
       .then(ignored().ignore_then(operation_type_parser))
       .then(Name::parser().or_not())
-      .then(ignored().ignore_then(variable_definitions_parser.or_not()))
-      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(variable_definitions_parser).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
       .then(ignored().ignore_then(selection_set_parser))
       .map_with(
         |(

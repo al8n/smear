@@ -329,8 +329,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     Ellipsis::parser()
       .then_ignore(ignored())
       .then(FragmentName::parser())
-      .then_ignore(ignored())
-      .then(directives.or_not())
+      .then(ignored().ignore_then(directives).or_not())
       .map_with(|((ellipsis, name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         ellipsis,
@@ -523,12 +522,13 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     D: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
-      .then_ignore(ignored())
-      .then(TypeCondition::<Span>::parser().or_not())
-      .then_ignore(ignored())
-      .then(directives.or_not())
-      .then_ignore(ignored())
-      .then(selection_set)
+      .then(
+        ignored()
+          .ignore_then(TypeCondition::<Span>::parser())
+          .or_not(),
+      )
+      .then(ignored().ignore_then(directives).or_not())
+      .then(ignored().ignore_then(selection_set))
       .map_with(
         |(((ell, type_condition), directives), selection_set), sp| Self {
           span: Span::from_map_extra(sp),

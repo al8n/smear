@@ -233,7 +233,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
     StringValue::parser()
       .or_not()
       .then(keywords::Schema::parser().padded_by(ignored()))
-      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(directives_parser).or_not())
       .then(ignored().ignore_then(root_operation_types_definition_parser))
       .map_with(
         |(((description, schema), directives), operation_type_definitions), sp| Self {

@@ -557,6 +557,12 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
   /// optional descriptions, directives, and member type definitions.
   ///
   /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the union type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: DP,
     member_types: MP,
@@ -575,8 +581,8 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
       .or_not()
       .then(keywords::Union::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(member_types.or_not()))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(member_types).or_not())
       .map_with(
         |((((description, keyword), name), directives), members), sp| Self {
           span: Span::from_map_extra(sp),
@@ -635,6 +641,12 @@ impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes>
   /// are correctly parsed as the `Members` variant.
   ///
   /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the union type extension content.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: impl Fn() -> DP,
     member_types: impl Fn() -> MP,

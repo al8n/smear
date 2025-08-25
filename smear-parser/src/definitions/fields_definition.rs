@@ -228,13 +228,11 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(Name::parser())
-      .then_ignore(ignored())
+      .then(Name::parser().padded_by(ignored()))
       .then(args_definition_parser.or_not())
       .then(Colon::parser().padded_by(ignored()))
-      .then(type_parser.then_ignore(ignored()))
-      .then(directives_parser.or_not())
+      .then(type_parser)
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(
         |(((((description, name), arguments_definition), colon), ty), directives), sp| Self {
           span: Span::from_map_extra(sp),

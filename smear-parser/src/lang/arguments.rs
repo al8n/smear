@@ -278,9 +278,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
     P: Parser<'src, I, Arg, E> + Clone,
     Container: chumsky::container::Container<Arg>,
   {
-    // '(' ws? arg+ ')'
     LParen::parser()
-      .then_ignore(ignored())
       .then(
         arg_parser
           .padded_by(ignored())

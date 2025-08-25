@@ -191,8 +191,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the object type definition.
   ///
@@ -218,9 +217,9 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
       .or_not()
       .then(keywords::Type::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(ignored().ignore_then(implement_interfaces_parser.or_not()))
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(fields_definition_parser.or_not()))
+      .then(ignored().ignore_then(implement_interfaces_parser).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(fields_definition_parser).or_not())
       .map_with(
         |(((((description, ty), name), implements), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),
@@ -317,8 +316,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the object type extension content.
   ///
@@ -342,7 +340,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
     choice((
       implement_interfaces_parser()
         .or_not()
-        .then(ignored().ignore_then(directives_parser().or_not()))
+        .then(ignored().ignore_then(directives_parser()).or_not())
         .then(ignored().ignore_then(fields_definition_parser()))
         .map(|((implements, directives), fields)| Self::Fields {
           implements,
@@ -514,8 +512,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the object type extension.
   ///

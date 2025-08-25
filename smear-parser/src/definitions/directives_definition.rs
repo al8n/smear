@@ -490,7 +490,7 @@ impl<Span> Location<Span> {
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the direction location.
+  /// whitespace skipping or comment processing around the location.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
@@ -617,8 +617,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after an optional pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the leading directive location.
   ///
@@ -633,8 +632,8 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
     P: Parser<'src, I, Location, E> + Clone,
   {
     Pipe::parser()
-      .or_not()
       .then_ignore(ignored())
+      .or_not()
       .then(location_parser)
       .map_with(|(pipe, location), sp| Self {
         span: Span::from_map_extra(sp),
@@ -739,8 +738,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the directive location.
   ///
@@ -897,10 +895,9 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   ///
   /// ## Notes
   ///
-  /// This parser handles [ignored tokens] between the leading location and
-  /// remaining locations automatically. The calling parser is responsible for
-  /// handling any necessary whitespace skipping or comment processing around
-  /// the entire directive locations collection.
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the directive locations.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P>(
@@ -1136,8 +1133,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the directive definition.
   ///
@@ -1162,8 +1158,12 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
       .then(keywords::Directive::parser().padded_by(ignored()))
       .then(At::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(ignored().ignore_then(args_parser.or_not()))
-      .then(ignored().ignore_then(keywords::Repeatable::parser().or_not()))
+      .then(ignored().ignore_then(args_parser).or_not())
+      .then(
+        ignored()
+          .ignore_then(keywords::Repeatable::parser())
+          .or_not(),
+      )
       .then(keywords::On::parser().padded_by(ignored()))
       .then(directive_locations_parser)
       .map_with(

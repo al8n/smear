@@ -163,7 +163,6 @@ impl<T, Span, C> Set<T, Span, C> {
           .at_least(1)
           .collect::<C>(),
       )))
-      .then_ignore(ignored())
       .then(RAngle::parser())
       .map_with(|((l_angle, values), r_angle), sp| Self {
         span: Span::from_map_extra(sp),

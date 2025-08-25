@@ -157,9 +157,8 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(EnumValue::<Span>::parser().then_ignore(ignored()))
-      .then(directives_parser.or_not())
+      .then(ignored().ignore_then(EnumValue::<Span>::parser()))
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(|((description, enum_value), directives), sp| Self {
         span: Span::from_map_extra(sp),
         description,
@@ -322,7 +321,6 @@ impl<EnumValueDefinition, Span, Container>
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         enum_value_parser
           .padded_by(ignored())
@@ -330,7 +328,6 @@ impl<EnumValueDefinition, Span, Container>
           .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, enum_values), r_brace), sp| Self {
         span: Span::from_map_extra(sp),
@@ -514,8 +511,7 @@ impl<Directives, EnumValuesDefinition, Span>
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the enum type definition.
   ///
@@ -539,8 +535,8 @@ impl<Directives, EnumValuesDefinition, Span>
       .or_not()
       .then(keywords::Enum::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(enum_values_definition.or_not()))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(enum_values_definition).or_not())
       .map_with(
         |((((description, keyword), name), directives), enum_values), sp| Self {
           span: Span::from_map_extra(sp),
@@ -613,7 +609,7 @@ impl<Directives, EnumValuesDefinition> EnumTypeExtensionContent<Directives, Enum
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the extension content.
+  /// whitespace skipping or comment processing around the enum type extension content.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, EVP>(
@@ -805,8 +801,7 @@ impl<Directives, EnumValuesDefinition, Span>
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the enum type extension.
   ///

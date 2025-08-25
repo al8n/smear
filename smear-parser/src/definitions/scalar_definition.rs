@@ -207,7 +207,7 @@ impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the operation definition.
+  /// whitespace skipping or comment processing around the scalar type definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
@@ -224,14 +224,9 @@ impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
     StringValue::parser()
       .or_not()
       .then(keywords::Scalar::<Span>::parser().padded_by(ignored()))
-      .then(choice((
-        Name::<Span>::parser()
-          .then_ignore(ignored())
-          .then(directives_parser)
-          .map(|(name, directives)| (name, Some(directives))),
-        Name::<Span>::parser().map(|name| (name, None)),
-      )))
-      .map_with(|((description, scalar), (name, directives)), sp| Self {
+      .then(Name::parser())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .map_with(|(((description, scalar), name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         description,
         scalar,
@@ -421,7 +416,7 @@ impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the scalar extension.
+  /// whitespace skipping or comment processing around the scalar type extension.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]

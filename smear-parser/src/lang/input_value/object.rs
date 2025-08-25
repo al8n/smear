@@ -333,7 +333,13 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
   /// including braces, field parsing, whitespace, optional commas, and empty
   /// objects, while enforcing constant vs variable context requirements.
   ///
-  /// Spec: [Object Value](https://spec.graphql.org/draft/#sec-Object-Value)
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the object value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P, const CONST: bool>(
     field_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone

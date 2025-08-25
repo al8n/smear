@@ -289,8 +289,12 @@ impl<Directives, FieldsDefinition, Span>
       .or_not()
       .then(keywords::Input::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(ignored().ignore_then(directives_parser.or_not()))
-      .then(ignored().ignore_then(input_fields_definition_parser.or_not()))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(
+        ignored()
+          .ignore_then(input_fields_definition_parser)
+          .or_not(),
+      )
       .map_with(
         |((((description, input), name), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),

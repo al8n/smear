@@ -154,7 +154,6 @@ impl<T, Span, C> Tuple<T, Span, C> {
           .at_least(1)
           .collect::<C>(),
       )))
-      .then_ignore(ignored())
       .then(RParen::parser())
       .map_with(|((l_paren, values), r_paren), sp| Self {
         span: Span::from_map_extra(sp),
