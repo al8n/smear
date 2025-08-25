@@ -1,5 +1,5 @@
 use chumsky::{extra::ParserExtra, prelude::*};
-use derive_more::{AsMut, AsRef, From, Into, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{AsMut, AsRef, Deref, From, Into, IsVariant, TryUnwrap, Unwrap};
 
 use smear_parser::{
   convert::*,
@@ -22,333 +22,134 @@ pub use smear_parser::{
     UintValue, Variable,
   },
 };
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ObjectField<Span>(lang::ObjectField<InputValue<Span>, Span>);
 
-impl<Span> Const<false> for ObjectField<Span> {}
+macro_rules! bail_struct_wrapper {
+  (
+    $(#[$meta:meta])*
+    $(Const<$const:literal>)? struct $outer:ident($inner:ty) {
+      $(#[$parser_meta:meta])*
+      parser: $parser:expr
 
-impl<Span> ObjectField<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
+      $(, remaining: {
+        $($item:item)*
+      })?
+    }
+  ) => {
+    $(#[$meta:meta])*
+    #[derive(Debug, Clone, From, Into, AsMut, AsRef, Deref)]
+    pub struct $outer<Span>($inner);
 
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
+    impl<Span> core::borrow::Borrow<$inner> for $outer<Span> {
+      #[inline]
+      fn borrow(&self) -> &$inner {
+        self
+      }
+    }
 
-  #[inline]
-  pub const fn value(&self) -> &InputValue<Span> {
-    self.0.value()
-  }
+    impl<Span> AsRef<Span> for $outer<Span> {
+      #[inline]
+      fn as_ref(&self) -> &Span {
+        self.span()
+      }
+    }
 
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
+    impl<Span> IntoSpan<Span> for $outer<Span> {
+      #[inline]
+      fn into_span(self) -> Span {
+        self.0.into_span()
+      }
+    }
 
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+    impl<Span> IntoComponents for $outer<Span> {
+      type Components = <$inner as IntoComponents>::Components;
+
+      #[inline]
+      fn into_components(self) -> Self::Components {
+        self.0.into_components()
+      }
+    }
+
+    $(
+      impl<Span> Const<$const> for $outer<Span> {}
+    )?
+
+    impl<Span> $outer<Span> {
+      $(#[$parser_meta])*
+      pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+      where
+        I: Source<'src>,
+        I::Token: Char + 'src,
+        I::Slice: Slice<Token = I::Token>,
+        E: ParserExtra<'src, I>,
+        Span: source::Span<'src, I, E>,
+      {
+        $parser
+      }
+
+      $($($item)*)?
+    }
+  };
+}
+
+bail_struct_wrapper!(Const<false> struct ObjectField(lang::ObjectField<InputValue<Span>, Span>) {
+  parser: {
     lang::ObjectField::parser_with(InputValue::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ConstObjectField<Span>(lang::ObjectField<ConstInputValue<Span>, Span>);
-
-impl<Span> Const<true> for ConstObjectField<Span> {}
-
-impl<Span> ConstObjectField<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  #[inline]
-  pub const fn value(&self) -> &ConstInputValue<Span> {
-    self.0.value()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct ConstObjectField(lang::ObjectField<ConstInputValue<Span>, Span>) {
+  parser: {
     lang::ObjectField::parser_with(ConstInputValue::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct Object<Span>(lang::Object<ObjectField<Span>, Span>);
-
-impl<Span> Const<false> for Object<Span> {}
-
-impl<Span> AsRef<Span> for Object<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for Object<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for Object<Span> {
-  type Components = (Span, LBrace<Span>, Vec<ObjectField<Span>>, RBrace<Span>);
-
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> Object<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> &[ObjectField<Span>] {
-    self.0.fields().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<false> struct Object(lang::Object<ObjectField<Span>, Span>) {
+  parser: {
     lang::Object::parser_with(ObjectField::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn fields(&self) -> &[ObjectField<Span>] {
+      self.0.fields().as_slice()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ConstObject<Span>(lang::Object<ConstObjectField<Span>, Span>);
-
-impl<Span> Const<true> for ConstObject<Span> {}
-
-impl<Span> AsRef<Span> for ConstObject<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ConstObject<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ConstObject<Span> {
-  type Components = (
-    Span,
-    LBrace<Span>,
-    Vec<ConstObjectField<Span>>,
-    RBrace<Span>,
-  );
-
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ConstObject<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> &[ConstObjectField<Span>] {
-    self.0.fields().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct ConstObject(lang::Object<ConstObjectField<Span>, Span>) {
+  parser: {
     lang::Object::parser_with(ConstObjectField::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn fields(&self) -> &[ConstObjectField<Span>] {
+      self.0.fields().as_slice()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct List<Span>(lang::List<InputValue<Span>, Span>);
-
-impl<Span> Const<false> for List<Span> {}
-
-impl<Span> AsRef<Span> for List<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for List<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for List<Span> {
-  type Components = (Span, LBracket<Span>, Vec<InputValue<Span>>, RBracket<Span>);
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> List<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_bracket(&self) -> &LBracket<Span> {
-    self.0.l_bracket()
-  }
-
-  #[inline]
-  pub const fn values(&self) -> &[InputValue<Span>] {
-    self.0.values().as_slice()
-  }
-
-  #[inline]
-  pub const fn r_bracket(&self) -> &RBracket<Span> {
-    self.0.r_bracket()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<false> struct List(lang::List<InputValue<Span>, Span>) {
+  parser: {
     lang::List::parser_with(InputValue::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn values(&self) -> &[InputValue<Span>] {
+      self.0.values().as_slice()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ConstList<Span>(lang::List<ConstInputValue<Span>, Span>);
-
-impl<Span> Const<true> for ConstList<Span> {}
-
-impl<Span> AsRef<Span> for ConstList<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ConstList<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ConstList<Span> {
-  type Components = (
-    Span,
-    LBracket<Span>,
-    Vec<ConstInputValue<Span>>,
-    RBracket<Span>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ConstList<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_bracket(&self) -> &LBracket<Span> {
-    self.0.l_bracket()
-  }
-
-  #[inline]
-  pub const fn values(&self) -> &[ConstInputValue<Span>] {
-    self.0.values().as_slice()
-  }
-
-  #[inline]
-  pub const fn r_bracket(&self) -> &RBracket<Span> {
-    self.0.r_bracket()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct ConstList(lang::List<ConstInputValue<Span>, Span>) {
+  parser: {
     lang::List::parser_with(ConstInputValue::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn values(&self) -> &[ConstInputValue<Span>] {
+      self.0.values().as_slice()
+    }
   }
-}
+});
 
 /// Input value
 ///
@@ -403,8 +204,8 @@ impl<Span> InputValue<Span> {
       Self::String(value) => value.span(),
       Self::Null(value) => value.span(),
       Self::Enum(value) => value.span(),
-      Self::List(value) => value.span(),
-      Self::Object(value) => value.span(),
+      Self::List(value) => value.0.span(),
+      Self::Object(value) => value.0.span(),
     }
   }
 
@@ -499,8 +300,8 @@ impl<Span> ConstInputValue<Span> {
       Self::String(value) => value.span(),
       Self::Null(value) => value.span(),
       Self::Enum(value) => value.span(),
-      Self::List(value) => value.span(),
-      Self::Object(value) => value.span(),
+      Self::List(value) => value.0.span(),
+      Self::Object(value) => value.0.span(),
     }
   }
 
@@ -545,218 +346,49 @@ impl<Span> ConstInputValue<Span> {
   }
 }
 
-/// Default input value
-#[derive(Debug, Clone)]
-pub struct DefaultInputValue<Span>(lang::DefaultInputValue<ConstInputValue<Span>, Span>);
-
-impl<Span> Const<true> for DefaultInputValue<Span> {}
-
-impl<Span> DefaultInputValue<Span> {
-  /// Returns the span of the default input value
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  /// Returns a reference to the equal token
-  #[inline]
-  pub const fn eq(&self) -> &Equal<Span> {
-    self.0.eq()
-  }
-
-  /// Returns a reference to the value of the default input value.
-  #[inline]
-  pub const fn value(&self) -> &ConstInputValue<Span> {
-    self.0.value()
-  }
-
-  /// Returns a parser of default input value.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct DefaultInputValue(lang::DefaultInputValue<ConstInputValue<Span>, Span>) {
+  parser: {
     lang::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct Argument<Span>(lang::Argument<InputValue<Span>, Span>);
-
-impl<Span> Const<false> for Argument<Span> {}
-
-impl<Span> Argument<Span> {
-  /// Returns the span of the argument.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  /// Returns the span of the colon
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  /// Returns the name of the argument.
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  /// Returns the value of the argument.
-  #[inline]
-  pub const fn value(&self) -> &InputValue<Span> {
-    self.0.value()
-  }
-
-  /// Returns a parser for the argument.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<false> struct Argument(lang::Argument<InputValue<Span>, Span>) {
+  parser: {
     lang::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct ConstArgument<Span>(lang::Argument<ConstInputValue<Span>, Span>);
-
-impl<Span> Const<true> for ConstArgument<Span> {}
-
-impl<Span> ConstArgument<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
+bail_struct_wrapper!(Const<false> struct Arguments(lang::Arguments<Argument<Span>, Span>) {
+  parser: {
+    lang::Arguments::parser_with(Argument::parser()).map(Self)
+  },
+  remaining: {
+    /// Returns the list of arguments
+    #[inline]
+    pub const fn arguments(&self) -> &[Argument<Span>] {
+      self.0.arguments().as_slice()
+    }
   }
+});
 
-  /// Returns the span of the colon
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  /// Returns the name of the argument.
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  /// Returns the value of the argument.
-  #[inline]
-  pub const fn value(&self) -> &ConstInputValue<Span> {
-    self.0.value()
-  }
-
-  /// Returns a parser for the argument.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct ConstArgument(lang::Argument<ConstInputValue<Span>, Span>) {
+  parser: {
     lang::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct Arguments<Span>(lang::Arguments<Argument<Span>, Span>);
-
-impl<Span> Const<false> for Arguments<Span> {}
-
-impl<Span> Arguments<Span> {
-  /// Returns the span of the arguments.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  /// Returns the left parenthesis of the arguments.
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen<Span> {
-    self.0.l_paren()
-  }
-
-  /// Returns the right parenthesis of the arguments.
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen<Span> {
-    self.0.r_paren()
-  }
-
-  /// Returns the list of arguments
-  #[inline]
-  pub const fn arguments(&self) -> &[Argument<Span>] {
-    self.0.arguments().as_slice()
-  }
-
-  /// Returns a parser for the arguments.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
-    lang::Arguments::parser_with(Argument::parser()).map(Self)
-  }
-}
-
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct ConstArguments<Span>(lang::Arguments<ConstArgument<Span>, Span>);
-
-impl<Span> Const<true> for ConstArguments<Span> {}
-
-impl<Span> ConstArguments<Span> {
-  /// Returns the span of the arguments.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  /// Returns the left parenthesis of the arguments.
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen<Span> {
-    self.0.l_paren()
-  }
-
-  /// Returns the right parenthesis of the arguments.
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen<Span> {
-    self.0.r_paren()
-  }
-
-  /// Returns the list of arguments
-  #[inline]
-  pub const fn arguments(&self) -> &[ConstArgument<Span>] {
-    self.0.arguments().as_slice()
-  }
-
-  /// Returns a parser for the arguments.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+bail_struct_wrapper!(Const<true> struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
+  parser: {
     lang::Arguments::parser_with(ConstArgument::parser()).map(Self)
+  },
+  remaining: {
+    /// Returns the list of arguments
+    #[inline]
+    pub const fn arguments(&self) -> &[ConstArgument<Span>] {
+      self.0.arguments().as_slice()
+    }
   }
-}
+});
 
 #[derive(Debug, Clone, From, Into, AsMut, AsRef)]
 #[repr(transparent)]
