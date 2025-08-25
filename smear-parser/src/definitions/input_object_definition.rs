@@ -261,6 +261,14 @@ impl<Directives, FieldsDefinition, Span>
   /// This parser handles the full input object definition syntax including all
   /// optional components. The parsing of fields definition and directives is
   /// delegated to the provided parser functions.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input object type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: DP,
@@ -279,11 +287,10 @@ impl<Directives, FieldsDefinition, Span>
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Input::parser().then_ignore(ignored()))
+      .then(keywords::Input::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(directives_parser.padded_by(ignored()).or_not())
-      .then(input_fields_definition_parser.padded_by(ignored()).or_not())
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(input_fields_definition_parser.or_not()))
       .map_with(
         |((((description, input), name), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),
@@ -294,7 +301,6 @@ impl<Directives, FieldsDefinition, Span>
           fields,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -376,9 +382,8 @@ impl<Directives, FieldsDefinition> InputObjectTypeExtensionContent<Directives, F
   {
     choice((
       directives_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(fields_definition_parser())
+        .then(ignored().ignore_then(fields_definition_parser()))
         .map(|(directives, fields)| Self::Fields { directives, fields }),
       directives_parser().map(Self::Directives),
     ))
@@ -547,6 +552,14 @@ impl<Directives, FieldsDefinition, Span>
   ///
   /// This parser handles the full input object extension syntax including the extend
   /// and input keywords, target input object name, and extension content.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input object type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: impl Fn() -> DP,
@@ -564,14 +577,14 @@ impl<Directives, FieldsDefinition, Span>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Input::parser())
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()))
-      .then(InputObjectTypeExtensionContent::parser_with(
-        directives_parser,
-        input_fields_definition_parser,
-      ))
+      .then(keywords::Input::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(
+        ignored().ignore_then(InputObjectTypeExtensionContent::parser_with(
+          directives_parser,
+          input_fields_definition_parser,
+        )),
+      )
       .map_with(|(((extend, input), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -579,6 +592,5 @@ impl<Directives, FieldsDefinition, Span>
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

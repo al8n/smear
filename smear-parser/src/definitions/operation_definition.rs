@@ -242,14 +242,12 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(operation_type_parser)
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()).or_not())
-      .then(variable_definitions_parser.then_ignore(ignored()).or_not())
-      .then(directives_parser.then_ignore(ignored()).or_not())
-      .then(selection_set_parser)
+      .then(ignored().ignore_then(operation_type_parser))
+      .then(Name::parser().or_not())
+      .then(ignored().ignore_then(variable_definitions_parser.or_not()))
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(selection_set_parser))
       .map_with(
         |(
           ((((description, operation_type), name), variable_definitions), directives),

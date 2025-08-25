@@ -421,7 +421,6 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     Container: chumsky::container::Container<FieldDefinition>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         field_definition_parser
           .padded_by(ignored())
@@ -429,7 +428,6 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
           .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, fields), r_brace), sp| Self {
         span: Span::from_map_extra(sp),

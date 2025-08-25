@@ -202,6 +202,14 @@ impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
   /// This parser handles the complete syntax for GraphQL scalar type definitions,
   /// supporting optional descriptions and directives while ensuring proper whitespace
   /// and comment handling throughout the definition.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the operation definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -215,20 +223,21 @@ impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Scalar::<Span>::parser())
-      .then_ignore(ignored())
-      .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
-      .map_with(|(((description, scalar), name), directives), sp| Self {
+      .then(keywords::Scalar::<Span>::parser().padded_by(ignored()))
+      .then(choice((
+        Name::<Span>::parser()
+          .then_ignore(ignored())
+          .then(directives_parser)
+          .map(|(name, directives)| (name, Some(directives))),
+        Name::<Span>::parser().map(|name| (name, None)),
+      )))
+      .map_with(|((description, scalar), (name, directives)), sp| Self {
         span: Span::from_map_extra(sp),
         description,
         scalar,
         name,
         directives,
       })
-      .padded_by(ignored())
   }
 }
 
@@ -407,6 +416,14 @@ impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
   /// which must include directives (unlike definitions where they are optional).
   /// The parser ensures proper keyword recognition, name validation, and directive
   /// processing while maintaining comprehensive error reporting capabilities.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the scalar extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -419,11 +436,9 @@ impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then(keywords::Scalar::<Span>::parser())
-      .padded_by(ignored())
+      .then(keywords::Scalar::<Span>::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser)
+      .then(ignored().ignore_then(directives_parser))
       .map_with(|(((extend, scalar), name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -431,6 +446,5 @@ impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
         name,
         directives,
       })
-      .padded_by(ignored())
   }
 }

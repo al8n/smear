@@ -194,12 +194,13 @@ impl<InputValueDefinition, Span, Container>
     Container: chumsky::container::Container<InputValueDefinition>,
   {
     LParen::parser()
-      // allow Ignored right after '(' (e.g., newlines/commas)
-      .then_ignore(ignored())
-      // one-or-more items, collected into `Container`
-      .then(input_value_definition_parser.padded_by(ignored()).repeated().at_least(1).collect())
-      // optional Ignored before ')'
-      .then_ignore(ignored())
+      .then(
+        input_value_definition_parser
+          .padded_by(ignored())
+          .repeated()
+          .at_least(1)
+          .collect(),
+      )
       .then(RParen::parser())
       .map_with(|((l_paren, values), r_paren), sp| Self {
         span: Span::from_map_extra(sp),

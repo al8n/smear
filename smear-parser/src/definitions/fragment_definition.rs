@@ -242,6 +242,14 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// This parser handles the full fragment definition syntax including all
   /// optional and required components. The parsing of selection set and
   /// directives is delegated to the provided parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the fragment definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, SP, DP>(
     directives_parser: DP,
     selection_set_parser: SP,
@@ -257,13 +265,12 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(Fragment::parser().then_ignore(ignored()))
+      .then(Fragment::parser().padded_by(ignored()))
       .then(FragmentName::parser().then_ignore(ignored()))
-      .then(TypeCondition::parser().then_ignore(ignored()))
-      .then(directives_parser.then_ignore(ignored()).or_not())
-      .then(selection_set_parser)
+      .then(TypeCondition::parser())
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(selection_set_parser))
       .map_with(
         |(((((description, fragment), name), type_condition), directives), selection_set), sp| {
           Self {
@@ -277,6 +284,5 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
           }
         },
       )
-      .padded_by(ignored())
   }
 }

@@ -511,6 +511,15 @@ impl<Directives, EnumValuesDefinition, Span>
   /// This parser handles the full enum definition syntax including all optional
   /// components. The parsing of enum values and directives is delegated to the
   /// provided parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens] beyond the
+  /// single ignored token sequence after the required pipe.
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the enum type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, P, DP>(
     directives_parser: DP,
@@ -527,15 +536,11 @@ impl<Directives, EnumValuesDefinition, Span>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(keywords::Enum::parser())
-      .then_ignore(ignored())
+      .then(keywords::Enum::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
-      .then_ignore(ignored())
-      .then(enum_values_definition.or_not())
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(enum_values_definition.or_not()))
       .map_with(
         |((((description, keyword), name), directives), enum_values), sp| Self {
           span: Span::from_map_extra(sp),
@@ -546,7 +551,6 @@ impl<Directives, EnumValuesDefinition, Span>
           enum_values,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -798,6 +802,15 @@ impl<Directives, EnumValuesDefinition, Span>
   ///
   /// This parser handles the full enum extension syntax including the extend
   /// and enum keywords, target enum name, and extension content.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens] beyond the
+  /// single ignored token sequence after the required pipe.
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the enum type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP, EVP>(
     directives_parser: impl Fn() -> DP,
@@ -814,14 +827,12 @@ impl<Directives, EnumValuesDefinition, Span>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Enum::parser())
-      .then_ignore(ignored())
-      .then(Name::<Span>::parser().then_ignore(ignored()))
-      .then(EnumTypeExtensionContent::parser_with(
+      .then(keywords::Enum::parser().padded_by(ignored()))
+      .then(Name::<Span>::parser())
+      .then(ignored().ignore_then(EnumTypeExtensionContent::parser_with(
         directives_parser,
         enum_values_definition,
-      ))
+      )))
       .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -829,6 +840,5 @@ impl<Directives, EnumValuesDefinition, Span>
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

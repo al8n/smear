@@ -555,6 +555,8 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
   ///
   /// This parser handles the complete syntax for GraphQL union types, including
   /// optional descriptions, directives, and member type definitions.
+  ///
+  /// ## Notes
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: DP,
     member_types: MP,
@@ -569,17 +571,12 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
-    // Description? 'union' Name Directives[Const]? UnionMemberTypes?
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Union::parser())
-      .then_ignore(ignored())
+      .then(keywords::Union::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
-      .then_ignore(ignored())
-      .then(member_types.or_not())
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(member_types.or_not()))
       .map_with(
         |((((description, keyword), name), directives), members), sp| Self {
           span: Span::from_map_extra(sp),
@@ -590,7 +587,6 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
           members,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -637,6 +633,8 @@ impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes>
   /// The parser tries member extensions first, then directive-only extensions.
   /// This ordering ensures that extensions with both directives and members
   /// are correctly parsed as the `Members` variant.
+  ///
+  /// ## Notes
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: impl Fn() -> DP,
     member_types: impl Fn() -> MP,
@@ -652,9 +650,8 @@ impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes>
   {
     choice((
       directives_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(member_types())
+        .then(ignored().ignore_then(member_types()))
         .map(|(directives, members)| Self::Members {
           directives,
           fields: members,
@@ -791,6 +788,14 @@ impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, 
   /// This parser handles the complete `extend union` syntax, managing keyword
   /// recognition, name validation, and content parsing through a structured
   /// approach that ensures robust error handling and proper whitespace management.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the operation definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: impl Fn() -> DP,
     member_types: impl Fn() -> MP,
@@ -806,14 +811,14 @@ impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, 
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Union::parser())
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()))
-      .then(UnionTypeExtensionContent::parser_with(
-        directives_parser,
-        member_types,
-      ))
+      .then(keywords::Union::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(
+        ignored().ignore_then(UnionTypeExtensionContent::parser_with(
+          directives_parser,
+          member_types,
+        )),
+      )
       .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -821,6 +826,5 @@ impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, 
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

@@ -548,6 +548,15 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   ///
   /// This parser handles the complete syntax for GraphQL interfaces, including
   /// interface inheritance through the implements clause.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens] beyond the
+  /// single ignored token sequence after the required pipe.
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the interface type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: IP,
     directives_parser: DP,
@@ -566,14 +575,12 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(keywords::Interface::parser())
-      .then_ignore(ignored())
+      .then(keywords::Interface::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(implement_interfaces_parser.padded_by(ignored()).or_not())
-      .then(directives_parser.padded_by(ignored()).or_not())
-      .then(fields_definition_parser.padded_by(ignored()).or_not())
+      .then(ignored().ignore_then(implement_interfaces_parser.or_not()))
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(fields_definition_parser.or_not()))
       .map_with(
         |(((((description, interface), name), implements), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),
@@ -585,7 +592,6 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
           implements,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -686,6 +692,15 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   /// 1. **Fields Pattern**: `implements? directives? fields` (most comprehensive)
   /// 2. **Directives Pattern**: `implements? directives` (metadata only)  
   /// 3. **Implements Pattern**: `implements` (inheritance only)
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens] beyond the
+  /// single ignored token sequence after the required pipe.
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the interface type extension content.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
@@ -704,19 +719,17 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   {
     choice((
       implement_interfaces_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(directives_parser().then_ignore(ignored()).or_not())
-        .then(fields_definition_parser())
+        .then(ignored().ignore_then(directives_parser().or_not()))
+        .then(ignored().ignore_then(fields_definition_parser()))
         .map(|((implements, directives), fields)| Self::Fields {
           implements,
           directives,
           fields,
         }),
       implement_interfaces_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(directives_parser())
+        .then(ignored().ignore_then(directives_parser()))
         .map(|(implements, directives)| Self::Directives {
           implements,
           directives,
@@ -857,6 +870,15 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   ///
   /// This parser handles the complete `extend interface` syntax, parsing the keywords,
   /// interface name, and delegating content parsing to the extension content parser.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens] beyond the
+  /// single ignored token sequence after the required pipe.
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the interface type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
@@ -875,11 +897,9 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Interface::parser())
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()))
-      .then(InterfaceTypeExtensionContent::<
+      .then(keywords::Interface::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(ignored().ignore_then(InterfaceTypeExtensionContent::<
         ImplementInterfaces,
         Directives,
         FieldsDefinition,
@@ -887,7 +907,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
         implement_interfaces_parser,
         directives_parser,
         fields_definition_parser,
-      ))
+      )))
       .map_with(|(((extend, interface), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -895,6 +915,5 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

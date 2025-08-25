@@ -288,7 +288,6 @@ impl<RootOperationTypeDefinition, Span, Container>
     Container: chumsky::container::Container<RootOperationTypeDefinition>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         operation_type_parser
           .padded_by(ignored())

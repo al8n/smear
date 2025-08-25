@@ -316,13 +316,12 @@ impl<Type, Directives, DefaultValue, Span>
     DefaultValue: Const<true>,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(Variable::parser())
-      .then(Colon::parser().padded_by(ignored()))
-      .then(type_parser.then_ignore(ignored()))
-      .then(directives_parser.or_not().then_ignore(ignored()))
-      .then(default_value_parser.or_not())
+      .then(Variable::parser().padded_by(ignored()))
+      .then(Colon::parser())
+      .then(ignored().ignore_then(type_parser))
+      .then(ignored().ignore_then(directives_parser.or_not()))
+      .then(ignored().ignore_then(default_value_parser.or_not()))
       .map_with(
         |(((((description, variable), colon), ty), directives), default_value), sp| Self {
           span: Span::from_map_extra(sp),
@@ -516,14 +515,13 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
     P: Parser<'src, I, VariableDefinition, E> + Clone,
   {
     LParen::parser()
-      .then_ignore(ignored())
       .then(
         variable_definition_parser
           .padded_by(ignored())
           .repeated()
+          .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RParen::parser())
       .map_with(|((l_paren, variables), r_paren), sp| Self {
         span: Span::from_map_extra(sp),

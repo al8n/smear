@@ -267,13 +267,12 @@ impl<Type, DefaultValue, Directives, Span>
     VP: Parser<'src, I, DefaultValue, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(Name::parser())
-      .then(Colon::parser().padded_by(ignored()))
-      .then(type_parser.padded_by(ignored()))
-      .then(default_const_value_parser.padded_by(ignored()).or_not())
-      .then(const_directives_parser.or_not())
+      .then(Name::parser().padded_by(ignored()))
+      .then(Colon::parser().then_ignore(ignored()))
+      .then(type_parser)
+      .then(ignored().ignore_then(default_const_value_parser.or_not()))
+      .then(ignored().ignore_then(const_directives_parser.or_not()))
       .map_with(
         |(((((description, name), colon), ty), default_value), directives), span| Self {
           span: Span::from_map_extra(span),
