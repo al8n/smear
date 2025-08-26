@@ -8,7 +8,6 @@ use crate::{
   lang::{
     ignored,
     punct::{LParen, RParen},
-    Const,
   },
   source::{Char, Slice, Source},
 };

@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, keywords, punct::Ampersand, Const, Name, StringValue},
+  lang::{ignored, keywords, punct::Ampersand, Name, StringValue},
   source::{Char, Slice, Source},
 };
 

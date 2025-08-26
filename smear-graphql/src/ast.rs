@@ -223,12 +223,12 @@ impl<Span> InputValue<Span> {
       let string_value_parser = StringValue::parser::<I, E>().map(|v| Self::String(v));
       let enum_value_parser = EnumValue::parser::<I, E>().map(|v| Self::Enum(v));
       let variable_value_parser = Variable::parser::<I, E>().map(|v| Self::Variable(v));
-      let object_value_parser = lang::Object::parser_with::<I, E, _, false>(
+      let object_value_parser = lang::Object::parser_with::<I, E, _>(
         lang::ObjectField::parser_with(value.clone()).map(ObjectField),
       )
       .map(|v| Self::Object(v.into()));
       let list_value_parser =
-        lang::List::parser_with::<I, E, _, false>(value.clone()).map(|v| Self::List(v.into()));
+        lang::List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v.into()));
 
       choice((
         boolean_value_parser,
@@ -318,12 +318,12 @@ impl<Span> ConstInputValue<Span> {
       let string_value_parser = StringValue::parser::<I, E>().map(|v| Self::String(v));
       let enum_value_parser = EnumValue::parser::<I, E>().map(|v| Self::Enum(v));
 
-      let object_value_parser = lang::Object::parser_with::<I, E, _, true>(
+      let object_value_parser = lang::Object::parser_with::<I, E, _>(
         lang::ObjectField::parser_with(value.clone()).map(ConstObjectField),
       )
       .map(|v| Self::Object(v.into()));
       let list_value_parser =
-        lang::List::parser_with::<I, E, _, true>(value.clone()).map(|v| Self::List(v.into()));
+        lang::List::parser_with::<I, E, _>(value.clone()).map(|v| Self::List(v.into()));
 
       choice((
         boolean_value_parser,

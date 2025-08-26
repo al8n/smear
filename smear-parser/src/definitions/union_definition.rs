@@ -5,7 +5,7 @@ use crate::{
   lang::{
     ignored, keywords,
     punct::{Equal, Pipe},
-    Const, Name, StringValue,
+    Name, StringValue,
   },
   source::{Char, Slice, Source},
 };

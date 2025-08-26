@@ -7,7 +7,7 @@ use super::super::{
   },
   ignored,
   punct::{Colon, LBrace, RBrace},
-  Const, Name,
+  Name,
 };
 
 /// A single field within a GraphQL input object literal.

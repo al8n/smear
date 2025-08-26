@@ -7,7 +7,7 @@ use super::{
   },
   ignored, keywords,
   punct::Ellipsis,
-  Const, Name,
+  Name,
 };
 
 /// Represents a type condition used in GraphQL fragments.

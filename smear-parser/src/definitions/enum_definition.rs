@@ -5,7 +5,7 @@ use crate::{
   lang::{
     ignored, keywords,
     punct::{LBrace, RBrace},
-    Const, EnumValue, Name, StringValue,
+    EnumValue, Name, StringValue,
   },
   source::{Char, Slice, Source},
 };

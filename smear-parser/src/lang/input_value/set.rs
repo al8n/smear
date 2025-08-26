@@ -5,7 +5,6 @@ use crate::{
   lang::{
     ignored,
     punct::{LAngle, RAngle},
-    Const,
   },
   source::{Char, Slice, Source},
 };

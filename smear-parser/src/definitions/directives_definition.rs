@@ -5,7 +5,7 @@ use crate::{
   lang::{
     ignored, keywords,
     punct::{At, Pipe},
-    Const, Name, StringValue,
+    Name, StringValue,
   },
   source::{Char, Slice, Source},
 };
@@ -916,7 +916,6 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
       .then(
         ignored()
           .ignore_then(DirectiveLocation::parser_with(location_parser()))
-          .map(|l| l)
           .repeated()
           .collect(),
       )

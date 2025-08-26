@@ -7,7 +7,7 @@ use super::{
   },
   ignored,
   punct::Colon,
-  Const, Name,
+  Name,
 };
 
 /// Represents a field alias in GraphQL syntax.

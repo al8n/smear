@@ -7,7 +7,7 @@ use super::{
   },
   ignored,
   punct::At,
-  Const, Name,
+  Name,
 };
 
 use core::marker::PhantomData;

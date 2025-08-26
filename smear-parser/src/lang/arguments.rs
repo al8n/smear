@@ -7,7 +7,7 @@ use super::{
   },
   ignored,
   punct::{Colon, LParen, RParen},
-  Const, Name,
+  Name,
 };
 
 use core::marker::PhantomData;

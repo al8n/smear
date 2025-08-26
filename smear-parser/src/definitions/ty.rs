@@ -143,8 +143,7 @@ impl<Span> NamedType<Span> {
     Span: crate::source::Span<'src, I, E>,
   {
     Name::parser()
-      .then_ignore(ignored())
-      .then(Bang::parser().then_ignore(ignored()).or_not())
+      .then(ignored().ignore_then(Bang::parser()).or_not())
       .map_with(|(name, bang), sp| Self {
         span: Span::from_map_extra(sp),
         name,
@@ -344,14 +343,9 @@ impl<Type, Span> ListType<Type, Span> {
     P: Parser<'src, I, Type, E> + Clone,
   {
     LBracket::parser()
-      .then(parser.clone().padded_by(ignored()))
+      .then(parser.padded_by(ignored()))
       .then(RBracket::parser())
-      .then(
-        ignored()
-          .or_not()
-          .then(Bang::parser().or_not())
-          .map(|(_, bang)| bang),
-      )
+      .then(ignored().ignore_then(Bang::parser()).or_not())
       .map_with(|(((l_bracket, ty), r_bracket), bang), sp| Self {
         span: Span::from_map_extra(sp),
         l_bracket,

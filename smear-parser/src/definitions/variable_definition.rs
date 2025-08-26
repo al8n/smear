@@ -7,7 +7,7 @@ use crate::{
   lang::{
     ignored,
     punct::{Colon, LParen, RParen},
-    Const, StringValue, Variable,
+    StringValue, Variable,
   },
   source::{Char, Slice, Source},
 };
