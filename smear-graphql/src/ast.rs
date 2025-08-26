@@ -10,11 +10,7 @@ use smear_parser::{
 
 pub use smear_parser::{
   definitions::{
-    DirectiveLocation, EnumTypeExtensionContent, ExecutableDirectiveLocation, ImplementInterface,
-    ImplementInterfaces, InputObjectTypeExtensionContent, InterfaceTypeExtensionContent,
-    LeadingDirectiveLocation, LeadingImplementInterface, LeadingUnionMemberType, ListType,
-    Location, NamedType, ObjectTypeExtensionContent, OperationType, SchemaExtensionContent, Type,
-    TypeSystemDirectiveLocation, UnionMemberType, UnionMemberTypes, UnionTypeExtensionContent,
+    ExecutableDirectiveLocation, Location, OperationType, TypeSystemDirectiveLocation,
   },
   lang::{
     BooleanValue, EnumValue, Exponent, ExponentIdentifier, ExponentSign, FloatValue, Fractional,
@@ -22,6 +18,37 @@ pub use smear_parser::{
     UintValue, Variable,
   },
 };
+
+pub type EnumTypeExtensionContent<Span> =
+  definitions::EnumTypeExtensionContent<ConstDirectives<Span>, Span>;
+pub type ObjectTypeExtensionContent<Span> = definitions::ObjectTypeExtensionContent<
+  ImplementInterfaces<Span>,
+  ConstDirectives<Span>,
+  FieldsDefinition<Span>,
+>;
+pub type InterfaceTypeExtensionContent<Span> = definitions::InterfaceTypeExtensionContent<
+  ImplementInterfaces<Span>,
+  ConstDirectives<Span>,
+  FieldsDefinition<Span>,
+>;
+pub type InputObjectTypeExtensionContent<Span> =
+  definitions::InputObjectTypeExtensionContent<ConstDirectives<Span>, FieldsDefinition<Span>>;
+pub type LeadingImplementInterface<Span> = definitions::LeadingImplementInterface<Name<Span>, Span>;
+pub type ImplementInterface<Span> = definitions::ImplementInterface<Name<Span>, Span>;
+pub type ImplementInterfaces<Span> = definitions::ImplementInterfaces<Name<Span>, Span>;
+pub type Type<Span> = definitions::Type<Name<Span>, Span>;
+pub type NamedType<Span> = definitions::NamedType<Name<Span>, Span>;
+pub type ListType<Span> = definitions::ListType<Type<Span>, Span>;
+pub type LeadingUnionMemberType<Span> = definitions::LeadingUnionMemberType<Name<Span>, Span>;
+pub type UnionMemberType<Span> = definitions::UnionMemberType<Name<Span>, Span>;
+pub type UnionMemberTypes<Span> = definitions::UnionMemberTypes<Name<Span>, Span>;
+pub type UnionTypeExtensionContent<Span> =
+  definitions::UnionTypeExtensionContent<ConstDirectives<Span>, UnionMemberTypes<Span>>;
+pub type LeadingDirectiveLocation<Span> =
+  definitions::LeadingDirectiveLocation<Location<Span>, Span>;
+pub type DirectiveLocation<Span> = definitions::DirectiveLocation<Location<Span>, Span>;
+pub type SchemaExtensionContent<Span> =
+  definitions::SchemaExtensionContent<ConstDirectives<Span>, RootOperationTypesDefinition<Span>>;
 
 macro_rules! newtype {
   (
@@ -589,7 +616,7 @@ newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
 });
 
 newtype!(struct InputValueDefinition(definitions::InputValueDefinition<
-  Type<Name<Span>, Span>,
+  Type<Span>,
   DefaultInputValue<Span>,
   ConstDirectives<Span>,
   Span,
@@ -683,7 +710,7 @@ newtype!(struct EnumTypeExtension(definitions::EnumTypeExtension<ConstDirectives
 });
 
 newtype!(struct FieldDefinition(
-  definitions::FieldDefinition<ConstArguments<Span>, Type<Name<Span>, Span>, ConstDirectives<Span>, Span>,
+  definitions::FieldDefinition<ConstArguments<Span>, Type<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
     definitions::FieldDefinition::parser_with(
@@ -759,7 +786,7 @@ newtype!(struct InputObjectTypeExtension(
 newtype!(struct InterfaceTypeDefinition(
   definitions::InterfaceTypeDefinition<
     Name<Span>,
-    ImplementInterfaces<Name<Span>, Span>,
+    ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -780,7 +807,7 @@ newtype!(
   struct InterfaceTypeExtension(
     definitions::InterfaceTypeExtension<
       Name<Span>,
-      ImplementInterfaces<Name<Span>, Span>,
+      ImplementInterfaces<Span>,
       ConstDirectives<Span>,
       FieldsDefinition<Span>,
       Span,
@@ -801,7 +828,7 @@ newtype!(
 newtype!(struct ObjectTypeDefinition(
   definitions::ObjectTypeDefinition<
     Name<Span>,
-    ImplementInterfaces<Name<Span>, Span>,
+    ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -821,7 +848,7 @@ newtype!(struct ObjectTypeDefinition(
 newtype!(struct ObjectTypeExtension(
   definitions::ObjectTypeExtension<
     Name<Span>,
-    ImplementInterfaces<Name<Span>, Span>,
+    ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -855,7 +882,7 @@ newtype!(struct ScalarTypeExtension(
 });
 
 newtype!(struct UnionTypeDefinition(
-  definitions::UnionTypeDefinition<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Name<Span>, Span>, Span>,
+  definitions::UnionTypeDefinition<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
 ) {
   parser: {
     definitions::UnionTypeDefinition::parser_with(
@@ -868,7 +895,7 @@ newtype!(struct UnionTypeDefinition(
 });
 
 newtype!(struct UnionTypeExtension(
-  definitions::UnionTypeExtension<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Name<Span>, Span>, Span>,
+  definitions::UnionTypeExtension<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
 ) {
   parser: {
     definitions::UnionTypeExtension::parser_with(Name::parser(), ConstDirectives::parser, UnionMemberTypes::parser_with(Name::parser))
@@ -877,7 +904,7 @@ newtype!(struct UnionTypeExtension(
 });
 
 newtype!(struct VariableDefinition(
-  definitions::VariableDefinition<Type<Name<Span>, Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
+  definitions::VariableDefinition<Type<Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
 ) {
   parser: {
     definitions::VariableDefinition::parser(
@@ -1038,6 +1065,7 @@ newtype!(struct SchemaExtension(
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeDefinition<Span> {
   Scalar(ScalarTypeDefinition<Span>),
   Enum(EnumTypeDefinition<Span>),
@@ -1103,6 +1131,7 @@ impl<Span> TypeDefinition<Span> {
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeSystemDefinition<Span> {
   Type(TypeDefinition<Span>),
   Directive(DirectiveDefinition<Span>),
@@ -1160,6 +1189,7 @@ impl<Span> TypeSystemDefinition<Span> {
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeExtension<Span> {
   Scalar(ScalarTypeExtension<Span>),
   Enum(EnumTypeExtension<Span>),
@@ -1225,6 +1255,7 @@ impl<Span> TypeExtension<Span> {
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeSystemExtension<Span> {
   Type(TypeExtension<Span>),
   Schema(SchemaExtension<Span>),
@@ -1274,8 +1305,9 @@ impl<Span> TypeSystemExtension<Span> {
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeSystem<Span> {
-  Definition(TypeDefinition<Span>),
+  Definition(TypeSystemDefinition<Span>),
   Extension(TypeSystemExtension<Span>),
 }
 
@@ -1314,7 +1346,7 @@ impl<Span> TypeSystem<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      TypeDefinition::parser().map(Self::Definition),
+      TypeSystemDefinition::parser().map(Self::Definition),
       TypeSystemExtension::parser().map(Self::Extension),
     ))
   }
