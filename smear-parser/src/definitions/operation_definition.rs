@@ -268,6 +268,82 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
   }
 }
 
+/// Represents a complete GraphQL operation definition.
+/// 
+/// Operations are the entry points for GraphQL execution. They can be either
+/// named operations with explicit types and metadata, or shorthand query operations.
+/// Operations define what data to fetch (queries), what data to modify (mutations),
+/// or what real-time updates to subscribe to (subscriptions).
+/// 
+/// GraphQL supports two operation definition syntaxes:
+/// 1. **Named operations**: Full syntax with operation type, optional name, variables, and directives
+/// 2. **Shorthand queries**: Simplified syntax for query operations without variables or directives
+/// 
+/// ## Operation Types and Semantics
+/// 
+/// - **Query operations**: Read-only data retrieval, can be executed in parallel
+/// - **Mutation operations**: Write operations with side effects, executed serially  
+/// - **Subscription operations**: Real-time streaming data over persistent connections
+/// 
+/// ## Examples
+/// 
+/// ```text
+/// # Named query operation
+/// query GetUserProfile($userId: ID!, $includeDetails: Boolean = false) @cached {
+///   user(id: $userId) {
+///     id
+///     name
+///     email
+///     profile @include(if: $includeDetails) {
+///       bio
+///       website
+///     }
+///   }
+/// }
+/// 
+/// # Named mutation operation
+/// mutation UpdateUserProfile($input: UpdateProfileInput!) @auth(required: true) {
+///   updateProfile(input: $input) {
+///     success
+///     user {
+///       id
+///       name
+///       profile { bio }
+///     }
+///   }
+/// }
+/// 
+/// # Named subscription operation
+/// subscription MessageNotifications($channelId: ID!) {
+///   messageAdded(channelId: $channelId) {
+///     id
+///     content
+///     author { name }
+///     timestamp
+///   }
+/// }
+/// 
+/// # Shorthand query operation (no variables, no directives)
+/// {
+///   user(id: "123") {
+///     name
+///     email
+///   }
+/// }
+/// ```
+/// 
+/// ## Grammar
+/// 
+/// ```text
+/// OperationDefinition:
+///   OperationType Name? VariablesDefinition? Directives? SelectionSet
+///   | SelectionSet
+/// 
+/// OperationType: one of
+///   query mutation subscription
+/// ```
+///
+/// Spec: [OperationDefinition](https://spec.graphql.org/draft/#OperationDefinition)
 #[derive(
   Debug,
   Clone,
@@ -279,15 +355,103 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span> {
+  /// Named operation with full metadata
+  /// 
+  /// ## Examples
+  /// ```text
+  /// # Query with variables and directives
+  /// query GetUserPosts($userId: ID!, $first: Int = 10) @cached(ttl: 300) {
+  ///   user(id: $userId) {
+  ///     name
+  ///     posts(first: $first) {
+  ///       title
+  ///       publishedAt
+  ///     }
+  ///   }
+  /// }
+  /// 
+  /// # Mutation operation
+  /// mutation CreatePost($input: CreatePostInput!) {
+  ///   createPost(input: $input) {
+  ///     id
+  ///     title
+  ///     author { name }
+  ///   }
+  /// }
+  /// 
+  /// # Subscription operation
+  /// subscription LiveUpdates {
+  ///   messageAdded {
+  ///     id
+  ///     content
+  ///     timestamp
+  ///   }
+  /// }
+  /// ```
   Named(
     NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>,
   ),
-  Shorten(SelectionSet),
+  /// Shorthand query operation (selection set only)
+  /// 
+  /// ## Examples
+  /// ```text
+  /// # Simple data retrieval
+  /// {
+  ///   user(id: "123") {
+  ///     name
+  ///     email
+  ///   }
+  /// }
+  /// 
+  /// # Nested field selection
+  /// {
+  ///   posts(first: 5) {
+  ///     title
+  ///     author {
+  ///       name
+  ///       avatar
+  ///     }
+  ///     comments(first: 3) {
+  ///       content
+  ///       author { name }
+  ///     }
+  ///   }
+  /// }
+  /// 
+  /// # Multiple top-level fields
+  /// {
+  ///   currentUser { name email }
+  ///   notifications { count unreadCount }
+  ///   settings { theme language }
+  /// }
+  /// ```
+  /// 
+  /// ## Equivalent Named Form
+  /// The shorthand operation `{ user { name } }` is equivalent to:
+  /// ```text
+  /// query {
+  ///   user {
+  ///     name
+  ///   }
+  /// }
+  /// ```
+  Shorthand(SelectionSet),
 }
 
 impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
   OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
+  /// Creates a parser for operation definitions.
+  /// 
+  /// Handles both named and shorthand operation forms with proper precedence.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input values definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, OP, VP, DP, SP>(
     operation_type_parser: OP,
@@ -315,7 +479,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
         selection_set_parser.clone(),
       )
       .map(Self::Named),
-      selection_set_parser.map(Self::Shorten),
+      selection_set_parser.map(Self::Shorthand),
     ))
   }
 }

@@ -292,8 +292,14 @@ impl<EnumValueDefinition, Span, Container>
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of enum value definitions.
   #[inline]
-  pub const fn values(&self) -> &Container {
+  pub const fn enum_value_definitions(&self) -> &Container {
     &self.enum_values
+  }
+
+  /// Consumes the enum values definition and returns the enum value definitions
+  #[inline]
+  pub fn into_enum_value_definitions(self) -> Container {
+    self.enum_values
   }
 
   /// Creates a parser that can parse an enum values definition with custom enum value parsing.

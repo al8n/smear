@@ -4,7 +4,7 @@ use derive_more::{AsMut, AsRef, Deref, From, Into, IsVariant, TryUnwrap, Unwrap}
 use smear_parser::{
   convert::*,
   definitions,
-  lang::{self, punct::*, *},
+  lang::{self, *},
   source::{self, Char, Slice, Source},
 };
 
@@ -23,10 +23,10 @@ pub use smear_parser::{
   },
 };
 
-macro_rules! bail_struct_wrapper {
+macro_rules! newtype {
   (
     $(#[$meta:meta])*
-    $(Const<$const:literal>)? struct $outer:ident($inner:ty) {
+    $(Const<$const:literal>)? struct $outer:ident($inner:ty $(,)?) {
       $(#[$parser_meta:meta])*
       parser: $parser:expr
 
@@ -37,6 +37,7 @@ macro_rules! bail_struct_wrapper {
   ) => {
     $(#[$meta:meta])*
     #[derive(Debug, Clone, From, Into, AsMut, AsRef, Deref)]
+    #[repr(transparent)]
     pub struct $outer<Span>($inner);
 
     impl<Span> core::borrow::Borrow<$inner> for $outer<Span> {
@@ -91,19 +92,19 @@ macro_rules! bail_struct_wrapper {
   };
 }
 
-bail_struct_wrapper!(Const<false> struct ObjectField(lang::ObjectField<InputValue<Span>, Span>) {
+newtype!(Const<false> struct ObjectField(lang::ObjectField<InputValue<Span>, Span>) {
   parser: {
     lang::ObjectField::parser_with(InputValue::parser()).map(Self)
   }
 });
 
-bail_struct_wrapper!(Const<true> struct ConstObjectField(lang::ObjectField<ConstInputValue<Span>, Span>) {
+newtype!(Const<true> struct ConstObjectField(lang::ObjectField<ConstInputValue<Span>, Span>) {
   parser: {
     lang::ObjectField::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-bail_struct_wrapper!(Const<false> struct Object(lang::Object<ObjectField<Span>, Span>) {
+newtype!(Const<false> struct Object(lang::Object<ObjectField<Span>, Span>) {
   parser: {
     lang::Object::parser_with(ObjectField::parser()).map(Self)
   },
@@ -115,7 +116,7 @@ bail_struct_wrapper!(Const<false> struct Object(lang::Object<ObjectField<Span>, 
   }
 });
 
-bail_struct_wrapper!(Const<true> struct ConstObject(lang::Object<ConstObjectField<Span>, Span>) {
+newtype!(Const<true> struct ConstObject(lang::Object<ConstObjectField<Span>, Span>) {
   parser: {
     lang::Object::parser_with(ConstObjectField::parser()).map(Self)
   },
@@ -127,7 +128,7 @@ bail_struct_wrapper!(Const<true> struct ConstObject(lang::Object<ConstObjectFiel
   }
 });
 
-bail_struct_wrapper!(Const<false> struct List(lang::List<InputValue<Span>, Span>) {
+newtype!(Const<false> struct List(lang::List<InputValue<Span>, Span>) {
   parser: {
     lang::List::parser_with(InputValue::parser()).map(Self)
   },
@@ -139,7 +140,7 @@ bail_struct_wrapper!(Const<false> struct List(lang::List<InputValue<Span>, Span>
   }
 });
 
-bail_struct_wrapper!(Const<true> struct ConstList(lang::List<ConstInputValue<Span>, Span>) {
+newtype!(Const<true> struct ConstList(lang::List<ConstInputValue<Span>, Span>) {
   parser: {
     lang::List::parser_with(ConstInputValue::parser()).map(Self)
   },
@@ -346,19 +347,19 @@ impl<Span> ConstInputValue<Span> {
   }
 }
 
-bail_struct_wrapper!(Const<true> struct DefaultInputValue(lang::DefaultInputValue<ConstInputValue<Span>, Span>) {
+newtype!(Const<true> struct DefaultInputValue(lang::DefaultInputValue<ConstInputValue<Span>, Span>) {
   parser: {
     lang::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-bail_struct_wrapper!(Const<false> struct Argument(lang::Argument<InputValue<Span>, Span>) {
+newtype!(Const<false> struct Argument(lang::Argument<InputValue<Span>, Span>) {
   parser: {
     lang::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
 });
 
-bail_struct_wrapper!(Const<false> struct Arguments(lang::Arguments<Argument<Span>, Span>) {
+newtype!(Const<false> struct Arguments(lang::Arguments<Argument<Span>, Span>) {
   parser: {
     lang::Arguments::parser_with(Argument::parser()).map(Self)
   },
@@ -371,13 +372,13 @@ bail_struct_wrapper!(Const<false> struct Arguments(lang::Arguments<Argument<Span
   }
 });
 
-bail_struct_wrapper!(Const<true> struct ConstArgument(lang::Argument<ConstInputValue<Span>, Span>) {
+newtype!(Const<true> struct ConstArgument(lang::Argument<ConstInputValue<Span>, Span>) {
   parser: {
     lang::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-bail_struct_wrapper!(Const<true> struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
+newtype!(Const<true> struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
   parser: {
     lang::Arguments::parser_with(ConstArgument::parser()).map(Self)
   },
@@ -390,408 +391,73 @@ bail_struct_wrapper!(Const<true> struct ConstArguments(lang::Arguments<ConstArgu
   }
 });
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct Directive<Span>(lang::Directive<Arguments<Span>, Span>);
-
-impl<Span> Const<false> for Directive<Span> {}
-
-impl<Span> Directive<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-  #[inline]
-  pub const fn at(&self) -> &At<Span> {
-    self.0.at()
-  }
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn arguments(&self) -> Option<&Arguments<Span>> {
-    self.0.arguments()
-  }
-
-  #[inline]
-  pub fn into_arguments(self) -> Option<Arguments<Span>> {
-    self.0.into_arguments()
-  }
-
-  /// Returns a parser for the directive.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<false> struct Directive(lang::Directive<Arguments<Span>, Span>) {
+  parser: {
     lang::Directive::parser_with(Arguments::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct ConstDirective<Span>(lang::Directive<ConstArguments<Span>, Span>);
+newtype!(Const<false> struct Directives(lang::Directives<Directive<Span>, Span>) {
+  parser: {
+    lang::Directives::parser_with(Directive::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn directives(&self) -> &[Directive<Span>] {
+      self.0.directives().as_slice()
+    }
 
-impl<Span> Const<true> for ConstDirective<Span> {}
-
-impl<Span> ConstDirective<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
+    #[inline]
+    pub fn into_directives(self) -> Vec<Directive<Span>> {
+      self.0.into_directives()
+    }
   }
-  #[inline]
-  pub const fn at(&self) -> &At<Span> {
-    self.0.at()
-  }
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
+});
 
-  #[inline]
-  pub const fn arguments(&self) -> Option<&ConstArguments<Span>> {
-    self.0.arguments()
-  }
-
-  #[inline]
-  pub fn into_arguments(self) -> Option<ConstArguments<Span>> {
-    self.0.into_arguments()
-  }
-
-  /// Returns a parser for the directive.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<true> struct ConstDirective(lang::Directive<ConstArguments<Span>, Span>) {
+  parser: {
     lang::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct Directives<Span>(lang::Directives<Directive<Span>, Span>);
-
-impl<Span> Const<false> for Directives<Span> {}
-
-impl<Span> Directives<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-  #[inline]
-  pub const fn directives(&self) -> &[Directive<Span>] {
-    self.0.directives().as_slice()
-  }
-  #[inline]
-  pub fn into_directives(self) -> Vec<Directive<Span>> {
-    self.0.into_directives()
-  }
-
-  /// Returns a parser for the directive.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
-    lang::Directives::parser_with(Directive::parser()).map(Self)
-  }
-}
-
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct ConstDirectives<Span>(lang::Directives<ConstDirective<Span>, Span>);
-
-impl<Span> Const<true> for ConstDirectives<Span> {}
-
-impl<Span> ConstDirectives<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-  #[inline]
-  pub const fn directives(&self) -> &[ConstDirective<Span>] {
-    self.0.directives().as_slice()
-  }
-  #[inline]
-  pub fn into_directives(self) -> Vec<ConstDirective<Span>> {
-    self.0.into_directives()
-  }
-
-  /// Returns a parser for the directive.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<true> struct ConstDirectives(lang::Directives<ConstDirective<Span>, Span>) {
+  parser: {
     lang::Directives::parser_with(ConstDirective::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn directives(&self) -> &[ConstDirective<Span>] {
+      self.0.directives().as_slice()
+    }
+
+    #[inline]
+    pub fn into_directives(self) -> Vec<ConstDirective<Span>> {
+      self.0.into_directives()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct FragmentSpread<Span>(lang::FragmentSpread<Directives<Span>, Span>);
-
-impl<Span> AsRef<Span> for FragmentSpread<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for FragmentSpread<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for FragmentSpread<Span> {
-  type Components = <lang::FragmentSpread<Directives<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> FragmentSpread<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &FragmentName<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct FragmentSpread(lang::FragmentSpread<Directives<Span>, Span>) {
+  parser: {
     lang::FragmentSpread::parser_with(Directives::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InlineFragment<Span>(lang::InlineFragment<Directives<Span>, SelectionSet<Span>, Span>);
-
-impl<Span> AsRef<Span> for InlineFragment<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InlineFragment<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InlineFragment<Span> {
-  type Components = <lang::InlineFragment<Directives<Span>, SelectionSet<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InlineFragment<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn ellipsis(&self) -> &Ellipsis<Span> {
-    self.0.ellipsis()
-  }
-
-  #[inline]
-  pub const fn type_condition(&self) -> Option<&TypeCondition<Span>> {
-    self.0.type_condition()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct InlineFragment(lang::InlineFragment<Directives<Span>, SelectionSet<Span>, Span>) {
+  parser: {
     lang::InlineFragment::parser_with(Directives::parser(), SelectionSet::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct FragmentDefinition<Span>(
-  definitions::FragmentDefinition<Directives<Span>, SelectionSet<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for FragmentDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for FragmentDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for FragmentDefinition<Span> {
-  type Components = <definitions::FragmentDefinition<Directives<Span>, SelectionSet<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> FragmentDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn fragment_keyword(&self) -> &keywords::Fragment<Span> {
-    self.0.fragment_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &FragmentName<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn type_condition(&self) -> &TypeCondition<Span> {
-    self.0.type_condition()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<Span> {
-    self.0.selection_set()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct FragmentDefinition(definitions::FragmentDefinition<Directives<Span>, SelectionSet<Span>, Span>) {
+  parser: {
     definitions::FragmentDefinition::parser_with(Directives::parser(), SelectionSet::parser())
       .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct Field<Span>(lang::Field<Arguments<Span>, Directives<Span>, SelectionSet<Span>, Span>);
-
-impl<Span> AsRef<Span> for Field<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for Field<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for Field<Span> {
-  type Components = <lang::Field<Arguments<Span>, Directives<Span>, SelectionSet<Span>, Span> as IntoComponents>::Components;
-
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> Field<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn alias(&self) -> Option<&Alias<Span>> {
-    self.0.alias()
-  }
-
-  #[inline]
-  pub const fn arguments(&self) -> Option<&Arguments<Span>> {
-    self.0.arguments()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn selection_set(&self) -> Option<&SelectionSet<Span>> {
-    self.0.selection_set()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct Field(lang::Field<Arguments<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
+  parser: {
     recursive(|field_parser| {
       // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
@@ -814,7 +480,7 @@ impl<Span> Field<Span> {
       lang::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
     })
   }
-}
+});
 
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
@@ -847,9 +513,9 @@ impl<Span> Selection<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
-      Self::Field(f) => f.span(),
-      Self::FragmentSpread(fs) => fs.span(),
-      Self::InlineFragment(ifr) => ifr.span(),
+      Self::Field(f) => f.0.span(),
+      Self::FragmentSpread(fs) => fs.0.span(),
+      Self::InlineFragment(ifr) => ifr.0.span(),
     }
   }
 
@@ -887,67 +553,8 @@ impl<Span> Selection<Span> {
   }
 }
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-#[repr(transparent)]
-pub struct SelectionSet<Span>(lang::SelectionSet<Selection<Span>, Span>);
-
-impl<Span> AsRef<Span> for SelectionSet<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for SelectionSet<Span> {
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for SelectionSet<Span> {
-  type Components = <lang::SelectionSet<Selection<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> SelectionSet<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn selections(&self) -> &[Selection<Span>] {
-    self.0.selections().as_slice()
-  }
-
-  /// Consumes the selections.
-  #[inline]
-  pub fn into_selections(self) -> Vec<Selection<Span>> {
-    self.0.into_selections()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
+  parser: {
     recursive(|selection_set| {
       let field_p = lang::Field::parser_with(
         Arguments::parser(),
@@ -970,74 +577,27 @@ impl<Span> SelectionSet<Span> {
 
       lang::SelectionSet::parser_with(selection).map(Self)
     })
+  },
+  remaining: {
+    #[inline]
+    pub const fn selections(&self) -> &[Selection<Span>] {
+      self.0.selections().as_slice()
+    }
+
+    #[inline]
+    pub fn into_selections(self) -> Vec<Selection<Span>> {
+      self.0.into_selections()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone)]
-pub struct InputValueDefinition<Span>(
-  definitions::InputValueDefinition<
-    Type<Span>,
-    DefaultInputValue<Span>,
-    ConstDirectives<Span>,
-    Span,
-  >,
-);
-
-impl<Span> Const<true> for InputValueDefinition<Span> {}
-
-impl<Span> AsRef<Span> for InputValueDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InputValueDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> InputValueDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  #[inline]
-  pub const fn ty(&self) -> &Type<Span> {
-    self.0.ty()
-  }
-
-  #[inline]
-  pub const fn default_value(&self) -> Option<&DefaultInputValue<Span>> {
-    self.0.default_value()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<true> struct InputValueDefinition(definitions::InputValueDefinition<
+  Type<Span>,
+  DefaultInputValue<Span>,
+  ConstDirectives<Span>,
+  Span,
+>) {
+  parser: {
     definitions::InputValueDefinition::parser_with(
       Type::parser(),
       DefaultInputValue::parser(),
@@ -1045,583 +605,89 @@ impl<Span> InputValueDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, AsMut, AsRef, From, Into)]
-pub struct ArgumentsDefinition<Span>(
-  definitions::ArgumentsDefinition<InputValueDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for ArgumentsDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ArgumentsDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ArgumentsDefinition<Span> {
-  type Components = (
-    Span,
-    LParen<Span>,
-    Vec<InputValueDefinition<Span>>,
-    RParen<Span>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ArgumentsDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen<Span> {
-    self.0.l_paren()
-  }
-
-  #[inline]
-  pub const fn values(&self) -> &[InputValueDefinition<Span>] {
-    self.0.values().as_slice()
-  }
-
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen<Span> {
-    self.0.r_paren()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct ArgumentsDefinition(definitions::ArgumentsDefinition<InputValueDefinition<Span>, Span>) {
+  parser: {
     definitions::ArgumentsDefinition::parser_with(InputValueDefinition::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn input_value_definitions(&self) -> &[InputValueDefinition<Span>] {
+      self.0.input_value_definitions().as_slice()
+    }
+
+    #[inline]
+    pub fn into_input_value_definitions(self) -> Vec<InputValueDefinition<Span>> {
+      self.0.into_input_value_definitions()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct DirectiveLocations<Span>(definitions::DirectiveLocations<Location<Span>, Span>);
-
-impl<Span> AsRef<Span> for DirectiveLocations<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for DirectiveLocations<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for DirectiveLocations<Span> {
-  type Components = (
-    Span,
-    LeadingDirectiveLocation<Location<Span>, Span>,
-    Vec<DirectiveLocation<Location<Span>, Span>>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> DirectiveLocations<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn locations(&self) -> &[DirectiveLocation<Location<Span>, Span>] {
-    self.0.remaining_locations().as_slice()
-  }
-
-  #[inline]
-  pub const fn leading_location(&self) -> &LeadingDirectiveLocation<Location<Span>, Span> {
-    self.0.leading_location()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct DirectiveLocations(definitions::DirectiveLocations<Location<Span>, Span>) {
+  parser: {
     definitions::DirectiveLocations::parser_with(Location::parser).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct DirectiveDefinition<Span>(
+newtype!(struct DirectiveDefinition(
   definitions::DirectiveDefinition<ConstArguments<Span>, DirectiveLocations<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for DirectiveDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for DirectiveDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for DirectiveDefinition<Span> {
-  type Components = <definitions::DirectiveDefinition<
-    ConstArguments<Span>,
-    DirectiveLocations<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> DirectiveDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn at(&self) -> &At<Span> {
-    self.0.at()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn directive_keyword(&self) -> &keywords::Directive<Span> {
-    self.0.directive_keyword()
-  }
-
-  #[inline]
-  pub const fn arguments(&self) -> Option<&ConstArguments<Span>> {
-    self.0.arguments()
-  }
-
-  #[inline]
-  pub const fn repeatable(&self) -> Option<&keywords::Repeatable<Span>> {
-    self.0.repeatable()
-  }
-
-  #[inline]
-  pub const fn on_keyword(&self) -> &keywords::On<Span> {
-    self.0.on_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn locations(&self) -> &DirectiveLocations<Span> {
-    self.0.locations()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::DirectiveDefinition::parser_with(
       ConstArguments::parser(),
       DirectiveLocations::parser(),
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct EnumValueDefinition<Span>(definitions::EnumValueDefinition<ConstDirectives<Span>, Span>);
-
-impl<Span> Const<true> for EnumValueDefinition<Span> {}
-
-impl<Span> AsRef<Span> for EnumValueDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for EnumValueDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for EnumValueDefinition<Span> {
-  type Components =
-    <definitions::EnumValueDefinition<ConstDirectives<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> EnumValueDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn value(&self) -> &EnumValue<Span> {
-    self.0.value()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<true> struct EnumValueDefinition(definitions::EnumValueDefinition<ConstDirectives<Span>, Span>) {
+  parser: {
     definitions::EnumValueDefinition::parser_with(ConstDirectives::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct EnumValuesDefinition<Span>(
-  definitions::EnumValuesDefinition<EnumValueDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for EnumValuesDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for EnumValuesDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for EnumValuesDefinition<Span> {
-  type Components = <definitions::EnumValuesDefinition<EnumValueDefinition<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> EnumValuesDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn values(&self) -> &[EnumValueDefinition<Span>] {
-    self.0.values().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct EnumValuesDefinition(definitions::EnumValuesDefinition<EnumValueDefinition<Span>, Span>) {
+  parser: {
     definitions::EnumValuesDefinition::parser_with(EnumValueDefinition::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn enum_value_definitions(&self) -> &[EnumValueDefinition<Span>] {
+      self.0.enum_value_definitions().as_slice()
+    }
+    #[inline]
+    pub fn into_enum_value_definitions(self) -> Vec<EnumValueDefinition<Span>> {
+      self.0.into_enum_value_definitions()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct EnumTypeDefinition<Span>(
-  definitions::EnumTypeDefinition<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for EnumTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for EnumTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for EnumTypeDefinition<Span> {
-  type Components = <definitions::EnumTypeDefinition<
-    ConstDirectives<Span>,
-    EnumValuesDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> EnumTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Span> {
-    self.0.enum_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn enum_values_definition(&self) -> Option<&EnumValuesDefinition<Span>> {
-    self.0.enum_values_definition()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct EnumTypeDefinition(definitions::EnumTypeDefinition<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>) {
+  parser: {
     definitions::EnumTypeDefinition::parser_with(
       ConstDirectives::parser(),
       EnumValuesDefinition::parser(),
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct EnumTypeExtension<Span>(
-  definitions::EnumTypeExtension<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for EnumTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for EnumTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for EnumTypeExtension<Span> {
-  type Components = <definitions::EnumTypeExtension<
-    ConstDirectives<Span>,
-    EnumValuesDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> EnumTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn enum_keyword(&self) -> &keywords::Enum<Span> {
-    self.0.enum_keyword()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &EnumTypeExtensionContent<ConstDirectives<Span>, EnumValuesDefinition<Span>> {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct EnumTypeExtension(definitions::EnumTypeExtension<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>) {
+  parser: {
     definitions::EnumTypeExtension::parser_with(
       ConstDirectives::parser,
       EnumValuesDefinition::parser,
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct FieldDefinition<Span>(
+newtype!(Const<true> struct FieldDefinition(
   definitions::FieldDefinition<ConstArguments<Span>, Type<Span>, ConstDirectives<Span>, Span>,
-);
-
-impl<Span> Const<true> for FieldDefinition<Span> {}
-
-impl<Span> AsRef<Span> for FieldDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for FieldDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for FieldDefinition<Span> {
-  type Components = <definitions::FieldDefinition<
-    ConstArguments<Span>,
-    Type<Span>,
-    ConstDirectives<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> FieldDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn arguments_definition(&self) -> Option<&ConstArguments<Span>> {
-    self.0.arguments_definition()
-  }
-
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  #[inline]
-  pub const fn ty(&self) -> &Type<Span> {
-    self.0.ty()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::FieldDefinition::parser_with(
       ConstArguments::parser(),
       Type::parser(),
@@ -1629,370 +695,76 @@ impl<Span> FieldDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct FieldsDefinition<Span>(definitions::FieldsDefinition<FieldDefinition<Span>, Span>);
-
-impl<Span> Const<true> for FieldsDefinition<Span> {}
-
-impl<Span> AsRef<Span> for FieldsDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for FieldsDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for FieldsDefinition<Span> {
-  type Components =
-    <definitions::FieldsDefinition<FieldDefinition<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> FieldsDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> &[FieldDefinition<Span>] {
-    self.0.fields().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(Const<true> struct FieldsDefinition(definitions::FieldsDefinition<FieldDefinition<Span>, Span>) {
+  parser: {
     definitions::FieldsDefinition::parser_with(FieldDefinition::parser()).map(Self)
-  }
-}
+  },
+  remaining: {
+    #[inline]
+    pub const fn field_definitions(&self) -> &[FieldDefinition<Span>] {
+      self.0.field_definitions().as_slice()
+    }
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InputFieldsDefinition<Span>(
+    #[inline]
+    pub fn into_field_definitions(self) -> Vec<FieldDefinition<Span>> {
+      self.0.into_field_definitions()
+    }
+  }
+});
+
+newtype!(Const<true> struct InputFieldsDefinition(
   definitions::InputFieldsDefinition<InputValueDefinition<Span>, Span>,
-);
-
-impl<Span> Const<true> for InputFieldsDefinition<Span> {}
-
-impl<Span> AsRef<Span> for InputFieldsDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InputFieldsDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InputFieldsDefinition<Span> {
-  type Components = <definitions::InputFieldsDefinition<InputValueDefinition<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InputFieldsDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> &[InputValueDefinition<Span>] {
-    self.0.fields().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::InputFieldsDefinition::parser_with(InputValueDefinition::parser()).map(Self)
+  },
+  remaining: {
+    #[inline]
+    pub const fn input_value_definitions(&self) -> &[InputValueDefinition<Span>] {
+      self.0.input_value_definitions().as_slice()
+    }
+    #[inline]
+    pub fn into_input_value_definitions(self) -> Vec<InputValueDefinition<Span>> {
+      self.0.into_input_value_definitions()
+    }
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InputObjectTypeDefinition<Span>(
+newtype!(struct InputObjectTypeDefinition(
   definitions::InputObjectTypeDefinition<ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for InputObjectTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InputObjectTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InputObjectTypeDefinition<Span> {
-  type Components = <definitions::InputObjectTypeDefinition<
-    ConstDirectives<Span>,
-    InputFieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InputObjectTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn input_keyword(&self) -> &keywords::Input<Span> {
-    self.0.input_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn fields(&self) -> Option<&InputFieldsDefinition<Span>> {
-    self.0.fields()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::InputObjectTypeDefinition::parser_with(
       ConstDirectives::parser(),
       InputFieldsDefinition::parser(),
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InputObjectTypeExtension<Span>(
+newtype!(struct InputObjectTypeExtension(
   definitions::InputObjectTypeExtension<ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for InputObjectTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InputObjectTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InputObjectTypeExtension<Span> {
-  type Components = <definitions::InputObjectTypeExtension<
-    ConstDirectives<Span>,
-    InputFieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InputObjectTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn input_keyword(&self) -> &keywords::Input<Span> {
-    self.0.input_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &InputObjectTypeExtensionContent<ConstDirectives<Span>, InputFieldsDefinition<Span>> {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::InputObjectTypeExtension::parser_with(
       ConstDirectives::parser,
       InputFieldsDefinition::parser,
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InterfaceTypeDefinition<Span>(
+newtype!(struct InterfaceTypeDefinition(
   definitions::InterfaceTypeDefinition<
     ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
   >,
-);
-
-impl<Span> AsRef<Span> for InterfaceTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InterfaceTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InterfaceTypeDefinition<Span> {
-  type Components = <definitions::InterfaceTypeDefinition<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InterfaceTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn interface_keyword(&self) -> &keywords::Interface<Span> {
-    self.0.interface_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<Span>> {
-    self.0.implements()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn fields_definition(&self) -> Option<&FieldsDefinition<Span>> {
-    self.0.fields_definition()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::InterfaceTypeDefinition::parser_with(
       ImplementInterfaces::parser(),
       ConstDirectives::parser(),
@@ -2000,177 +772,37 @@ impl<Span> InterfaceTypeDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct InterfaceTypeExtension<Span>(
-  definitions::InterfaceTypeExtension<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-    Span,
-  >,
+newtype!(
+  struct InterfaceTypeExtension(
+    definitions::InterfaceTypeExtension<
+      ImplementInterfaces<Span>,
+      ConstDirectives<Span>,
+      FieldsDefinition<Span>,
+      Span,
+    >,
+  ) {
+    parser: {
+      definitions::InterfaceTypeExtension::parser_with(
+        ImplementInterfaces::parser,
+        ConstDirectives::parser,
+        FieldsDefinition::parser,
+      )
+      .map(Self)
+    }
+  }
 );
 
-impl<Span> AsRef<Span> for InterfaceTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for InterfaceTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for InterfaceTypeExtension<Span> {
-  type Components = <definitions::InterfaceTypeExtension<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> InterfaceTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn interface_keyword(&self) -> &keywords::Interface<Span> {
-    self.0.interface_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &InterfaceTypeExtensionContent<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-  > {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
-    definitions::InterfaceTypeExtension::parser_with(
-      ImplementInterfaces::parser,
-      ConstDirectives::parser,
-      FieldsDefinition::parser,
-    )
-    .map(Self)
-  }
-}
-
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ObjectTypeDefinition<Span>(
+newtype!(struct ObjectTypeDefinition(
   definitions::ObjectTypeDefinition<
     ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
   >,
-);
-
-impl<Span> AsRef<Span> for ObjectTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ObjectTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ObjectTypeDefinition<Span> {
-  type Components = <definitions::ObjectTypeDefinition<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ObjectTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn type_keyword(&self) -> &keywords::Type<Span> {
-    self.0.type_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<Span>> {
-    self.0.implements()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn fields_definition(&self) -> Option<&FieldsDefinition<Span>> {
-    self.0.fields_definition()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::ObjectTypeDefinition::parser_with(
       ImplementInterfaces::parser(),
       ConstDirectives::parser(),
@@ -2178,71 +810,17 @@ impl<Span> ObjectTypeDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct ObjectTypeExtension<Span>(
+newtype!(struct ObjectTypeExtension(
   definitions::ObjectTypeExtension<
     ImplementInterfaces<Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
   >,
-);
-
-impl<Span> AsRef<Span> for ObjectTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ObjectTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ObjectTypeExtension<Span> {
-  type Components = <definitions::ObjectTypeExtension<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ObjectTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &ObjectTypeExtensionContent<
-    ImplementInterfaces<Span>,
-    ConstDirectives<Span>,
-    FieldsDefinition<Span>,
-  > {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::ObjectTypeExtension::parser_with(
       ImplementInterfaces::parser,
       ConstDirectives::parser,
@@ -2250,360 +828,49 @@ impl<Span> ObjectTypeExtension<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct ScalarTypeDefinition<Span>(
+newtype!(struct ScalarTypeDefinition(
   definitions::ScalarTypeDefinition<ConstDirectives<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for ScalarTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ScalarTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ScalarTypeDefinition<Span> {
-  type Components =
-    <definitions::ScalarTypeDefinition<ConstDirectives<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ScalarTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::ScalarTypeDefinition::parser_with(ConstDirectives::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct ScalarTypeExtension<Span>(definitions::ScalarTypeExtension<ConstDirectives<Span>, Span>);
-
-impl<Span> AsRef<Span> for ScalarTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for ScalarTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for ScalarTypeExtension<Span> {
-  type Components =
-    <definitions::ScalarTypeExtension<ConstDirectives<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> ScalarTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn scalar_keyword(&self) -> &keywords::Scalar<Span> {
-    self.0.scalar_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> &ConstDirectives<Span> {
-    self.0.directives()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+newtype!(struct ScalarTypeExtension(
+  definitions::ScalarTypeExtension<ConstDirectives<Span>, Span>,
+) {
+  parser: {
     definitions::ScalarTypeExtension::parser_with(ConstDirectives::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct UnionTypeDefinition<Span>(
+newtype!(struct UnionTypeDefinition(
   definitions::UnionTypeDefinition<ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for UnionTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for UnionTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for UnionTypeDefinition<Span> {
-  type Components = <definitions::UnionTypeDefinition<
-    ConstDirectives<Span>,
-    UnionMemberTypes<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> UnionTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn union_keyword(&self) -> &keywords::Union<Span> {
-    self.0.union_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn members(&self) -> Option<&UnionMemberTypes<Span>> {
-    self.0.members()
-  }
-
-  #[inline]
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::UnionTypeDefinition::parser_with(
       ConstDirectives::parser(),
       UnionMemberTypes::parser(),
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct UnionTypeExtension<Span>(
+newtype!(struct UnionTypeExtension(
   definitions::UnionTypeExtension<ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for UnionTypeExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for UnionTypeExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for UnionTypeExtension<Span> {
-  type Components = <definitions::UnionTypeExtension<
-    ConstDirectives<Span>,
-    UnionMemberTypes<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> UnionTypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn union_keyword(&self) -> &keywords::Union<Span> {
-    self.0.union_keyword()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &UnionTypeExtensionContent<ConstDirectives<Span>, UnionMemberTypes<Span>> {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::UnionTypeExtension::parser_with(ConstDirectives::parser, UnionMemberTypes::parser)
       .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct VariableDefinition<Span>(
+newtype!(struct VariableDefinition(
   definitions::VariableDefinition<Type<Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for VariableDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for VariableDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for VariableDefinition<Span> {
-  type Components = <definitions::VariableDefinition<
-    Type<Span>,
-    Directives<Span>,
-    DefaultInputValue<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> VariableDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn variable(&self) -> &Variable<Span> {
-    self.0.variable()
-  }
-
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  #[inline]
-  pub const fn ty(&self) -> &Type<Span> {
-    self.0.ty()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn default_value(&self) -> Option<&DefaultInputValue<Span>> {
-    self.0.default_value()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::VariableDefinition::parser(
       Type::parser(),
       Directives::parser(),
@@ -2611,71 +878,28 @@ impl<Span> VariableDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct VariablesDefinition<Span>(
+newtype!(struct VariablesDefinition(
   definitions::VariablesDefinition<VariableDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for VariablesDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for VariablesDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for VariablesDefinition<Span> {
-  type Components = <definitions::VariablesDefinition<VariableDefinition<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> VariablesDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen<Span> {
-    self.0.l_paren()
-  }
-
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen<Span> {
-    self.0.r_paren()
-  }
-
-  #[inline]
-  pub const fn definitions(&self) -> &[VariableDefinition<Span>] {
-    self.0.definitions().as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::VariablesDefinition::parser_with(VariableDefinition::parser()).map(Self)
-  }
-}
+  },
+  remaining: {
+    #[inline]
+    pub const fn variable_definitions(&self) -> &[VariableDefinition<Span>] {
+      self.0.variable_definitions().as_slice()
+    }
 
-#[derive(Debug, Clone, From, Into, AsMut, AsRef)]
-pub struct NamedOperationDefinition<Span>(
+    #[inline]
+    pub fn into_variable_definitions(self) -> Vec<VariableDefinition<Span>> {
+      self.0.into_variable_definitions()
+    }
+  }
+});
+
+newtype!(struct NamedOperationDefinition(
   definitions::NamedOperationDefinition<
     OperationType<Span>,
     VariablesDefinition<Span>,
@@ -2683,81 +907,8 @@ pub struct NamedOperationDefinition<Span>(
     SelectionSet<Span>,
     Span,
   >,
-);
-
-impl<Span> AsRef<Span> for NamedOperationDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.0.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for NamedOperationDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for NamedOperationDefinition<Span> {
-  type Components = <definitions::NamedOperationDefinition<
-    OperationType<Span>,
-    VariablesDefinition<Span>,
-    Directives<Span>,
-    SelectionSet<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> NamedOperationDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn operation_type(&self) -> &OperationType<Span> {
-    self.0.operation_type()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> Option<&Name<Span>> {
-    self.0.name()
-  }
-
-  #[inline]
-  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition<Span>> {
-    self.0.variable_definitions()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<Span> {
-    &self.0.selection_set()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::NamedOperationDefinition::parser_with(
       OperationType::parser(),
       VariablesDefinition::parser(),
@@ -2766,14 +917,14 @@ impl<Span> NamedOperationDefinition<Span> {
     )
     .map(Self)
   }
-}
+});
 
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum OperationDefinition<Span> {
   Named(NamedOperationDefinition<Span>),
-  Shorten(SelectionSet<Span>),
+  Shorthand(SelectionSet<Span>),
 }
 
 impl<Span> AsRef<Span> for OperationDefinition<Span> {
@@ -2788,7 +939,7 @@ impl<Span> IntoSpan<Span> for OperationDefinition<Span> {
   fn into_span(self) -> Span {
     match self {
       Self::Named(named) => named.into_span(),
-      Self::Shorten(s) => s.into_span(),
+      Self::Shorthand(s) => s.into_span(),
     }
   }
 }
@@ -2797,8 +948,8 @@ impl<Span> OperationDefinition<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
-      Self::Named(named) => named.span(),
-      Self::Shorten(short) => short.span(),
+      Self::Named(named) => named.0.span(),
+      Self::Shorthand(short) => short.0.span(),
     }
   }
 
@@ -2818,281 +969,62 @@ impl<Span> OperationDefinition<Span> {
     )
     .map(|val| match val {
       definitions::OperationDefinition::Named(named) => Self::Named(named.into()),
-      definitions::OperationDefinition::Shorten(short) => Self::Shorten(short),
+      definitions::OperationDefinition::Shorthand(short) => Self::Shorthand(short),
     })
   }
 }
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct RootOperationTypeDefinition<Span>(
+newtype!(struct RootOperationTypeDefinition(
   definitions::RootOperationTypeDefinition<OperationType<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for RootOperationTypeDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.0.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for RootOperationTypeDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for RootOperationTypeDefinition<Span> {
-  type Components = <definitions::RootOperationTypeDefinition<OperationType<Span>, Span> as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> RootOperationTypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn operation_type(&self) -> &OperationType<Span> {
-    self.0.operation_type()
-  }
-
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    self.0.colon()
-  }
-
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    self.0.name()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::RootOperationTypeDefinition::parser_with(OperationType::parser()).map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct RootOperationTypesDefinition<Span>(
+newtype!(struct RootOperationTypesDefinition(
   definitions::RootOperationTypesDefinition<RootOperationTypeDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for RootOperationTypesDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for RootOperationTypesDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for RootOperationTypesDefinition<Span> {
-  type Components = <definitions::RootOperationTypesDefinition<
-    RootOperationTypeDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> RootOperationTypesDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    self.0.l_brace()
-  }
-
-  #[inline]
-  pub const fn definitions(&self) -> &[RootOperationTypeDefinition<Span>] {
-    self.0.definitions().as_slice()
-  }
-
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    self.0.r_brace()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::RootOperationTypesDefinition::parser_with(RootOperationTypeDefinition::parser())
       .map(Self)
-  }
-}
+  },
+  remaining: {
+    #[inline]
+    pub const fn root_operation_type_definitions(&self) -> &[RootOperationTypeDefinition<Span>] {
+      self.0.root_operation_type_definitions().as_slice()
+    }
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct SchemaDefinition<Span>(
+    #[inline]
+    pub fn into_root_operation_type_definitions(self) -> Vec<RootOperationTypeDefinition<Span>> {
+      self.0.into_root_operation_type_definitions()
+    }
+  }
+});
+
+newtype!(struct SchemaDefinition(
   definitions::SchemaDefinition<ConstDirectives<Span>, RootOperationTypesDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for SchemaDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for SchemaDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for SchemaDefinition<Span> {
-  type Components = <definitions::SchemaDefinition<
-    ConstDirectives<Span>,
-    RootOperationTypesDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> SchemaDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn description(&self) -> Option<&StringValue<Span>> {
-    self.0.description()
-  }
-
-  #[inline]
-  pub const fn schema_keyword(&self) -> &keywords::Schema<Span> {
-    self.0.schema_keyword()
-  }
-
-  #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<Span>> {
-    self.0.directives()
-  }
-
-  #[inline]
-  pub const fn definitions(&self) -> &RootOperationTypesDefinition<Span> {
-    self.0.definitions()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::SchemaDefinition::parser_with(
       ConstDirectives::parser(),
       RootOperationTypesDefinition::parser(),
     )
     .map(Self)
   }
-}
+});
 
-#[derive(Debug, Clone, From, Into, AsRef, AsMut)]
-pub struct SchemaExtension<Span>(
+newtype!(struct SchemaExtension(
   definitions::SchemaExtension<ConstDirectives<Span>, RootOperationTypesDefinition<Span>, Span>,
-);
-
-impl<Span> AsRef<Span> for SchemaExtension<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for SchemaExtension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.0.into_span()
-  }
-}
-
-impl<Span> IntoComponents for SchemaExtension<Span> {
-  type Components = <definitions::SchemaExtension<
-    ConstDirectives<Span>,
-    RootOperationTypesDefinition<Span>,
-    Span,
-  > as IntoComponents>::Components;
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    self.0.into_components()
-  }
-}
-
-impl<Span> SchemaExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    self.0.span()
-  }
-
-  #[inline]
-  pub const fn extend_keyword(&self) -> &keywords::Extend<Span> {
-    self.0.extend_keyword()
-  }
-
-  #[inline]
-  pub const fn schema_keyword(&self) -> &keywords::Schema<Span> {
-    self.0.schema_keyword()
-  }
-
-  #[inline]
-  pub const fn content(
-    &self,
-  ) -> &SchemaExtensionContent<ConstDirectives<Span>, RootOperationTypesDefinition<Span>> {
-    self.0.content()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
-  {
+) {
+  parser: {
     definitions::SchemaExtension::parser_with(
       ConstDirectives::parser,
       RootOperationTypesDefinition::parser(),
     )
     .map(Self)
   }
-}
+});
 
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -3131,12 +1063,12 @@ impl<Span> TypeDefinition<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
-      Self::Scalar(s) => s.span(),
-      Self::Enum(e) => e.span(),
-      Self::Union(u) => u.span(),
-      Self::InputObject(i) => i.span(),
-      Self::Object(o) => o.span(),
-      Self::Interface(i) => i.span(),
+      Self::Scalar(s) => s.0.span(),
+      Self::Enum(e) => e.0.span(),
+      Self::Union(u) => u.0.span(),
+      Self::InputObject(i) => i.0.span(),
+      Self::Object(o) => o.0.span(),
+      Self::Interface(i) => i.0.span(),
     }
   }
 
@@ -3195,8 +1127,8 @@ impl<Span> TypeSystemDefinition<Span> {
   pub const fn span(&self) -> &Span {
     match self {
       Self::Type(t) => t.span(),
-      Self::Directive(d) => d.span(),
-      Self::Schema(s) => s.span(),
+      Self::Directive(d) => d.0.span(),
+      Self::Schema(s) => s.0.span(),
     }
   }
 
@@ -3253,12 +1185,12 @@ impl<Span> TypeExtension<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
-      Self::Scalar(s) => s.span(),
-      Self::Enum(e) => e.span(),
-      Self::Union(u) => u.span(),
-      Self::InputObject(i) => i.span(),
-      Self::Object(o) => o.span(),
-      Self::Interface(i) => i.span(),
+      Self::Scalar(s) => s.0.span(),
+      Self::Enum(e) => e.0.span(),
+      Self::Union(u) => u.0.span(),
+      Self::InputObject(i) => i.0.span(),
+      Self::Object(o) => o.0.span(),
+      Self::Interface(i) => i.0.span(),
     }
   }
 
@@ -3311,7 +1243,7 @@ impl<Span> TypeSystemExtension<Span> {
   pub const fn span(&self) -> &Span {
     match self {
       Self::Type(t) => t.span(),
-      Self::Schema(s) => s.span(),
+      Self::Schema(s) => s.0.span(),
     }
   }
 

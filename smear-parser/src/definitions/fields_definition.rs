@@ -380,7 +380,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of field definitions.
   #[inline]
-  pub const fn fields(&self) -> &Container {
+  pub const fn field_definitions(&self) -> &Container {
     &self.fields
   }
 
@@ -389,7 +389,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   /// This method takes ownership of the entire `FieldsDefinition` structure and
   /// extracts just the container holding the field collection.
   #[inline]
-  pub fn into_fields(self) -> Container {
+  pub fn into_field_definitions(self) -> Container {
     self.fields
   }
 

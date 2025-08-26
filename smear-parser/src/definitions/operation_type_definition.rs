@@ -250,8 +250,14 @@ impl<RootOperationTypeDefinition, Span, Container>
   /// This collection must contain at least one definition (the query root type) and
   /// may contain up to three definitions (query, mutation, subscription).
   #[inline]
-  pub const fn definitions(&self) -> &Container {
+  pub const fn root_operation_type_definitions(&self) -> &Container {
     &self.root_operation_types
+  }
+
+  /// Consumes and returns the root operation type definitions.
+  #[inline]
+  pub fn into_root_operation_type_definitions(self) -> Container {
+    self.root_operation_types
   }
 
   /// Returns a reference to the closing right brace token.

@@ -142,8 +142,14 @@ impl<InputValueDefinition, Span, Container>
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of argument definitions.
   #[inline]
-  pub const fn values(&self) -> &Container {
+  pub const fn input_value_definitions(&self) -> &Container {
     &self.values
+  }
+
+  /// Consumes and returns the input value definitions.
+  #[inline]
+  pub fn into_input_value_definitions(self) -> Container {
+    self.values
   }
 
   /// Returns a reference to the opening left parenthesis (`(`) of the arguments definition.

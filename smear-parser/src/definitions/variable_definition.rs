@@ -493,8 +493,14 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of variable definitions.
   #[inline]
-  pub const fn definitions(&self) -> &Container {
+  pub const fn variable_definitions(&self) -> &Container {
     &self.variables
+  }
+
+  /// Consumes and returns the variable definitions.
+  #[inline]
+  pub fn into_variable_definitions(self) -> Container {
+    self.variables
   }
 
   /// Creates a parser that can parse a variables definition with custom variable parsing.
