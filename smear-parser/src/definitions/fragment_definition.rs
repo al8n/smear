@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, keywords::Fragment, FragmentName, StringValue, TypeCondition},
+  lang::{ignored, keywords::Fragment, StringValue, TypeCondition},
   source::{Char, Slice, Source},
 };
 
@@ -112,18 +112,18 @@ use crate::{
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentDefinition<Directives, SelectionSet, Span> {
+pub struct FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   fragment: Fragment<Span>,
-  name: FragmentName<Span>,
-  type_condition: TypeCondition<Span>,
+  name: FragmentName,
+  type_condition: TypeCondition<Name, Span>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<Directives, SelectionSet, Span> AsRef<Span>
-  for FragmentDefinition<Directives, SelectionSet, Span>
+impl<FragmentName, Name, Directives, SelectionSet, Span> AsRef<Span>
+  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -131,8 +131,8 @@ impl<Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoSpan<Span>
-  for FragmentDefinition<Directives, SelectionSet, Span>
+impl<FragmentName, Name, Directives, SelectionSet, Span> IntoSpan<Span>
+  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -140,15 +140,15 @@ impl<Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoComponents
-  for FragmentDefinition<Directives, SelectionSet, Span>
+impl<FragmentName, Name, Directives, SelectionSet, Span> IntoComponents
+  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
 {
   type Components = (
     Span,
     Option<StringValue<Span>>,
     Fragment<Span>,
-    FragmentName<Span>,
-    TypeCondition<Span>,
+    FragmentName,
+    TypeCondition<Name, Span>,
     Option<Directives>,
     SelectionSet,
   );
@@ -167,7 +167,9 @@ impl<Directives, SelectionSet, Span> IntoComponents
   }
 }
 
-impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet, Span> {
+impl<FragmentName, Name, Directives, SelectionSet, Span>
+  FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
+{
   /// Returns a reference to the span covering the entire fragment definition.
   ///
   /// The span includes the optional description, fragment keyword, name,
@@ -183,7 +185,7 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// within GraphQL operations. Fragment names must be unique within a document
   /// and cannot be the reserved word "on".
   #[inline]
-  pub const fn name(&self) -> &FragmentName<Span> {
+  pub const fn name(&self) -> &FragmentName {
     &self.name
   }
 
@@ -213,7 +215,7 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// type safety by guaranteeing that the fragment's fields are valid for
   /// the specified type.
   #[inline]
-  pub const fn type_condition(&self) -> &TypeCondition<Span> {
+  pub const fn type_condition(&self) -> &TypeCondition<Name, Span> {
     &self.type_condition
   }
 
@@ -250,7 +252,9 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// whitespace skipping or comment processing around the fragment definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, SP, DP>(
+  pub fn parser_with<'src, I, E, FP, NP, DP, SP>(
+    fragment_name_parser: FP,
+    name_parser: NP,
     directives_parser: DP,
     selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
@@ -260,14 +264,16 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    FP: Parser<'src, I, FragmentName, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
       .then(Fragment::parser().padded_by(ignored()))
-      .then(FragmentName::parser())
-      .then(TypeCondition::parser().padded_by(ignored()))
+      .then(fragment_name_parser)
+      .then(TypeCondition::parser_with(name_parser).padded_by(ignored()))
       .then(directives_parser.then_ignore(ignored()).or_not())
       .then(selection_set_parser)
       .map_with(

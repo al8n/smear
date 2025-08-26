@@ -8,7 +8,6 @@ use crate::{
   lang::{
     ignored,
     punct::{Bang, LBracket, RBracket},
-    Name,
   },
   source::{Char, Slice, Source},
 };
@@ -56,28 +55,28 @@ use crate::{
 /// NamedType : Name !?
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct NamedType<Span> {
+pub struct NamedType<Name, Span> {
   span: Span,
-  name: Name<Span>,
+  name: Name,
   bang: Option<Bang<Span>>,
 }
 
-impl<Span> AsRef<Span> for NamedType<Span> {
+impl<Name, Span> AsRef<Span> for NamedType<Name, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for NamedType<Span> {
+impl<Name, Span> IntoSpan<Span> for NamedType<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for NamedType<Span> {
-  type Components = (Span, Name<Span>, Option<Bang<Span>>);
+impl<Name, Span> IntoComponents for NamedType<Name, Span> {
+  type Components = (Span, Name, Option<Bang<Span>>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -85,7 +84,7 @@ impl<Span> IntoComponents for NamedType<Span> {
   }
 }
 
-impl<Span> NamedType<Span> {
+impl<Name, Span> NamedType<Name, Span> {
   /// Returns a reference to the span covering the entire named type.
   ///
   /// The span includes the type name and optional bang modifier,
@@ -101,7 +100,7 @@ impl<Span> NamedType<Span> {
   /// Type names must follow GraphQL naming conventions and resolve to valid
   /// schema types (scalars, objects, interfaces, unions, enums, or input objects).
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -133,7 +132,7 @@ impl<Span> NamedType<Span> {
   /// ID!         # Non-null ID scalar type
   /// ```
   #[inline]
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -141,8 +140,9 @@ impl<Span> NamedType<Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
-    Name::parser()
+    name_parser
       .then(ignored().ignore_then(Bang::parser()).or_not())
       .map_with(|(name, bang), sp| Self {
         span: Span::from_map_extra(sp),
@@ -431,11 +431,11 @@ macro_rules! ty {
         #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
         #[unwrap(ref, ref_mut)]
         #[try_unwrap(ref, ref_mut)]
-        pub enum $name<Span> {
+        pub enum $name<Name, Span> {
           /// A named type referencing a schema-defined type.
           ///
           /// Examples: `String!`, `User`, `PostStatus!`, `ID`
-          Name(NamedType<Span>),
+          Name(NamedType<Name, Span>),
 
           /// A list type containing elements of another type.
           ///
@@ -443,14 +443,14 @@ macro_rules! ty {
           List($ty<ListType<Self, Span>>),
         }
 
-        impl<Span> From<ListType<Self, Span>> for $name<Span> {
+        impl<Name, Span> From<ListType<Self, Span>> for $name<Name, Span> {
           #[inline]
           fn from(ty: ListType<Self, Span>) -> Self {
             Self::List(<$ty<ListType<Self, Span>>>::new(ty))
           }
         }
 
-        impl<Span> AsRef<Span> for $name<Span> {
+        impl<Name, Span> AsRef<Span> for $name<Name, Span> {
           #[inline]
           fn as_ref(&self) -> &Span {
             match self {
@@ -460,14 +460,14 @@ macro_rules! ty {
           }
         }
 
-        impl<Span> $name<Span> {
+        impl<Name, Span> $name<Name, Span> {
           /// Creates a recursive parser for GraphQL types.
           ///
           /// This parser handles the complete GraphQL type syntax including
           /// named types, list types, and nested combinations. It uses recursion
           /// to handle arbitrarily nested list types.
           #[inline]
-          pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+          pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
           where
             I: Source<'src>,
             I::Token: Char + 'src,
@@ -475,9 +475,11 @@ macro_rules! ty {
             I::Slice: Slice<Token = I::Token>,
             E: ParserExtra<'src, I>,
             Span: crate::source::FromMapExtra<'src, I, E>,
+            Name: 'src,
+            NP: Parser<'src, I, Name, E> + Clone + 'src,
           {
             recursive(|parser| {
-              choice((NamedType::parser().map(Self::Name), ListType::parser_with(parser).map(Self::from)))
+              choice((NamedType::parser_with(name_parser).map(Self::Name), ListType::parser_with(parser).map(Self::from)))
             })
           }
         }
@@ -507,7 +509,7 @@ ty!(
   Arc<ArcType>,
 );
 
-impl<Span> IntoSpan<Span> for Type<Span> {
+impl<Name, Span> IntoSpan<Span> for Type<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     match self {

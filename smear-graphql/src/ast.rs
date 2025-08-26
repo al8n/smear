@@ -383,9 +383,9 @@ newtype!(struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
   }
 });
 
-newtype!(struct Directive(lang::Directive<Arguments<Span>, Span>) {
+newtype!(struct Directive(lang::Directive<Name<Span>, Arguments<Span>, Span>) {
   parser: {
-    lang::Directive::parser_with(Arguments::parser()).map(Self)
+    lang::Directive::parser_with(Name::parser(), Arguments::parser()).map(Self)
   }
 });
 
@@ -406,9 +406,9 @@ newtype!(struct Directives(lang::Directives<Directive<Span>, Span>) {
   }
 });
 
-newtype!(struct ConstDirective(lang::Directive<ConstArguments<Span>, Span>) {
+newtype!(struct ConstDirective(lang::Directive<Name<Span>, ConstArguments<Span>, Span>) {
   parser: {
-    lang::Directive::parser_with(ConstArguments::parser()).map(Self)
+    lang::Directive::parser_with(Name::parser(), ConstArguments::parser()).map(Self)
   }
 });
 
@@ -429,21 +429,21 @@ newtype!(struct ConstDirectives(lang::Directives<ConstDirective<Span>, Span>) {
   }
 });
 
-newtype!(struct FragmentSpread(lang::FragmentSpread<Directives<Span>, Span>) {
+newtype!(struct FragmentSpread(lang::FragmentSpread<FragmentName<Span>, Directives<Span>, Span>) {
   parser: {
-    lang::FragmentSpread::parser_with(Directives::parser()).map(Self)
+    lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser()).map(Self)
   }
 });
 
-newtype!(struct InlineFragment(lang::InlineFragment<Directives<Span>, SelectionSet<Span>, Span>) {
+newtype!(struct InlineFragment(lang::InlineFragment<Name<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
   parser: {
-    lang::InlineFragment::parser_with(Directives::parser(), SelectionSet::parser()).map(Self)
+    lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), SelectionSet::parser()).map(Self)
   }
 });
 
-newtype!(struct FragmentDefinition(definitions::FragmentDefinition<Directives<Span>, SelectionSet<Span>, Span>) {
+newtype!(struct FragmentDefinition(definitions::FragmentDefinition<FragmentName<Span>, Name<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
   parser: {
-    definitions::FragmentDefinition::parser_with(Directives::parser(), SelectionSet::parser())
+    definitions::FragmentDefinition::parser_with(FragmentName::parser(), Name::parser(), Directives::parser(), SelectionSet::parser())
       .map(Self)
   }
 });
@@ -457,10 +457,10 @@ newtype!(struct Field(lang::Field<Arguments<Span>, Directives<Span>, SelectionSe
         let selection_set =
           lang::SelectionSet::parser_with(selection.clone()).map(SelectionSet::<Span>);
 
-        let spread = lang::FragmentSpread::parser_with(Directives::parser())
+        let spread = lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser())
           .map(|fs| Selection::<Span>::FragmentSpread(FragmentSpread::<Span>(fs)));
 
-        let inline = lang::InlineFragment::parser_with(Directives::parser(), selection_set.clone())
+        let inline = lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), selection_set.clone())
           .map(|f| Selection::<Span>::InlineFragment(InlineFragment::<Span>(f)));
 
         choice((field_parser.map(Selection::<Span>::Field), spread, inline))
@@ -530,11 +530,16 @@ impl<Span> Selection<Span> {
       )
       .map(Field::<Span>);
 
-      let inline_p = lang::InlineFragment::parser_with(Directives::parser(), selsetion_set.clone())
-        .map(InlineFragment::<Span>);
+      let inline_p = lang::InlineFragment::parser_with(
+        Name::parser(),
+        Directives::parser(),
+        selsetion_set.clone(),
+      )
+      .map(InlineFragment::<Span>);
 
       let spread_p =
-        lang::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
+        lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser())
+          .map(FragmentSpread::<Span>);
 
       choice((
         field_p.map(Self::Field),
@@ -555,11 +560,11 @@ newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
       )
       .map(Field::<Span>);
 
-      let inline_p = lang::InlineFragment::parser_with(Directives::parser(), selection_set)
+      let inline_p = lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), selection_set)
         .map(InlineFragment::<Span>);
 
       let spread_p =
-        lang::FragmentSpread::parser_with(Directives::parser()).map(FragmentSpread::<Span>);
+        lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser()).map(FragmentSpread::<Span>);
 
       let selection = choice((
         field_p.map(Selection::<Span>::Field),
@@ -584,14 +589,14 @@ newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
 });
 
 newtype!(struct InputValueDefinition(definitions::InputValueDefinition<
-  Type<Span>,
+  Type<Name<Span>, Span>,
   DefaultInputValue<Span>,
   ConstDirectives<Span>,
   Span,
 >) {
   parser: {
     definitions::InputValueDefinition::parser_with(
-      Type::parser(),
+      Type::parser_with(Name::parser()),
       DefaultInputValue::parser(),
       ConstDirectives::parser(),
     )
@@ -623,10 +628,11 @@ newtype!(struct DirectiveLocations(definitions::DirectiveLocations<Location<Span
 });
 
 newtype!(struct DirectiveDefinition(
-  definitions::DirectiveDefinition<ConstArguments<Span>, DirectiveLocations<Span>, Span>,
+  definitions::DirectiveDefinition<Name<Span>, ConstArguments<Span>, DirectiveLocations<Span>, Span>,
 ) {
   parser: {
     definitions::DirectiveDefinition::parser_with(
+      Name::parser(),
       ConstArguments::parser(),
       DirectiveLocations::parser(),
     )
@@ -677,12 +683,12 @@ newtype!(struct EnumTypeExtension(definitions::EnumTypeExtension<ConstDirectives
 });
 
 newtype!(struct FieldDefinition(
-  definitions::FieldDefinition<ConstArguments<Span>, Type<Span>, ConstDirectives<Span>, Span>,
+  definitions::FieldDefinition<ConstArguments<Span>, Type<Name<Span>, Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
     definitions::FieldDefinition::parser_with(
       ConstArguments::parser(),
-      Type::parser(),
+      Type::parser_with(Name::parser()),
       ConstDirectives::parser(),
     )
     .map(Self)
@@ -725,10 +731,11 @@ newtype!(struct InputFieldsDefinition(
 });
 
 newtype!(struct InputObjectTypeDefinition(
-  definitions::InputObjectTypeDefinition<ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
+  definitions::InputObjectTypeDefinition<Name<Span>, ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
 ) {
   parser: {
     definitions::InputObjectTypeDefinition::parser_with(
+      Name::parser(),
       ConstDirectives::parser(),
       InputFieldsDefinition::parser(),
     )
@@ -737,10 +744,11 @@ newtype!(struct InputObjectTypeDefinition(
 });
 
 newtype!(struct InputObjectTypeExtension(
-  definitions::InputObjectTypeExtension<ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
+  definitions::InputObjectTypeExtension<Name<Span>, ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
 ) {
   parser: {
     definitions::InputObjectTypeExtension::parser_with(
+      Name::parser(),
       ConstDirectives::parser,
       InputFieldsDefinition::parser,
     )
@@ -750,7 +758,8 @@ newtype!(struct InputObjectTypeExtension(
 
 newtype!(struct InterfaceTypeDefinition(
   definitions::InterfaceTypeDefinition<
-    ImplementInterfaces<Span>,
+    Name<Span>,
+    ImplementInterfaces<Name<Span>, Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -758,7 +767,8 @@ newtype!(struct InterfaceTypeDefinition(
 ) {
   parser: {
     definitions::InterfaceTypeDefinition::parser_with(
-      ImplementInterfaces::parser(),
+      Name::parser(),
+      ImplementInterfaces::parser_with(Name::parser),
       ConstDirectives::parser(),
       FieldsDefinition::parser(),
     )
@@ -769,7 +779,8 @@ newtype!(struct InterfaceTypeDefinition(
 newtype!(
   struct InterfaceTypeExtension(
     definitions::InterfaceTypeExtension<
-      ImplementInterfaces<Span>,
+      Name<Span>,
+      ImplementInterfaces<Name<Span>, Span>,
       ConstDirectives<Span>,
       FieldsDefinition<Span>,
       Span,
@@ -777,7 +788,8 @@ newtype!(
   ) {
     parser: {
       definitions::InterfaceTypeExtension::parser_with(
-        ImplementInterfaces::parser,
+        Name::parser(),
+        || ImplementInterfaces::parser_with(Name::parser),
         ConstDirectives::parser,
         FieldsDefinition::parser,
       )
@@ -788,7 +800,8 @@ newtype!(
 
 newtype!(struct ObjectTypeDefinition(
   definitions::ObjectTypeDefinition<
-    ImplementInterfaces<Span>,
+    Name<Span>,
+    ImplementInterfaces<Name<Span>, Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -796,7 +809,8 @@ newtype!(struct ObjectTypeDefinition(
 ) {
   parser: {
     definitions::ObjectTypeDefinition::parser_with(
-      ImplementInterfaces::parser(),
+      Name::parser(),
+      ImplementInterfaces::parser_with(Name::parser),
       ConstDirectives::parser(),
       FieldsDefinition::parser(),
     )
@@ -806,7 +820,8 @@ newtype!(struct ObjectTypeDefinition(
 
 newtype!(struct ObjectTypeExtension(
   definitions::ObjectTypeExtension<
-    ImplementInterfaces<Span>,
+    Name<Span>,
+    ImplementInterfaces<Name<Span>, Span>,
     ConstDirectives<Span>,
     FieldsDefinition<Span>,
     Span,
@@ -814,7 +829,8 @@ newtype!(struct ObjectTypeExtension(
 ) {
   parser: {
     definitions::ObjectTypeExtension::parser_with(
-      ImplementInterfaces::parser,
+      Name::parser(),
+      || ImplementInterfaces::parser_with(Name::parser),
       ConstDirectives::parser,
       FieldsDefinition::parser,
     )
@@ -823,48 +839,49 @@ newtype!(struct ObjectTypeExtension(
 });
 
 newtype!(struct ScalarTypeDefinition(
-  definitions::ScalarTypeDefinition<ConstDirectives<Span>, Span>,
+  definitions::ScalarTypeDefinition<Name<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
-    definitions::ScalarTypeDefinition::parser_with(ConstDirectives::parser()).map(Self)
+    definitions::ScalarTypeDefinition::parser_with(Name::parser(), ConstDirectives::parser()).map(Self)
   }
 });
 
 newtype!(struct ScalarTypeExtension(
-  definitions::ScalarTypeExtension<ConstDirectives<Span>, Span>,
+  definitions::ScalarTypeExtension<Name<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
-    definitions::ScalarTypeExtension::parser_with(ConstDirectives::parser()).map(Self)
+    definitions::ScalarTypeExtension::parser_with(Name::parser(), ConstDirectives::parser()).map(Self)
   }
 });
 
 newtype!(struct UnionTypeDefinition(
-  definitions::UnionTypeDefinition<ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
+  definitions::UnionTypeDefinition<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Name<Span>, Span>, Span>,
 ) {
   parser: {
     definitions::UnionTypeDefinition::parser_with(
+      Name::parser(),
       ConstDirectives::parser(),
-      UnionMemberTypes::parser(),
+      UnionMemberTypes::parser_with(Name::parser),
     )
     .map(Self)
   }
 });
 
 newtype!(struct UnionTypeExtension(
-  definitions::UnionTypeExtension<ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
+  definitions::UnionTypeExtension<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Name<Span>, Span>, Span>,
 ) {
   parser: {
-    definitions::UnionTypeExtension::parser_with(ConstDirectives::parser, UnionMemberTypes::parser)
+    definitions::UnionTypeExtension::parser_with(Name::parser(), ConstDirectives::parser, UnionMemberTypes::parser_with(Name::parser))
       .map(Self)
   }
 });
 
 newtype!(struct VariableDefinition(
-  definitions::VariableDefinition<Type<Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
+  definitions::VariableDefinition<Type<Name<Span>, Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
 ) {
   parser: {
     definitions::VariableDefinition::parser(
-      Type::parser(),
+      Type::parser_with(Name::parser()),
       Directives::parser(),
       DefaultInputValue::parser(),
     )
@@ -967,10 +984,10 @@ impl<Span> OperationDefinition<Span> {
 }
 
 newtype!(struct RootOperationTypeDefinition(
-  definitions::RootOperationTypeDefinition<OperationType<Span>, Span>,
+  definitions::RootOperationTypeDefinition<Name<Span>, OperationType<Span>, Span>,
 ) {
   parser: {
-    definitions::RootOperationTypeDefinition::parser_with(OperationType::parser()).map(Self)
+    definitions::RootOperationTypeDefinition::parser_with(Name::parser(), OperationType::parser()).map(Self)
   }
 });
 

@@ -7,7 +7,6 @@ use super::{
   },
   ignored,
   punct::At,
-  Name,
 };
 
 use core::marker::PhantomData;
@@ -20,29 +19,29 @@ use std::vec::Vec;
 ///
 /// Spec: [Directive](https://spec.graphql.org/draft/#Directive)
 #[derive(Debug, Clone, Copy)]
-pub struct Directive<Args, Span> {
+pub struct Directive<Name, Args, Span> {
   span: Span,
   at: At<Span>,
-  name: Name<Span>,
+  name: Name,
   arguments: Option<Args>,
 }
 
-impl<Args, Span> AsRef<Span> for Directive<Args, Span> {
+impl<Name, Args, Span> AsRef<Span> for Directive<Name, Args, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Args, Span> IntoSpan<Span> for Directive<Args, Span> {
+impl<Name, Args, Span> IntoSpan<Span> for Directive<Name, Args, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Args, Span> IntoComponents for Directive<Args, Span> {
-  type Components = (Span, At<Span>, Name<Span>, Option<Args>);
+impl<Name, Args, Span> IntoComponents for Directive<Name, Args, Span> {
+  type Components = (Span, At<Span>, Name, Option<Args>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -50,7 +49,7 @@ impl<Args, Span> IntoComponents for Directive<Args, Span> {
   }
 }
 
-impl<Args, Span> Directive<Args, Span> {
+impl<Name, Args, Span> Directive<Name, Args, Span> {
   /// Returns a reference to the span covering the entire directive.
   ///
   /// The span includes the `@` symbol, name, and arguments (if present).
@@ -67,7 +66,7 @@ impl<Args, Span> Directive<Args, Span> {
 
   /// Returns a reference to the directive's name.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -99,18 +98,22 @@ impl<Args, Span> Directive<Args, Span> {
   /// whitespace skipping or comment processing around the directive.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(args_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP, AP>(
+    name_parser: NP,
+    args_parser: AP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Args, E> + Clone,
+    AP: Parser<'src, I, Args, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
     At::parser()
       .then_ignore(ignored())
-      .then(Name::parser())
+      .then(name_parser)
       .then(ignored().ignore_then(args_parser).or_not())
       .map_with(|((at, name), arguments), sp| Self {
         span: Span::from_map_extra(sp),

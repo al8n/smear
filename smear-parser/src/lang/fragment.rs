@@ -32,13 +32,13 @@ use super::{
 ///
 /// Spec: [Type Conditions](https://spec.graphql.org/draft/#sec-Type-Conditions)
 #[derive(Debug, Clone, Copy)]
-pub struct TypeCondition<Span> {
+pub struct TypeCondition<Name, Span> {
   span: Span,
   on: keywords::On<Span>,
-  type_name: Name<Span>,
+  type_name: Name,
 }
 
-impl<Span> TypeCondition<Span> {
+impl<Name, Span> TypeCondition<Name, Span> {
   /// Returns a reference to the span covering the entire type condition.
   ///
   /// The span includes both the `on` keyword and the type name.
@@ -57,7 +57,7 @@ impl<Span> TypeCondition<Span> {
   ///
   /// This identifies the specific type that the fragment condition applies to.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.type_name
   }
 
@@ -73,17 +73,18 @@ impl<Span> TypeCondition<Span> {
   /// whitespace skipping or comment processing around the type condition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
+    NP: Parser<'src, I, Name, E> + Clone,
     Span: crate::source::FromMapExtra<'src, I, E>,
   {
     keywords::On::parser()
       .then_ignore(ignored())
-      .then(Name::parser())
+      .then(name_parser)
       .map_with(|(on, type_name), sp| Self {
         span: Span::from_map_extra(sp),
         on,
@@ -92,22 +93,22 @@ impl<Span> TypeCondition<Span> {
   }
 }
 
-impl<Span> AsRef<Span> for TypeCondition<Span> {
+impl<Name, Span> AsRef<Span> for TypeCondition<Name, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for TypeCondition<Span> {
+impl<Name, Span> IntoSpan<Span> for TypeCondition<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for TypeCondition<Span> {
-  type Components = (Span, keywords::On<Span>, Name<Span>);
+impl<Name, Span> IntoComponents for TypeCondition<Name, Span> {
+  type Components = (Span, keywords::On<Span>, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -242,29 +243,35 @@ impl<Span> FragmentName<Span> {
 ///
 /// Spec: [Fragment Spreads](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Spreads)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentSpread<Directives, Span> {
+pub struct FragmentSpread<FragmentName, Directives, Span> {
   span: Span,
   ellipsis: Ellipsis<Span>,
-  name: FragmentName<Span>,
+  name: FragmentName,
   directives: Option<Directives>,
 }
 
-impl<Directives, Span> AsRef<Span> for FragmentSpread<Directives, Span> {
+impl<FragmentName, Directives, Span> AsRef<Span>
+  for FragmentSpread<FragmentName, Directives, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, Span> IntoSpan<Span> for FragmentSpread<Directives, Span> {
+impl<FragmentName, Directives, Span> IntoSpan<Span>
+  for FragmentSpread<FragmentName, Directives, Span>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, Span> IntoComponents for FragmentSpread<Directives, Span> {
-  type Components = (Span, Ellipsis<Span>, FragmentName<Span>, Option<Directives>);
+impl<FragmentName, Directives, Span> IntoComponents
+  for FragmentSpread<FragmentName, Directives, Span>
+{
+  type Components = (Span, Ellipsis<Span>, FragmentName, Option<Directives>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -272,7 +279,7 @@ impl<Directives, Span> IntoComponents for FragmentSpread<Directives, Span> {
   }
 }
 
-impl<Directives, Span> FragmentSpread<Directives, Span> {
+impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Span> {
   /// Returns a reference to the span covering the entire fragment spread.
   ///
   /// The span includes the ellipsis (`...`), fragment name, and any directives.
@@ -284,7 +291,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
   ///
   /// This identifies which named fragment's selection set should be included
   /// at this location in the query.
-  pub const fn name(&self) -> &FragmentName<Span> {
+  pub const fn name(&self) -> &FragmentName {
     &self.name
   }
 
@@ -316,19 +323,23 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
   /// whitespace skipping or comment processing around the fragment spread.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(directives: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP, DP>(
+    fragment_name_parser: NP,
+    directives_parser: DP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Directives, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    NP: Parser<'src, I, FragmentName, E> + Clone,
   {
     Ellipsis::parser()
       .then_ignore(ignored())
-      .then(FragmentName::parser())
-      .then(ignored().ignore_then(directives).or_not())
+      .then(fragment_name_parser)
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(|((ellipsis, name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         ellipsis,
@@ -398,16 +409,16 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
 ///
 /// Spec: [Inline Fragments](https://spec.graphql.org/draft/#sec-Inline-Fragments)
 #[derive(Debug, Clone, Copy)]
-pub struct InlineFragment<Directives, SelectionSet, Span> {
+pub struct InlineFragment<Name, Directives, SelectionSet, Span> {
   span: Span,
   ellipsis: Ellipsis<Span>,
-  type_condition: Option<TypeCondition<Span>>,
+  type_condition: Option<TypeCondition<Name, Span>>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<Directives, SelectionSet, Span> AsRef<Span>
-  for InlineFragment<Directives, SelectionSet, Span>
+impl<Name, Directives, SelectionSet, Span> AsRef<Span>
+  for InlineFragment<Name, Directives, SelectionSet, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -415,8 +426,8 @@ impl<Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoSpan<Span>
-  for InlineFragment<Directives, SelectionSet, Span>
+impl<Name, Directives, SelectionSet, Span> IntoSpan<Span>
+  for InlineFragment<Name, Directives, SelectionSet, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -424,13 +435,13 @@ impl<Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-impl<Directives, SelectionSet, Span> IntoComponents
-  for InlineFragment<Directives, SelectionSet, Span>
+impl<Name, Directives, SelectionSet, Span> IntoComponents
+  for InlineFragment<Name, Directives, SelectionSet, Span>
 {
   type Components = (
     Span,
     Ellipsis<Span>,
-    Option<TypeCondition<Span>>,
+    Option<TypeCondition<Name, Span>>,
     Option<Directives>,
     SelectionSet,
   );
@@ -447,7 +458,7 @@ impl<Directives, SelectionSet, Span> IntoComponents
   }
 }
 
-impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Span> {
+impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, SelectionSet, Span> {
   /// Returns a reference to the span covering the entire inline fragment.
   ///
   /// The span includes the ellipsis, type condition (if present), directives,
@@ -472,7 +483,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
   /// If no type condition is provided, the fragment applies to all possible types
   /// at this location.
   #[inline]
-  pub const fn type_condition(&self) -> Option<&TypeCondition<Span>> {
+  pub const fn type_condition(&self) -> Option<&TypeCondition<Name, Span>> {
     self.type_condition.as_ref()
   }
 
@@ -506,9 +517,10 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
   /// whitespace skipping or comment processing around the inline fragment.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, S, D>(
-    directives: D,
-    selection_set: S,
+  pub fn parser_with<'src, I, E, NP, DP, SP>(
+    name_parser: NP,
+    directives_parser: DP,
+    selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -516,17 +528,18 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
-    S: Parser<'src, I, SelectionSet, E> + Clone,
-    D: Parser<'src, I, Directives, E> + Clone,
+    SP: Parser<'src, I, SelectionSet, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
     Ellipsis::parser()
       .then(
         ignored()
-          .ignore_then(TypeCondition::<Span>::parser())
+          .ignore_then(TypeCondition::parser_with(name_parser))
           .or_not(),
       )
-      .then(ignored().ignore_then(directives).or_not())
-      .then(ignored().ignore_then(selection_set))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(selection_set_parser))
       .map_with(
         |(((ell, type_condition), directives), selection_set), sp| Self {
           span: Span::from_map_extra(sp),
