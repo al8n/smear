@@ -5,7 +5,6 @@ use crate::{
   lang::{
     ignored,
     punct::{Colon, LBrace, RBrace},
-    Name,
   },
   source::{Char, Slice, Source},
 };
@@ -39,29 +38,35 @@ use std::vec::Vec;
 ///
 /// Spec: [Root Operation Types Definition](https://spec.graphql.org/draft/#sec-Root-Operation-Types)
 #[derive(Debug, Clone, Copy)]
-pub struct RootOperationTypeDefinition<OperationType, Span> {
+pub struct RootOperationTypeDefinition<Name, OperationType, Span> {
   span: Span,
   operation_type: OperationType,
   colon: Colon<Span>,
-  name: Name<Span>,
+  name: Name,
 }
 
-impl<OperationType, Span> AsRef<Span> for RootOperationTypeDefinition<OperationType, Span> {
+impl<Name, OperationType, Span> AsRef<Span>
+  for RootOperationTypeDefinition<Name, OperationType, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<OperationType, Span> IntoSpan<Span> for RootOperationTypeDefinition<OperationType, Span> {
+impl<Name, OperationType, Span> IntoSpan<Span>
+  for RootOperationTypeDefinition<Name, OperationType, Span>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<OperationType, Span> IntoComponents for RootOperationTypeDefinition<OperationType, Span> {
-  type Components = (Span, OperationType, Colon<Span>, Name<Span>);
+impl<Name, OperationType, Span> IntoComponents
+  for RootOperationTypeDefinition<Name, OperationType, Span>
+{
+  type Components = (Span, OperationType, Colon<Span>, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -69,7 +74,7 @@ impl<OperationType, Span> IntoComponents for RootOperationTypeDefinition<Operati
   }
 }
 
-impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
+impl<Name, OperationType, Span> RootOperationTypeDefinition<Name, OperationType, Span> {
   /// Returns a reference to the span covering the entire root operation type definition.
   ///
   /// The span includes the operation type keyword, colon separator, and the target type name.
@@ -101,7 +106,7 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
   /// This must be the name of an Object type defined elsewhere in the schema.
   /// The referenced type becomes the entry point for operations of this type.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -117,7 +122,8 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
   /// whitespace skipping or comment processing around the root operation type.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(
+  pub fn parser_with<'src, I, E, NP, P>(
+    name_parser: NP,
     operation_type_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -126,11 +132,12 @@ impl<OperationType, Span> RootOperationTypeDefinition<OperationType, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
     P: Parser<'src, I, OperationType, E> + Clone,
   {
     operation_type_parser
       .then(Colon::parser().padded_by(ignored()))
-      .then(Name::parser())
+      .then(name_parser)
       .map_with(|((operation_type, colon), name), sp| Self {
         span: Span::from_map_extra(sp),
         operation_type,

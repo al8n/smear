@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   convert::*,
-  lang::{ignored, keywords, punct::Ampersand, Name, StringValue},
+  lang::{ignored, keywords, punct::Ampersand, StringValue},
   source::{Char, Slice, Source},
 };
 
@@ -32,28 +32,28 @@ use crate::{
 ///   &? Name
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct LeadingImplementInterface<Span> {
+pub struct LeadingImplementInterface<Name, Span> {
   span: Span,
   amp: Option<Ampersand<Span>>,
-  name: Name<Span>,
+  name: Name,
 }
 
-impl<Span> AsRef<Span> for LeadingImplementInterface<Span> {
+impl<Name, Span> AsRef<Span> for LeadingImplementInterface<Name, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for LeadingImplementInterface<Span> {
+impl<Name, Span> IntoSpan<Span> for LeadingImplementInterface<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for LeadingImplementInterface<Span> {
-  type Components = (Span, Option<Ampersand<Span>>, Name<Span>);
+impl<Name, Span> IntoComponents for LeadingImplementInterface<Name, Span> {
+  type Components = (Span, Option<Ampersand<Span>>, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -61,7 +61,7 @@ impl<Span> IntoComponents for LeadingImplementInterface<Span> {
   }
 }
 
-impl<Span> LeadingImplementInterface<Span> {
+impl<Name, Span> LeadingImplementInterface<Name, Span> {
   /// Returns a reference to the span covering the leading interface implementation.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -81,7 +81,7 @@ impl<Span> LeadingImplementInterface<Span> {
   ///
   /// This must be the name of an interface type defined elsewhere in the schema.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -97,18 +97,19 @@ impl<Span> LeadingImplementInterface<Span> {
   /// whitespace skipping or comment processing around the leading implement interface.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
     Ampersand::parser()
       .then_ignore(ignored())
       .or_not()
-      .then(Name::parser())
+      .then(name_parser)
       .map_with(|(amp, name), sp| Self {
         span: Span::from_map_extra(sp),
         amp,
@@ -139,28 +140,28 @@ impl<Span> LeadingImplementInterface<Span> {
 /// ImplementInterface: '&' Name
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct ImplementInterface<Span> {
+pub struct ImplementInterface<Name, Span> {
   span: Span,
   amp: Ampersand<Span>,
-  name: Name<Span>,
+  name: Name,
 }
 
-impl<Span> AsRef<Span> for ImplementInterface<Span> {
+impl<Name, Span> AsRef<Span> for ImplementInterface<Name, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for ImplementInterface<Span> {
+impl<Name, Span> IntoSpan<Span> for ImplementInterface<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for ImplementInterface<Span> {
-  type Components = (Span, Ampersand<Span>, Name<Span>);
+impl<Name, Span> IntoComponents for ImplementInterface<Name, Span> {
+  type Components = (Span, Ampersand<Span>, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -168,7 +169,7 @@ impl<Span> IntoComponents for ImplementInterface<Span> {
   }
 }
 
-impl<Span> ImplementInterface<Span> {
+impl<Name, Span> ImplementInterface<Name, Span> {
   /// Returns a reference to the span covering this interface implementation.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -188,7 +189,7 @@ impl<Span> ImplementInterface<Span> {
   ///
   /// This must be the name of an interface type defined elsewhere in the schema.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -204,17 +205,18 @@ impl<Span> ImplementInterface<Span> {
   /// whitespace skipping or comment processing around the implement interface.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
     Ampersand::parser()
       .then_ignore(ignored())
-      .then(Name::parser())
+      .then(name_parser)
       .map_with(|(amp, name), sp| Self {
         span: Span::from_map_extra(sp),
         amp,
@@ -276,32 +278,32 @@ impl<Span> ImplementInterface<Span> {
 ///   & Name
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct ImplementInterfaces<Span, Container = Vec<ImplementInterface<Span>>> {
+pub struct ImplementInterfaces<Name, Span, Container = Vec<ImplementInterface<Name, Span>>> {
   span: Span,
   implements: keywords::Implements<Span>,
-  leading: LeadingImplementInterface<Span>,
+  leading: LeadingImplementInterface<Name, Span>,
   remaining: Container,
 }
 
-impl<Span, Container> AsRef<Span> for ImplementInterfaces<Span, Container> {
+impl<Name, Span, Container> AsRef<Span> for ImplementInterfaces<Name, Span, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span, Container> IntoSpan<Span> for ImplementInterfaces<Span, Container> {
+impl<Name, Span, Container> IntoSpan<Span> for ImplementInterfaces<Name, Span, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span, Container> IntoComponents for ImplementInterfaces<Span, Container> {
+impl<Name, Span, Container> IntoComponents for ImplementInterfaces<Name, Span, Container> {
   type Components = (
     Span,
     keywords::Implements<Span>,
-    LeadingImplementInterface<Span>,
+    LeadingImplementInterface<Name, Span>,
     Container,
   );
 
@@ -311,7 +313,7 @@ impl<Span, Container> IntoComponents for ImplementInterfaces<Span, Container> {
   }
 }
 
-impl<Span, Container> ImplementInterfaces<Span, Container> {
+impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// Returns a reference to the span covering the entire implements clause.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -332,7 +334,7 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
   /// The leading interface has special parsing rules where the ampersand is optional,
   /// unlike subsequent interfaces where it's required.
   #[inline]
-  pub const fn leading(&self) -> &LeadingImplementInterface<Span> {
+  pub const fn leading(&self) -> &LeadingImplementInterface<Name, Span> {
     &self.leading
   }
 
@@ -350,20 +352,23 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
   /// This parser correctly handles the ampersand rules, parsing the first interface
   /// with optional ampersand, followed by zero or more subsequent interfaces
   /// with required ampersands.
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, NP>(
+    name_parser: impl Fn() -> NP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
-    Container: chumsky::container::Container<ImplementInterface<Span>>,
+    NP: Parser<'src, I, Name, E> + Clone,
+    Container: chumsky::container::Container<ImplementInterface<Name, Span>>,
   {
     keywords::Implements::<Span>::parser()
       .then_ignore(ignored())
-      .then(LeadingImplementInterface::parser())
+      .then(LeadingImplementInterface::parser_with(name_parser()))
       .then(
-        ImplementInterface::parser()
+        ImplementInterface::parser_with(name_parser())
           .padded_by(ignored())
           .repeated()
           .collect(),
@@ -428,18 +433,18 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
 ///
 /// Spec: [Interface Type Definition](https://spec.graphql.org/draft/#sec-Interface-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   interface: keywords::Interface<Span>,
-  name: Name<Span>,
+  name: Name,
   implements: Option<ImplementInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -447,8 +452,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -456,14 +461,14 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
+  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
     Option<StringValue<Span>>,
     keywords::Interface<Span>,
-    Name<Span>,
+    Name,
     Option<ImplementInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
@@ -483,8 +488,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  InterfaceTypeDefinition<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface definition.
   #[inline]
@@ -512,7 +517,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// Interface names should clearly indicate the contract or behavior
   /// they represent, following GraphQL naming conventions.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -556,7 +561,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// whitespace skipping or comment processing around the interface type definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, IP, DP, FP>(
+  pub fn parser_with<'src, I, E, NP, IP, DP, FP>(
+    name_parser: NP,
     implement_interfaces_parser: IP,
     directives_parser: DP,
     fields_definition_parser: FP,
@@ -567,6 +573,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -574,7 +581,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     StringValue::parser()
       .or_not()
       .then(keywords::Interface::parser().padded_by(ignored()))
-      .then(Name::parser())
+      .then(name_parser)
       .then(ignored().ignore_then(implement_interfaces_parser).or_not())
       .then(ignored().ignore_then(directives_parser).or_not())
       .then(ignored().ignore_then(fields_definition_parser).or_not())
@@ -760,16 +767,16 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///   | extend interface Name ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span> {
+pub struct InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   interface: keywords::Interface<Span>,
-  name: Name<Span>,
+  name: Name,
   content: InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
-  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -777,8 +784,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -786,14 +793,14 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
-  for InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
+  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Interface<Span>,
-    Name<Span>,
+    Name,
     InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
@@ -809,8 +816,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
   }
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
-  InterfaceTypeExtension<ImplementInterfaces, Directives, FieldsDefinition, Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface extension.
   ///
@@ -843,7 +850,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// This must reference an existing interface defined elsewhere in the schema.
   /// Used for extension resolution and validation.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -872,7 +879,8 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// whitespace skipping or comment processing around the interface type extension.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, IP, DP, FP>(
+  pub fn parser_with<'src, I, E, NP, IP, DP, FP>(
+    name_parser: NP,
     implement_interfaces_parser: impl Fn() -> IP,
     directives_parser: impl Fn() -> DP,
     fields_definition_parser: impl Fn() -> FP,
@@ -883,22 +891,21 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
   {
     keywords::Extend::parser()
       .then(keywords::Interface::parser().padded_by(ignored()))
-      .then(Name::parser())
-      .then(ignored().ignore_then(InterfaceTypeExtensionContent::<
-        ImplementInterfaces,
-        Directives,
-        FieldsDefinition,
-      >::parser_with(
-        implement_interfaces_parser,
-        directives_parser,
-        fields_definition_parser,
-      )))
+      .then(name_parser)
+      .then(
+        ignored().ignore_then(InterfaceTypeExtensionContent::parser_with(
+          implement_interfaces_parser,
+          directives_parser,
+          fields_definition_parser,
+        )),
+      )
       .map_with(|(((extend, interface), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,

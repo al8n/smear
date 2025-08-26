@@ -5,7 +5,7 @@ use crate::{
   lang::{
     ignored, keywords,
     punct::{At, Pipe},
-    Name, StringValue,
+    StringValue,
   },
   source::{Char, Slice, Source},
 };
@@ -982,39 +982,43 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
 ///
 /// Spec: [DirectiveDefinition](https://spec.graphql.org/draft/#DirectiveDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct DirectiveDefinition<Args, Locations, Span> {
+pub struct DirectiveDefinition<Name, Args, Locations, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   keyword: keywords::Directive<Span>,
   at: At<Span>,
-  name: Name<Span>,
+  name: Name,
   arguments_definition: Option<Args>,
   repeateable: Option<keywords::Repeatable<Span>>,
   on: keywords::On<Span>,
   directive_locations: Locations,
 }
 
-impl<Args, Locations, Span> AsRef<Span> for DirectiveDefinition<Args, Locations, Span> {
+impl<Name, Args, Locations, Span> AsRef<Span> for DirectiveDefinition<Name, Args, Locations, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Args, Locations, Span> IntoSpan<Span> for DirectiveDefinition<Args, Locations, Span> {
+impl<Name, Args, Locations, Span> IntoSpan<Span>
+  for DirectiveDefinition<Name, Args, Locations, Span>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Args, Locations, Span> IntoComponents for DirectiveDefinition<Args, Locations, Span> {
+impl<Name, Args, Locations, Span> IntoComponents
+  for DirectiveDefinition<Name, Args, Locations, Span>
+{
   type Components = (
     Span,
     Option<StringValue<Span>>,
     keywords::Directive<Span>,
     At<Span>,
-    Name<Span>,
+    Name,
     Option<Args>,
     Option<keywords::Repeatable<Span>>,
     keywords::On<Span>,
@@ -1037,7 +1041,7 @@ impl<Args, Locations, Span> IntoComponents for DirectiveDefinition<Args, Locatio
   }
 }
 
-impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
+impl<Name, Args, Locations, Span> DirectiveDefinition<Name, Args, Locations, Span> {
   /// Returns a reference to the span covering the entire directive definition.
   ///
   /// The span includes the optional description, directive keyword, name,
@@ -1106,7 +1110,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   /// The name identifies the directive and is used when applying the directive
   /// in GraphQL documents (preceded by `@`).
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -1132,7 +1136,8 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   /// whitespace skipping or comment processing around the directive definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, AP, LP>(
+  pub fn parser_with<'src, I, E, NP, AP, LP>(
+    name_parser: NP,
     args_parser: AP,
     directive_locations_parser: LP,
   ) -> impl Parser<'src, I, Self, E> + Clone
@@ -1144,13 +1149,14 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
     Span: crate::source::FromMapExtra<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     LP: Parser<'src, I, Locations, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()
       .or_not()
       .then(keywords::Directive::parser().padded_by(ignored()))
       .then(At::parser().padded_by(ignored()))
-      .then(Name::parser())
+      .then(name_parser)
       .then(ignored().ignore_then(args_parser).or_not())
       .then(
         ignored()
