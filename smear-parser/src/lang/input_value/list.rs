@@ -117,18 +117,15 @@ impl<Value, Span, Container> List<Value, Span, Container> {
   /// whitespace skipping or comment processing around the list.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P, const CONST: bool>(
-    value_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
-    Value: crate::lang::input_value::InputValue<CONST>,
   {
     // '[' ws? ( ']' | elem+ ']' )
     LBracket::parser()

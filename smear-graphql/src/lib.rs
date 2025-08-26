@@ -7,14 +7,8 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// GraphQL argument parsers
-pub mod arguments;
-/// GraphQL directive parsers
-pub mod directives;
-/// GraphQL field parsers
-pub mod field;
-/// GraphQL value parsers
-pub mod value;
+/// Standards-compliant GraphQL parser conbinators.
+pub mod ast;
 
 #[test]
 fn t() {}

@@ -48,12 +48,12 @@ macro_rules! punct {
           I::Token: $crate::__private::Char + 'src,
           I::Slice: $crate::__private::Slice<Token = I::Token>,
           E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
-          Span: $crate::__private::Span<'src, I, E>,
+          Span: $crate::__private::FromMapExtra<'src, I, E>,
         {
           use $crate::__private::{chumsky::prelude::*, Char};
 
           just($tokens)
-            .map_with(|_, sp| Self($crate::__private::Span::from_map_extra(sp)))
+            .map_with(|_, sp| Self($crate::__private::FromMapExtra::from_map_extra(sp)))
         }
       }
     }

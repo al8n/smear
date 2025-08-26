@@ -79,7 +79,7 @@ impl<Span> TypeCondition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     keywords::On::parser()
       .then_ignore(ignored())
@@ -198,7 +198,7 @@ impl<Span> FragmentName<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Name::<Span>::parser()
       .to_slice()
@@ -322,14 +322,13 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
       .then_ignore(ignored())
       .then(FragmentName::parser())
-      .then_ignore(ignored())
-      .then(directives.or_not())
+      .then(ignored().ignore_then(directives).or_not())
       .map_with(|((ellipsis, name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         ellipsis,
@@ -508,25 +507,26 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, S, D>(
-    selection_set: S,
     directives: D,
+    selection_set: S,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
     D: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
-      .then_ignore(ignored())
-      .then(TypeCondition::<Span>::parser().or_not())
-      .then_ignore(ignored())
-      .then(directives.or_not())
-      .then_ignore(ignored())
-      .then(selection_set)
+      .then(
+        ignored()
+          .ignore_then(TypeCondition::<Span>::parser())
+          .or_not(),
+      )
+      .then(ignored().ignore_then(directives).or_not())
+      .then(ignored().ignore_then(selection_set))
       .map_with(
         |(((ell, type_condition), directives), selection_set), sp| Self {
           span: Span::from_map_extra(sp),

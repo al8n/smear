@@ -42,28 +42,28 @@ use super::super::{
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectValueField<InputValue, Span> {
+pub struct ObjectField<InputValue, Span> {
   span: Span,
   name: Name<Span>,
   colon: Colon<Span>,
   value: InputValue,
 }
 
-impl<InputValue, Span> AsRef<Span> for ObjectValueField<InputValue, Span> {
+impl<InputValue, Span> AsRef<Span> for ObjectField<InputValue, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<InputValue, Span> IntoSpan<Span> for ObjectValueField<InputValue, Span> {
+impl<InputValue, Span> IntoSpan<Span> for ObjectField<InputValue, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<InputValue, Span> IntoComponents for ObjectValueField<InputValue, Span> {
+impl<InputValue, Span> IntoComponents for ObjectField<InputValue, Span> {
   type Components = (Span, Name<Span>, Colon<Span>, InputValue);
 
   #[inline]
@@ -72,7 +72,7 @@ impl<InputValue, Span> IntoComponents for ObjectValueField<InputValue, Span> {
   }
 }
 
-impl<InputValue, Span> ObjectValueField<InputValue, Span> {
+impl<InputValue, Span> ObjectField<InputValue, Span> {
   /// Returns the source span of the entire field.
   ///
   /// This span covers from the first character of the field name through
@@ -133,7 +133,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, InputValue, E> + Clone,
   {
     Name::parser()
@@ -167,7 +167,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 /// ## Grammar
 ///
 /// ```text
-/// ObjectValue ::= '{' ObjectFields? '}'
+/// Object ::= '{' ObjectFields? '}'
 /// ObjectFields ::= ObjectField+
 /// ObjectField ::= Name ':' Value
 /// ```
@@ -243,7 +243,7 @@ impl<InputValue, Span> ObjectValueField<InputValue, Span> {
 ///
 /// Spec: [Input Object Values](https://spec.graphql.org/draft/#sec-Input-Object-Values)
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectValue<Field, Span, Container = std::vec::Vec<Field>> {
+pub struct Object<Field, Span, Container = std::vec::Vec<Field>> {
   span: Span,
   l_brace: LBrace<Span>,
   r_brace: RBrace<Span>,
@@ -251,21 +251,21 @@ pub struct ObjectValue<Field, Span, Container = std::vec::Vec<Field>> {
   _field: core::marker::PhantomData<Field>,
 }
 
-impl<Field, Span, Container> AsRef<Span> for ObjectValue<Field, Span, Container> {
+impl<Field, Span, Container> AsRef<Span> for Object<Field, Span, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Field, Span, Container> IntoSpan<Span> for ObjectValue<Field, Span, Container> {
+impl<Field, Span, Container> IntoSpan<Span> for Object<Field, Span, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Field, Span, Container> IntoComponents for ObjectValue<Field, Span, Container> {
+impl<Field, Span, Container> IntoComponents for Object<Field, Span, Container> {
   type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
 
   #[inline]
@@ -274,7 +274,7 @@ impl<Field, Span, Container> IntoComponents for ObjectValue<Field, Span, Contain
   }
 }
 
-impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
+impl<Field, Span, Container> Object<Field, Span, Container> {
   /// Returns the source span of the entire object literal.
   ///
   /// This span covers from the opening brace through the closing brace,
@@ -321,14 +321,20 @@ impl<Field, Span, Container> ObjectValue<Field, Span, Container> {
   /// including braces, field parsing, whitespace, optional commas, and empty
   /// objects, while enforcing constant vs variable context requirements.
   ///
-  /// Spec: [Object Value](https://spec.graphql.org/draft/#sec-Object-Value)
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the object value.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P>(field_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Field, E> + Clone,
     Container: chumsky::container::Container<Field>,
   {

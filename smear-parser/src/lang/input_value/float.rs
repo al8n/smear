@@ -82,7 +82,7 @@ impl<Span> ExponentSign<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Minus::parser()
       .map(Self::Negative)
@@ -182,7 +182,7 @@ impl<Span> ExponentIdentifier<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     just(I::Token::e)
       .or(just(I::Token::E))
@@ -307,7 +307,7 @@ impl<Span> Exponent<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     ExponentIdentifier::parser()
       .then(ExponentSign::parser().or_not())
@@ -422,7 +422,7 @@ impl<Span> Fractional<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Dot::parser()
       .then(Digits::parser())
@@ -595,7 +595,7 @@ impl<Span> FloatValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     IntValue::parser()
       .then(Fractional::parser().then(Exponent::parser().or_not()))

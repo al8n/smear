@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored, keywords,
@@ -119,7 +119,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
   /// Enum values must be valid GraphQL names and cannot be the reserved
   /// words `true`, `false`, or `null`.
   #[inline]
-  pub const fn enum_value(&self) -> &EnumValue<Span> {
+  pub const fn value(&self) -> &EnumValue<Span> {
     &self.enum_value
   }
 
@@ -151,14 +151,13 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(EnumValue::<Span>::parser().then_ignore(ignored()))
-      .then(directives_parser.or_not())
+      .then(ignored().ignore_then(EnumValue::<Span>::parser()))
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(|((description, enum_value), directives), sp| Self {
         span: Span::from_map_extra(sp),
         description,
@@ -292,8 +291,14 @@ impl<EnumValueDefinition, Span, Container>
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of enum value definitions.
   #[inline]
-  pub const fn enum_values(&self) -> &Container {
+  pub const fn enum_value_definitions(&self) -> &Container {
     &self.enum_values
+  }
+
+  /// Consumes the enum values definition and returns the enum value definitions
+  #[inline]
+  pub fn into_enum_value_definitions(self) -> Container {
+    self.enum_values
   }
 
   /// Creates a parser that can parse an enum values definition with custom enum value parsing.
@@ -315,12 +320,11 @@ impl<EnumValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         enum_value_parser
           .padded_by(ignored())
@@ -328,7 +332,6 @@ impl<EnumValueDefinition, Span, Container>
           .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, enum_values), r_brace), sp| Self {
         span: Span::from_map_extra(sp),
@@ -395,7 +398,7 @@ impl<EnumValueDefinition, Span, Container>
 ///
 /// Spec: [Enum Type Definition](https://spec.graphql.org/draft/#sec-Enum-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
+pub struct EnumTypeDefinition<Directives, EnumValuesDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   keyword: keywords::Enum<Span>,
@@ -405,7 +408,7 @@ pub struct EnumDefinition<Directives, EnumValuesDefinition, Span> {
 }
 
 impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -414,7 +417,7 @@ impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -423,7 +426,7 @@ impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoComponents
-  for EnumDefinition<Directives, EnumValuesDefinition, Span>
+  for EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   type Components = (
     Span,
@@ -448,7 +451,7 @@ impl<Directives, EnumValuesDefinition, Span> IntoComponents
 }
 
 impl<Directives, EnumValuesDefinition, Span>
-  EnumDefinition<Directives, EnumValuesDefinition, Span>
+  EnumTypeDefinition<Directives, EnumValuesDefinition, Span>
 {
   /// Returns a reference to the span covering the entire enum definition.
   ///
@@ -491,7 +494,7 @@ impl<Directives, EnumValuesDefinition, Span>
   /// The enum values definition contains all the possible values for this enum type.
   /// It may be absent in enum definitions that are meant to be extended later.
   #[inline]
-  pub const fn enum_values(&self) -> Option<&EnumValuesDefinition> {
+  pub const fn enum_values_definition(&self) -> Option<&EnumValuesDefinition> {
     self.enum_values.as_ref()
   }
 
@@ -509,30 +512,34 @@ impl<Directives, EnumValuesDefinition, Span>
   /// This parser handles the full enum definition syntax including all optional
   /// components. The parsing of enum values and directives is delegated to the
   /// provided parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the enum type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, P, DP>(
-    enum_values_definition: P,
     directives_parser: DP,
+    enum_values_definition: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(keywords::Enum::parser())
-      .then_ignore(ignored())
+      .then(keywords::Enum::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
-      .then_ignore(ignored())
-      .then(enum_values_definition.or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(enum_values_definition).or_not())
       .map_with(
         |((((description, keyword), name), directives), enum_values), sp| Self {
           span: Span::from_map_extra(sp),
@@ -543,7 +550,6 @@ impl<Directives, EnumValuesDefinition, Span>
           enum_values,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -584,7 +590,7 @@ impl<Directives, EnumValuesDefinition, Span>
 /// * `Directives` - The type representing directives applied to the enum extension
 /// * `EnumValuesDefinition` - The type representing the new enum values being added
 #[derive(Debug, Clone, Copy)]
-pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
+pub enum EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
   /// Extension that adds new enum values, optionally with additional directives on the type
   Values {
     /// Optional directives to add to the enum type itself
@@ -596,7 +602,7 @@ pub enum EnumExtensionContent<Directives, EnumValuesDefinition> {
   Directives(Directives),
 }
 
-impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValuesDefinition> {
+impl<Directives, EnumValuesDefinition> EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
   /// Creates a parser that can parse enum extension content.
   ///
   /// This parser handles both types of enum extensions: those that add values
@@ -606,7 +612,7 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the extension content.
+  /// whitespace skipping or comment processing around the enum type extension content.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, EVP>(
@@ -618,7 +624,6 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
     DP: Parser<'src, I, Directives, E> + Clone,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
   {
@@ -694,16 +699,16 @@ impl<Directives, EnumValuesDefinition> EnumExtensionContent<Directives, EnumValu
 ///
 /// Spec: [Enum Type Extension](https://spec.graphql.org/draft/#sec-Enum-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumExtension<Directives, EnumValuesDefinition, Span> {
+pub struct EnumTypeExtension<Directives, EnumValuesDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   keyword: keywords::Enum<Span>,
   name: Name<Span>,
-  content: EnumExtensionContent<Directives, EnumValuesDefinition>,
+  content: EnumTypeExtensionContent<Directives, EnumValuesDefinition>,
 }
 
 impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -712,7 +717,7 @@ impl<Directives, EnumValuesDefinition, Span> AsRef<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -721,14 +726,14 @@ impl<Directives, EnumValuesDefinition, Span> IntoSpan<Span>
 }
 
 impl<Directives, EnumValuesDefinition, Span> IntoComponents
-  for EnumExtension<Directives, EnumValuesDefinition, Span>
+  for EnumTypeExtension<Directives, EnumValuesDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Enum<Span>,
     Name<Span>,
-    EnumExtensionContent<Directives, EnumValuesDefinition>,
+    EnumTypeExtensionContent<Directives, EnumValuesDefinition>,
   );
 
   #[inline]
@@ -743,7 +748,9 @@ impl<Directives, EnumValuesDefinition, Span> IntoComponents
   }
 }
 
-impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValuesDefinition, Span> {
+impl<Directives, EnumValuesDefinition, Span>
+  EnumTypeExtension<Directives, EnumValuesDefinition, Span>
+{
   /// Returns a reference to the span covering the entire enum extension.
   ///
   /// The span includes the extend keyword, enum keyword, name, and all
@@ -785,7 +792,7 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
   /// The content specifies what is being added to the enum type:
   /// either new values (optionally with directives), or just directives.
   #[inline]
-  pub const fn content(&self) -> &EnumExtensionContent<Directives, EnumValuesDefinition> {
+  pub const fn content(&self) -> &EnumTypeExtensionContent<Directives, EnumValuesDefinition> {
     &self.content
   }
 
@@ -793,6 +800,14 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
   ///
   /// This parser handles the full enum extension syntax including the extend
   /// and enum keywords, target enum name, and extension content.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the enum type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP, EVP>(
     directives_parser: impl Fn() -> DP,
@@ -803,19 +818,17 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Enum::parser())
-      .then_ignore(ignored())
-      .then(Name::<Span>::parser().then_ignore(ignored()))
-      .then(EnumExtensionContent::parser_with(
+      .then(keywords::Enum::parser().padded_by(ignored()))
+      .then(Name::<Span>::parser())
+      .then(ignored().ignore_then(EnumTypeExtensionContent::parser_with(
         directives_parser,
         enum_values_definition,
-      ))
+      )))
       .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -823,6 +836,5 @@ impl<Directives, EnumValuesDefinition, Span> EnumExtension<Directives, EnumValue
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

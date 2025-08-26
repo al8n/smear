@@ -68,14 +68,14 @@ use crate::{
 ///
 /// ```text
 /// OperationDefinition:
-///   Description? OperationType Name? VariableDefinitions? Directives? SelectionSet
+///   Description? OperationType Name? VariablesDefinition? Directives? SelectionSet
 /// ```
 ///
 /// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
 #[derive(Debug, Clone, Copy)]
 pub struct NamedOperationDefinition<
   OperationType,
-  VariableDefinitions,
+  VariablesDefinition,
   Directives,
   SelectionSet,
   Span,
@@ -84,13 +84,13 @@ pub struct NamedOperationDefinition<
   description: Option<StringValue<Span>>,
   operation_type: OperationType,
   name: Option<Name<Span>>,
-  variable_definitions: Option<VariableDefinitions>,
+  variable_definitions: Option<VariablesDefinition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<Span>
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> AsRef<Span>
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -98,8 +98,8 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> AsRef<S
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoSpan<Span>
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> IntoSpan<Span>
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -107,15 +107,15 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoSpa
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoComponents
-  for NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span> IntoComponents
+  for NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   type Components = (
     Span,
     Option<StringValue<Span>>,
     OperationType,
     Option<Name<Span>>,
-    Option<VariableDefinitions>,
+    Option<VariablesDefinition>,
     Option<Directives>,
     SelectionSet,
   );
@@ -134,8 +134,8 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span> IntoCom
   }
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
-  NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
+  NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   /// Returns a reference to the span covering the entire operation definition.
   #[inline]
@@ -185,7 +185,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   /// enabling parameterized and reusable operations. They include type information
   /// and optional default values.
   #[inline]
-  pub const fn variable_definitions(&self) -> Option<&VariableDefinitions> {
+  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition> {
     self.variable_definitions.as_ref()
   }
 
@@ -234,21 +234,19 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariableDefinitions, E> + Clone,
+    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(operation_type_parser)
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()).or_not())
-      .then(variable_definitions_parser.then_ignore(ignored()).or_not())
-      .then(directives_parser.then_ignore(ignored()).or_not())
-      .then(selection_set_parser)
+      .then(ignored().ignore_then(operation_type_parser))
+      .then(Name::parser().or_not())
+      .then(ignored().ignore_then(variable_definitions_parser).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(selection_set_parser))
       .map_with(
         |(
           ((((description, operation_type), name), variable_definitions), directives),
@@ -269,6 +267,82 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
   }
 }
 
+/// Represents a complete GraphQL operation definition.
+///
+/// Operations are the entry points for GraphQL execution. They can be either
+/// named operations with explicit types and metadata, or shorthand query operations.
+/// Operations define what data to fetch (queries), what data to modify (mutations),
+/// or what real-time updates to subscribe to (subscriptions).
+///
+/// GraphQL supports two operation definition syntaxes:
+/// 1. **Named operations**: Full syntax with operation type, optional name, variables, and directives
+/// 2. **Shorthand queries**: Simplified syntax for query operations without variables or directives
+///
+/// ## Operation Types and Semantics
+///
+/// - **Query operations**: Read-only data retrieval, can be executed in parallel
+/// - **Mutation operations**: Write operations with side effects, executed serially  
+/// - **Subscription operations**: Real-time streaming data over persistent connections
+///
+/// ## Examples
+///
+/// ```text
+/// # Named query operation
+/// query GetUserProfile($userId: ID!, $includeDetails: Boolean = false) @cached {
+///   user(id: $userId) {
+///     id
+///     name
+///     email
+///     profile @include(if: $includeDetails) {
+///       bio
+///       website
+///     }
+///   }
+/// }
+///
+/// # Named mutation operation
+/// mutation UpdateUserProfile($input: UpdateProfileInput!) @auth(required: true) {
+///   updateProfile(input: $input) {
+///     success
+///     user {
+///       id
+///       name
+///       profile { bio }
+///     }
+///   }
+/// }
+///
+/// # Named subscription operation
+/// subscription MessageNotifications($channelId: ID!) {
+///   messageAdded(channelId: $channelId) {
+///     id
+///     content
+///     author { name }
+///     timestamp
+///   }
+/// }
+///
+/// # Shorthand query operation (no variables, no directives)
+/// {
+///   user(id: "123") {
+///     name
+///     email
+///   }
+/// }
+/// ```
+///
+/// ## Grammar
+///
+/// ```text
+/// OperationDefinition:
+///   OperationType Name? VariablesDefinition? Directives? SelectionSet
+///   | SelectionSet
+///
+/// OperationType: one of
+///   query mutation subscription
+/// ```
+///
+/// Spec: [OperationDefinition](https://spec.graphql.org/draft/#OperationDefinition)
 #[derive(
   Debug,
   Clone,
@@ -279,16 +353,104 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span> {
+pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span> {
+  /// Named operation with full metadata
+  ///
+  /// ## Examples
+  /// ```text
+  /// # Query with variables and directives
+  /// query GetUserPosts($userId: ID!, $first: Int = 10) @cached(ttl: 300) {
+  ///   user(id: $userId) {
+  ///     name
+  ///     posts(first: $first) {
+  ///       title
+  ///       publishedAt
+  ///     }
+  ///   }
+  /// }
+  ///
+  /// # Mutation operation
+  /// mutation CreatePost($input: CreatePostInput!) {
+  ///   createPost(input: $input) {
+  ///     id
+  ///     title
+  ///     author { name }
+  ///   }
+  /// }
+  ///
+  /// # Subscription operation
+  /// subscription LiveUpdates {
+  ///   messageAdded {
+  ///     id
+  ///     content
+  ///     timestamp
+  ///   }
+  /// }
+  /// ```
   Named(
-    NamedOperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>,
+    NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>,
   ),
-  Shorten(SelectionSet),
+  /// Shorthand query operation (selection set only)
+  ///
+  /// ## Examples
+  /// ```text
+  /// # Simple data retrieval
+  /// {
+  ///   user(id: "123") {
+  ///     name
+  ///     email
+  ///   }
+  /// }
+  ///
+  /// # Nested field selection
+  /// {
+  ///   posts(first: 5) {
+  ///     title
+  ///     author {
+  ///       name
+  ///       avatar
+  ///     }
+  ///     comments(first: 3) {
+  ///       content
+  ///       author { name }
+  ///     }
+  ///   }
+  /// }
+  ///
+  /// # Multiple top-level fields
+  /// {
+  ///   currentUser { name email }
+  ///   notifications { count unreadCount }
+  ///   settings { theme language }
+  /// }
+  /// ```
+  ///
+  /// ## Equivalent Named Form
+  /// The shorthand operation `{ user { name } }` is equivalent to:
+  /// ```text
+  /// query {
+  ///   user {
+  ///     name
+  ///   }
+  /// }
+  /// ```
+  Shorthand(SelectionSet),
 }
 
-impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
-  OperationDefinition<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
+impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
+  OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
+  /// Creates a parser for operation definitions.
+  ///
+  /// Handles both named and shorthand operation forms with proper precedence.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input values definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, OP, VP, DP, SP>(
     operation_type_parser: OP,
@@ -301,10 +463,9 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
-
+    Span: crate::source::FromMapExtra<'src, I, E>,
     OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariableDefinitions, E> + Clone,
+    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
@@ -316,7 +477,7 @@ impl<OperationType, VariableDefinitions, Directives, SelectionSet, Span>
         selection_set_parser.clone(),
       )
       .map(Self::Named),
-      selection_set_parser.map(Self::Shorten),
+      selection_set_parser.map(Self::Shorthand),
     ))
   }
 }

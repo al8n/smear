@@ -25,7 +25,10 @@ word!(
   "keyword schema": Schema: [I::Token::s, I::Token::c, I::Token::h, I::Token::e, I::Token::m, I::Token::a],
   /// `implements` keyword
   "keyword implements": Implements: [I::Token::i, I::Token::m, I::Token::p, I::Token::l, I::Token::e, I::Token::m, I::Token::e, I::Token::n, I::Token::t, I::Token::s],
+  /// `query` keyword
   "keyword query": Query: [I::Token::q, I::Token::u, I::Token::e, I::Token::r, I::Token::y],
+  /// `mutation` keyword
   "keyword mutation": Mutation: [I::Token::m, I::Token::u, I::Token::t, I::Token::a, I::Token::t, I::Token::i, I::Token::o, I::Token::n],
+  /// `subscription` keyword
   "keyword subscription": Subscription: [I::Token::s, I::Token::u, I::Token::b, I::Token::s, I::Token::c, I::Token::r, I::Token::i, I::Token::p, I::Token::t, I::Token::i, I::Token::o, I::Token::n],
 );

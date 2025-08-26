@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{ignored, keywords, Name, StringValue},
   source::{Char, Slice, Source},
@@ -103,7 +103,7 @@ use super::super::{
 ///
 /// Spec: [Scalar Type Definition](https://spec.graphql.org/draft/#sec-Scalar-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarDefinition<Directives, Span> {
+pub struct ScalarTypeDefinition<Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   scalar: keywords::Scalar<Span>,
@@ -111,21 +111,21 @@ pub struct ScalarDefinition<Directives, Span> {
   directives: Option<Directives>,
 }
 
-impl<Directives, Span> AsRef<Span> for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> AsRef<Span> for ScalarTypeDefinition<Directives, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, Span> IntoSpan<Span> for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for ScalarTypeDefinition<Directives, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, Span> IntoComponents for ScalarDefinition<Directives, Span> {
+impl<Directives, Span> IntoComponents for ScalarTypeDefinition<Directives, Span> {
   type Components = (
     Span,
     Option<StringValue<Span>>,
@@ -146,7 +146,7 @@ impl<Directives, Span> IntoComponents for ScalarDefinition<Directives, Span> {
   }
 }
 
-impl<Directives, Span> ScalarDefinition<Directives, Span> {
+impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
   /// Returns a reference to the span covering the entire scalar definition.
   ///
   /// The span encompasses the complete scalar definition from the optional description
@@ -202,6 +202,14 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
   /// This parser handles the complete syntax for GraphQL scalar type definitions,
   /// supporting optional descriptions and directives while ensuring proper whitespace
   /// and comment handling throughout the definition.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the scalar type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -209,17 +217,14 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Scalar::<Span>::parser())
-      .then_ignore(ignored())
-      .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
+      .then(keywords::Scalar::<Span>::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(|(((description, scalar), name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         description,
@@ -227,7 +232,6 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
         name,
         directives,
       })
-      .padded_by(ignored())
   }
 }
 
@@ -301,7 +305,7 @@ impl<Directives, Span> ScalarDefinition<Directives, Span> {
 ///
 /// Spec: [Scalar Type Extension](https://spec.graphql.org/draft/#sec-Scalar-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarExtension<Directives, Span> {
+pub struct ScalarTypeExtension<Directives, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   scalar: keywords::Scalar<Span>,
@@ -309,21 +313,21 @@ pub struct ScalarExtension<Directives, Span> {
   directives: Directives,
 }
 
-impl<Directives, Span> AsRef<Span> for ScalarExtension<Directives, Span> {
+impl<Directives, Span> AsRef<Span> for ScalarTypeExtension<Directives, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directives, Span> IntoSpan<Span> for ScalarExtension<Directives, Span> {
+impl<Directives, Span> IntoSpan<Span> for ScalarTypeExtension<Directives, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directives, Span> IntoComponents for ScalarExtension<Directives, Span> {
+impl<Directives, Span> IntoComponents for ScalarTypeExtension<Directives, Span> {
   type Components = (
     Span,
     keywords::Extend<Span>,
@@ -344,7 +348,7 @@ impl<Directives, Span> IntoComponents for ScalarExtension<Directives, Span> {
   }
 }
 
-impl<Directives, Span> ScalarExtension<Directives, Span> {
+impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
   /// Returns a reference to the span covering the entire scalar extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through
@@ -406,6 +410,14 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
   /// which must include directives (unlike definitions where they are optional).
   /// The parser ensures proper keyword recognition, name validation, and directive
   /// processing while maintaining comprehensive error reporting capabilities.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the scalar type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, E, DP>(directives_parser: DP) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -413,15 +425,13 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then(keywords::Scalar::<Span>::parser())
-      .padded_by(ignored())
+      .then(keywords::Scalar::<Span>::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser)
+      .then(ignored().ignore_then(directives_parser))
       .map_with(|(((extend, scalar), name), directives), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -429,6 +439,5 @@ impl<Directives, Span> ScalarExtension<Directives, Span> {
         name,
         directives,
       })
-      .padded_by(ignored())
   }
 }

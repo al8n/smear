@@ -13,6 +13,7 @@ pub use operation_type::*;
 pub use operation_type_definition::*;
 pub use scalar_definition::*;
 pub use schema_definition::*;
+pub use ty::*;
 pub use union_definition::*;
 pub use variable_definition::*;
 
@@ -31,5 +32,6 @@ mod operation_type;
 mod operation_type_definition;
 mod scalar_definition;
 mod schema_definition;
+mod ty;
 mod union_definition;
 mod variable_definition;

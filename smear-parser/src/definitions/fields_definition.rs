@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,
@@ -219,20 +219,18 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(Name::parser())
-      .then_ignore(ignored())
+      .then(Name::parser().padded_by(ignored()))
       .then(args_definition_parser.or_not())
       .then(Colon::parser().padded_by(ignored()))
-      .then(type_parser.then_ignore(ignored()))
-      .then(directives_parser.or_not())
+      .then(type_parser)
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(
         |(((((description, name), arguments_definition), colon), ty), directives), sp| Self {
           span: Span::from_map_extra(sp),
@@ -319,6 +317,35 @@ pub struct FieldsDefinition<FieldDefinition, Span, Container = Vec<FieldDefiniti
   _m: PhantomData<FieldDefinition>,
 }
 
+impl<FieldDefinition, Span, Container> AsRef<Span>
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<FieldDefinition, Span, Container> IntoSpan<Span>
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<FieldDefinition, Span, Container> IntoComponents
+  for FieldsDefinition<FieldDefinition, Span, Container>
+{
+  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.l_brace, self.fields, self.r_brace)
+  }
+}
+
 impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, Container> {
   /// Returns a reference to the span covering the entire fields definition.
   ///
@@ -351,7 +378,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of field definitions.
   #[inline]
-  pub const fn fields(&self) -> &Container {
+  pub const fn field_definitions(&self) -> &Container {
     &self.fields
   }
 
@@ -360,7 +387,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
   /// This method takes ownership of the entire `FieldsDefinition` structure and
   /// extracts just the container holding the field collection.
   #[inline]
-  pub fn into_fields(self) -> Container {
+  pub fn into_field_definitions(self) -> Container {
     self.fields
   }
 
@@ -384,13 +411,11 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
-
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
       .then(
         field_definition_parser
           .padded_by(ignored())
@@ -398,7 +423,6 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
           .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RBrace::parser())
       .map_with(|((l_brace, fields), r_brace), sp| Self {
         span: Span::from_map_extra(sp),

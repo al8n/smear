@@ -41,82 +41,6 @@ mod tuple;
 mod uint;
 mod variable;
 
-/// Marker trait for GraphQL input value types.
-///
-/// This trait identifies types that represent valid GraphQL input values and
-/// indicates whether they are constant (compile-time evaluable) or variable
-/// (runtime-dependent). This distinction is crucial for GraphQL's type system
-/// and execution model.
-///
-/// ## GraphQL Input Value Hierarchy
-///
-/// GraphQL defines a specific set of types that can be used as input values:
-/// - **Scalars**: `Int`, `Float`, `String`, `Boolean`, `ID`
-/// - **Enums**: User-defined enumeration values
-/// - **Input Objects**: Structured input with named fields
-/// - **Lists**: Ordered collections of input values
-/// - **Null**: The absence of a value
-/// - **Variables**: Runtime-provided values (only in non-constant contexts)
-///
-/// ## Constant vs Variable Values
-///
-/// GraphQL distinguishes between two categories of input values:
-///
-/// ### Constant Values (`CONST = true`)
-/// Values that can be determined at query parse time and don't depend on
-/// variables or runtime context:
-/// - **Literals**: `42`, `"hello"`, `true`, `null`, `ENUM_VALUE`
-/// - **Literal objects**: `{ name: "John", age: 30 }`
-/// - **Literal lists**: `[1, 2, 3]`, `["a", "b"]`
-///
-/// ### Variable Values (`CONST = false`)
-/// Values that depend on runtime-provided variables:
-/// - **Variables**: `$userId`, `$filter`, `$limit`
-/// - **Objects with variables**: `{ id: $userId, name: "John" }`
-/// - **Lists with variables**: `[$id1, $id2]`, `[1, $dynamicValue]`
-///
-/// ## Usage Contexts
-///
-/// Different GraphQL contexts have different requirements for input values:
-///
-/// ### Constant-Only Contexts (require `CONST = true`)
-/// - **Default values**: `field(arg: Type = defaultValue)`
-/// - **Directive arguments**: `@deprecated(reason: "Use newField instead")`
-/// - **Schema definitions**: Input object field defaults
-///
-/// ### Variable-Allowed Contexts (accept `CONST = false`)
-/// - **Query arguments**: `user(id: $userId)`
-/// - **Mutation inputs**: `createUser(input: $userInput)`
-/// - **Fragment arguments**: Field arguments in queries
-///
-/// ## Type-Level Validation
-///
-/// This trait enables compile-time validation of GraphQL context requirements:
-///
-/// ## Schema Validation
-///
-/// The `CONST` flag is used during schema validation to ensure:
-/// - Default values contain only constant expressions
-/// - Directive arguments use only constant values
-/// - Variable usage is appropriate for the context
-///
-/// ## Execution Implications
-///
-/// - **Constant values**: Can be pre-evaluated and cached
-/// - **Variable values**: Must be evaluated for each execution
-/// - **Mixed structures**: Require partial evaluation strategies
-///
-/// ## Error Prevention
-///
-/// This trait helps prevent common GraphQL errors:
-/// - Using variables in constant-only contexts
-/// - Attempting to serialize variable values as literals
-/// - Invalid default value specifications
-/// - Incorrect directive argument types
-///
-/// Spec: [Input Values](https://spec.graphql.org/draft/#sec-Input-Values)
-pub trait InputValue<const CONST: bool> {}
-
 /// A GraphQL default value assignment for input parameters.
 ///
 /// Represents the default value assignment syntax used in GraphQL variable
@@ -189,9 +113,8 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
-    Value: InputValue<true>,
   {
     Equal::parser()
       .then_ignore(ignored::ignored())
@@ -237,7 +160,7 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   I::Slice: Slice<Token = I::Token>,
-  I::Span: crate::source::Span<'src, I, E>,
+  I::Span: crate::source::FromMapExtra<'src, I, E>,
   E: ParserExtra<'src, I>,
   KP: Parser<'src, I, Key, E> + Clone,
   VP: Parser<'src, I, Value, E> + Clone,

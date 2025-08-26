@@ -2,12 +2,12 @@ use core::marker::PhantomData;
 
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,
     punct::{Colon, LParen, RParen},
-    DefaultInputValue, StringValue, Variable,
+    StringValue, Variable,
   },
   source::{Char, Slice, Source},
 };
@@ -156,18 +156,18 @@ use super::super::{
 ///
 /// Spec: [Variable Definition](https://spec.graphql.org/draft/#sec-Variable-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct VariableDefinition<Type, Directives, Value, Span> {
+pub struct VariableDefinition<Type, Directives, DefaultValue, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   variable: Variable<Span>,
   colon: Colon<Span>,
   ty: Type,
   directives: Option<Directives>,
-  default_value: Option<DefaultInputValue<Value, Span>>,
+  default_value: Option<DefaultValue>,
 }
 
-impl<Type, Directives, Value, Span> AsRef<Span>
-  for VariableDefinition<Type, Directives, Value, Span>
+impl<Type, Directives, DefaultValue, Span> AsRef<Span>
+  for VariableDefinition<Type, Directives, DefaultValue, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -175,8 +175,8 @@ impl<Type, Directives, Value, Span> AsRef<Span>
   }
 }
 
-impl<Type, Directives, Value, Span> IntoSpan<Span>
-  for VariableDefinition<Type, Directives, Value, Span>
+impl<Type, Directives, DefaultValue, Span> IntoSpan<Span>
+  for VariableDefinition<Type, Directives, DefaultValue, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -184,8 +184,8 @@ impl<Type, Directives, Value, Span> IntoSpan<Span>
   }
 }
 
-impl<Type, Directives, Value, Span> IntoComponents
-  for VariableDefinition<Type, Directives, Value, Span>
+impl<Type, Directives, DefaultValue, Span> IntoComponents
+  for VariableDefinition<Type, Directives, DefaultValue, Span>
 {
   type Components = (
     Span,
@@ -194,7 +194,7 @@ impl<Type, Directives, Value, Span> IntoComponents
     Colon<Span>,
     Type,
     Option<Directives>,
-    Option<DefaultInputValue<Value, Span>>,
+    Option<DefaultValue>,
   );
 
   #[inline]
@@ -211,7 +211,9 @@ impl<Type, Directives, Value, Span> IntoComponents
   }
 }
 
-impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, Span> {
+impl<Type, Directives, DefaultValue, Span>
+  VariableDefinition<Type, Directives, DefaultValue, Span>
+{
   /// Returns a reference to the span covering the entire variable definition.
   ///
   /// The span includes the optional description, variable (with $ prefix), colon,
@@ -278,7 +280,7 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
   /// and compatible with the variable's type. They make variables effectively
   /// optional even when the type is non-null.
   #[inline]
-  pub const fn default_value(&self) -> Option<&DefaultInputValue<Value, Span>> {
+  pub const fn default_value(&self) -> Option<&DefaultValue> {
     self.default_value.as_ref()
   }
 
@@ -299,27 +301,25 @@ impl<Type, Directives, Value, Span> VariableDefinition<Type, Directives, Value, 
   pub fn parser<'src, I, E, TP, DP, VP>(
     type_parser: TP,
     directives_parser: DP,
-    value_parser: VP,
+    default_value_parser: VP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
-    VP: Parser<'src, I, Value, E> + Clone,
-    Value: crate::lang::InputValue<true>,
+    VP: Parser<'src, I, DefaultValue, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(Variable::parser())
-      .then(Colon::parser().padded_by(ignored()))
-      .then(type_parser.then_ignore(ignored()))
-      .then(directives_parser.or_not().then_ignore(ignored()))
-      .then(DefaultInputValue::parser_with(value_parser).or_not())
+      .then(Variable::parser().padded_by(ignored()))
+      .then(Colon::parser())
+      .then(ignored().ignore_then(type_parser))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(default_value_parser).or_not())
       .map_with(
         |(((((description, variable), colon), ty), directives), default_value), sp| Self {
           span: Span::from_map_extra(sp),
@@ -491,16 +491,13 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of variable definitions.
   #[inline]
-  pub const fn variables_definition(&self) -> &Container {
+  pub const fn variable_definitions(&self) -> &Container {
     &self.variables
   }
 
-  /// Consumes the variables definition and returns the underlying container of variable definitions.
-  ///
-  /// This method takes ownership of the entire `VariablesDefinition` structure and
-  /// extracts just the container holding the variable collection.
+  /// Consumes and returns the variable definitions.
   #[inline]
-  pub fn into_variables_definitions(self) -> Container {
+  pub fn into_variable_definitions(self) -> Container {
     self.variables
   }
 
@@ -517,19 +514,18 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<VariableDefinition>,
     P: Parser<'src, I, VariableDefinition, E> + Clone,
   {
     LParen::parser()
-      .then_ignore(ignored())
       .then(
         variable_definition_parser
           .padded_by(ignored())
           .repeated()
+          .at_least(1)
           .collect(),
       )
-      .then_ignore(ignored())
       .then(RParen::parser())
       .map_with(|((l_paren, variables), r_paren), sp| Self {
         span: Span::from_map_extra(sp),

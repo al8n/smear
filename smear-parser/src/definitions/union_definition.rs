@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored, keywords,
@@ -118,7 +118,7 @@ impl<Span> LeadingUnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
@@ -238,7 +238,7 @@ impl<Span> UnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
@@ -367,7 +367,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<UnionMemberType<Span>>,
   {
     Equal::parser()
@@ -455,7 +455,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
 ///
 /// Spec: [Union Type Definition](https://spec.graphql.org/draft/#sec-Union-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionDefinition<Directives, MemberTypes, Span> {
+pub struct UnionTypeDefinition<Directives, MemberTypes, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   keyword: keywords::Union<Span>,
@@ -464,7 +464,9 @@ pub struct UnionDefinition<Directives, MemberTypes, Span> {
   members: Option<MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> AsRef<Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
@@ -472,7 +474,7 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionDefinition<Directives, 
 }
 
 impl<Directives, MemberTypes, Span> IntoSpan<Span>
-  for UnionDefinition<Directives, MemberTypes, Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -481,7 +483,7 @@ impl<Directives, MemberTypes, Span> IntoSpan<Span>
 }
 
 impl<Directives, MemberTypes, Span> IntoComponents
-  for UnionDefinition<Directives, MemberTypes, Span>
+  for UnionTypeDefinition<Directives, MemberTypes, Span>
 {
   type Components = (
     Span,
@@ -505,7 +507,7 @@ impl<Directives, MemberTypes, Span> IntoComponents
   }
 }
 
-impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes, Span> {
   /// Returns a reference to the span covering the entire union definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -553,6 +555,14 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
   ///
   /// This parser handles the complete syntax for GraphQL union types, including
   /// optional descriptions, directives, and member type definitions.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the union type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: DP,
     member_types: MP,
@@ -562,21 +572,16 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
-    // Description? 'union' Name Directives[Const]? UnionMemberTypes?
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Union::parser())
-      .then_ignore(ignored())
+      .then(keywords::Union::parser().padded_by(ignored()))
       .then(Name::<Span>::parser())
-      .then_ignore(ignored())
-      .then(directives_parser.or_not())
-      .then_ignore(ignored())
-      .then(member_types.or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(member_types).or_not())
       .map_with(
         |((((description, keyword), name), directives), members), sp| Self {
           span: Span::from_map_extra(sp),
@@ -587,7 +592,6 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
           members,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -596,7 +600,7 @@ impl<Directives, MemberTypes, Span> UnionDefinition<Directives, MemberTypes, Spa
 /// Union extensions can add directives or new member types to existing unions,
 /// enabling schema evolution without modifying original definitions.
 #[derive(Debug, Clone, Copy)]
-pub enum UnionExtensionContent<Directives, MemberTypes> {
+pub enum UnionTypeExtensionContent<Directives, MemberTypes> {
   /// Extension adds only directives to the union.
   ///
   /// Used to add metadata or behavioral modifications without changing
@@ -628,12 +632,20 @@ pub enum UnionExtensionContent<Directives, MemberTypes> {
   },
 }
 
-impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
+impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes> {
   /// Creates a parser for union extension content.
   ///
   /// The parser tries member extensions first, then directive-only extensions.
   /// This ordering ensures that extensions with both directives and members
   /// are correctly parsed as the `Members` variant.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the union type extension content.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: impl Fn() -> DP,
     member_types: impl Fn() -> MP,
@@ -643,15 +655,13 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
     choice((
       directives_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(member_types())
+        .then(ignored().ignore_then(member_types()))
         .map(|(directives, members)| Self::Members {
           directives,
           fields: members,
@@ -689,15 +699,17 @@ impl<Directives, MemberTypes> UnionExtensionContent<Directives, MemberTypes> {
 ///
 /// Spec: [Union Type Extension](https://spec.graphql.org/draft/#sec-Union-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionExtension<Directives, MemberTypes, Span> {
+pub struct UnionTypeExtension<Directives, MemberTypes, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   keyword: keywords::Union<Span>,
   name: Name<Span>,
-  content: UnionExtensionContent<Directives, MemberTypes>,
+  content: UnionTypeExtensionContent<Directives, MemberTypes>,
 }
 
-impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> AsRef<Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
@@ -705,7 +717,7 @@ impl<Directives, MemberTypes, Span> AsRef<Span> for UnionExtension<Directives, M
 }
 
 impl<Directives, MemberTypes, Span> IntoSpan<Span>
-  for UnionExtension<Directives, MemberTypes, Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -714,14 +726,14 @@ impl<Directives, MemberTypes, Span> IntoSpan<Span>
 }
 
 impl<Directives, MemberTypes, Span> IntoComponents
-  for UnionExtension<Directives, MemberTypes, Span>
+  for UnionTypeExtension<Directives, MemberTypes, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Union<Span>,
     Name<Span>,
-    UnionExtensionContent<Directives, MemberTypes>,
+    UnionTypeExtensionContent<Directives, MemberTypes>,
   );
 
   #[inline]
@@ -736,7 +748,7 @@ impl<Directives, MemberTypes, Span> IntoComponents
   }
 }
 
-impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span> {
+impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, Span> {
   /// Returns a reference to the span covering the entire union extension.
   ///
   /// The span includes the `extend union` keywords, union name, and all extension
@@ -777,7 +789,7 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
 
   /// Returns a reference to the content being added by this extension.
   #[inline]
-  pub const fn content(&self) -> &UnionExtensionContent<Directives, MemberTypes> {
+  pub const fn content(&self) -> &UnionTypeExtensionContent<Directives, MemberTypes> {
     &self.content
   }
 
@@ -786,6 +798,14 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
   /// This parser handles the complete `extend union` syntax, managing keyword
   /// recognition, name validation, and content parsing through a structured
   /// approach that ensures robust error handling and proper whitespace management.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the operation definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
     directives_parser: impl Fn() -> DP,
     member_types: impl Fn() -> MP,
@@ -795,19 +815,19 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Union::parser())
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()))
-      .then(UnionExtensionContent::parser_with(
-        directives_parser,
-        member_types,
-      ))
+      .then(keywords::Union::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(
+        ignored().ignore_then(UnionTypeExtensionContent::parser_with(
+          directives_parser,
+          member_types,
+        )),
+      )
       .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -815,6 +835,5 @@ impl<Directives, MemberTypes, Span> UnionExtension<Directives, MemberTypes, Span
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

@@ -198,7 +198,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
   /// kind of GraphQL operation. They form the foundation of the GraphQL execution
   /// model and define how clients can interact with the service.
   #[inline]
-  pub const fn root_operation_type_definitions(&self) -> &RootOperationTypesDefinition {
+  pub const fn definitions(&self) -> &RootOperationTypesDefinition {
     &self.operation_type_definitions
   }
 
@@ -208,6 +208,14 @@ impl<Directives, RootOperationTypesDefinition, Span>
   /// including all optional and required components. The parsing of directives
   /// and root operation type definitions is delegated to the provided parsers,
   /// allowing for context-specific validation and processing.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the operation definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, RP>(
     directives_parser: DP,
     root_operation_types_definition_parser: RP,
@@ -217,17 +225,15 @@ impl<Directives, RootOperationTypesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
-
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(keywords::Schema::parser().then_ignore(ignored()))
-      .then(directives_parser.then_ignore(ignored()).or_not())
-      .then(root_operation_types_definition_parser)
+      .then(keywords::Schema::parser().padded_by(ignored()))
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(root_operation_types_definition_parser))
       .map_with(
         |(((description, schema), directives), operation_type_definitions), sp| Self {
           span: Span::from_map_extra(sp),
@@ -237,7 +243,6 @@ impl<Directives, RootOperationTypesDefinition, Span>
           operation_type_definitions,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -410,9 +415,8 @@ impl<Directives, RootOperationTypesDefinition>
   {
     choice((
       directives_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(root_operation_types_definition_parser)
+        .then(ignored().ignore_then(root_operation_types_definition_parser))
         .map(|(directives, definitions)| Self::Operations {
           directives,
           definitions,
@@ -643,6 +647,14 @@ impl<Directives, RootOperationTypesDefinition, Span>
   /// supporting both directive-only and operational extensions. The parser
   /// is designed to be composable and integrate seamlessly with larger
   /// GraphQL document parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the schema extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, RP>(
     directives_parser: impl Fn() -> DP,
     root_operation_types_definition_parser: RP,
@@ -652,13 +664,12 @@ impl<Directives, RootOperationTypesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
   {
     keywords::Extend::<Span>::parser()
-      .then_ignore(ignored())
-      .then(keywords::Schema::<Span>::parser().then_ignore(ignored()))
+      .then(keywords::Schema::<Span>::parser().padded_by(ignored()))
       .then(SchemaExtensionContent::<
         Directives,
         RootOperationTypesDefinition,
@@ -672,6 +683,5 @@ impl<Directives, RootOperationTypesDefinition, Span>
         schema: schema_keyword,
         content,
       })
-      .padded_by(ignored())
   }
 }

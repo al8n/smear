@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{ignored, keywords::Fragment, FragmentName, StringValue, TypeCondition},
   source::{Char, Slice, Source},
@@ -242,25 +242,32 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
   /// This parser handles the full fragment definition syntax including all
   /// optional and required components. The parsing of selection set and
   /// directives is delegated to the provided parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the fragment definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, SP, DP>(
-    selection_set_parser: SP,
     directives_parser: DP,
+    selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
-      .then_ignore(ignored())
       .or_not()
-      .then(Fragment::parser().then_ignore(ignored()))
-      .then(FragmentName::parser().then_ignore(ignored()))
-      .then(TypeCondition::parser().then_ignore(ignored()))
+      .then(Fragment::parser().padded_by(ignored()))
+      .then(FragmentName::parser())
+      .then(TypeCondition::parser().padded_by(ignored()))
       .then(directives_parser.then_ignore(ignored()).or_not())
       .then(selection_set_parser)
       .map_with(
@@ -276,6 +283,5 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
           }
         },
       )
-      .padded_by(ignored())
   }
 }

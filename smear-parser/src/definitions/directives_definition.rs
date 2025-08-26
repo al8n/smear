@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored, keywords,
@@ -314,7 +314,7 @@ impl<Span> ExecutableDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -428,7 +428,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -490,7 +490,7 @@ impl<Span> Location<Span> {
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the direction location.
+  /// whitespace skipping or comment processing around the location.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
@@ -499,7 +499,7 @@ impl<Span> Location<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -617,8 +617,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after an optional pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the leading directive location.
   ///
@@ -629,12 +628,12 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Location, E> + Clone,
   {
     Pipe::parser()
-      .or_not()
       .then_ignore(ignored())
+      .or_not()
       .then(location_parser)
       .map_with(|(pipe, location), sp| Self {
         span: Span::from_map_extra(sp),
@@ -739,8 +738,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
   ///
   /// ## Notes
   ///
-  /// This parser does not handle surrounding [ignored tokens] beyond the
-  /// single ignored token sequence after the required pipe.
+  /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
   /// whitespace skipping or comment processing around the directive location.
   ///
@@ -751,7 +749,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Location, E> + Clone,
   {
     Pipe::parser()
@@ -897,10 +895,9 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
   ///
   /// ## Notes
   ///
-  /// This parser handles [ignored tokens] between the leading location and
-  /// remaining locations automatically. The calling parser is responsible for
-  /// handling any necessary whitespace skipping or comment processing around
-  /// the entire directive locations collection.
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the directive locations.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, P>(
@@ -911,15 +908,14 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<DirectiveLocation<Location, Span>>,
     P: Parser<'src, I, Location, E> + Clone,
   {
     LeadingDirectiveLocation::parser_with(location_parser())
       .then(
         ignored()
-          .then(DirectiveLocation::parser_with(location_parser()))
-          .map(|(_, l)| l)
+          .ignore_then(DirectiveLocation::parser_with(location_parser()))
           .repeated()
           .collect(),
       )
@@ -1128,34 +1124,41 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
   /// This parser handles the full directive definition syntax including all
   /// optional components. The parsing of arguments and locations is delegated
   /// to the provided parsers.
-  pub fn parser_with<'src, I, E>(
-    locations_parser: impl Parser<'src, I, Locations, E> + Clone,
-    args_parser: impl Parser<'src, I, Args, E> + Clone,
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the directive definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  pub fn parser_with<'src, I, E, AP, LP>(
+    args_parser: AP,
+    directive_locations_parser: LP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    AP: Parser<'src, I, Args, E> + Clone,
+    LP: Parser<'src, I, Locations, E> + Clone,
   {
     // description? ~ 'directive' ~ '@' ~ name ~ arguments_definition? ~ repeatable? ~ 'on' ~ directive_locations
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Directive::parser())
-      .then_ignore(ignored())
-      .then(At::parser())
-      .then_ignore(ignored())
+      .then(keywords::Directive::parser().padded_by(ignored()))
+      .then(At::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then_ignore(ignored())
-      .then(args_parser.or_not())
-      .then_ignore(ignored())
-      .then(keywords::Repeatable::parser().or_not())
-      .then_ignore(ignored())
-      .then(keywords::On::parser())
-      .then_ignore(ignored())
-      .then(locations_parser)
+      .then(ignored().ignore_then(args_parser).or_not())
+      .then(
+        ignored()
+          .ignore_then(keywords::Repeatable::parser())
+          .or_not(),
+      )
+      .then(keywords::On::parser().padded_by(ignored()))
+      .then(directive_locations_parser)
       .map_with(
         |(
           ((((((description, keyword), at), name), arguments_definition), repeateable), on),
@@ -1175,6 +1178,5 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
           }
         },
       )
-      .padded_by(ignored())
   }
 }

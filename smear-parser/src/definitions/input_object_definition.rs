@@ -146,7 +146,7 @@ use crate::{
 ///
 /// Spec: [Input Object Type Definition](https://spec.graphql.org/draft/#sec-Input-Object-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputObjectDefinition<FieldsDefinition, Directives, Span> {
+pub struct InputObjectTypeDefinition<Directives, FieldsDefinition, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   input: keywords::Input<Span>,
@@ -155,8 +155,8 @@ pub struct InputObjectDefinition<FieldsDefinition, Directives, Span> {
   fields: Option<FieldsDefinition>,
 }
 
-impl<FieldsDefinition, Directives, Span> AsRef<Span>
-  for InputObjectDefinition<FieldsDefinition, Directives, Span>
+impl<Directives, FieldsDefinition, Span> AsRef<Span>
+  for InputObjectTypeDefinition<Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -164,8 +164,8 @@ impl<FieldsDefinition, Directives, Span> AsRef<Span>
   }
 }
 
-impl<FieldsDefinition, Directives, Span> IntoSpan<Span>
-  for InputObjectDefinition<FieldsDefinition, Directives, Span>
+impl<Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InputObjectTypeDefinition<Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -173,8 +173,8 @@ impl<FieldsDefinition, Directives, Span> IntoSpan<Span>
   }
 }
 
-impl<FieldsDefinition, Directives, Span> IntoComponents
-  for InputObjectDefinition<FieldsDefinition, Directives, Span>
+impl<Directives, FieldsDefinition, Span> IntoComponents
+  for InputObjectTypeDefinition<Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
@@ -198,7 +198,9 @@ impl<FieldsDefinition, Directives, Span> IntoComponents
   }
 }
 
-impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition, Directives, Span> {
+impl<Directives, FieldsDefinition, Span>
+  InputObjectTypeDefinition<Directives, FieldsDefinition, Span>
+{
   /// Returns a reference to the span covering the entire input object definition.
   ///
   /// The span includes the optional description, input keyword, name, optional
@@ -259,27 +261,38 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
   /// This parser handles the full input object definition syntax including all
   /// optional components. The parsing of fields definition and directives is
   /// delegated to the provided parser functions.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input object type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
-  pub fn parser_with<'src, I, E, FP, DP>(
-    input_fields_definition_parser: FP,
+  pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: DP,
+    input_fields_definition_parser: FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
-      .then_ignore(ignored())
-      .then(keywords::Input::parser().then_ignore(ignored()))
+      .then(keywords::Input::parser().padded_by(ignored()))
       .then(Name::parser())
-      .then(directives_parser.padded_by(ignored()).or_not())
-      .then(input_fields_definition_parser.padded_by(ignored()).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(
+        ignored()
+          .ignore_then(input_fields_definition_parser)
+          .or_not(),
+      )
       .map_with(
         |((((description, input), name), directives), fields), sp| Self {
           span: Span::from_map_extra(sp),
@@ -290,7 +303,6 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
           fields,
         },
       )
-      .padded_by(ignored())
   }
 }
 
@@ -331,7 +343,7 @@ impl<FieldsDefinition, Directives, Span> InputObjectDefinition<FieldsDefinition,
 /// * `Directives` - The type representing directives applied to the input object extension
 /// * `FieldsDefinition` - The type representing the new input fields being added
 #[derive(Debug, Clone, Copy)]
-pub enum InputObjectExtensionContent<Directives, FieldsDefinition> {
+pub enum InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
   /// Extension that adds only directives to the input object type without new fields
   Directives(Directives),
   /// Extension that adds new input fields, optionally with additional directives on the type
@@ -343,7 +355,7 @@ pub enum InputObjectExtensionContent<Directives, FieldsDefinition> {
   },
 }
 
-impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, FieldsDefinition> {
+impl<Directives, FieldsDefinition> InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
   /// Creates a parser that can parse input object extension content.
   ///
   /// This parser handles both types of input object extensions: those that add fields
@@ -356,24 +368,22 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
   /// whitespace skipping or comment processing around the extension content.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, DP, IFDP>(
+  pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> IFDP,
+    fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-
     DP: Parser<'src, I, Directives, E> + Clone,
-    IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
   {
     choice((
       directives_parser()
-        .then_ignore(ignored())
         .or_not()
-        .then(fields_definition_parser())
+        .then(ignored().ignore_then(fields_definition_parser()))
         .map(|(directives, fields)| Self::Fields { directives, fields }),
       directives_parser().map(Self::Directives),
     ))
@@ -447,16 +457,16 @@ impl<Directives, FieldsDefinition> InputObjectExtensionContent<Directives, Field
 ///
 /// Spec: [Input Object Type Extension](https://spec.graphql.org/draft/#sec-Input-Object-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct InputObjectExtension<Directives, FieldsDefinition, Span> {
+pub struct InputObjectTypeExtension<Directives, FieldsDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   input: keywords::Input<Span>,
   name: Name<Span>,
-  content: InputObjectExtensionContent<Directives, FieldsDefinition>,
+  content: InputObjectTypeExtensionContent<Directives, FieldsDefinition>,
 }
 
 impl<Directives, FieldsDefinition, Span> AsRef<Span>
-  for InputObjectExtension<Directives, FieldsDefinition, Span>
+  for InputObjectTypeExtension<Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -465,7 +475,7 @@ impl<Directives, FieldsDefinition, Span> AsRef<Span>
 }
 
 impl<Directives, FieldsDefinition, Span> IntoSpan<Span>
-  for InputObjectExtension<Directives, FieldsDefinition, Span>
+  for InputObjectTypeExtension<Directives, FieldsDefinition, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -474,14 +484,14 @@ impl<Directives, FieldsDefinition, Span> IntoSpan<Span>
 }
 
 impl<Directives, FieldsDefinition, Span> IntoComponents
-  for InputObjectExtension<Directives, FieldsDefinition, Span>
+  for InputObjectTypeExtension<Directives, FieldsDefinition, Span>
 {
   type Components = (
     Span,
     keywords::Extend<Span>,
     keywords::Input<Span>,
     Name<Span>,
-    InputObjectExtensionContent<Directives, FieldsDefinition>,
+    InputObjectTypeExtensionContent<Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -490,7 +500,9 @@ impl<Directives, FieldsDefinition, Span> IntoComponents
   }
 }
 
-impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, FieldsDefinition, Span> {
+impl<Directives, FieldsDefinition, Span>
+  InputObjectTypeExtension<Directives, FieldsDefinition, Span>
+{
   /// Returns a reference to the span covering the entire input object extension.
   ///
   /// The span includes the extend keyword, input keyword, name, and all
@@ -532,7 +544,7 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
   /// The content specifies what is being added to the input object type:
   /// either new fields (optionally with directives), or just directives.
   #[inline]
-  pub const fn content(&self) -> &InputObjectExtensionContent<Directives, FieldsDefinition> {
+  pub const fn content(&self) -> &InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
     &self.content
   }
 
@@ -540,30 +552,37 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
   ///
   /// This parser handles the full input object extension syntax including the extend
   /// and input keywords, target input object name, and extension content.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the input object type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
-  pub fn parser_with<'src, I, E, IFDP, DP>(
-    input_fields_definition_parser: impl Fn() -> IFDP,
+  pub fn parser_with<'src, I, E, DP, FP>(
     directives_parser: impl Fn() -> DP,
+    input_fields_definition_parser: impl Fn() -> FP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
-
-    IFDP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()
-      .then_ignore(ignored())
-      .then(keywords::Input::parser())
-      .then_ignore(ignored())
-      .then(Name::parser().then_ignore(ignored()))
-      .then(InputObjectExtensionContent::parser_with(
-        directives_parser,
-        input_fields_definition_parser,
-      ))
+      .then(keywords::Input::parser().padded_by(ignored()))
+      .then(Name::parser())
+      .then(
+        ignored().ignore_then(InputObjectTypeExtensionContent::parser_with(
+          directives_parser,
+          input_fields_definition_parser,
+        )),
+      )
       .map_with(|(((extend, input), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,
@@ -571,6 +590,5 @@ impl<Directives, FieldsDefinition, Span> InputObjectExtension<Directives, Fields
         name,
         content,
       })
-      .padded_by(ignored())
   }
 }

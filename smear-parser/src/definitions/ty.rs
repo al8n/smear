@@ -1,0 +1,518 @@
+use chumsky::{extra::ParserExtra, prelude::*};
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+
+use std::{boxed::Box, rc::Rc, sync::Arc};
+
+use crate::{
+  convert::*,
+  lang::{
+    ignored,
+    punct::{Bang, LBracket, RBracket},
+    Name,
+  },
+  source::{Char, Slice, Source},
+};
+
+/// Represents a named GraphQL type with optional non-null modifier.
+///
+/// Named types are the foundation of GraphQL's type system, referencing
+/// concrete types by name. They can represent any defined type in the schema:
+/// scalars, objects, interfaces, unions, enums, or input objects.
+///
+/// The optional bang (`!`) suffix makes the type non-null, meaning it cannot
+/// return `null` values and must always provide a valid value of the specified type.
+///
+/// ## Examples
+///
+/// ```text
+/// # Nullable named types
+/// String          # Can be null or a string value
+/// User            # Can be null or a User object
+/// PostStatus      # Can be null or a PostStatus enum value
+///
+/// # Non-null named types  
+/// String!         # Must be a string value, never null
+/// User!           # Must be a User object, never null
+/// ID!             # Must be an ID value, never null
+///
+/// # Usage in field definitions
+/// type User {
+///   id: ID!                    # Required ID
+///   name: String!              # Required name
+///   email: String              # Optional email (can be null)
+///   avatar: Image              # Optional avatar image
+///   status: UserStatus!        # Required status enum
+/// }
+/// ```
+///
+/// ## Nullability Semantics
+/// - **Without `!`**: Field can return `null` or a valid value
+/// - **With `!`**: Field must always return a valid value, never `null`
+/// - **Error Handling**: Non-null fields that would return `null` cause query errors
+/// - **Schema Evolution**: Adding `!` to existing fields is a breaking change
+///
+/// ## Grammar
+/// ```text
+/// NamedType : Name !?
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct NamedType<Span> {
+  span: Span,
+  name: Name<Span>,
+  bang: Option<Bang<Span>>,
+}
+
+impl<Span> AsRef<Span> for NamedType<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for NamedType<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span> IntoComponents for NamedType<Span> {
+  type Components = (Span, Name<Span>, Option<Bang<Span>>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.name, self.bang)
+  }
+}
+
+impl<Span> NamedType<Span> {
+  /// Returns a reference to the span covering the entire named type.
+  ///
+  /// The span includes the type name and optional bang modifier,
+  /// providing complete source location information.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the name of the type.
+  ///
+  /// This is the identifier that references a type defined elsewhere in the schema.
+  /// Type names must follow GraphQL naming conventions and resolve to valid
+  /// schema types (scalars, objects, interfaces, unions, enums, or input objects).
+  #[inline]
+  pub const fn name(&self) -> &Name<Span> {
+    &self.name
+  }
+
+  /// Returns a reference to the optional non-null modifier (`!`).
+  ///
+  /// The bang modifier indicates whether this type is non-null:
+  /// - `Some(bang)`: Type is non-null (cannot be `null`)
+  /// - `None`: Type is nullable (can be `null`)
+  #[inline]
+  pub const fn bang(&self) -> Option<&Bang<Span>> {
+    self.bang.as_ref()
+  }
+
+  /// Creates a parser for named types.
+  ///
+  /// This parser recognizes a type name followed by an optional bang (`!`) modifier.
+  /// It handles whitespace between the name and bang appropriately.
+  ///
+  /// ## Grammar Handled
+  /// ```text
+  /// NamedType : Name !?
+  /// ```
+  ///
+  /// ## Example Parsed Input
+  /// ```text
+  /// String      # Nullable string type
+  /// String!     # Non-null string type
+  /// User        # Nullable User object type
+  /// ID!         # Non-null ID scalar type
+  /// ```
+  #[inline]
+  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+  {
+    Name::parser()
+      .then(ignored().ignore_then(Bang::parser()).or_not())
+      .map_with(|(name, bang), sp| Self {
+        span: Span::from_map_extra(sp),
+        name,
+        bang,
+      })
+  }
+}
+
+/// Represents a GraphQL list type with optional non-null modifier.
+///
+/// List types represent arrays or collections of values in GraphQL. They wrap
+/// another type (the element type) to indicate that fields of this type return
+/// multiple values of the wrapped type.
+///
+/// List types support complex nullability semantics:
+/// - The list itself can be null or non-null
+/// - The elements within the list can be null or non-null
+/// - These nullability rules are independent and composable
+///
+/// ## Examples
+///
+/// ```text
+/// # Nullable list of nullable strings
+/// [String]         # Can be null, or a list containing strings and nulls
+///
+/// # Non-null list of nullable strings
+/// [String]!        # Must be a list (never null), but can contain nulls
+///
+/// # Nullable list of non-null strings
+/// [String!]        # Can be null, or a list containing only strings (no nulls)
+///
+/// # Non-null list of non-null strings
+/// [String!]!       # Must be a list containing only strings (no nulls anywhere)
+///
+/// # Nested list types
+/// [[String]]       # List of lists of strings
+/// [User!]!         # Non-null list of non-null User objects
+/// [[String!]!]!    # Non-null list of non-null lists of non-null strings
+/// ```
+///
+/// ## Nullability Combinations
+///
+/// | Type Syntax | List Nullability | Element Nullability | Example Values |
+/// |-------------|------------------|---------------------|----------------|
+/// | `[String]`  | Nullable | Nullable | `null`, `["a", null, "c"]` |
+/// | `[String]!` | Non-null | Nullable | `["a", null, "c"]`, `[]` |
+/// | `[String!]` | Nullable | Non-null | `null`, `["a", "b", "c"]` |
+/// | `[String!]!`| Non-null | Non-null | `["a", "b", "c"]`, `[]` |
+///
+/// ## Use Cases
+/// - **Collections**: Arrays of objects, IDs, or scalar values
+/// - **Relationships**: One-to-many relationships in object types
+/// - **Batch Operations**: Multiple inputs or outputs in mutations
+/// - **Search Results**: Variable-length result sets
+/// - **Tags/Categories**: Multiple classifications or labels
+///
+/// ## Grammar
+/// ```text
+/// ListType : [ Type ] !?
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct ListType<Type, Span> {
+  span: Span,
+  l_bracket: LBracket<Span>,
+  ty: Type,
+  r_bracket: RBracket<Span>,
+  bang: Option<Bang<Span>>,
+}
+
+impl<Type, Span> AsRef<Span> for ListType<Type, Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Type, Span> IntoSpan<Span> for ListType<Type, Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Type, Span> IntoComponents for ListType<Type, Span> {
+  type Components = (
+    Span,
+    LBracket<Span>,
+    Type,
+    RBracket<Span>,
+    Option<Bang<Span>>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.l_bracket,
+      self.ty,
+      self.r_bracket,
+      self.bang,
+    )
+  }
+}
+
+impl<Type, Span> ListType<Type, Span> {
+  /// Returns a reference to the span covering the entire list type.
+  ///
+  /// The span includes the brackets, element type, and optional bang modifier.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the opening left bracket (`[`).
+  ///
+  /// This marks the beginning of the list type syntax and provides
+  /// the exact source location of the opening delimiter.
+  #[inline]
+  pub const fn l_bracket(&self) -> &LBracket<Span> {
+    &self.l_bracket
+  }
+
+  /// Returns a reference to the element type contained within the list.
+  ///
+  /// This is the type of individual elements in the list. It can be any
+  /// valid GraphQL type including named types, other list types, or even
+  /// nested list types for multi-dimensional arrays.
+  ///
+  /// ## Examples
+  /// ```rust
+  /// // For list type [String!]
+  /// let element_type = list_type.ty(); // References String!
+  ///
+  /// // For nested list [[User]]
+  /// let element_type = list_type.ty(); // References [User]
+  /// ```
+  #[inline]
+  pub const fn ty(&self) -> &Type {
+    &self.ty
+  }
+
+  /// Returns a reference to the closing right bracket (`]`).
+  ///
+  /// This marks the end of the list type syntax and provides
+  /// the exact source location of the closing delimiter.
+  #[inline]
+  pub const fn r_bracket(&self) -> &RBracket<Span> {
+    &self.r_bracket
+  }
+
+  /// Returns a reference to the optional non-null modifier for the list itself.
+  ///
+  /// This bang modifier applies to the list as a whole, not to the elements:
+  /// - `Some(bang)`: List cannot be `null` (but elements may be nullable)
+  /// - `None`: List can be `null`
+  #[inline]
+  pub const fn bang(&self) -> Option<&Bang<Span>> {
+    self.bang.as_ref()
+  }
+
+  /// Creates a parser for list types using the provided element type parser.
+  ///
+  /// This parser handles the complete list type syntax including brackets,
+  /// element type parsing, and optional bang modifier. The element type
+  /// parsing is delegated to the provided parser for flexibility.
+  ///
+  /// ## Parser Flow
+  /// 1. Parse opening bracket `[`
+  /// 2. Parse element type (with whitespace handling)
+  /// 3. Parse closing bracket `]`
+  /// 4. Parse optional bang modifier `!`
+  /// 5. Capture complete span information
+  ///
+  /// ## Parameters
+  /// - `parser`: Parser for the element type within the list
+  ///
+  /// ## Grammar Handled
+  /// ```text
+  /// ListType : [ Type ] !?
+  /// ```
+  ///
+  /// ## Example Parsed Input
+  /// ```text
+  /// [String]        # Nullable list of nullable strings
+  /// [String!]!      # Non-null list of non-null strings
+  /// [[User]]        # Nested list type
+  /// [ID!]           # Nullable list of non-null IDs
+  /// ```
+  #[inline]
+  pub fn parser_with<'src, I, E, P>(parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    P: Parser<'src, I, Type, E> + Clone,
+  {
+    LBracket::parser()
+      .then(parser.padded_by(ignored()))
+      .then(RBracket::parser())
+      .then(ignored().ignore_then(Bang::parser()).or_not())
+      .map_with(|(((l_bracket, ty), r_bracket), bang), sp| Self {
+        span: Span::from_map_extra(sp),
+        l_bracket,
+        ty,
+        r_bracket,
+        bang,
+      })
+  }
+}
+
+macro_rules! ty {
+  ($(
+    $(#[$meta:meta])*
+    $ty:ident<$name:ident>), +$(,)?
+  ) => {
+    paste::paste! {
+      $(
+        ///
+        /// Represents a complete GraphQL type that can be either named or a list.
+        ///
+        /// This enum captures the two fundamental categories of types in GraphQL:
+        /// - **Named Types**: Direct references to schema-defined types
+        /// - **List Types**: Collections wrapping other types
+        ///
+        /// The type system is recursive - list types can contain other list types,
+        /// enabling complex nested structures like lists of lists.
+        ///
+        /// ## Type Categories
+        ///
+        /// ### Named Types (`Name` variant)
+        /// Reference types defined in the schema:
+        /// - **Scalars**: `String`, `Int`, `Float`, `Boolean`, `ID`, custom scalars
+        /// - **Objects**: User-defined object types
+        /// - **Interfaces**: Abstract types with shared fields
+        /// - **Unions**: Types that can be one of several object types
+        /// - **Enums**: Types with predefined values
+        /// - **Input Objects**: Complex input types for mutations
+        ///
+        /// ### List Types (`List` variant)
+        /// Collections of other types:
+        /// - **Simple Lists**: `[String]`, `[User]`, `[ID!]`
+        /// - **Nested Lists**: `[[String]]`, `[[[Int]]]`
+        /// - **Mixed Nullability**: `[String!]!`, `[User]!`, `[[String!]]`
+        ///
+        /// ## Examples
+        ///
+        /// ```text
+        /// # Named types in field definitions
+        /// type User {
+        ///   id: ID!                    # Named type: non-null ID
+        ///   name: String!              # Named type: non-null String
+        ///   email: String              # Named type: nullable String
+        ///   role: UserRole!            # Named type: non-null enum
+        /// }
+        ///
+        /// # List types in field definitions
+        /// type Post {
+        ///   tags: [String!]!           # List type: non-null list of non-null strings
+        ///   comments: [Comment]        # List type: nullable list of nullable comments
+        ///   relatedPosts: [[Post!]]    # List type: nested lists
+        /// }
+        ///
+        /// # Complex type combinations
+        /// type SearchResult {
+        ///   users: [User!]             # List of non-null users (list can be null)
+        ///   posts: [Post]!             # Non-null list of nullable posts
+        ///   categories: [[Category!]]! # Non-null list of non-null lists of non-null categories
+        /// }
+        /// ```
+        ///
+        /// ## Type Resolution
+        ///
+        /// During schema processing, types are resolved as follows:
+        /// 1. **Named Types**: Lookup in schema type registry
+        /// 2. **List Types**: Recursively resolve element type, then wrap in list
+        /// 3. **Validation**: Ensure all referenced types exist and are valid
+        ///
+        /// ## Memory Management
+        ///
+        #[doc = "This type uses `" $ty "` for self-referential structures:"]
+        ///
+        $(#[$meta])*
+        #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
+        #[unwrap(ref, ref_mut)]
+        #[try_unwrap(ref, ref_mut)]
+        pub enum $name<Span> {
+          /// A named type referencing a schema-defined type.
+          ///
+          /// Examples: `String!`, `User`, `PostStatus!`, `ID`
+          Name(NamedType<Span>),
+
+          /// A list type containing elements of another type.
+          ///
+          /// Examples: `[String]!`, `[[User!]]`, `[ID!]`
+          List($ty<ListType<Self, Span>>),
+        }
+
+        impl<Span> From<ListType<Self, Span>> for $name<Span> {
+          #[inline]
+          fn from(ty: ListType<Self, Span>) -> Self {
+            Self::List(<$ty<ListType<Self, Span>>>::new(ty))
+          }
+        }
+
+        impl<Span> AsRef<Span> for $name<Span> {
+          #[inline]
+          fn as_ref(&self) -> &Span {
+            match self {
+              Self::Name(ty) => ty.span(),
+              Self::List(ty) => ty.span(),
+            }
+          }
+        }
+
+        impl<Span> $name<Span> {
+          /// Creates a recursive parser for GraphQL types.
+          ///
+          /// This parser handles the complete GraphQL type syntax including
+          /// named types, list types, and nested combinations. It uses recursion
+          /// to handle arbitrarily nested list types.
+          #[inline]
+          pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+          where
+            I: Source<'src>,
+            I::Token: Char + 'src,
+            I::Slice: Slice<Token = I::Token>,
+            I::Slice: Slice<Token = I::Token>,
+            E: ParserExtra<'src, I>,
+            Span: crate::source::FromMapExtra<'src, I, E>,
+          {
+            recursive(|parser| {
+              choice((NamedType::parser().map(Self::Name), ListType::parser_with(parser).map(Self::from)))
+            })
+          }
+        }
+      )*
+    }
+  };
+}
+
+ty!(
+  /// GraphQL type using `Box` for recursive list types.
+  ///
+  /// This is the standard type representation that uses heap allocation
+  /// for recursive structures. Suitable for most use cases where types
+  /// are processed once and don't require sharing.
+  Box<Type>,
+  /// GraphQL type using `Rc` for recursive list types with reference counting.
+  ///
+  /// This type uses `Rc` (Reference Counted) smart pointers to enable
+  /// sharing of type structures within single-threaded contexts. Useful
+  /// when the same type structure is referenced in multiple places.
+  Rc<RcType>,
+  /// GraphQL type using `Arc` for recursive list types with atomic reference counting.
+  ///
+  /// This type uses `Arc` (Atomically Reference Counted) smart pointers
+  /// to enable sharing of type structures across thread boundaries. Required
+  /// for multi-threaded schema processing or when types need to be Send + Sync.
+  Arc<ArcType>,
+);
+
+impl<Span> IntoSpan<Span> for Type<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Name(ty) => ty.into_span(),
+      Self::List(ty) => ty.into_span(),
+    }
+  }
+}

@@ -3,7 +3,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use super::super::{
+use crate::{
   convert::*,
   lang::{
     ignored,
@@ -134,8 +134,14 @@ impl<InputValueDefinition, Span, Container>
   /// This allows iteration over, indexing into, or otherwise working with
   /// the collection of argument definitions.
   #[inline]
-  pub const fn values(&self) -> &Container {
+  pub const fn input_value_definitions(&self) -> &Container {
     &self.values
+  }
+
+  /// Consumes and returns the input value definitions.
+  #[inline]
+  pub fn into_input_value_definitions(self) -> Container {
+    self.values
   }
 
   /// Returns a reference to the opening left parenthesis (`(`) of the arguments definition.
@@ -180,17 +186,18 @@ impl<InputValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, InputValueDefinition, E> + Clone,
     Container: chumsky::container::Container<InputValueDefinition>,
   {
     LParen::parser()
-      // allow Ignored right after '(' (e.g., newlines/commas)
-      .then_ignore(ignored())
-      // one-or-more items, collected into `Container`
-      .then(input_value_definition_parser.padded_by(ignored()).repeated().at_least(1).collect())
-      // optional Ignored before ')'
-      .then_ignore(ignored())
+      .then(
+        input_value_definition_parser
+          .padded_by(ignored())
+          .repeated()
+          .at_least(1)
+          .collect(),
+      )
       .then(RParen::parser())
       .map_with(|((l_paren, values), r_paren), sp| Self {
         span: Span::from_map_extra(sp),

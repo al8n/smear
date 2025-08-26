@@ -60,7 +60,7 @@ impl<Span> NullValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     just([I::Token::n, I::Token::u, I::Token::l, I::Token::l])
       .map_with(|_, span| Self(Span::from_map_extra(span)))
