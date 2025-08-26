@@ -995,11 +995,6 @@ pub struct DirectiveDefinition<Args, Locations, Span> {
   directive_locations: Locations,
 }
 
-impl<Args, Locations, Span> Const<true> for DirectiveDefinition<Args, Locations, Span> where
-  Args: Const<true>
-{
-}
-
 impl<Args, Locations, Span> AsRef<Span> for DirectiveDefinition<Args, Locations, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -1147,7 +1142,6 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Args: Const<true>,
     Span: crate::source::Span<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     LP: Parser<'src, I, Locations, E> + Clone,

@@ -27,9 +27,6 @@ pub struct Directive<Args, Span> {
   arguments: Option<Args>,
 }
 
-impl<Args, Span> Const<true> for Directive<Args, Span> where Args: Const<true> {}
-impl<Args, Span> Const<false> for Directive<Args, Span> where Args: Const<false> {}
-
 impl<Args, Span> AsRef<Span> for Directive<Args, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -136,16 +133,6 @@ pub struct Directives<Directive, Span, Container = Vec<Directive>> {
   span: Span,
   directives: Container,
   _directive: PhantomData<Directive>,
-}
-
-impl<Directive, Span, Container> Const<true> for Directives<Directive, Span, Container> where
-  Directive: Const<true>
-{
-}
-
-impl<Directive, Span, Container> Const<false> for Directives<Directive, Span, Container> where
-  Directive: Const<false>
-{
 }
 
 impl<Directive, Span, Container> AsRef<Span> for Directives<Directive, Span, Container> {

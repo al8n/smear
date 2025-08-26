@@ -26,7 +26,7 @@ pub use smear_parser::{
 macro_rules! newtype {
   (
     $(#[$meta:meta])*
-    $(Const<$const:literal>)? struct $outer:ident($inner:ty $(,)?) {
+    struct $outer:ident($inner:ty $(,)?) {
       $(#[$parser_meta:meta])*
       parser: $parser:expr
 
@@ -70,10 +70,6 @@ macro_rules! newtype {
       }
     }
 
-    $(
-      impl<Span> Const<$const> for $outer<Span> {}
-    )?
-
     impl<Span> $outer<Span> {
       $(#[$parser_meta])*
       pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
@@ -92,19 +88,19 @@ macro_rules! newtype {
   };
 }
 
-newtype!(Const<false> struct ObjectField(lang::ObjectField<InputValue<Span>, Span>) {
+newtype!(struct ObjectField(lang::ObjectField<InputValue<Span>, Span>) {
   parser: {
     lang::ObjectField::parser_with(InputValue::parser()).map(Self)
   }
 });
 
-newtype!(Const<true> struct ConstObjectField(lang::ObjectField<ConstInputValue<Span>, Span>) {
+newtype!(struct ConstObjectField(lang::ObjectField<ConstInputValue<Span>, Span>) {
   parser: {
     lang::ObjectField::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-newtype!(Const<false> struct Object(lang::Object<ObjectField<Span>, Span>) {
+newtype!(struct Object(lang::Object<ObjectField<Span>, Span>) {
   parser: {
     lang::Object::parser_with(ObjectField::parser()).map(Self)
   },
@@ -116,7 +112,7 @@ newtype!(Const<false> struct Object(lang::Object<ObjectField<Span>, Span>) {
   }
 });
 
-newtype!(Const<true> struct ConstObject(lang::Object<ConstObjectField<Span>, Span>) {
+newtype!(struct ConstObject(lang::Object<ConstObjectField<Span>, Span>) {
   parser: {
     lang::Object::parser_with(ConstObjectField::parser()).map(Self)
   },
@@ -128,7 +124,7 @@ newtype!(Const<true> struct ConstObject(lang::Object<ConstObjectField<Span>, Spa
   }
 });
 
-newtype!(Const<false> struct List(lang::List<InputValue<Span>, Span>) {
+newtype!(struct List(lang::List<InputValue<Span>, Span>) {
   parser: {
     lang::List::parser_with(InputValue::parser()).map(Self)
   },
@@ -140,7 +136,7 @@ newtype!(Const<false> struct List(lang::List<InputValue<Span>, Span>) {
   }
 });
 
-newtype!(Const<true> struct ConstList(lang::List<ConstInputValue<Span>, Span>) {
+newtype!(struct ConstList(lang::List<ConstInputValue<Span>, Span>) {
   parser: {
     lang::List::parser_with(ConstInputValue::parser()).map(Self)
   },
@@ -190,8 +186,6 @@ pub enum InputValue<Span> {
   /// Spec: [Input Object Value](https://spec.graphql.org/draft/#sec-Input-Object-Value)
   Object(Object<Span>),
 }
-
-impl<Span> Const<false> for InputValue<Span> {}
 
 impl<Span> InputValue<Span> {
   /// Returns the span of the input value.
@@ -288,8 +282,6 @@ pub enum ConstInputValue<Span> {
   Object(ConstObject<Span>),
 }
 
-impl<Span> Const<true> for ConstInputValue<Span> {}
-
 impl<Span> ConstInputValue<Span> {
   /// Returns the span of the input value.
   #[inline]
@@ -347,19 +339,19 @@ impl<Span> ConstInputValue<Span> {
   }
 }
 
-newtype!(Const<true> struct DefaultInputValue(lang::DefaultInputValue<ConstInputValue<Span>, Span>) {
+newtype!(struct DefaultInputValue(lang::DefaultInputValue<ConstInputValue<Span>, Span>) {
   parser: {
     lang::DefaultInputValue::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-newtype!(Const<false> struct Argument(lang::Argument<InputValue<Span>, Span>) {
+newtype!(struct Argument(lang::Argument<InputValue<Span>, Span>) {
   parser: {
     lang::Argument::parser_with(InputValue::parser()).map(|arg| Self(arg))
   }
 });
 
-newtype!(Const<false> struct Arguments(lang::Arguments<Argument<Span>, Span>) {
+newtype!(struct Arguments(lang::Arguments<Argument<Span>, Span>) {
   parser: {
     lang::Arguments::parser_with(Argument::parser()).map(Self)
   },
@@ -372,13 +364,13 @@ newtype!(Const<false> struct Arguments(lang::Arguments<Argument<Span>, Span>) {
   }
 });
 
-newtype!(Const<true> struct ConstArgument(lang::Argument<ConstInputValue<Span>, Span>) {
+newtype!(struct ConstArgument(lang::Argument<ConstInputValue<Span>, Span>) {
   parser: {
     lang::Argument::parser_with(ConstInputValue::parser()).map(Self)
   }
 });
 
-newtype!(Const<true> struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
+newtype!(struct ConstArguments(lang::Arguments<ConstArgument<Span>, Span>) {
   parser: {
     lang::Arguments::parser_with(ConstArgument::parser()).map(Self)
   },
@@ -391,13 +383,13 @@ newtype!(Const<true> struct ConstArguments(lang::Arguments<ConstArgument<Span>, 
   }
 });
 
-newtype!(Const<false> struct Directive(lang::Directive<Arguments<Span>, Span>) {
+newtype!(struct Directive(lang::Directive<Arguments<Span>, Span>) {
   parser: {
     lang::Directive::parser_with(Arguments::parser()).map(Self)
   }
 });
 
-newtype!(Const<false> struct Directives(lang::Directives<Directive<Span>, Span>) {
+newtype!(struct Directives(lang::Directives<Directive<Span>, Span>) {
   parser: {
     lang::Directives::parser_with(Directive::parser()).map(Self)
   },
@@ -414,13 +406,13 @@ newtype!(Const<false> struct Directives(lang::Directives<Directive<Span>, Span>)
   }
 });
 
-newtype!(Const<true> struct ConstDirective(lang::Directive<ConstArguments<Span>, Span>) {
+newtype!(struct ConstDirective(lang::Directive<ConstArguments<Span>, Span>) {
   parser: {
     lang::Directive::parser_with(ConstArguments::parser()).map(Self)
   }
 });
 
-newtype!(Const<true> struct ConstDirectives(lang::Directives<ConstDirective<Span>, Span>) {
+newtype!(struct ConstDirectives(lang::Directives<ConstDirective<Span>, Span>) {
   parser: {
     lang::Directives::parser_with(ConstDirective::parser()).map(Self)
   },
@@ -591,7 +583,7 @@ newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
   }
 });
 
-newtype!(Const<true> struct InputValueDefinition(definitions::InputValueDefinition<
+newtype!(struct InputValueDefinition(definitions::InputValueDefinition<
   Type<Span>,
   DefaultInputValue<Span>,
   ConstDirectives<Span>,
@@ -642,7 +634,7 @@ newtype!(struct DirectiveDefinition(
   }
 });
 
-newtype!(Const<true> struct EnumValueDefinition(definitions::EnumValueDefinition<ConstDirectives<Span>, Span>) {
+newtype!(struct EnumValueDefinition(definitions::EnumValueDefinition<ConstDirectives<Span>, Span>) {
   parser: {
     definitions::EnumValueDefinition::parser_with(ConstDirectives::parser()).map(Self)
   }
@@ -684,7 +676,7 @@ newtype!(struct EnumTypeExtension(definitions::EnumTypeExtension<ConstDirectives
   }
 });
 
-newtype!(Const<true> struct FieldDefinition(
+newtype!(struct FieldDefinition(
   definitions::FieldDefinition<ConstArguments<Span>, Type<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
@@ -697,7 +689,7 @@ newtype!(Const<true> struct FieldDefinition(
   }
 });
 
-newtype!(Const<true> struct FieldsDefinition(definitions::FieldsDefinition<FieldDefinition<Span>, Span>) {
+newtype!(struct FieldsDefinition(definitions::FieldsDefinition<FieldDefinition<Span>, Span>) {
   parser: {
     definitions::FieldsDefinition::parser_with(FieldDefinition::parser()).map(Self)
   },
@@ -714,7 +706,7 @@ newtype!(Const<true> struct FieldsDefinition(definitions::FieldsDefinition<Field
   }
 });
 
-newtype!(Const<true> struct InputFieldsDefinition(
+newtype!(struct InputFieldsDefinition(
   definitions::InputFieldsDefinition<InputValueDefinition<Span>, Span>,
 ) {
   parser: {

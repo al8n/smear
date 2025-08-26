@@ -280,8 +280,6 @@ impl<Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
-    FieldsDefinition: Const<true>,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -379,8 +377,6 @@ impl<Directives, FieldsDefinition> InputObjectTypeExtensionContent<Directives, F
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Directives: Const<true>,
-    FieldsDefinition: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
   {
@@ -575,8 +571,6 @@ impl<Directives, FieldsDefinition, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
-    FieldsDefinition: Const<true>,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

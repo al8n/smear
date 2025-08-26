@@ -573,7 +573,6 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -656,7 +655,6 @@ impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -818,7 +816,6 @@ impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, 
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {

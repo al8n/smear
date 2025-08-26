@@ -260,7 +260,6 @@ impl<Directives, SelectionSet, Span> FragmentDefinition<Directives, SelectionSet
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<false>,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

@@ -218,7 +218,6 @@ impl<Directives, Span> ScalarTypeDefinition<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -427,7 +426,6 @@ impl<Directives, Span> ScalarTypeExtension<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<true>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     keywords::Extend::parser()

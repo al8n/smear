@@ -235,7 +235,6 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -269,24 +268,24 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 }
 
 /// Represents a complete GraphQL operation definition.
-/// 
+///
 /// Operations are the entry points for GraphQL execution. They can be either
 /// named operations with explicit types and metadata, or shorthand query operations.
 /// Operations define what data to fetch (queries), what data to modify (mutations),
 /// or what real-time updates to subscribe to (subscriptions).
-/// 
+///
 /// GraphQL supports two operation definition syntaxes:
 /// 1. **Named operations**: Full syntax with operation type, optional name, variables, and directives
 /// 2. **Shorthand queries**: Simplified syntax for query operations without variables or directives
-/// 
+///
 /// ## Operation Types and Semantics
-/// 
+///
 /// - **Query operations**: Read-only data retrieval, can be executed in parallel
 /// - **Mutation operations**: Write operations with side effects, executed serially  
 /// - **Subscription operations**: Real-time streaming data over persistent connections
-/// 
+///
 /// ## Examples
-/// 
+///
 /// ```text
 /// # Named query operation
 /// query GetUserProfile($userId: ID!, $includeDetails: Boolean = false) @cached {
@@ -300,7 +299,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 ///     }
 ///   }
 /// }
-/// 
+///
 /// # Named mutation operation
 /// mutation UpdateUserProfile($input: UpdateProfileInput!) @auth(required: true) {
 ///   updateProfile(input: $input) {
@@ -312,7 +311,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 ///     }
 ///   }
 /// }
-/// 
+///
 /// # Named subscription operation
 /// subscription MessageNotifications($channelId: ID!) {
 ///   messageAdded(channelId: $channelId) {
@@ -322,7 +321,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 ///     timestamp
 ///   }
 /// }
-/// 
+///
 /// # Shorthand query operation (no variables, no directives)
 /// {
 ///   user(id: "123") {
@@ -331,14 +330,14 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 ///   }
 /// }
 /// ```
-/// 
+///
 /// ## Grammar
-/// 
+///
 /// ```text
 /// OperationDefinition:
 ///   OperationType Name? VariablesDefinition? Directives? SelectionSet
 ///   | SelectionSet
-/// 
+///
 /// OperationType: one of
 ///   query mutation subscription
 /// ```
@@ -356,7 +355,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 #[try_unwrap(ref, ref_mut)]
 pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span> {
   /// Named operation with full metadata
-  /// 
+  ///
   /// ## Examples
   /// ```text
   /// # Query with variables and directives
@@ -369,7 +368,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
   ///     }
   ///   }
   /// }
-  /// 
+  ///
   /// # Mutation operation
   /// mutation CreatePost($input: CreatePostInput!) {
   ///   createPost(input: $input) {
@@ -378,7 +377,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
   ///     author { name }
   ///   }
   /// }
-  /// 
+  ///
   /// # Subscription operation
   /// subscription LiveUpdates {
   ///   messageAdded {
@@ -392,7 +391,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
     NamedOperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>,
   ),
   /// Shorthand query operation (selection set only)
-  /// 
+  ///
   /// ## Examples
   /// ```text
   /// # Simple data retrieval
@@ -402,7 +401,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
   ///     email
   ///   }
   /// }
-  /// 
+  ///
   /// # Nested field selection
   /// {
   ///   posts(first: 5) {
@@ -417,7 +416,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
   ///     }
   ///   }
   /// }
-  /// 
+  ///
   /// # Multiple top-level fields
   /// {
   ///   currentUser { name email }
@@ -425,7 +424,7 @@ pub enum OperationDefinition<OperationType, VariablesDefinition, Directives, Sel
   ///   settings { theme language }
   /// }
   /// ```
-  /// 
+  ///
   /// ## Equivalent Named Form
   /// The shorthand operation `{ user { name } }` is equivalent to:
   /// ```text
@@ -442,7 +441,7 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
   OperationDefinition<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
 {
   /// Creates a parser for operation definitions.
-  /// 
+  ///
   /// Handles both named and shorthand operation forms with proper precedence.
   ///
   /// ## Notes
@@ -465,7 +464,6 @@ impl<OperationType, VariablesDefinition, Directives, SelectionSet, Span>
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<false>,
     OP: Parser<'src, I, OperationType, E> + Clone,
     VP: Parser<'src, I, VariablesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,

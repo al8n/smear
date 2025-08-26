@@ -312,8 +312,6 @@ impl<Type, Directives, DefaultValue, Span>
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, DefaultValue, E> + Clone,
-    Directives: Const<false>,
-    DefaultValue: Const<true>,
   {
     StringValue::parser()
       .or_not()

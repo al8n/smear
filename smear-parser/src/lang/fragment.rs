@@ -323,7 +323,6 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<false>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
@@ -517,7 +516,6 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    Directives: Const<false>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
     D: Parser<'src, I, Directives, E> + Clone,
   {

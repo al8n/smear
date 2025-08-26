@@ -34,9 +34,6 @@ pub struct Argument<Value, Span> {
   value: Value,
 }
 
-impl<Value, Span> Const<true> for Argument<Value, Span> where Value: Const<true> {}
-impl<Value, Span> Const<false> for Argument<Value, Span> where Value: Const<false> {}
-
 impl<Value, Span> AsRef<Span> for Argument<Value, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -187,9 +184,6 @@ pub struct Arguments<Arg, Span, Container = Vec<Arg>> {
   r_paren: RParen<Span>,
   _arg: PhantomData<Arg>,
 }
-
-impl<Arg, Span, Container> Const<true> for Arguments<Arg, Span, Container> where Arg: Const<true> {}
-impl<Arg, Span, Container> Const<false> for Arguments<Arg, Span, Container> where Arg: Const<false> {}
 
 impl<Arg, Span, Container> AsRef<Span> for Arguments<Arg, Span, Container> {
   #[inline]

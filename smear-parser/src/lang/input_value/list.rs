@@ -65,9 +65,6 @@ pub struct List<Value, Span, Container = Vec<Value>> {
   _value: core::marker::PhantomData<Value>,
 }
 
-impl<Value, Span, Container> Const<true> for List<Value, Span, Container> where Value: Const<true> {}
-impl<Value, Span, Container> Const<false> for List<Value, Span, Container> where Value: Const<false> {}
-
 impl<Value, Span, Container> List<Value, Span, Container> {
   /// Returns the source span of the entire list literal.
   ///
@@ -121,9 +118,7 @@ impl<Value, Span, Container> List<Value, Span, Container> {
   /// whitespace skipping or comment processing around the list.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P, const CONST: bool>(
-    value_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -132,7 +127,6 @@ impl<Value, Span, Container> List<Value, Span, Container> {
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
-    Value: Const<CONST>,
   {
     // '[' ws? ( ']' | elem+ ']' )
     LBracket::parser()

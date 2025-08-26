@@ -49,9 +49,6 @@ pub struct ObjectField<InputValue, Span> {
   value: InputValue,
 }
 
-impl<InputValue, Span> Const<true> for ObjectField<InputValue, Span> where InputValue: Const<true> {}
-impl<InputValue, Span> Const<false> for ObjectField<InputValue, Span> where InputValue: Const<false> {}
-
 impl<InputValue, Span> AsRef<Span> for ObjectField<InputValue, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -130,16 +127,13 @@ impl<InputValue, Span> ObjectField<InputValue, Span> {
   /// whitespace skipping or comment processing around the object.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P, const CONST: bool>(
-    value: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
-    InputValue: Const<CONST>,
     P: Parser<'src, I, InputValue, E> + Clone,
   {
     Name::parser()
@@ -257,12 +251,6 @@ pub struct Object<Field, Span, Container = std::vec::Vec<Field>> {
   _field: core::marker::PhantomData<Field>,
 }
 
-impl<Field, Span, Container> Const<true> for Object<Field, Span, Container> where Field: Const<true> {}
-impl<Field, Span, Container> Const<false> for Object<Field, Span, Container> where
-  Field: Const<false>
-{
-}
-
 impl<Field, Span, Container> AsRef<Span> for Object<Field, Span, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -340,9 +328,7 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
   /// whitespace skipping or comment processing around the object value.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P, const CONST: bool>(
-    field_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'src, I, E, P>(field_parser: P) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -350,7 +336,6 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
     E: ParserExtra<'src, I>,
     Span: crate::source::Span<'src, I, E>,
     P: Parser<'src, I, Field, E> + Clone,
-    Field: Const<CONST>,
     Container: chumsky::container::Container<Field>,
   {
     LBrace::parser()

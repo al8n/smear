@@ -32,19 +32,6 @@ pub struct MapEntry<Key, Value, Span> {
   value: Value,
 }
 
-impl<Key, Value, Span> Const<true> for MapEntry<Key, Value, Span>
-where
-  Key: Const<true>,
-  Value: Const<true>,
-{
-}
-impl<Key, Value, Span> Const<false> for MapEntry<Key, Value, Span>
-where
-  Key: Const<false>,
-  Value: Const<false>,
-{
-}
-
 impl<Key, Value, Span> AsRef<Span> for MapEntry<Key, Value, Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -117,7 +104,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
   /// whitespace skipping or comment processing around the map entry.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, KP, VP, const CONST: bool>(
+  pub fn parser_with<'src, I, E, KP, VP>(
     key_parser: KP,
     value_parser: VP,
   ) -> impl Parser<'src, I, Self, E> + Clone
@@ -129,8 +116,6 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
     Span: crate::source::Span<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
-    Key: Const<CONST>,
-    Value: Const<CONST>,
   {
     key_parser
       .then(Colon::parser().padded_by(ignored()))
@@ -196,19 +181,6 @@ pub struct Map<Key, Value, Span, C = Vec<MapEntry<Key, Value, Span>>> {
   r_angle: RAngle<Span>,
   _key: PhantomData<Key>,
   _value: PhantomData<Value>,
-}
-
-impl<Key, Value, Span, C> Const<true> for Map<Key, Value, Span, C>
-where
-  Key: Const<true>,
-  Value: Const<true>,
-{
-}
-impl<Key, Value, Span, C> Const<false> for Map<Key, Value, Span, C>
-where
-  Key: Const<false>,
-  Value: Const<false>,
-{
 }
 
 impl<Key, Value, Span, C> AsRef<Span> for Map<Key, Value, Span, C> {
@@ -283,7 +255,7 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
   /// whitespace skipping or comment processing around the map.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, KP, VP, const CONST: bool>(
+  pub fn parser_with<'src, I, E, KP, VP>(
     key_parser: KP,
     value_parser: VP,
   ) -> impl Parser<'src, I, Self, E> + Clone
@@ -296,8 +268,6 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
     C: Container<MapEntry<Key, Value, Span>>,
-    Key: Const<CONST>,
-    Value: Const<CONST>,
   {
     LAngle::<Span>::parser()
       .then_ignore(ignored())
