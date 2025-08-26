@@ -133,7 +133,7 @@ impl<InputValue, Span> ObjectField<InputValue, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, InputValue, E> + Clone,
   {
     Name::parser()
@@ -334,7 +334,7 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Field, E> + Clone,
     Container: chumsky::container::Container<Field>,
   {

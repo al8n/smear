@@ -104,7 +104,7 @@ impl<Span> Alias<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Name::<Span>::parser()
       .then_ignore(ignored())
@@ -303,7 +303,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,

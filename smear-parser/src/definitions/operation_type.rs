@@ -105,7 +105,7 @@ impl<Span> OperationType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       Query::parser().map(Self::Query),

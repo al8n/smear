@@ -103,7 +103,7 @@ impl<Span> LeadingImplementInterface<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Ampersand::parser()
       .then_ignore(ignored())
@@ -210,7 +210,7 @@ impl<Span> ImplementInterface<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Ampersand::parser()
       .then_ignore(ignored())
@@ -356,7 +356,7 @@ impl<Span, Container> ImplementInterfaces<Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<ImplementInterface<Span>>,
   {
     keywords::Implements::<Span>::parser()
@@ -566,7 +566,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
@@ -882,7 +882,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone,

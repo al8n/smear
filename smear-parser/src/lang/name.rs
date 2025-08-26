@@ -129,7 +129,7 @@ impl<Span> Name<Span> {
     I::Slice: Slice<Token = I::Token>,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     // [_A-Za-z]
     let start = one_of([

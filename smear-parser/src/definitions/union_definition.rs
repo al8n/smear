@@ -118,7 +118,7 @@ impl<Span> LeadingUnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
@@ -238,7 +238,7 @@ impl<Span> UnionMemberType<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Pipe::parser()
       .then_ignore(ignored())
@@ -367,7 +367,7 @@ impl<Span, Container> UnionMemberTypes<Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<UnionMemberType<Span>>,
   {
     Equal::parser()
@@ -572,7 +572,7 @@ impl<Directives, MemberTypes, Span> UnionTypeDefinition<Directives, MemberTypes,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {
@@ -815,7 +815,7 @@ impl<Directives, MemberTypes, Span> UnionTypeExtension<Directives, MemberTypes, 
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
   {

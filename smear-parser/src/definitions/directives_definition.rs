@@ -314,7 +314,7 @@ impl<Span> ExecutableDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       QueryLocation::parser().map(Self::Query),
@@ -428,7 +428,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       SchemaLocation::parser().map(Self::Schema),
@@ -499,7 +499,7 @@ impl<Span> Location<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
       ExecutableDirectiveLocation::parser().map(Self::Executable),
@@ -628,7 +628,7 @@ impl<Location, Span> LeadingDirectiveLocation<Location, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Location, E> + Clone,
   {
     Pipe::parser()
@@ -749,7 +749,7 @@ impl<Location, Span> DirectiveLocation<Location, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Location, E> + Clone,
   {
     Pipe::parser()
@@ -908,7 +908,7 @@ impl<Location, Span, Container> DirectiveLocations<Location, Span, Container> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     Container: chumsky::container::Container<DirectiveLocation<Location, Span>>,
     P: Parser<'src, I, Location, E> + Clone,
   {
@@ -1141,7 +1141,7 @@ impl<Args, Locations, Span> DirectiveDefinition<Args, Locations, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     LP: Parser<'src, I, Locations, E> + Clone,
   {

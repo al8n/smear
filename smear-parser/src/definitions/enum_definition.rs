@@ -151,7 +151,7 @@ impl<Directives, Span> EnumValueDefinition<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
@@ -320,7 +320,7 @@ impl<EnumValueDefinition, Span, Container>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, EnumValueDefinition, E> + Clone,
     Container: chumsky::container::Container<EnumValueDefinition>,
   {
@@ -530,7 +530,7 @@ impl<Directives, EnumValuesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
@@ -818,7 +818,7 @@ impl<Directives, EnumValuesDefinition, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {

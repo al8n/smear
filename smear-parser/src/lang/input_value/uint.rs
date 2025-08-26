@@ -65,7 +65,7 @@ impl<Span> UintValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     one_of(I::NON_ZERO_DIGITS)
       .then(one_of(I::DIGITS).repeated().ignored())

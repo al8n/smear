@@ -45,7 +45,7 @@ use chumsky::{
 ///
 /// This allows the same parsing interface to work with different levels of
 /// detail in span tracking.
-pub trait Span<'src, I: Input<'src>, E: ParserExtra<'src, I>>: 'src {
+pub trait FromMapExtra<'src, I: Input<'src>, E: ParserExtra<'src, I>>: 'src {
   /// Creates a spanned value from Chumsky's parser extra information.
   ///
   /// This method extracts the necessary information from the parser's extra
@@ -56,7 +56,7 @@ pub trait Span<'src, I: Input<'src>, E: ParserExtra<'src, I>>: 'src {
   fn from_map_extra<'b>(extra: &mut MapExtra<'src, 'b, I, E>) -> Self;
 }
 
-impl<'src, I, E, T> Span<'src, I, E> for T
+impl<'src, I, E, T> FromMapExtra<'src, I, E> for T
 where
   I: Input<'src, Span = T>,
   E: ParserExtra<'src, I>,

@@ -79,7 +79,7 @@ impl<Span> TypeCondition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     keywords::On::parser()
       .then_ignore(ignored())
@@ -198,7 +198,7 @@ impl<Span> FragmentName<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     Name::<Span>::parser()
       .to_slice()
@@ -322,7 +322,7 @@ impl<Directives, Span> FragmentSpread<Directives, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Directives, E> + Clone,
   {
     Ellipsis::parser()
@@ -515,7 +515,7 @@ impl<Directives, SelectionSet, Span> InlineFragment<Directives, SelectionSet, Sp
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     S: Parser<'src, I, SelectionSet, E> + Clone,
     D: Parser<'src, I, Directives, E> + Clone,
   {

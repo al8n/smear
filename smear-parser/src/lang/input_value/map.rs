@@ -112,7 +112,7 @@ impl<Key, Value, Span> MapEntry<Key, Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
   {
@@ -263,7 +263,7 @@ impl<Key, Value, Span, C> Map<Key, Value, Span, C> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     KP: Parser<'src, I, Key, E> + Clone,
     VP: Parser<'src, I, Value, E> + Clone,
     C: Container<MapEntry<Key, Value, Span>>,

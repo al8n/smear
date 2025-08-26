@@ -3,7 +3,7 @@ use chumsky::{
   input::{Input, MapExtra, SliceInput},
 };
 
-use crate::source::Span;
+use crate::source::FromMapExtra;
 
 /// A value paired with its source span information.
 ///
@@ -304,7 +304,7 @@ impl<'src, 'b, I: SliceInput<'src>, E: ParserExtra<'src, I>> From<&mut MapExtra<
   }
 }
 
-impl<'src, I, E> Span<'src, I, E> for WithSource<I::Slice, I::Span>
+impl<'src, I, E> FromMapExtra<'src, I, E> for WithSource<I::Slice, I::Span>
 where
   I: SliceInput<'src>,
   E: ParserExtra<'src, I>,

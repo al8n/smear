@@ -113,7 +113,7 @@ impl<Value, Span> DefaultInputValue<Value, Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, Value, E> + Clone,
   {
     Equal::parser()
@@ -160,7 +160,7 @@ where
   I: Source<'src>,
   I::Token: Char + 'src,
   I::Slice: Slice<Token = I::Token>,
-  I::Span: crate::source::Span<'src, I, E>,
+  I::Span: crate::source::FromMapExtra<'src, I, E>,
   E: ParserExtra<'src, I>,
   KP: Parser<'src, I, Key, E> + Clone,
   VP: Parser<'src, I, Value, E> + Clone,

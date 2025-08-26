@@ -65,7 +65,7 @@ impl<Span> BooleanValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
   {
     just([I::Token::t, I::Token::r, I::Token::u, I::Token::e])
       .to(true)

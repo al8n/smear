@@ -256,7 +256,7 @@ impl<Type, DefaultValue, Directives, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     VP: Parser<'src, I, DefaultValue, E> + Clone,

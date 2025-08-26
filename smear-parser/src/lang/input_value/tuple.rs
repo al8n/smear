@@ -131,7 +131,7 @@ impl<T, Span, C> Tuple<T, Span, C> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, T, E> + Clone,
     C: Container<T>,
   {

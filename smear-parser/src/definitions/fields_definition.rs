@@ -219,7 +219,7 @@ impl<Args, Type, Directives, Span> FieldDefinition<Args, Type, Directives, Span>
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     AP: Parser<'src, I, Args, E> + Clone,
     TP: Parser<'src, I, Type, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -411,7 +411,7 @@ impl<FieldDefinition, Span, Container> FieldsDefinition<FieldDefinition, Span, C
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: crate::source::Span<'src, I, E>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
     P: Parser<'src, I, FieldDefinition, E> + Clone,
     Container: chumsky::container::Container<FieldDefinition>,
   {

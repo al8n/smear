@@ -78,7 +78,7 @@ macro_rules! newtype {
         I::Token: Char + 'src,
         I::Slice: Slice<Token = I::Token>,
         E: ParserExtra<'src, I>,
-        Span: source::Span<'src, I, E>,
+        Span: source::FromMapExtra<'src, I, E>,
       {
         $parser
       }
@@ -213,7 +213,7 @@ impl<Span> InputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|value| {
       let boolean_value_parser = BooleanValue::parser::<I, E>().map(|v| Self::Boolean(v));
@@ -307,7 +307,7 @@ impl<Span> ConstInputValue<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|value| {
       // scalars (whatever you already have)
@@ -517,7 +517,7 @@ impl<Span> Selection<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|selection| {
       let selsetion_set =
@@ -951,7 +951,7 @@ impl<Span> OperationDefinition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     definitions::OperationDefinition::parser_with(
       OperationType::parser(),
@@ -1070,7 +1070,7 @@ impl<Span> TypeDefinition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
       ScalarTypeDefinition::parser().map(Self::Scalar),
@@ -1130,7 +1130,7 @@ impl<Span> TypeSystemDefinition<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
       TypeDefinition::parser().map(Self::Type),
@@ -1192,7 +1192,7 @@ impl<Span> TypeExtension<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
       ScalarTypeExtension::parser().map(Self::Scalar),
@@ -1245,7 +1245,7 @@ impl<Span> TypeSystemExtension<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
       TypeExtension::parser().map(Self::Type),
@@ -1294,7 +1294,7 @@ impl<Span> TypeSystem<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
       TypeDefinition::parser().map(Self::Definition),
@@ -1355,14 +1355,14 @@ impl<Span> Document<Span> {
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
     E: ParserExtra<'src, I>,
-    Span: source::Span<'src, I, E>,
+    Span: source::FromMapExtra<'src, I, E>,
   {
     TypeSystem::parser()
       .padded_by(ignored())
       .repeated()
       .collect()
       .map_with(|types, sp| Self {
-        span: source::Span::from_map_extra(sp),
+        span: source::FromMapExtra::from_map_extra(sp),
         types,
       })
   }
