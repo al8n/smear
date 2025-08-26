@@ -1367,18 +1367,3 @@ impl<Span> Document<Span> {
       })
   }
 }
-
-// #[cfg(test)]
-// mod tests {
-//   use super::*;
-//   use chumsky::{extra::Err, prelude::*};
-
-//   type Error<'a, T, S> = Err<Rich<'a, T, S>>;
-
-//   #[test]
-//   fn t() {
-//     let input = "nul";
-
-//     let parser = NullValue::parser::<&str, Error<'_, _, _>>();
-//   }
-// }
