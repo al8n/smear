@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, keywords::Fragment, StringValue, TypeCondition},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a named fragment definition in GraphQL.

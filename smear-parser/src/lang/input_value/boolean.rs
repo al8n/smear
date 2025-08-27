@@ -1,9 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{
-  convert::*,
-  source::{Char, Slice, Source},
-};
+use crate::source::*;
 
 /// A parsed GraphQL **Boolean Value** (`true` or `false`).
 ///
@@ -112,7 +109,7 @@ impl<Span> IntoComponents for BooleanValue<Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
   use chumsky::{error::Simple, extra};
 
   fn boolean_parser<'a>() -> impl Parser<

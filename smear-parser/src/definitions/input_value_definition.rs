@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, punct::Colon, Name, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a GraphQL input value definition.

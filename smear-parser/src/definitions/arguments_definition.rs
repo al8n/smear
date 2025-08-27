@@ -4,12 +4,11 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{LParen, RParen},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents an arguments definition in GraphQL schema syntax.

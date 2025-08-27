@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{punct::Minus, UintValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// A GraphQL integer literal value.
@@ -141,7 +140,7 @@ impl<Span> IntValue<Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
 
   fn int_parser<'a>(
   ) -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>

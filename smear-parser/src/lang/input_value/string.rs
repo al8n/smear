@@ -1,10 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
+  super::source::*,
   punct::{Quote, TripleQuote},
 };
 
@@ -424,7 +421,7 @@ impl<Span> IntoComponents for StringValue<Span> {
 
 #[cfg(test)]
 mod tests {
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
 
   use super::*;
   use chumsky::{error::Simple, extra};

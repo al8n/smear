@@ -1,12 +1,11 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{LAngle, RAngle},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// A set literal with angle bracket delimiters.

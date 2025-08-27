@@ -3,6 +3,8 @@ members = [
   "smear",
   "smear-graphql",
   "smear-parser",
+  "smear-thegraph",
+  "smear-utils",
 ]
 resolver = "3"
 
@@ -18,4 +20,4 @@ chumsky = { version = "0.10", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref"] }
 smear-graphql = { path = "smear-graphql", default-features = false }
 smear-parser = { path = "smear-parser", default-features = false }
-
+smear-utils = { path = "smear-utils", default-features = false }

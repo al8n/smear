@@ -1,12 +1,11 @@
 use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{LParen, RParen},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// A tuple literal with parentheses delimiters.

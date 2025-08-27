@@ -1,14 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
-  ignored,
-  punct::Dollar,
-  Name,
-};
+use super::super::{super::source::*, ignored, punct::Dollar, Name};
 
 /// A GraphQL variable reference.
 ///

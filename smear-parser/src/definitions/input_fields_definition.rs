@@ -4,12 +4,11 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{LBrace, RBrace},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a collection of input field definitions in a GraphQL input object type.

@@ -1,12 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{Colon, LBrace, RBrace},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 use core::marker::PhantomData;

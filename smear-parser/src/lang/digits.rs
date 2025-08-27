@@ -1,9 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{
-  convert::*,
-  source::{Char, Slice, Source},
-};
+use crate::source::*;
 
 /// A sequence of decimal digits (`0-9`).
 ///

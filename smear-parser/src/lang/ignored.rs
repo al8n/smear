@@ -1,4 +1,4 @@
-use crate::source::{Char, Slice, Source};
+use crate::source::*;
 
 use chumsky::{extra::ParserExtra, prelude::*};
 

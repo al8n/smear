@@ -4,12 +4,11 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use std::{boxed::Box, rc::Rc, sync::Arc};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{Bang, LBracket, RBracket},
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a named GraphQL type with optional non-null modifier.

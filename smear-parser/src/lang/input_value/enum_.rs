@@ -1,10 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{
-  convert::*,
-  lang::Name,
-  source::{Char, Slice, Source},
-};
+use crate::{lang::Name, source::*};
 
 /// A GraphQL enum value identifier.
 ///
@@ -137,7 +133,7 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
   use chumsky::{error::Simple, extra};
 
   fn enum_parser<'a>(

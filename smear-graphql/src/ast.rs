@@ -2,10 +2,9 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{AsMut, AsRef, Deref, From, Into, IsVariant, TryUnwrap, Unwrap};
 
 use smear_parser::{
-  convert::*,
   definitions,
   lang::{self, *},
-  source::{self, Char, Slice, Source},
+  source::{self, Char, IntoComponents, IntoSpan, Slice, Source},
 };
 
 pub use smear_parser::{

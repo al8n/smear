@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, keywords, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a GraphQL scalar type definition that defines custom data types with specific serialization behavior.

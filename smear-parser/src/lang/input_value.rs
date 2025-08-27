@@ -2,10 +2,7 @@ use chumsky::{container::Container, extra::ParserExtra, prelude::*};
 use either::Either;
 
 use super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
+  super::source::*,
   ignored,
   punct::{Colon, Equal, LAngle},
 };

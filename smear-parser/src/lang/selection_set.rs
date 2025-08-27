@@ -1,10 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
+  super::source::*,
   ignored,
   punct::{LBrace, RBrace},
 };
