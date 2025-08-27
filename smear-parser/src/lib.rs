@@ -1,12 +1,15 @@
 #![doc = include_str!("../../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs, warnings)]
+#![allow(clippy::type_complexity)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc as std;
 
 #[cfg(feature = "std")]
 extern crate std;
+
+pub use chumsky;
 
 macro_rules! word {
   ($(
@@ -79,22 +82,16 @@ pub mod lang;
 /// Definations parsers
 pub mod definitions;
 
-/// The spanned
-pub mod spanned;
-
-/// Conversion related traits
-pub mod convert;
-
 /// Source trait and implementations
-pub mod source;
-
-mod utils;
+pub mod source {
+  pub use smear_utils::*;
+}
 
 #[doc(hidden)]
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{convert::*, source::*};
+  pub use super::source::*;
 }
 
 #[cfg(all(feature = "std", test))]

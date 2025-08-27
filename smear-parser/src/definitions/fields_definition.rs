@@ -3,13 +3,12 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{Colon, LBrace, RBrace},
     Name, StringValue,
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a single field definition in a GraphQL object, interface, or input type.

@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::keywords::{Mutation, Query, Subscription},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents the three fundamental operation types in GraphQL that define how clients interact with a GraphQL service.

@@ -1,12 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     punct::{Dot, Minus, Plus},
     Digits,
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 use super::IntValue;
@@ -621,7 +620,7 @@ impl<Span> FloatValue<Span> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
   use chumsky::{error::Simple, extra};
 
   fn float_parser<'a>() -> impl Parser<

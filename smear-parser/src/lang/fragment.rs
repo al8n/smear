@@ -1,14 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
-  ignored, keywords,
-  punct::Ellipsis,
-  Name,
-};
+use super::{super::source::*, ignored, keywords, punct::Ellipsis, Name};
 
 /// Represents a type condition used in GraphQL fragments.
 ///

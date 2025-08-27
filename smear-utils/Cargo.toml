@@ -1,6 +1,6 @@
 [package]
-name = "smear-parser"
-version.workspace = true
+name = "smear-utils"
+version = "0.1.0"
 edition.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -8,16 +8,12 @@ license.workspace = true
 
 [features]
 default = ["std"]
-alloc = ["smear-utils/alloc"]
-std = ["chumsky/default", "smear-utils/default"]
+alloc = []
+std = ["chumsky/default"]
 
 bytes = ["chumsky/bytes", "dep:bytes"]
 
 [dependencies]
 chumsky.workspace = true
-derive_more.workspace = true
-either = { version = "1", default-features = false }
-paste = "1"
-smear-utils.workspace = true
 
 bytes = { version = "1", default-features = false, optional = true }

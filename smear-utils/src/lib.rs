@@ -1,76 +1,20 @@
-use chumsky::{
-  extra::ParserExtra,
-  input::{Input, MapExtra, StrInput},
-  text::Char as ChumskyChar,
-};
+//! Utilities for [`smear`](https://crates.io/crates/smear) and its ecosystem.
+#![cfg_attr(not(feature = "std"), no_std)]
+#![deny(missing_docs, warnings)]
 
-/// Trait for types that can be created from Chumsky's parser extra information.
-///
-/// This trait provides a unified interface for creating spanned values and span
-/// types from the extra information available during parsing. It enables generic
-/// parsing code that can work with different span representations while maintaining
-/// consistent creation patterns.
-///
-/// ## Design Purpose
-///
-/// The trait serves several key purposes:
-/// - **Abstraction**: Unified interface for creating different spanned types
-/// - **Flexibility**: Support for both complex spanned values and simple spans
-/// - **Integration**: Seamless integration with Chumsky's parsing infrastructure
-/// - **Polymorphism**: Enable generic parsing functions over different span types
-///
-/// ## Usage Patterns
-///
-/// ```ignore
-/// // Generic parser that works with any spanned type
-/// fn parse_with_span<'src, I, E, S>() -> impl Parser<'src, I, S, E>
-/// where
-///     I: Input<'src>,
-///     E: ParserExtra<'src, I>,
-///     S: Span<'src, I, E>,
-/// {
-///     just("example").map_with(|_, extra| S::from_map_extra(extra))
-/// }
-///
-/// // Can be used with both WithSource and raw spans
-/// let with_source_parser = parse_with_span::<_, _, _, WithSource<_, _>>();
-/// let span_only_parser = parse_with_span::<_, _, _, SimpleSpan>();
-/// ```
-///
-/// ## Implementation Types
-///
-/// The trait is implemented for:
-/// - **`WithSource<Source, Span>`**: Creates source+span pairs
-/// - **Any span type implementing `chumsky::span::Span`**: Creates raw spans
-///
-/// This allows the same parsing interface to work with different levels of
-/// detail in span tracking.
-pub trait FromMapExtra<'src, I: Input<'src>, E: ParserExtra<'src, I>>: 'src {
-  /// Creates a spanned value from Chumsky's parser extra information.
-  ///
-  /// This method extracts the necessary information from the parser's extra
-  /// state to create the appropriate spanned representation. The exact behavior
-  /// depends on the implementing type:
-  /// - `WithSource` creates a source+span pair
-  /// - Raw span types extract just the span information
-  fn from_map_extra<'b>(extra: &mut MapExtra<'src, 'b, I, E>) -> Self;
-}
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
 
-impl<'src, I, E, T> FromMapExtra<'src, I, E> for T
-where
-  I: Input<'src, Span = T>,
-  E: ParserExtra<'src, I>,
-  T: chumsky::span::Span + 'src,
-{
-  #[inline]
-  fn from_map_extra<'b>(value: &mut MapExtra<'src, 'b, I, E>) -> Self
-  where
-    I: Input<'src>,
-    E: ParserExtra<'src, I>,
-  {
-    value.span()
-  }
-}
+#[cfg(feature = "std")]
+extern crate std;
+
+use chumsky::{input::StrInput, text::Char as ChumskyChar};
+
+pub use convert::{FromMapExtra, IntoComponents, IntoSpan};
+pub use with_source::WithSource;
+
+mod convert;
+mod with_source;
 
 /// Extension trait providing standardized character constants for GraphQL parsing.
 ///

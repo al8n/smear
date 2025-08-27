@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, keywords, punct::Ampersand, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents the first interface in an `implements` list, where the ampersand is optional.

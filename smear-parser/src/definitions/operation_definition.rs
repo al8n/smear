@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, Name, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.

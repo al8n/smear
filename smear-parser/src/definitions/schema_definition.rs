@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, keywords, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a GraphQL schema definition that describes the structure and capabilities of a GraphQL service.

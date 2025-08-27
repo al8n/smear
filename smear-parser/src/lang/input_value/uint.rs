@@ -1,9 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{
-  convert::*,
-  source::{Char, Slice, Source},
-};
+use crate::source::*;
 
 /// An unsigned decimal integer component for GraphQL numeric literals.
 ///
@@ -100,7 +97,7 @@ impl<Span> IntoComponents for UintValue<Span> {
 
 #[cfg(test)]
 mod tests {
-  use crate::spanned::WithSource;
+  use crate::source::WithSource;
 
   use super::*;
 

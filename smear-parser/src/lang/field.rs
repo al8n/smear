@@ -1,14 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{
-  super::{
-    convert::*,
-    source::{Char, Slice, Source},
-  },
-  ignored,
-  punct::Colon,
-  Name,
-};
+use super::{super::source::*, ignored, punct::Colon, Name};
 
 /// Represents a field alias in GraphQL syntax.
 ///

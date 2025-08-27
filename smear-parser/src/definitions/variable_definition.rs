@@ -3,13 +3,12 @@ use core::marker::PhantomData;
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{
     ignored,
     punct::{Colon, LParen, RParen},
     StringValue, Variable,
   },
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a variable definition in a GraphQL operation.

@@ -1,9 +1,8 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  convert::*,
   lang::{ignored, keywords, StringValue},
-  source::{Char, Slice, Source},
+  source::*,
 };
 
 /// Represents a GraphQL Object type definition that defines a concrete type with fields.
