@@ -11,7 +11,7 @@ default = ["std"]
 alloc = ["smear-utils/alloc"]
 std = ["chumsky/default", "smear-utils/default"]
 
-bytes = ["chumsky/bytes", "dep:bytes"]
+bytes = ["chumsky/bytes", "dep:bytes", "smear-utils/bytes"]
 
 [dependencies]
 chumsky.workspace = true

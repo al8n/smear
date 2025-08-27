@@ -82,6 +82,9 @@ pub mod lang;
 /// Definations parsers
 pub mod definitions;
 
+/// Parsing related traits
+pub mod parse;
+
 /// Source trait and implementations
 pub mod source {
   pub use smear_utils::*;
