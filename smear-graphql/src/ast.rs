@@ -7,6 +7,8 @@ use smear_parser::{
   source::{self, Char, IntoComponents, IntoSpan, Slice, Source},
 };
 
+use super::parse::Parsable;
+
 pub use smear_parser::{
   definitions::{
     ExecutableDirectiveLocation, Location, OperationType, TypeSystemDirectiveLocation,
@@ -96,9 +98,8 @@ macro_rules! newtype {
       }
     }
 
-    impl<Span> $outer<Span> {
-      $(#[$parser_meta])*
-      pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+    impl<Span> Parsable<Span> for $outer<Span> {
+      fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
       where
         I: Source<'src>,
         I::Token: Char + 'src,
@@ -108,9 +109,13 @@ macro_rules! newtype {
       {
         $parser
       }
-
-      $($($item)*)?
     }
+
+    $(
+      impl<Span> $outer<Span> {
+        $($item)*
+      }
+    )?
   };
 }
 
@@ -229,11 +234,10 @@ impl<Span> InputValue<Span> {
       Self::Object(value) => value.0.span(),
     }
   }
+}
 
-  /// Returns a parser for the input value.
-  ///
-  /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for InputValue<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -323,11 +327,10 @@ impl<Span> ConstInputValue<Span> {
       Self::Object(value) => value.0.span(),
     }
   }
+}
 
-  /// Returns a parser for the input value.
-  ///
-  /// Spec: [Input Value](https://spec.graphql.org/draft/#sec-Input-Value)
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for ConstInputValue<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -527,17 +530,8 @@ impl<Span> IntoSpan<Span> for Selection<Span> {
   }
 }
 
-impl<Span> Selection<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Field(f) => f.0.span(),
-      Self::FragmentSpread(fs) => fs.0.span(),
-      Self::InlineFragment(ifr) => ifr.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for Selection<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -573,6 +567,17 @@ impl<Span> Selection<Span> {
         inline_p.map(Self::InlineFragment),
       ))
     })
+  }
+}
+
+impl<Span> Selection<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Field(f) => f.0.span(),
+      Self::FragmentSpread(fs) => fs.0.span(),
+      Self::InlineFragment(ifr) => ifr.0.span(),
+    }
   }
 }
 
@@ -979,16 +984,8 @@ impl<Span> IntoSpan<Span> for OperationDefinition<Span> {
   }
 }
 
-impl<Span> OperationDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Named(named) => named.0.span(),
-      Self::Shorthand(short) => short.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for OperationDefinition<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1006,6 +1003,16 @@ impl<Span> OperationDefinition<Span> {
       definitions::OperationDefinition::Named(named) => Self::Named(named.into()),
       definitions::OperationDefinition::Shorthand(short) => Self::Shorthand(short),
     })
+  }
+}
+
+impl<Span> OperationDefinition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Named(named) => named.0.span(),
+      Self::Shorthand(short) => short.0.span(),
+    }
   }
 }
 
@@ -1095,20 +1102,8 @@ impl<Span> IntoSpan<Span> for TypeDefinition<Span> {
   }
 }
 
-impl<Span> TypeDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Scalar(s) => s.0.span(),
-      Self::Enum(e) => e.0.span(),
-      Self::Union(u) => u.0.span(),
-      Self::InputObject(i) => i.0.span(),
-      Self::Object(o) => o.0.span(),
-      Self::Interface(i) => i.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for TypeDefinition<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1124,6 +1119,20 @@ impl<Span> TypeDefinition<Span> {
       ObjectTypeDefinition::parser().map(Self::Object),
       InterfaceTypeDefinition::parser().map(Self::Interface),
     ))
+  }
+}
+
+impl<Span> TypeDefinition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Scalar(s) => s.0.span(),
+      Self::Enum(e) => e.0.span(),
+      Self::Union(u) => u.0.span(),
+      Self::InputObject(i) => i.0.span(),
+      Self::Object(o) => o.0.span(),
+      Self::Interface(i) => i.0.span(),
+    }
   }
 }
 
@@ -1159,17 +1168,8 @@ impl<Span> IntoSpan<Span> for TypeSystemDefinition<Span> {
   }
 }
 
-impl<Span> TypeSystemDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Directive(d) => d.0.span(),
-      Self::Schema(s) => s.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for TypeSystemDefinition<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1182,6 +1182,17 @@ impl<Span> TypeSystemDefinition<Span> {
       DirectiveDefinition::parser().map(Self::Directive),
       SchemaDefinition::parser().map(Self::Schema),
     ))
+  }
+}
+
+impl<Span> TypeSystemDefinition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Type(t) => t.span(),
+      Self::Directive(d) => d.0.span(),
+      Self::Schema(s) => s.0.span(),
+    }
   }
 }
 
@@ -1219,20 +1230,8 @@ impl<Span> IntoSpan<Span> for TypeExtension<Span> {
   }
 }
 
-impl<Span> TypeExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Scalar(s) => s.0.span(),
-      Self::Enum(e) => e.0.span(),
-      Self::Union(u) => u.0.span(),
-      Self::InputObject(i) => i.0.span(),
-      Self::Object(o) => o.0.span(),
-      Self::Interface(i) => i.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for TypeExtension<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1248,6 +1247,20 @@ impl<Span> TypeExtension<Span> {
       ObjectTypeExtension::parser().map(Self::Object),
       InterfaceTypeExtension::parser().map(Self::Interface),
     ))
+  }
+}
+
+impl<Span> TypeExtension<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Scalar(s) => s.0.span(),
+      Self::Enum(e) => e.0.span(),
+      Self::Union(u) => u.0.span(),
+      Self::InputObject(i) => i.0.span(),
+      Self::Object(o) => o.0.span(),
+      Self::Interface(i) => i.0.span(),
+    }
   }
 }
 
@@ -1277,16 +1290,8 @@ impl<Span> IntoSpan<Span> for TypeSystemExtension<Span> {
   }
 }
 
-impl<Span> TypeSystemExtension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Schema(s) => s.0.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for TypeSystemExtension<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1298,6 +1303,16 @@ impl<Span> TypeSystemExtension<Span> {
       TypeExtension::parser().map(Self::Type),
       SchemaExtension::parser().map(Self::Schema),
     ))
+  }
+}
+
+impl<Span> TypeSystemExtension<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Type(t) => t.span(),
+      Self::Schema(s) => s.0.span(),
+    }
   }
 }
 
@@ -1327,16 +1342,8 @@ impl<Span> IntoSpan<Span> for TypeSystem<Span> {
   }
 }
 
-impl<Span> TypeSystem<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Extension(e) => e.span(),
-      Self::Definition(d) => d.span(),
-    }
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for TypeSystem<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1348,6 +1355,16 @@ impl<Span> TypeSystem<Span> {
       TypeSystemDefinition::parser().map(Self::Definition),
       TypeSystemExtension::parser().map(Self::Extension),
     ))
+  }
+}
+
+impl<Span> TypeSystem<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Extension(e) => e.span(),
+      Self::Definition(d) => d.span(),
+    }
   }
 }
 
@@ -1386,18 +1403,8 @@ impl<Span> IntoComponents for Document<Span> {
   }
 }
 
-impl<Span> Document<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  #[inline]
-  pub const fn types(&self) -> &[TypeSystem<Span>] {
-    self.types.as_slice()
-  }
-
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+impl<Span> Parsable<Span> for Document<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
     I::Token: Char + 'src,
@@ -1413,5 +1420,17 @@ impl<Span> Document<Span> {
         span: source::FromMapExtra::from_map_extra(sp),
         types,
       })
+  }
+}
+
+impl<Span> Document<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  #[inline]
+  pub const fn types(&self) -> &[TypeSystem<Span>] {
+    self.types.as_slice()
   }
 }
