@@ -7,7 +7,7 @@ use smear_parser::{
   source::{self, Char, IntoComponents, IntoSpan, Slice, Source},
 };
 
-use super::parse::Parsable;
+use super::parse;
 
 pub use smear_parser::{
   definitions::{
@@ -98,7 +98,7 @@ macro_rules! newtype {
       }
     }
 
-    impl<Span> Parsable<Span> for $outer<Span> {
+    impl<Span> parse::Parsable<Span> for $outer<Span> {
       fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
       where
         I: Source<'src>,
@@ -236,7 +236,7 @@ impl<Span> InputValue<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for InputValue<Span> {
+impl<Span> parse::Parsable<Span> for InputValue<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -329,7 +329,7 @@ impl<Span> ConstInputValue<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for ConstInputValue<Span> {
+impl<Span> parse::Parsable<Span> for ConstInputValue<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -530,7 +530,7 @@ impl<Span> IntoSpan<Span> for Selection<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for Selection<Span> {
+impl<Span> parse::Parsable<Span> for Selection<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -583,28 +583,29 @@ impl<Span> Selection<Span> {
 
 newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
   parser: {
-    recursive(|selection_set| {
-      let field_p = lang::Field::parser_with(
-        Arguments::parser(),
-        Directives::parser(),
-        selection_set.clone(),
-      )
-      .map(Field::<Span>);
+    // recursive(|selection_set| {
+    //   let field_p = lang::Field::parser_with(
+    //     Arguments::parser(),
+    //     Directives::parser(),
+    //     selection_set.clone(),
+    //   )
+    //   .map(Field::<Span>);
 
-      let inline_p = lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), selection_set)
-        .map(InlineFragment::<Span>);
+    //   let inline_p = lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), selection_set)
+    //     .map(InlineFragment::<Span>);
 
-      let spread_p =
-        lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser()).map(FragmentSpread::<Span>);
+    //   let spread_p =
+    //     lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser()).map(FragmentSpread::<Span>);
 
-      let selection = choice((
-        field_p.map(Selection::<Span>::Field),
-        spread_p.map(Selection::<Span>::FragmentSpread),
-        inline_p.map(Selection::<Span>::InlineFragment),
-      ));
+    //   let selection = choice((
+    //     field_p.map(Selection::<Span>::Field),
+    //     spread_p.map(Selection::<Span>::FragmentSpread),
+    //     inline_p.map(Selection::<Span>::InlineFragment),
+    //   ));
 
-      lang::SelectionSet::parser_with(selection).map(Self)
-    })
+    //   lang::SelectionSet::parser_with(selection).map(Self)
+    // })
+    lang::SelectionSet::parser_with(Selection::parser()).map(Self)
   },
   remaining: {
     #[inline]
@@ -659,12 +660,12 @@ newtype!(struct DirectiveLocations(definitions::DirectiveLocations<Location<Span
 });
 
 newtype!(struct DirectiveDefinition(
-  definitions::DirectiveDefinition<Name<Span>, ConstArguments<Span>, DirectiveLocations<Span>, Span>,
+  definitions::DirectiveDefinition<Name<Span>, ArgumentsDefinition<Span>, DirectiveLocations<Span>, Span>,
 ) {
   parser: {
     definitions::DirectiveDefinition::parser_with(
       Name::parser(),
-      ConstArguments::parser(),
+      ArgumentsDefinition::parser(),
       DirectiveLocations::parser(),
     )
     .map(Self)
@@ -984,7 +985,7 @@ impl<Span> IntoSpan<Span> for OperationDefinition<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for OperationDefinition<Span> {
+impl<Span> parse::Parsable<Span> for OperationDefinition<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1102,7 +1103,7 @@ impl<Span> IntoSpan<Span> for TypeDefinition<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for TypeDefinition<Span> {
+impl<Span> parse::Parsable<Span> for TypeDefinition<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1168,7 +1169,7 @@ impl<Span> IntoSpan<Span> for TypeSystemDefinition<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for TypeSystemDefinition<Span> {
+impl<Span> parse::Parsable<Span> for TypeSystemDefinition<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1230,7 +1231,7 @@ impl<Span> IntoSpan<Span> for TypeExtension<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for TypeExtension<Span> {
+impl<Span> parse::Parsable<Span> for TypeExtension<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1290,7 +1291,7 @@ impl<Span> IntoSpan<Span> for TypeSystemExtension<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for TypeSystemExtension<Span> {
+impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1342,7 +1343,7 @@ impl<Span> IntoSpan<Span> for TypeSystem<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for TypeSystem<Span> {
+impl<Span> parse::Parsable<Span> for TypeSystem<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1403,7 +1404,7 @@ impl<Span> IntoComponents for Document<Span> {
   }
 }
 
-impl<Span> Parsable<Span> for Document<Span> {
+impl<Span> parse::Parsable<Span> for Document<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,

@@ -1082,7 +1082,7 @@ impl<Name, Args, Locations, Span> DirectiveDefinition<Name, Args, Locations, Spa
   /// The arguments definition specifies what parameters can be provided when
   /// using this directive, including their types, default values, and descriptions.
   #[inline]
-  pub const fn arguments(&self) -> Option<&Args> {
+  pub const fn arguments_definition(&self) -> Option<&Args> {
     self.arguments_definition.as_ref()
   }
 
