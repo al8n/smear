@@ -17,3 +17,17 @@ bytes = ["smear-parser/bytes"]
 chumsky.workspace = true
 derive_more.workspace = true
 smear-parser.workspace = true
+
+[dev-dependencies]
+criterion = "0.7"
+apollo-parser = "0.8"
+
+[[bench]]
+name = "query"
+path = "benches/query.rs"
+harness = false
+
+[[bench]]
+name = "supergraph"
+path = "benches/supergraph.rs"
+harness = false

@@ -1,5 +1,5 @@
 use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{ast::*, parse::*, WithSource};
+use smear_graphql::{cst::*, parse::*, WithSource};
 
 const ALL: &str = r###"
 query SomeQuery(

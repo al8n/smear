@@ -8,9 +8,6 @@ extern crate alloc as std;
 extern crate std;
 
 /// Standards-compliant GraphQL parser conbinators.
-pub mod ast;
+pub mod cst;
 
 pub use smear_parser::{parse, source::WithSource};
-
-#[test]
-fn t() {}

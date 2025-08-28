@@ -5,7 +5,7 @@
 //   | Person
 
 use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{ast::*, parse::*, WithSource};
+use smear_graphql::{cst::*, parse::*, WithSource};
 
 const INPUT_INLINED: &str = r###"
 extend union SearchResult @deprecated = Photo | Person
