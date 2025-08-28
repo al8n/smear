@@ -344,7 +344,7 @@ impl<Name, Directives, FieldsDefinition, Span>
 /// * `Directives` - The type representing directives applied to the input object extension
 /// * `FieldsDefinition` - The type representing the new input fields being added
 #[derive(Debug, Clone, Copy)]
-pub enum InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
+pub enum InputObjectTypeExtensionData<Directives, FieldsDefinition> {
   /// Extension that adds only directives to the input object type without new fields
   Directives(Directives),
   /// Extension that adds new input fields, optionally with additional directives on the type
@@ -356,8 +356,26 @@ pub enum InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
   },
 }
 
-impl<Directives, FieldsDefinition> InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
-  /// Creates a parser that can parse input object extension content.
+impl<Directives, FieldsDefinition> InputObjectTypeExtensionData<Directives, FieldsDefinition> {
+  /// Returns the directives associated with this extension content, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the fields definition associated with this extension content, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    match self {
+      Self::Directives(_) => None,
+      Self::Fields { fields, .. } => Some(fields),
+    }
+  }
+
+  /// Creates a parser that can parse input object extension data.
   ///
   /// This parser handles both types of input object extensions: those that add fields
   /// (optionally with directives) and those that add only directives.
@@ -366,7 +384,7 @@ impl<Directives, FieldsDefinition> InputObjectTypeExtensionContent<Directives, F
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the extension content.
+  /// whitespace skipping or comment processing around the extension data.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, FP>(
@@ -463,7 +481,7 @@ pub struct InputObjectTypeExtension<Name, Directives, FieldsDefinition, Span> {
   extend: keywords::Extend<Span>,
   input: keywords::Input<Span>,
   name: Name,
-  content: InputObjectTypeExtensionContent<Directives, FieldsDefinition>,
+  content: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
 }
 
 impl<Name, Directives, FieldsDefinition, Span> AsRef<Span>
@@ -492,7 +510,7 @@ impl<Name, Directives, FieldsDefinition, Span> IntoComponents
     keywords::Extend<Span>,
     keywords::Input<Span>,
     Name,
-    InputObjectTypeExtensionContent<Directives, FieldsDefinition>,
+    InputObjectTypeExtensionData<Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -540,19 +558,31 @@ impl<Name, Directives, FieldsDefinition, Span>
     &self.name
   }
 
-  /// Returns a reference to the extension content.
+  /// Returns directives associated with the extension, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.content.directives()
+  }
+
+  /// Returns the fields definition associated with the extension, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.content.fields_definition()
+  }
+
+  /// Returns a reference to the extension data.
   ///
   /// The content specifies what is being added to the input object type:
   /// either new fields (optionally with directives), or just directives.
   #[inline]
-  pub const fn content(&self) -> &InputObjectTypeExtensionContent<Directives, FieldsDefinition> {
+  pub const fn data(&self) -> &InputObjectTypeExtensionData<Directives, FieldsDefinition> {
     &self.content
   }
 
   /// Creates a parser that can parse a complete input object extension.
   ///
   /// This parser handles the full input object extension syntax including the extend
-  /// and input keywords, target input object name, and extension content.
+  /// and input keywords, target input object name, and extension data.
   ///
   /// ## Notes
   ///
@@ -581,7 +611,7 @@ impl<Name, Directives, FieldsDefinition, Span>
       .then(keywords::Input::parser().padded_by(ignored()))
       .then(name_parser)
       .then(
-        ignored().ignore_then(InputObjectTypeExtensionContent::parser_with(
+        ignored().ignore_then(InputObjectTypeExtensionData::parser_with(
           directives_parser,
           input_fields_definition_parser,
         )),

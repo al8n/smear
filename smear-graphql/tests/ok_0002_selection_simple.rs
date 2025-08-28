@@ -1,5 +1,5 @@
 use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{parse::*, ast::*, WithSource};
+use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"
 {
@@ -10,7 +10,10 @@ const ALL: &str = r###"
 
 #[test]
 fn selection_simple() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Simple<'_, char>>>(ALL).unwrap();
+  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
+    extra::Err<Simple<'_, char>>,
+  >(ALL)
+  .unwrap();
   assert_eq!(selection_set.selections().len(), 2);
 
   let mut fields = selection_set.into_selections().into_iter();

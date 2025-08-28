@@ -1,5 +1,5 @@
 use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{parse::*, ast::*, WithSource};
+use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"
 {
@@ -22,7 +22,10 @@ const ALL: &str = r###"
 
 #[test]
 fn selection_with_fragment_spread() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Simple<'_, char>>>(ALL).unwrap();
+  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
+    extra::Err<Simple<'_, char>>,
+  >(ALL)
+  .unwrap();
   assert_eq!(selection_set.selections().len(), 6);
 
   let mut fields = selection_set.into_selections().into_iter();
@@ -58,7 +61,9 @@ fn selection_with_fragment_spread() {
   {
     let snack_selection = fields.next().unwrap().unwrap_fragment_spread();
     assert_eq!(snack_selection.name().span().source(), &"snackSelection");
-    let directives = snack_selection.directives().expect("should have directives");
+    let directives = snack_selection
+      .directives()
+      .expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let deprecated = directives.directives().first().unwrap();
     assert_eq!(deprecated.name().span().source(), &"deprecated");
@@ -86,7 +91,7 @@ fn selection_with_fragment_spread() {
     assert_eq!(duration.name().span().source(), &"duration");
     let value = duration.value();
     assert!(value.is_string());
-    assert_eq!(value.unwrap_string_ref().content().span().source(), &"2 hours");
+    assert_eq!(value.unwrap_string_ref().data().span().source(), &"2 hours");
   }
 
   {

@@ -341,7 +341,7 @@ impl<Name, Span, Container> UnionMemberTypes<Name, Span, Container> {
   /// The leading member has special parsing rules where the pipe is optional,
   /// unlike subsequent members where it's required.
   #[inline]
-  pub const fn leading(&self) -> &LeadingUnionMemberType<Name, Span> {
+  pub const fn leading_member_type(&self) -> &LeadingUnionMemberType<Name, Span> {
     &self.leading
   }
 
@@ -350,7 +350,7 @@ impl<Name, Span, Container> UnionMemberTypes<Name, Span, Container> {
   /// All members in this container have required pipes and represent the
   /// additional union alternatives beyond the first one.
   #[inline]
-  pub const fn remaining(&self) -> &Container {
+  pub const fn remaining_member_types(&self) -> &Container {
     &self.remaining
   }
 
@@ -556,7 +556,7 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeDefinition<Name, Directives, 
   /// Union members define the possible Object types that can be returned.
   /// Unions without members are valid (placeholder unions) but uncommon.
   #[inline]
-  pub const fn members(&self) -> Option<&MemberTypes> {
+  pub const fn member_types(&self) -> Option<&MemberTypes> {
     self.members.as_ref()
   }
 
@@ -611,7 +611,7 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeDefinition<Name, Directives, 
 /// Union extensions can add directives or new member types to existing unions,
 /// enabling schema evolution without modifying original definitions.
 #[derive(Debug, Clone, Copy)]
-pub enum UnionTypeExtensionContent<Directives, MemberTypes> {
+pub enum UnionTypeExtensionData<Directives, MemberTypes> {
   /// Extension adds only directives to the union.
   ///
   /// Used to add metadata or behavioral modifications without changing
@@ -643,8 +643,26 @@ pub enum UnionTypeExtensionContent<Directives, MemberTypes> {
   },
 }
 
-impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes> {
-  /// Creates a parser for union extension content.
+impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
+  /// Returns the directives associated with this union extension, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Members { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the member types being added by this union extension, if any.
+  #[inline]
+  pub const fn member_types(&self) -> Option<&MemberTypes> {
+    match self {
+      Self::Directives(_) => None,
+      Self::Members { fields, .. } => Some(fields),
+    }
+  }
+
+  /// Creates a parser for union extension data.
   ///
   /// The parser tries member extensions first, then directive-only extensions.
   /// This ordering ensures that extensions with both directives and members
@@ -654,7 +672,7 @@ impl<Directives, MemberTypes> UnionTypeExtensionContent<Directives, MemberTypes>
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the union type extension content.
+  /// whitespace skipping or comment processing around the union type extension data.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, DP, MP>(
@@ -715,7 +733,7 @@ pub struct UnionTypeExtension<Name, Directives, MemberTypes, Span> {
   extend: keywords::Extend<Span>,
   keyword: keywords::Union<Span>,
   name: Name,
-  content: UnionTypeExtensionContent<Directives, MemberTypes>,
+  content: UnionTypeExtensionData<Directives, MemberTypes>,
 }
 
 impl<Name, Directives, MemberTypes, Span> AsRef<Span>
@@ -744,7 +762,7 @@ impl<Name, Directives, MemberTypes, Span> IntoComponents
     keywords::Extend<Span>,
     keywords::Union<Span>,
     Name,
-    UnionTypeExtensionContent<Directives, MemberTypes>,
+    UnionTypeExtensionData<Directives, MemberTypes>,
   );
 
   #[inline]
@@ -798,9 +816,21 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, M
     &self.name
   }
 
+  /// Returns the directives applied by this extension, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.content.directives()
+  }
+
+  /// Returns the member types being added by this extension, if any.
+  #[inline]
+  pub const fn member_types(&self) -> Option<&MemberTypes> {
+    self.content.member_types()
+  }
+
   /// Returns a reference to the content being added by this extension.
   #[inline]
-  pub const fn content(&self) -> &UnionTypeExtensionContent<Directives, MemberTypes> {
+  pub const fn data(&self) -> &UnionTypeExtensionData<Directives, MemberTypes> {
     &self.content
   }
 
@@ -835,12 +865,10 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, M
     keywords::Extend::parser()
       .then(keywords::Union::parser().padded_by(ignored()))
       .then(name_parser)
-      .then(
-        ignored().ignore_then(UnionTypeExtensionContent::parser_with(
-          directives_parser,
-          member_types_parser,
-        )),
-      )
+      .then(ignored().ignore_then(UnionTypeExtensionData::parser_with(
+        directives_parser,
+        member_types_parser,
+      )))
       .map_with(|(((extend, keyword), name), content), sp| Self {
         span: Span::from_map_extra(sp),
         extend,

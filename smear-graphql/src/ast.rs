@@ -2,7 +2,7 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{AsMut, AsRef, Deref, From, Into, IsVariant, TryUnwrap, Unwrap};
 
 use smear_parser::{
-  definitions,
+  boxed, definitions,
   lang::{self, *},
   source::{self, Char, IntoComponents, IntoSpan, Slice, Source},
 };
@@ -20,20 +20,20 @@ pub use smear_parser::{
   },
 };
 
-pub type EnumTypeExtensionContent<Span> =
-  definitions::EnumTypeExtensionContent<ConstDirectives<Span>, Span>;
-pub type ObjectTypeExtensionContent<Span> = definitions::ObjectTypeExtensionContent<
+pub type EnumTypeExtensionData<Span> =
+  definitions::EnumTypeExtensionData<ConstDirectives<Span>, Span>;
+pub type ObjectTypeExtensionData<Span> = definitions::ObjectTypeExtensionData<
   ImplementInterfaces<Span>,
   ConstDirectives<Span>,
   FieldsDefinition<Span>,
 >;
-pub type InterfaceTypeExtensionContent<Span> = definitions::InterfaceTypeExtensionContent<
+pub type InterfaceTypeExtensionData<Span> = definitions::InterfaceTypeExtensionData<
   ImplementInterfaces<Span>,
   ConstDirectives<Span>,
   FieldsDefinition<Span>,
 >;
-pub type InputObjectTypeExtensionContent<Span> =
-  definitions::InputObjectTypeExtensionContent<ConstDirectives<Span>, FieldsDefinition<Span>>;
+pub type InputObjectTypeExtensionData<Span> =
+  definitions::InputObjectTypeExtensionData<ConstDirectives<Span>, FieldsDefinition<Span>>;
 pub type LeadingImplementInterface<Span> = definitions::LeadingImplementInterface<Name<Span>, Span>;
 pub type ImplementInterface<Span> = definitions::ImplementInterface<Name<Span>, Span>;
 pub type ImplementInterfaces<Span> = definitions::ImplementInterfaces<Name<Span>, Span>;
@@ -43,13 +43,13 @@ pub type ListType<Span> = definitions::ListType<Type<Span>, Span>;
 pub type LeadingUnionMemberType<Span> = definitions::LeadingUnionMemberType<Name<Span>, Span>;
 pub type UnionMemberType<Span> = definitions::UnionMemberType<Name<Span>, Span>;
 pub type UnionMemberTypes<Span> = definitions::UnionMemberTypes<Name<Span>, Span>;
-pub type UnionTypeExtensionContent<Span> =
-  definitions::UnionTypeExtensionContent<ConstDirectives<Span>, UnionMemberTypes<Span>>;
+pub type UnionTypeExtensionData<Span> =
+  definitions::UnionTypeExtensionData<ConstDirectives<Span>, UnionMemberTypes<Span>>;
 pub type LeadingDirectiveLocation<Span> =
   definitions::LeadingDirectiveLocation<Location<Span>, Span>;
 pub type DirectiveLocation<Span> = definitions::DirectiveLocation<Location<Span>, Span>;
-pub type SchemaExtensionContent<Span> =
-  definitions::SchemaExtensionContent<ConstDirectives<Span>, RootOperationTypesDefinition<Span>>;
+pub type SchemaExtensionData<Span> =
+  definitions::SchemaExtensionData<ConstDirectives<Span>, RootOperationTypesDefinition<Span>>;
 
 macro_rules! newtype {
   (
@@ -638,7 +638,7 @@ newtype!(struct InputValueDefinition(definitions::InputValueDefinition<
 
 newtype!(struct ArgumentsDefinition(definitions::ArgumentsDefinition<InputValueDefinition<Span>, Span>) {
   parser: {
-    definitions::ArgumentsDefinition::parser_with(InputValueDefinition::parser()).map(Self)
+    boxed!(definitions::ArgumentsDefinition::parser_with(InputValueDefinition::parser()).map(Self))
   },
   remaining: {
     #[inline]
@@ -680,7 +680,7 @@ newtype!(struct EnumValueDefinition(definitions::EnumValueDefinition<ConstDirect
 
 newtype!(struct EnumValuesDefinition(definitions::EnumValuesDefinition<EnumValueDefinition<Span>, Span>) {
   parser: {
-    definitions::EnumValuesDefinition::parser_with(EnumValueDefinition::parser()).map(Self)
+    boxed!(definitions::EnumValuesDefinition::parser_with(EnumValueDefinition::parser()).map(Self))
   },
   remaining: {
     #[inline]
@@ -715,11 +715,11 @@ newtype!(struct EnumTypeExtension(definitions::EnumTypeExtension<ConstDirectives
 });
 
 newtype!(struct FieldDefinition(
-  definitions::FieldDefinition<ConstArguments<Span>, Type<Span>, ConstDirectives<Span>, Span>,
+  definitions::FieldDefinition<ArgumentsDefinition<Span>, Type<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
     definitions::FieldDefinition::parser_with(
-      ConstArguments::parser(),
+      ArgumentsDefinition::parser(),
       Type::parser_with(Name::parser()),
       ConstDirectives::parser(),
     )
@@ -729,7 +729,7 @@ newtype!(struct FieldDefinition(
 
 newtype!(struct FieldsDefinition(definitions::FieldsDefinition<FieldDefinition<Span>, Span>) {
   parser: {
-    definitions::FieldsDefinition::parser_with(FieldDefinition::parser()).map(Self)
+    boxed!(definitions::FieldsDefinition::parser_with(FieldDefinition::parser()).map(Self))
   },
   remaining: {
     #[inline]
@@ -748,7 +748,7 @@ newtype!(struct InputFieldsDefinition(
   definitions::InputFieldsDefinition<InputValueDefinition<Span>, Span>,
 ) {
   parser: {
-    definitions::InputFieldsDefinition::parser_with(InputValueDefinition::parser()).map(Self)
+    boxed!(definitions::InputFieldsDefinition::parser_with(InputValueDefinition::parser()).map(Self))
   },
   remaining: {
     #[inline]
@@ -909,13 +909,13 @@ newtype!(struct UnionTypeExtension(
 });
 
 newtype!(struct VariableDefinition(
-  definitions::VariableDefinition<Type<Span>, Directives<Span>, DefaultInputValue<Span>, Span>,
+  definitions::VariableDefinition<Type<Span>, DefaultInputValue<Span>, Directives<Span>, Span>,
 ) {
   parser: {
     definitions::VariableDefinition::parser(
       Type::parser_with(Name::parser()),
-      Directives::parser(),
       DefaultInputValue::parser(),
+      Directives::parser(),
     )
     .map(Self)
   }
@@ -925,7 +925,7 @@ newtype!(struct VariablesDefinition(
   definitions::VariablesDefinition<VariableDefinition<Span>, Span>,
 ) {
   parser: {
-    definitions::VariablesDefinition::parser_with(VariableDefinition::parser()).map(Self)
+    boxed!(definitions::VariablesDefinition::parser_with(VariableDefinition::parser()).map(Self))
   },
   remaining: {
     #[inline]
@@ -1113,12 +1113,12 @@ impl<Span> parse::Parsable<Span> for TypeDefinition<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      ScalarTypeDefinition::parser().map(Self::Scalar),
-      EnumTypeDefinition::parser().map(Self::Enum),
-      UnionTypeDefinition::parser().map(Self::Union),
-      InputObjectTypeDefinition::parser().map(Self::InputObject),
-      ObjectTypeDefinition::parser().map(Self::Object),
-      InterfaceTypeDefinition::parser().map(Self::Interface),
+      boxed!(ScalarTypeDefinition::parser().map(Self::Scalar)),
+      boxed!(EnumTypeDefinition::parser().map(Self::Enum)),
+      boxed!(UnionTypeDefinition::parser().map(Self::Union)),
+      boxed!(InputObjectTypeDefinition::parser().map(Self::InputObject)),
+      boxed!(ObjectTypeDefinition::parser().map(Self::Object)),
+      boxed!(InterfaceTypeDefinition::parser().map(Self::Interface)),
     ))
   }
 }
@@ -1241,12 +1241,12 @@ impl<Span> parse::Parsable<Span> for TypeExtension<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      ScalarTypeExtension::parser().map(Self::Scalar),
-      EnumTypeExtension::parser().map(Self::Enum),
-      UnionTypeExtension::parser().map(Self::Union),
-      InputObjectTypeExtension::parser().map(Self::InputObject),
-      ObjectTypeExtension::parser().map(Self::Object),
-      InterfaceTypeExtension::parser().map(Self::Interface),
+      boxed!(ScalarTypeExtension::parser().map(Self::Scalar)),
+      boxed!(EnumTypeExtension::parser().map(Self::Enum)),
+      boxed!(UnionTypeExtension::parser().map(Self::Union)),
+      boxed!(InputObjectTypeExtension::parser().map(Self::InputObject)),
+      boxed!(ObjectTypeExtension::parser().map(Self::Object)),
+      boxed!(InterfaceTypeExtension::parser().map(Self::Interface)),
     ))
   }
 }
@@ -1301,8 +1301,8 @@ impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      TypeExtension::parser().map(Self::Type),
-      SchemaExtension::parser().map(Self::Schema),
+      boxed!(TypeExtension::parser().map(Self::Type)),
+      boxed!(SchemaExtension::parser().map(Self::Schema)),
     ))
   }
 }
@@ -1353,8 +1353,8 @@ impl<Span> parse::Parsable<Span> for TypeSystem<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      TypeSystemDefinition::parser().map(Self::Definition),
-      TypeSystemExtension::parser().map(Self::Extension),
+      boxed!(TypeSystemDefinition::parser().map(Self::Definition)),
+      boxed!(TypeSystemExtension::parser().map(Self::Extension)),
     ))
   }
 }

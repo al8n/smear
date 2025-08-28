@@ -324,7 +324,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// This provides access to the exact `implements` keyword and its location,
   /// useful for error reporting and syntax highlighting.
   #[inline]
-  pub const fn implements(&self) -> &keywords::Implements<Span> {
+  pub const fn implements_keyword(&self) -> &keywords::Implements<Span> {
     &self.implements
   }
 
@@ -333,7 +333,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// The leading interface has special parsing rules where the ampersand is optional,
   /// unlike subsequent interfaces where it's required.
   #[inline]
-  pub const fn leading(&self) -> &LeadingImplementInterface<Name, Span> {
+  pub const fn leading_implement_interface(&self) -> &LeadingImplementInterface<Name, Span> {
     &self.leading
   }
 
@@ -342,7 +342,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// All interfaces in this container have required ampersands and represent
   /// the additional interfaces beyond the first one.
   #[inline]
-  pub const fn remaining(&self) -> &Container {
+  pub const fn remaining_implement_interfaces(&self) -> &Container {
     &self.remaining
   }
 
@@ -607,7 +607,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 ///
 /// These can be combined in various ways to create comprehensive extensions.
 #[derive(Debug, Clone, Copy)]
-pub enum InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds directives to an interface, optionally with new interface implementations.
   ///
   /// This variant applies metadata or behavioral modifications without changing
@@ -687,8 +687,37 @@ pub enum InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDe
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Returns the directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives { directives, .. } => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Implements { .. } => None,
+    }
+  }
+
+  /// Returns the interface implementations if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    match self {
+      Self::Directives { implements, .. } => implements.as_ref(),
+      Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Implements(implements) => Some(implements),
+    }
+  }
+
+  /// Returns the fields definition if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    match self {
+      Self::Fields { fields, .. } => Some(fields),
+      Self::Directives { .. } | Self::Implements { .. } => None,
+    }
+  }
+
   /// Creates a parser for interface extension content with proper precedence handling.
   ///
   /// The parser tries patterns in a specific order to resolve parsing ambiguity:
@@ -700,7 +729,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the interface type extension content.
+  /// whitespace skipping or comment processing around the interface type extension data.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
@@ -771,7 +800,7 @@ pub struct InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsD
   extend: keywords::Extend<Span>,
   interface: keywords::Interface<Span>,
   name: Name,
-  content: InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  content: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
@@ -800,7 +829,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponen
     keywords::Extend<Span>,
     keywords::Interface<Span>,
     Name,
-    InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+    InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -820,7 +849,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface extension.
   ///
-  /// Includes the `extend interface` keywords, interface name, and all extension content.
+  /// Includes the `extend interface` keywords, interface name, and all extension data.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -853,6 +882,24 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
     &self.name
   }
 
+  /// Returns directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.content.directives()
+  }
+
+  /// Returns interface implementations if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    self.content.implements()
+  }
+
+  /// Returns fields if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.content.fields_definition()
+  }
+
   /// Returns a reference to the content being added by this extension.
   ///
   /// The content determines what type of enhancement is being made:
@@ -860,9 +907,9 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// - `Directives`: Metadata/behavioral modifications with optional implementations
   /// - `Implements`: Interface inheritance relationships only
   #[inline]
-  pub const fn content(
+  pub const fn data(
     &self,
-  ) -> &InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+  ) -> &InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.content
   }
 
@@ -899,7 +946,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
       .then(keywords::Interface::parser().padded_by(ignored()))
       .then(name_parser)
       .then(
-        ignored().ignore_then(InterfaceTypeExtensionContent::parser_with(
+        ignored().ignore_then(InterfaceTypeExtensionData::parser_with(
           implement_interfaces_parser,
           directives_parser,
           fields_definition_parser,

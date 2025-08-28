@@ -1,5 +1,5 @@
 use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{parse::*, ast::*, WithSource};
+use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"
 
@@ -21,7 +21,10 @@ const ALL: &str = r###"
 
 #[test]
 fn selection_with_fields_aliases_arguments() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Simple<'_, char>>>(ALL).unwrap();
+  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
+    extra::Err<Simple<'_, char>>,
+  >(ALL)
+  .unwrap();
   assert_eq!(selection_set.selections().len(), 2);
 
   let mut fields = selection_set.into_selections().into_iter();
@@ -30,7 +33,7 @@ fn selection_with_fields_aliases_arguments() {
   assert!(fields.next().is_none());
 
   assert_eq!(pet.name().span().source(), &"pet");
-  
+
   {
     let spet = pet.selection_set().cloned().unwrap();
     assert_eq!(spet.selections().len(), 3);
@@ -45,7 +48,12 @@ fn selection_with_fields_aliases_arguments() {
     assert_eq!(birthday.selection_set().unwrap().selections().len(), 2);
 
     {
-      let mut fields = birthday.selection_set().cloned().unwrap().into_selections().into_iter();
+      let mut fields = birthday
+        .selection_set()
+        .cloned()
+        .unwrap()
+        .into_selections()
+        .into_iter();
       let month = fields.next().unwrap().unwrap_field();
       assert!(month.selection_set().is_none());
 
@@ -57,7 +65,12 @@ fn selection_with_fields_aliases_arguments() {
     assert_eq!(playmates.selection_set().unwrap().selections().len(), 2);
 
     {
-      let mut fields = playmates.selection_set().cloned().unwrap().into_selections().into_iter();
+      let mut fields = playmates
+        .selection_set()
+        .cloned()
+        .unwrap()
+        .into_selections()
+        .into_iter();
       let name = fields.next().unwrap().unwrap_field();
       assert!(name.selection_set().is_none());
 

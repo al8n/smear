@@ -1,5 +1,5 @@
 use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{parse::*, ast::*, WithSource};
+use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"
 {
@@ -15,7 +15,10 @@ const ALL: &str = r###"
 
 #[test]
 fn selection_with_inline_fragment() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Simple<'_, char>>>(ALL).unwrap();
+  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
+    extra::Err<Simple<'_, char>>,
+  >(ALL)
+  .unwrap();
   assert_eq!(selection_set.selections().len(), 3);
 
   let mut fields = selection_set.into_selections().into_iter();
@@ -42,7 +45,7 @@ fn selection_with_inline_fragment() {
     let mut fields = spet.clone().into_selections().into_iter();
     let playmates = fields.next().unwrap().unwrap_field();
     assert_eq!(playmates.name().span().source(), &"playmates");
-    
+
     let splaymates = playmates.selection_set().cloned().unwrap();
     {
       assert_eq!(splaymates.selections().len(), 1);

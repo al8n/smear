@@ -197,7 +197,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
   /// kind of GraphQL operation. They form the foundation of the GraphQL execution
   /// model and define how clients can interact with the service.
   #[inline]
-  pub const fn definitions(&self) -> &RootOperationTypesDefinition {
+  pub const fn root_operation_types_definition(&self) -> &RootOperationTypesDefinition {
     &self.operation_type_definitions
   }
 
@@ -305,7 +305,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
 /// * `Directives` - The type representing directives applied to the schema extension
 /// * `RootOperationTypesDefinition` - The type representing new root operation type definitions
 #[derive(Debug, Clone, Copy, derive_more::IsVariant)]
-pub enum SchemaExtensionContent<Directives, RootOperationTypesDefinition> {
+pub enum SchemaExtensionData<Directives, RootOperationTypesDefinition> {
   /// Extension contains only directives applied to the schema.
   ///
   /// This variant represents extensions that add metadata, behavioral modifiers,
@@ -386,8 +386,26 @@ pub enum SchemaExtensionContent<Directives, RootOperationTypesDefinition> {
 }
 
 impl<Directives, RootOperationTypesDefinition>
-  SchemaExtensionContent<Directives, RootOperationTypesDefinition>
+  SchemaExtensionData<Directives, RootOperationTypesDefinition>
 {
+  /// Returns directives if present, regardless of the variant.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Operations { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns operation definitions if present, otherwise `None`.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> Option<&RootOperationTypesDefinition> {
+    match self {
+      Self::Directives(_) => None,
+      Self::Operations { definitions, .. } => Some(definitions),
+    }
+  }
+
   /// Creates a parser for schema extension content using the provided sub-parsers.
   ///
   /// This parser handles the two possible forms of schema extension content with
@@ -564,7 +582,7 @@ pub struct SchemaExtension<Directives, RootOperationTypesDefinition, Span> {
   span: Span,
   extend: keywords::Extend<Span>,
   schema: keywords::Schema<Span>,
-  content: SchemaExtensionContent<Directives, RootOperationTypesDefinition>,
+  content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
 }
 
 impl<Directives, RootOperationTypesDefinition, Span> AsRef<Span>
@@ -592,7 +610,7 @@ impl<Directives, RootOperationTypesDefinition, Span> IntoComponents
     Span,
     keywords::Extend<Span>,
     keywords::Schema<Span>,
-    SchemaExtensionContent<Directives, RootOperationTypesDefinition>,
+    SchemaExtensionData<Directives, RootOperationTypesDefinition>,
   );
 
   #[inline]
@@ -631,12 +649,24 @@ impl<Directives, RootOperationTypesDefinition, Span>
     &self.schema
   }
 
+  /// Returns the directives applied to this schema extension, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.content.directives()
+  }
+
+  /// Returns the operation definitions added by this schema extension, if any.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> Option<&RootOperationTypesDefinition> {
+    self.content.root_operation_types_definition()
+  }
+
   /// Returns a reference to the content of this schema extension.
   ///
   /// The content determines what capabilities are being added to the schema and
   /// represents the core functionality of the extension.
   #[inline]
-  pub const fn content(&self) -> &SchemaExtensionContent<Directives, RootOperationTypesDefinition> {
+  pub const fn data(&self) -> &SchemaExtensionData<Directives, RootOperationTypesDefinition> {
     &self.content
   }
 
@@ -669,7 +699,7 @@ impl<Directives, RootOperationTypesDefinition, Span>
   {
     keywords::Extend::<Span>::parser()
       .then(keywords::Schema::<Span>::parser().padded_by(ignored()))
-      .then(SchemaExtensionContent::<
+      .then(SchemaExtensionData::<
         Directives,
         RootOperationTypesDefinition,
       >::parser_with(

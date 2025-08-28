@@ -244,7 +244,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 /// Extensions enable modular schema composition and gradual schema evolution
 /// without breaking existing type definitions.
 #[derive(Debug, Clone, Copy)]
-pub enum ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds only directives, optionally with new interface implementations.
   ///
   /// This variant is used when extending an object to add metadata or behavioral
@@ -305,9 +305,37 @@ pub enum ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefin
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition>
-  ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
+  ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
 {
-  /// Creates a parser for object extension content.
+  /// Returns the interfaces if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    match self {
+      Self::Fields { implements, .. } | Self::Directives { implements, .. } => implements.as_ref(),
+      Self::Implements(implements) => Some(implements),
+    }
+  }
+
+  /// Returns the directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives { directives, .. } => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Implements { .. } => None,
+    }
+  }
+
+  /// Returns the fields definition if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    match self {
+      Self::Fields { fields, .. } => Some(fields),
+      Self::Directives { .. } | Self::Implements { .. } => None,
+    }
+  }
+
+  /// Creates a parser for object extension data.
   ///
   /// This parser uses a choice combinator to try different extension patterns,
   /// ensuring that the most specific matches (like fields with directives) are
@@ -317,7 +345,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the object type extension content.
+  /// whitespace skipping or comment processing around the object type extension data.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
@@ -407,7 +435,7 @@ pub struct ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefi
   extend: keywords::Extend<Span>,
   interface: keywords::Type<Span>,
   name: Name,
-  content: ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  content: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
@@ -436,7 +464,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponen
     keywords::Extend<Span>,
     keywords::Type<Span>,
     Name,
-    ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+    ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -487,6 +515,24 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
     &self.name
   }
 
+  /// Returns the directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.content.directives()
+  }
+
+  /// Returns the interfaces if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    self.content.implements()
+  }
+
+  /// Returns the fields definition if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.content.fields_definition()
+  }
+
   /// Returns a reference to the content being added by this extension.
   ///
   /// The content determines what new capabilities are being added to the object:
@@ -495,17 +541,17 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// - New directives
   /// - Combinations of the above
   #[inline]
-  pub const fn content(
+  pub const fn data(
     &self,
-  ) -> &ObjectTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+  ) -> &ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.content
   }
 
   /// Creates a parser for object type extensions.
   ///
   /// This parser handles the `extend type` syntax followed by the object name
-  /// and extension content. The content parsing is delegated to the
-  /// `ObjectTypeExtensionContent` parser for modularity.
+  /// and extension data. The content parsing is delegated to the
+  /// `ObjectTypeExtensionData` parser for modularity.
   ///
   /// ## Notes
   ///
@@ -534,7 +580,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
     keywords::Extend::parser()
       .then(keywords::Type::parser().padded_by(ignored()))
       .then(name_parser)
-      .then(ignored().ignore_then(ObjectTypeExtensionContent::<
+      .then(ignored().ignore_then(ObjectTypeExtensionData::<
         ImplementInterfaces,
         Directives,
         FieldsDefinition,

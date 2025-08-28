@@ -1,18 +1,33 @@
 use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{parse::*, ast::*, WithSource};
+use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"
-directive @example(isTreat: Boolean, treatKind: String) on FIELD | MUTATION
+directive @example(isTreat: Boolean, treatKind: String) repeatable on FIELD | MUTATION
 "###;
 
 #[test]
-fn directive_definition_with_arguments() {
-  let definition = DirectiveDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Simple<'_, char>>>(ALL).unwrap();
+fn directive_definition_repeatable() {
+  let definition = DirectiveDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
+    extra::Err<Simple<'_, char>>,
+  >(ALL)
+  .unwrap();
   assert_eq!(definition.name().span().source(), &"example");
-
-  assert!(definition.locations().leading_location().location().unwrap_executable_ref().is_field());
+  assert!(definition
+    .locations()
+    .leading_location()
+    .location()
+    .unwrap_executable_ref()
+    .is_field());
   assert_eq!(definition.locations().remaining_locations().len(), 1);
-  assert!(definition.locations().remaining_locations().first().unwrap().location().unwrap_executable_ref().is_mutation());
+  assert!(definition
+    .locations()
+    .remaining_locations()
+    .first()
+    .unwrap()
+    .location()
+    .unwrap_executable_ref()
+    .is_mutation());
+  assert!(definition.repeatable().is_some());
 
   let args = definition.arguments_definition().unwrap();
   let mut iter = args.input_value_definitions().iter();

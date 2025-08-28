@@ -256,7 +256,7 @@ impl<Span> StringValue<Span> {
   /// """               // content: "\nline 1\nline 2\n" (raw)
   /// ```
   #[inline]
-  pub const fn content(&self) -> &StringContent<Span> {
+  pub const fn data(&self) -> &StringContent<Span> {
     &self.content
   }
 
@@ -441,11 +441,11 @@ mod tests {
     let s = r#""""#;
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().span().source(), &"");
+    assert_eq!(sv.data().span().source(), &"");
 
     let s = r#""hello""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().span().source(), &"hello");
+    assert_eq!(sv.data().span().source(), &"hello");
     match sv.delimiters() {
       StringDelimiter::Quote { l_quote, r_quote } => {
         assert_eq!(l_quote.span().source(), &"\"");
@@ -460,12 +460,12 @@ mod tests {
     // Escaped characters are accepted; content is raw (not unescaped here).
     let s = r#""line1\nline2\t\\\/\"""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().span().source(), &r#"line1\nline2\t\\\/\""#);
+    assert_eq!(sv.data().span().source(), &r#"line1\nline2\t\\\/\""#);
 
     // Unicode escape: exactly four hex digits
     let s = r#""\u0041\u0062\u0030""#; // A b 0
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().span().source(), &r#"\u0041\u0062\u0030"#);
+    assert_eq!(sv.data().span().source(), &r#"\u0041\u0062\u0030"#);
   }
 
   #[test]
@@ -508,16 +508,16 @@ mod tests {
     let s = r#""""""""#; // """ """
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().span().source(), &"");
+    assert_eq!(sv.data().span().source(), &"");
 
     let s = r#"""" """"#; // """ """
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().span().source(), &" ");
+    assert_eq!(sv.data().span().source(), &" ");
 
     let s = r#""""hello""""#;
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().span().source(), &"hello");
+    assert_eq!(sv.data().span().source(), &"hello");
     match sv.delimiters() {
       StringDelimiter::TripleQuote {
         l_triple_quote,
@@ -535,7 +535,7 @@ mod tests {
     let s = "\"\"\"\nHe said \"Hi\".\nMultiline.\n\"\"\"";
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(
-      sv.content().span().source(),
+      sv.data().span().source(),
       &"\nHe said \"Hi\".\nMultiline.\n"
     );
   }
@@ -545,7 +545,7 @@ mod tests {
     // Content contains an escaped triple-quote sequence: \""
     let s = "\"\"\"x\\\"\"\"y\"\"\""; // runtime: """x\"""y"""
     let sv = string_parser().parse(s).into_result().unwrap();
-    assert_eq!(sv.content().span().source(), &r#"x\"""y"#);
+    assert_eq!(sv.data().span().source(), &r#"x\"""y"#);
   }
 
   #[test]
@@ -566,7 +566,7 @@ mod tests {
     let s = r#""abc""#;
     let sv = string_parser().parse(s).into_result().unwrap();
     assert_eq!(sv.span().source(), &s);
-    assert_eq!(sv.content().span().source(), &"abc");
+    assert_eq!(sv.data().span().source(), &"abc");
   }
 
   #[test]

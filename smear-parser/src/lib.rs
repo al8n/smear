@@ -11,6 +11,25 @@ extern crate std;
 
 pub use chumsky;
 
+/// On some platforms, the linker fails to compile complex types, the reference issue is
+/// [rust-lang/rust/issues#130729](https://github.com/rust-lang/rust/issues/130729).
+///
+/// This macro conditionally boxes parsers to reduce type complexity on platforms
+/// where the issue occurs.
+#[macro_export]
+macro_rules! boxed {
+  ($expr:expr) => {{
+    #[cfg(not(target_os = "linux"))]
+    {
+      #[allow(unused_imports)]
+      use $crate::__private::chumsky::prelude::Parser as _;
+      $expr.boxed()
+    }
+    #[cfg(target_os = "linux")]
+    $expr
+  }};
+}
+
 macro_rules! word {
   ($(
     $(#[$meta:meta])*
