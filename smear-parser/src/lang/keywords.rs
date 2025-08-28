@@ -20,7 +20,7 @@ word!(
   /// `type` keyword
   "keyword type": Type: [I::Token::t, I::Token::y, I::Token::p, I::Token::e],
   /// `fragment` keyword
-  "keyword fragment": Fragment: [I::Token::f, I::Token::r, I::Token::a, I::Token::g, I::Token::m, I::Token::e],
+  "keyword fragment": Fragment: [I::Token::f, I::Token::r, I::Token::a, I::Token::g, I::Token::m, I::Token::e, I::Token::n, I::Token::t],
   /// `schema` keyword
   "keyword schema": Schema: [I::Token::s, I::Token::c, I::Token::h, I::Token::e, I::Token::m, I::Token::a],
   /// `implements` keyword

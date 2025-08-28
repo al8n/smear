@@ -17,11 +17,8 @@ fn fragment_definition_with_fragment_spread() {
   .unwrap();
   assert_eq!(definition.name().span().source(), &"friendFields");
 
-  let directives = definition.directives().cloned().unwrap();
-  assert_eq!(directives.directives().len(), 1);
-  let directive = directives.directives().first().unwrap();
-  assert_eq!(directive.name().span().source(), &"example");
-  assert!(directive.arguments().is_none());
+  let directives = definition.directives();
+  assert!(directives.is_none());
 
   let type_condition = definition.type_condition();
   assert_eq!(type_condition.name().span().source(), &"User");
@@ -42,15 +39,8 @@ fn fragment_definition_with_fragment_spread() {
   }
 
   {
-    let profile_pic = fields.next().unwrap().unwrap_field();
-    assert_eq!(profile_pic.name().span().source(), &"profilePic");
-    assert!(profile_pic.selection_set().is_none());
-
-    let arguments = profile_pic.arguments().cloned().unwrap();
-    assert_eq!(arguments.arguments().len(), 1);
-    let argument = arguments.arguments().first().unwrap();
-    assert_eq!(argument.name().span().source(), &"size");
-    let value = argument.value();
-    assert_eq!(value.unwrap_int_ref().span().source(), &"50");
+    let profile_pic = fields.next().unwrap().unwrap_fragment_spread();
+    assert_eq!(profile_pic.name().span().source(), &"standardProfilePic");
+    assert!(profile_pic.directives().is_none());
   }
 }

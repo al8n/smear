@@ -86,6 +86,19 @@ macro_rules! word {
               .map_with(|_, sp| Self($crate::__private::FromMapExtra::from_map_extra(sp)))
           }
         }
+
+        impl<Span> $crate::__private::parse::Parsable<Span> for $name<Span> {
+          fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
+          where
+            I: $crate::__private::Source<'src>,
+            I::Token: $crate::__private::Char + 'src,
+            I::Slice: $crate::__private::Slice<Token = I::Token>,
+            E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+            Span: $crate::__private::FromMapExtra<'src, I, E>,
+          {
+            Self::parser()
+          }
+        }
       )*
     }
   };
@@ -113,7 +126,7 @@ pub mod source {
 pub mod __private {
   pub use chumsky;
 
-  pub use super::source::*;
+  pub use super::{parse, source::*};
 }
 
 #[cfg(all(feature = "std", test))]

@@ -140,7 +140,6 @@ mod tests {
   ) -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
        + Clone {
     EnumValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
-      .then_ignore(end())
   }
 
   #[test]
@@ -213,7 +212,6 @@ mod tests {
 
   #[test]
   fn requires_full_input() {
-    // Because we add `end()`, trailing input must fail.
     for s in ["FOO,", "Bar ", "trueValue!", "RED\n"] {
       assert!(
         enum_parser().parse(s).into_result().is_err(),
@@ -224,12 +222,10 @@ mod tests {
 
   #[test]
   fn into_span_returns_owned_span_with_same_source() {
-    // Parse once to inspect, once to move.
     let s = "MY_ENUM";
     let ev1 = enum_parser().parse(s).into_result().unwrap();
     assert_eq!(ev1.span().source(), &s);
 
-    // Parse again to test into_span (consumes the value).
     let ev2 = enum_parser().parse(s).into_result().unwrap();
     let owned_span = ev2.into_span();
     assert_eq!(owned_span.source(), &s);
@@ -237,13 +233,10 @@ mod tests {
 
   #[test]
   fn labelled_error_exists_for_reserved() {
-    // Ensure we actually get an error object (label text is impl-dependent).
     let errs = enum_parser().parse("true").into_result().unwrap_err();
     assert!(!errs.is_empty());
-    // Ensure we actually get an error object (label text is impl-dependent).
     let errs = enum_parser().parse("false").into_result().unwrap_err();
     assert!(!errs.is_empty());
-    // Ensure we actually get an error object (label text is impl-dependent).
     let errs = enum_parser().parse("null").into_result().unwrap_err();
     assert!(!errs.is_empty());
   }

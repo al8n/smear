@@ -1,3 +1,6 @@
+use chumsky::{error::Rich, extra, span::SimpleSpan};
+use smear_graphql::{ast::*, parse::*, WithSource};
+
 const ALL: &str = r###"
 schema
 @core(feature: "https://specs.apollo.dev/core/v0.1"),
@@ -266,3 +269,13 @@ interface Vehicle {
   retailPrice: String
 }
 "###;
+
+#[test]
+fn supergraph() {
+  let document =
+    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
+      .unwrap();
+
+  let definitions = document.content();
+  assert_eq!(definitions.len(), 43);
+}

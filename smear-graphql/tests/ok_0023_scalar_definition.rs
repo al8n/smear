@@ -7,10 +7,20 @@ scalar Time @deprecated
 
 #[test]
 fn scalar_type_definition() {
-  let definition = ScalarTypeDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
-  .unwrap();
+  let definition =
+    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
+      .unwrap();
+
+  let definitions = definition.content();
+  assert_eq!(definitions.len(), 1);
+
+  let definition = definitions
+    .iter()
+    .next()
+    .unwrap()
+    .unwrap_definition_ref()
+    .unwrap_type_ref()
+    .unwrap_scalar_ref();
 
   assert_eq!(definition.name().span().source(), &"Time");
   let directives = definition.directives().cloned().unwrap();

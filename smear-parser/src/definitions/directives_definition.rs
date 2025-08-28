@@ -54,7 +54,7 @@ word!(
   /// directive @deprecated(reason: String) on FIELD_DEFINITION
   /// directive @auth(requires: Role) on FIELD_DEFINITION
   /// ```
-  "field definition location": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "field definition location": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD` location - directives can be applied to field selections in queries.
   ///
   /// Field directives control individual field selection behavior, commonly
@@ -437,8 +437,8 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
       ArgumentDefinitionLocation::parser().map(Self::ArgumentDefinition),
       InterfaceLocation::parser().map(Self::Interface),
       UnionLocation::parser().map(Self::Union),
-      EnumLocation::parser().map(Self::Enum),
       EnumValueLocation::parser().map(Self::EnumValue),
+      EnumLocation::parser().map(Self::Enum),
       InputObjectLocation::parser().map(Self::InputObject),
       InputFieldDefinitionLocation::parser().map(Self::InputFieldDefinition),
     ))
@@ -501,8 +501,8 @@ impl<Span> Location<Span> {
     Span: crate::source::FromMapExtra<'src, I, E>,
   {
     choice((
-      ExecutableDirectiveLocation::parser().map(Self::Executable),
       TypeSystemDirectiveLocation::parser().map(Self::TypeSystem),
+      ExecutableDirectiveLocation::parser().map(Self::Executable),
     ))
   }
 }
@@ -1183,5 +1183,28 @@ impl<Name, Args, Locations, Span> DirectiveDefinition<Name, Args, Locations, Spa
           }
         },
       )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use chumsky::{extra, span::SimpleSpan};
+
+  fn keyword_parser<'a>() -> impl Parser<
+    'a,
+    &'a str,
+    FieldDefinitionLocation<WithSource<&'a str, SimpleSpan>>,
+    extra::Err<Simple<'a, char>>,
+  > + Clone {
+    FieldDefinitionLocation::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>(
+    )
+  }
+
+  #[test]
+  fn test_field_definition_location() {
+    let parser = keyword_parser();
+    let result = parser.parse("FIELD_DEFINITION").into_result();
+    assert!(result.is_ok());
   }
 }

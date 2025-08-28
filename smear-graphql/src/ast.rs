@@ -470,9 +470,22 @@ newtype!(struct InlineFragment(lang::InlineFragment<Name<Span>, Directives<Span>
   }
 });
 
-newtype!(struct FragmentDefinition(definitions::FragmentDefinition<FragmentName<Span>, Name<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
+newtype!(struct TypeCondition(lang::TypeCondition<Name<Span>, Span>) {
   parser: {
-    definitions::FragmentDefinition::parser_with(FragmentName::parser(), Name::parser(), Directives::parser(), SelectionSet::parser())
+    lang::TypeCondition::parser_with(Name::parser()).map(Self)
+  }
+});
+
+newtype!(struct FragmentDefinitionContent(definitions::FragmentDefinitionContent<FragmentName<Span>, TypeCondition<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
+  parser: {
+    definitions::FragmentDefinitionContent::parser_with(FragmentName::parser(), TypeCondition::parser(), Directives::parser(), SelectionSet::parser())
+      .map(Self)
+  }
+});
+
+newtype!(struct FragmentDefinition(definitions::FragmentDefinition<FragmentName<Span>, TypeCondition<Span>, Directives<Span>, SelectionSet<Span>, Span>) {
+  parser: {
+    definitions::FragmentDefinition::parser_with(FragmentName::parser(), TypeCondition::parser(), Directives::parser(), SelectionSet::parser())
       .map(Self)
   }
 });
@@ -1292,7 +1305,7 @@ impl<Span> parse::Parsable<Span> for TypeDefinitionContent<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      boxed!(ScalarTypeDefinitionContent::parser().map(Self::Scalar)),
+      ScalarTypeDefinitionContent::parser().map(Self::Scalar),
       boxed!(EnumTypeDefinitionContent::parser().map(Self::Enum)),
       boxed!(UnionTypeDefinitionContent::parser().map(Self::Union)),
       boxed!(InputObjectTypeDefinitionContent::parser().map(Self::InputObject)),
@@ -1446,7 +1459,7 @@ pub enum Definition<Span> {
   Type(TypeDefinition<Span>),
   Directive(DirectiveDefinition<Span>),
   Schema(SchemaDefinition<Span>),
-  FragmentDefinition(FragmentDefinition<Span>),
+  Fragment(FragmentDefinition<Span>),
   Operation(OperationDefinition<Span>),
 }
 
@@ -1464,7 +1477,7 @@ impl<Span> IntoSpan<Span> for Definition<Span> {
       Self::Type(t) => t.into_span(),
       Self::Directive(d) => d.into_span(),
       Self::Schema(s) => s.into_span(),
-      Self::FragmentDefinition(f) => f.into_span(),
+      Self::Fragment(f) => f.into_span(),
       Self::Operation(o) => o.into_span(),
     }
   }
@@ -1484,7 +1497,7 @@ impl<Span> parse::Parsable<Span> for Definition<Span> {
       boxed!(SchemaDefinition::parser().map(Self::Schema)),
       boxed!(DirectiveDefinition::parser().map(Self::Directive)),
       boxed!(TypeDefinition::parser().map(Self::Type)),
-      boxed!(FragmentDefinition::parser().map(Self::FragmentDefinition)),
+      boxed!(FragmentDefinition::parser().map(Self::Fragment)),
     ))
   }
 }
@@ -1496,7 +1509,7 @@ impl<Span> Definition<Span> {
       Self::Type(t) => t.span(),
       Self::Directive(d) => d.0.span(),
       Self::Schema(s) => s.0.span(),
-      Self::FragmentDefinition(f) => f.0.span(),
+      Self::Fragment(f) => f.0.span(),
       Self::Operation(o) => o.span(),
     }
   }
