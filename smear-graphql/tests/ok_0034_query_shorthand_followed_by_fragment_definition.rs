@@ -28,6 +28,7 @@ fn query_shorthand_followed_by_fragment_definition() {
       .next()
       .unwrap()
       .unwrap_definition_ref()
+      .unwrap_executable_ref()
       .unwrap_operation_ref()
       .unwrap_shorthand_ref();
     let selections = query.selections();
@@ -42,6 +43,7 @@ fn query_shorthand_followed_by_fragment_definition() {
       .next()
       .unwrap()
       .unwrap_definition_ref()
+      .unwrap_executable_ref()
       .unwrap_fragment_ref();
     assert_eq!(definition.name().span().source(), &"friendFields");
     let type_condition = definition.type_condition();

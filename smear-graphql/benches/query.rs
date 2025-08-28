@@ -32,9 +32,10 @@ fn smear_parser_parse_query(query: &str) {
   use smear_graphql::cst;
 
   let operation =
-    cst::OperationDefinition::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
+    cst::ExecutableDefinition::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
       .unwrap();
   let selection_set = operation
+    .unwrap_operation_ref()
     .try_unwrap_named_ref()
     .expect("the node SelectionSet is not optional in the spec; qed")
     .selection_set();

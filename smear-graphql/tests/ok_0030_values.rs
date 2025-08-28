@@ -27,6 +27,7 @@ fn values() {
     .first()
     .unwrap()
     .unwrap_definition_ref()
+    .unwrap_executable_ref()
     .unwrap_operation_ref()
     .unwrap_shorthand_ref();
   let mut iter = query.selections().iter();

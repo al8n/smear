@@ -1455,12 +1455,60 @@ impl<Span> TypeExtension<Span> {
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
+pub enum ExecutableDefinition<Span> {
+  Fragment(FragmentDefinition<Span>),
+  Operation(OperationDefinition<Span>),
+}
+
+impl<Span> AsRef<Span> for ExecutableDefinition<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for ExecutableDefinition<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Fragment(f) => f.into_span(),
+      Self::Operation(o) => o.into_span(),
+    }
+  }
+}
+
+impl<Span> ExecutableDefinition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Fragment(f) => f.0.span(),
+      Self::Operation(o) => o.span(),
+    }
+  }
+}
+
+impl<Span> parse::Parsable<Span> for ExecutableDefinition<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    OperationDefinition::parser().map(Self::Operation).or(FragmentDefinition::parser().map(Self::Fragment))
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum Definition<Span> {
   Type(TypeDefinition<Span>),
   Directive(DirectiveDefinition<Span>),
   Schema(SchemaDefinition<Span>),
-  Fragment(FragmentDefinition<Span>),
-  Operation(OperationDefinition<Span>),
+  Executable(ExecutableDefinition<Span>),
 }
 
 impl<Span> AsRef<Span> for Definition<Span> {
@@ -1477,8 +1525,7 @@ impl<Span> IntoSpan<Span> for Definition<Span> {
       Self::Type(t) => t.into_span(),
       Self::Directive(d) => d.into_span(),
       Self::Schema(s) => s.into_span(),
-      Self::Fragment(f) => f.into_span(),
-      Self::Operation(o) => o.into_span(),
+      Self::Executable(e) => e.into_span(),
     }
   }
 }
@@ -1493,11 +1540,10 @@ impl<Span> parse::Parsable<Span> for Definition<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      boxed!(OperationDefinition::parser().map(Self::Operation)),
+      boxed!(ExecutableDefinition::parser().map(Self::Executable)),
       boxed!(SchemaDefinition::parser().map(Self::Schema)),
       boxed!(DirectiveDefinition::parser().map(Self::Directive)),
       boxed!(TypeDefinition::parser().map(Self::Type)),
-      boxed!(FragmentDefinition::parser().map(Self::Fragment)),
     ))
   }
 }
@@ -1509,8 +1555,7 @@ impl<Span> Definition<Span> {
       Self::Type(t) => t.span(),
       Self::Directive(d) => d.0.span(),
       Self::Schema(s) => s.0.span(),
-      Self::Fragment(f) => f.0.span(),
-      Self::Operation(o) => o.span(),
+      Self::Executable(e) => e.span(),
     }
   }
 }
