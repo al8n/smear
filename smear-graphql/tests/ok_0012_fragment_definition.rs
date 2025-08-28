@@ -1,8 +1,4 @@
-use chumsky::{
-  error::{Rich, Simple},
-  extra,
-  span::SimpleSpan,
-};
+use chumsky::{error::Rich, extra, span::SimpleSpan};
 use smear_graphql::{ast::*, parse::*, WithSource};
 
 const ALL: &str = r###"fragment friendFields on User @example {

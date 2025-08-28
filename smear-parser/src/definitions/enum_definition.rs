@@ -345,46 +345,8 @@ impl<EnumValueDefinition, Span, Container>
 /// Represents a content of enum type definition in GraphQL schema.
 ///
 /// The difference between this and `EnumTypeDefinition` is that this does not include
-/// the description and the `enum` keyword.
-///
-/// A content of enum type definition specifies a type that can have one of a finite set of values.
-/// It includes the enum keyword, name, optional description, optional directives,
-/// and optional enum values definition. Enum types are useful for representing
-/// a fixed set of possible values.
-///
-/// ## Examples
-///
-/// ```text
-/// # Simple enum definition
-/// enum Status {
-///   ACTIVE
-///   INACTIVE
-/// }
-///
-/// # Enum with description and directives
-/// """
-/// Represents the status of a user account
-/// """
-/// enum UserStatus @auth(requires: ADMIN) {
-///   """
-///   Account is active and in good standing
-///   """
-///   ACTIVE
-///   
-///   """
-///   Account is temporarily suspended
-///   """
-///   SUSPENDED @deprecated(reason: "Use INACTIVE")
-///   
-///   """
-///   Account is permanently deactivated
-///   """
-///   INACTIVE
-/// }
-///
-/// # Enum definition without values (for extensions)
-/// enum Status @directive
-/// ```
+/// the description and the `enum` keyword. This allows
+/// for more modular parsing and composition when building up full type definitions.
 ///
 /// ## Type Parameters
 ///
@@ -837,52 +799,8 @@ impl<Directives, EnumValuesDefinition> EnumTypeExtensionData<Directives, EnumVal
 /// Represents a content of enum type extension in GraphQL schema.
 ///
 /// The difference between this and `EnumTypeExtension` is that this does not include
-/// the `extend` and `enum` keywords.
-///
-/// An enum extension allows adding new enum values and/or directives to an
-/// existing enum type without modifying the original definition. This is
-/// particularly useful in schema composition scenarios where different
-/// parts of a system need to extend shared types.
-///
-/// ## GraphQL Extension Philosophy
-///
-/// Extensions support GraphQL's modular approach to schema development:
-/// - **Non-destructive**: Extensions don't modify original definitions
-/// - **Additive**: Extensions can only add new capabilities
-/// - **Composable**: Multiple extensions can be applied to the same type
-/// - **Modular**: Different services can extend shared types
-///
-/// ## Examples
-///
-/// ```text
-/// # Simple enum extension adding values
-/// extend enum UserStatus {
-///   ARCHIVED
-///   MIGRATED
-/// }
-///
-/// # Enum extension adding directives to the type and new values
-/// extend enum UserStatus @deprecated(reason: "Use AccountStatus instead") {
-///   LEGACY_ACTIVE
-///   LEGACY_INACTIVE
-/// }
-///
-/// # Enum extension adding only directives to the type
-/// extend enum UserStatus @auth(requires: ADMIN) @rateLimit(max: 100)
-///
-/// # Complex enum extension with descriptions
-/// extend enum UserStatus @internal {
-///   """
-///   Special status for system accounts
-///   """
-///   SYSTEM
-///   
-///   """
-///   Status for accounts undergoing migration
-///   """
-///   MIGRATING @deprecated(reason: "Migration completed")
-/// }
-/// ```
+/// the `extend` and `enum` keywords. This allows
+/// for more modular parsing and composition when building up full type definitions.
 ///
 /// ## Type Parameters
 ///

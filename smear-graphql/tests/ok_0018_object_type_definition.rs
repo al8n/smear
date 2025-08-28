@@ -21,7 +21,7 @@ fn object_type_definition() {
   .unwrap();
   assert_eq!(definition.name().span().source(), &"Person");
   assert_eq!(
-    definition.description().unwrap().data().span().source(),
+    definition.description().unwrap().content().span().source(),
     &"description of type"
   );
 
@@ -39,7 +39,7 @@ fn object_type_definition() {
     let name = fields.next().unwrap();
     assert_eq!(name.name().span().source(), &"name");
     assert_eq!(
-      name.description().unwrap().data().span().source(),
+      name.description().unwrap().content().span().source(),
       &"\n    description of field\n    "
     );
     let ty = name.ty().unwrap_name_ref();

@@ -8,7 +8,8 @@ use crate::{
 /// Represents a content of scalar type definition in GraphQL schema.
 ///
 /// The difference between this and [`ScalarTypeDefinition`] is that this does not include
-/// the description and `scalar` keyword.
+/// the description and `scalar` keyword. This allows
+/// for more modular parsing and composition when building up full type definitions.
 ///
 /// ## Grammar
 ///
@@ -361,7 +362,8 @@ impl<Name, Directives, Span> ScalarTypeDefinition<Name, Directives, Span> {
 /// Represents a GraphQL scalar type extension that adds new directives to an existing scalar.
 ///
 /// The difference between this and [`ScalarTypeExtension`] is that this does not include
-/// the `extend` and `scalar` keywords.
+/// the `extend` and `scalar` keywords. This allows
+/// for more modular parsing and composition when building up full type definitions.
 ///
 /// ## Type Parameters
 ///

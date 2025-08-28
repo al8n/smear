@@ -91,7 +91,10 @@ fn selection_with_fragment_spread() {
     assert_eq!(duration.name().span().source(), &"duration");
     let value = duration.value();
     assert!(value.is_string());
-    assert_eq!(value.unwrap_string_ref().data().span().source(), &"2 hours");
+    assert_eq!(
+      value.unwrap_string_ref().content().span().source(),
+      &"2 hours"
+    );
   }
 
   {

@@ -49,7 +49,7 @@ fn variables_with_default() {
       default_value
         .value()
         .unwrap_string_ref()
-        .data()
+        .content()
         .span()
         .source(),
       &"Config"

@@ -37,7 +37,7 @@ fn directive_on_argument_definition() {
   assert_eq!(argument.name().span().source(), &"reason");
   let value = argument.value();
   assert_eq!(
-    value.unwrap_string_ref().data().span().source(),
+    value.unwrap_string_ref().content().span().source(),
     &"Use username instead"
   );
 }

@@ -16,7 +16,7 @@ fn input_object_definition() {
   .unwrap();
   assert_eq!(definition.name().span().source(), &"ExampleInputObject");
 
-  let input_fields = definition.fields().cloned().unwrap();
+  let input_fields = definition.fields_definition().cloned().unwrap();
   assert_eq!(input_fields.input_value_definitions().len(), 2);
   let mut fields = input_fields.input_value_definitions().iter();
 

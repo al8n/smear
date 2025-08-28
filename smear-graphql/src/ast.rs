@@ -694,6 +694,26 @@ newtype!(struct EnumValuesDefinition(definitions::EnumValuesDefinition<EnumValue
   }
 });
 
+newtype!(struct EnumTypeDefinitionContent(definitions::EnumTypeDefinitionContent<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>) {
+  parser: {
+    definitions::EnumTypeDefinitionContent::parser_with(
+      ConstDirectives::parser(),
+      EnumValuesDefinition::parser(),
+    )
+    .map(Self)
+  }
+});
+
+newtype!(struct EnumTypeExtensionContent(definitions::EnumTypeExtensionContent<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>) {
+  parser: {
+    definitions::EnumTypeExtensionContent::parser_with(
+      ConstDirectives::parser,
+      EnumValuesDefinition::parser,
+    )
+    .map(Self)
+  }
+});
+
 newtype!(struct EnumTypeDefinition(definitions::EnumTypeDefinition<ConstDirectives<Span>, EnumValuesDefinition<Span>, Span>) {
   parser: {
     definitions::EnumTypeDefinition::parser_with(
@@ -762,6 +782,31 @@ newtype!(struct InputFieldsDefinition(
   }
 });
 
+newtype!(struct InputObjectTypeDefinitionContent(
+  definitions::InputObjectTypeDefinitionContent<Name<Span>, ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
+) {
+  parser: {
+    definitions::InputObjectTypeDefinitionContent::parser_with(
+      Name::parser(),
+      ConstDirectives::parser(),
+      InputFieldsDefinition::parser(),
+    )
+    .map(Self)
+  }
+});
+
+newtype!(struct InputObjectTypeExtensionContent(
+  definitions::InputObjectTypeExtensionContent<Name<Span>, ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
+) {
+  parser: {
+    definitions::InputObjectTypeExtensionContent::parser_with(
+      Name::parser(),
+      ConstDirectives::parser,
+      InputFieldsDefinition::parser,
+    )
+    .map(Self)
+  }
+});
 newtype!(struct InputObjectTypeDefinition(
   definitions::InputObjectTypeDefinition<Name<Span>, ConstDirectives<Span>, InputFieldsDefinition<Span>, Span>,
 ) {
@@ -787,6 +832,48 @@ newtype!(struct InputObjectTypeExtension(
     .map(Self)
   }
 });
+
+newtype!(struct InterfaceTypeDefinitionContent(
+  definitions::InterfaceTypeDefinitionContent<
+    Name<Span>,
+    ImplementInterfaces<Span>,
+    ConstDirectives<Span>,
+    FieldsDefinition<Span>,
+    Span,
+  >,
+) {
+  parser: {
+    definitions::InterfaceTypeDefinitionContent::parser_with(
+      Name::parser(),
+      ImplementInterfaces::parser_with(Name::parser),
+      ConstDirectives::parser(),
+      FieldsDefinition::parser(),
+    )
+    .map(Self)
+  }
+});
+
+newtype!(
+  struct InterfaceTypeExtensionContent(
+    definitions::InterfaceTypeExtensionContent<
+      Name<Span>,
+      ImplementInterfaces<Span>,
+      ConstDirectives<Span>,
+      FieldsDefinition<Span>,
+      Span,
+    >,
+  ) {
+    parser: {
+      definitions::InterfaceTypeExtensionContent::parser_with(
+        Name::parser(),
+        || ImplementInterfaces::parser_with(Name::parser),
+        ConstDirectives::parser,
+        FieldsDefinition::parser,
+      )
+      .map(Self)
+    }
+  }
+);
 
 newtype!(struct InterfaceTypeDefinition(
   definitions::InterfaceTypeDefinition<
@@ -830,6 +917,46 @@ newtype!(
   }
 );
 
+newtype!(struct ObjectTypeDefinitionContent(
+  definitions::ObjectTypeDefinitionContent<
+    Name<Span>,
+    ImplementInterfaces<Span>,
+    ConstDirectives<Span>,
+    FieldsDefinition<Span>,
+    Span,
+  >,
+) {
+  parser: {
+    definitions::ObjectTypeDefinitionContent::parser_with(
+      Name::parser(),
+      ImplementInterfaces::parser_with(Name::parser),
+      ConstDirectives::parser(),
+      FieldsDefinition::parser(),
+    )
+    .map(Self)
+  }
+});
+
+newtype!(struct ObjectTypeExtensionContent(
+  definitions::ObjectTypeExtensionContent<
+    Name<Span>,
+    ImplementInterfaces<Span>,
+    ConstDirectives<Span>,
+    FieldsDefinition<Span>,
+    Span,
+  >,
+) {
+  parser: {
+    definitions::ObjectTypeExtensionContent::parser_with(
+      Name::parser(),
+      || ImplementInterfaces::parser_with(Name::parser),
+      ConstDirectives::parser,
+      FieldsDefinition::parser,
+    )
+    .map(Self)
+  }
+});
+
 newtype!(struct ObjectTypeDefinition(
   definitions::ObjectTypeDefinition<
     Name<Span>,
@@ -870,6 +997,14 @@ newtype!(struct ObjectTypeExtension(
   }
 });
 
+newtype!(struct ScalarTypeDefinitionContent(
+  definitions::ScalarTypeDefinitionContent<Name<Span>, ConstDirectives<Span>, Span>,
+) {
+  parser: {
+    definitions::ScalarTypeDefinitionContent::parser_with(Name::parser(), ConstDirectives::parser()).map(Self)
+  }
+});
+
 newtype!(struct ScalarTypeDefinition(
   definitions::ScalarTypeDefinition<Name<Span>, ConstDirectives<Span>, Span>,
 ) {
@@ -878,11 +1013,41 @@ newtype!(struct ScalarTypeDefinition(
   }
 });
 
+newtype!(struct ScalarTypeExtensionContent(
+  definitions::ScalarTypeExtensionContent<Name<Span>, ConstDirectives<Span>, Span>,
+) {
+  parser: {
+    definitions::ScalarTypeExtensionContent::parser_with(Name::parser(), ConstDirectives::parser()).map(Self)
+  }
+});
+
 newtype!(struct ScalarTypeExtension(
   definitions::ScalarTypeExtension<Name<Span>, ConstDirectives<Span>, Span>,
 ) {
   parser: {
     definitions::ScalarTypeExtension::parser_with(Name::parser(), ConstDirectives::parser()).map(Self)
+  }
+});
+
+newtype!(struct UnionTypeDefinitionContent(
+  definitions::UnionTypeDefinitionContent<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
+) {
+  parser: {
+    definitions::UnionTypeDefinitionContent::parser_with(
+      Name::parser(),
+      ConstDirectives::parser(),
+      UnionMemberTypes::parser_with(Name::parser),
+    )
+    .map(Self)
+  }
+});
+
+newtype!(struct UnionTypeExtensionContent(
+  definitions::UnionTypeExtensionContent<Name<Span>, ConstDirectives<Span>, UnionMemberTypes<Span>, Span>,
+) {
+  parser: {
+    definitions::UnionTypeExtensionContent::parser_with(Name::parser(), ConstDirectives::parser, UnionMemberTypes::parser_with(Name::parser))
+      .map(Self)
   }
 });
 
@@ -1073,6 +1238,74 @@ newtype!(struct SchemaExtension(
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
+pub enum TypeDefinitionContent<Span> {
+  Scalar(ScalarTypeDefinitionContent<Span>),
+  Enum(EnumTypeDefinitionContent<Span>),
+  Union(UnionTypeDefinitionContent<Span>),
+  InputObject(InputObjectTypeDefinitionContent<Span>),
+  Object(ObjectTypeDefinitionContent<Span>),
+  Interface(InterfaceTypeDefinitionContent<Span>),
+}
+
+impl<Span> AsRef<Span> for TypeDefinitionContent<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for TypeDefinitionContent<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Scalar(s) => s.into_span(),
+      Self::Enum(e) => e.into_span(),
+      Self::Union(u) => u.into_span(),
+      Self::InputObject(i) => i.into_span(),
+      Self::Object(o) => o.into_span(),
+      Self::Interface(i) => i.into_span(),
+    }
+  }
+}
+
+impl<Span> TypeDefinitionContent<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Scalar(s) => s.0.span(),
+      Self::Enum(e) => e.0.span(),
+      Self::Union(u) => u.0.span(),
+      Self::InputObject(i) => i.0.span(),
+      Self::Object(o) => o.0.span(),
+      Self::Interface(i) => i.0.span(),
+    }
+  }
+}
+
+impl<Span> parse::Parsable<Span> for TypeDefinitionContent<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    choice((
+      boxed!(ScalarTypeDefinitionContent::parser().map(Self::Scalar)),
+      boxed!(EnumTypeDefinitionContent::parser().map(Self::Enum)),
+      boxed!(UnionTypeDefinitionContent::parser().map(Self::Union)),
+      boxed!(InputObjectTypeDefinitionContent::parser().map(Self::InputObject)),
+      boxed!(ObjectTypeDefinitionContent::parser().map(Self::Object)),
+      boxed!(InterfaceTypeDefinitionContent::parser().map(Self::Interface)),
+    ))
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum TypeDefinition<Span> {
   Scalar(ScalarTypeDefinition<Span>),
   Enum(EnumTypeDefinition<Span>),
@@ -1113,7 +1346,7 @@ impl<Span> parse::Parsable<Span> for TypeDefinition<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      boxed!(ScalarTypeDefinition::parser().map(Self::Scalar)),
+      ScalarTypeDefinition::parser().map(Self::Scalar),
       boxed!(EnumTypeDefinition::parser().map(Self::Enum)),
       boxed!(UnionTypeDefinition::parser().map(Self::Union)),
       boxed!(InputObjectTypeDefinition::parser().map(Self::InputObject)),
@@ -1133,66 +1366,6 @@ impl<Span> TypeDefinition<Span> {
       Self::InputObject(i) => i.0.span(),
       Self::Object(o) => o.0.span(),
       Self::Interface(i) => i.0.span(),
-    }
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeSystemDefinition<Span> {
-  Type(TypeDefinition<Span>),
-  Directive(DirectiveDefinition<Span>),
-  Schema(SchemaDefinition<Span>),
-}
-
-impl<Span> AsRef<Span> for TypeSystemDefinition<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Directive(d) => d.span(),
-      Self::Schema(s) => s.span(),
-    }
-  }
-}
-
-impl<Span> IntoSpan<Span> for TypeSystemDefinition<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Type(t) => t.into_span(),
-      Self::Directive(d) => d.into_span(),
-      Self::Schema(s) => s.into_span(),
-    }
-  }
-}
-
-impl<Span> parse::Parsable<Span> for TypeSystemDefinition<Span> {
-  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::FromMapExtra<'src, I, E>,
-  {
-    choice((
-      TypeDefinition::parser().map(Self::Type),
-      DirectiveDefinition::parser().map(Self::Directive),
-      SchemaDefinition::parser().map(Self::Schema),
-    ))
-  }
-}
-
-impl<Span> TypeSystemDefinition<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Directive(d) => d.0.span(),
-      Self::Schema(s) => s.0.span(),
     }
   }
 }
@@ -1241,7 +1414,7 @@ impl<Span> parse::Parsable<Span> for TypeExtension<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      boxed!(ScalarTypeExtension::parser().map(Self::Scalar)),
+      ScalarTypeExtension::parser().map(Self::Scalar),
       boxed!(EnumTypeExtension::parser().map(Self::Enum)),
       boxed!(UnionTypeExtension::parser().map(Self::Union)),
       boxed!(InputObjectTypeExtension::parser().map(Self::InputObject)),
@@ -1269,29 +1442,35 @@ impl<Span> TypeExtension<Span> {
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum TypeSystemExtension<Span> {
-  Type(TypeExtension<Span>),
-  Schema(SchemaExtension<Span>),
+pub enum Definition<Span> {
+  Type(TypeDefinition<Span>),
+  Directive(DirectiveDefinition<Span>),
+  Schema(SchemaDefinition<Span>),
+  FragmentDefinition(FragmentDefinition<Span>),
+  Operation(OperationDefinition<Span>),
 }
 
-impl<Span> AsRef<Span> for TypeSystemExtension<Span> {
+impl<Span> AsRef<Span> for Definition<Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for TypeSystemExtension<Span> {
+impl<Span> IntoSpan<Span> for Definition<Span> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
       Self::Type(t) => t.into_span(),
+      Self::Directive(d) => d.into_span(),
       Self::Schema(s) => s.into_span(),
+      Self::FragmentDefinition(f) => f.into_span(),
+      Self::Operation(o) => o.into_span(),
     }
   }
 }
 
-impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
+impl<Span> parse::Parsable<Span> for Definition<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1301,13 +1480,70 @@ impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
-      boxed!(TypeExtension::parser().map(Self::Type)),
-      boxed!(SchemaExtension::parser().map(Self::Schema)),
+      boxed!(OperationDefinition::parser().map(Self::Operation)),
+      boxed!(SchemaDefinition::parser().map(Self::Schema)),
+      boxed!(DirectiveDefinition::parser().map(Self::Directive)),
+      boxed!(TypeDefinition::parser().map(Self::Type)),
+      boxed!(FragmentDefinition::parser().map(Self::FragmentDefinition)),
     ))
   }
 }
 
-impl<Span> TypeSystemExtension<Span> {
+impl<Span> Definition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Type(t) => t.span(),
+      Self::Directive(d) => d.0.span(),
+      Self::Schema(s) => s.0.span(),
+      Self::FragmentDefinition(f) => f.0.span(),
+      Self::Operation(o) => o.span(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum Extension<Span> {
+  Type(TypeExtension<Span>),
+  Schema(SchemaExtension<Span>),
+}
+
+impl<Span> AsRef<Span> for Extension<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for Extension<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Type(t) => t.into_span(),
+      Self::Schema(s) => s.into_span(),
+    }
+  }
+}
+
+impl<Span> parse::Parsable<Span> for Extension<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    TypeExtension::parser()
+      .map(Self::Type)
+      .or(SchemaExtension::parser().map(Self::Schema))
+  }
+}
+
+impl<Span> Extension<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -1322,8 +1558,8 @@ impl<Span> TypeSystemExtension<Span> {
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum TypeSystem<Span> {
-  Definition(TypeSystemDefinition<Span>),
-  Extension(TypeSystemExtension<Span>),
+  Definition(Definition<Span>),
+  Extension(Extension<Span>),
 }
 
 impl<Span> AsRef<Span> for TypeSystem<Span> {
@@ -1352,10 +1588,9 @@ impl<Span> parse::Parsable<Span> for TypeSystem<Span> {
     E: ParserExtra<'src, I>,
     Span: source::FromMapExtra<'src, I, E>,
   {
-    choice((
-      boxed!(TypeSystemDefinition::parser().map(Self::Definition)),
-      boxed!(TypeSystemExtension::parser().map(Self::Extension)),
-    ))
+    Definition::parser()
+      .map(Self::Definition)
+      .or(Extension::parser().map(Self::Extension))
   }
 }
 
@@ -1370,41 +1605,46 @@ impl<Span> TypeSystem<Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Document<Span> {
+pub struct Document<Span, Container = Vec<TypeSystem<Span>>> {
   span: Span,
-  types: Vec<TypeSystem<Span>>,
+  content: Container,
 }
 
-impl<Span> AsRef<[TypeSystem<Span>]> for Document<Span> {
+impl<Span, Container: AsRef<[TypeSystem<Span>]>> AsRef<[TypeSystem<Span>]>
+  for Document<Span, Container>
+{
   #[inline]
   fn as_ref(&self) -> &[TypeSystem<Span>] {
-    self.types()
+    self.content()
   }
 }
 
-impl<Span> AsRef<Span> for Document<Span> {
+impl<Span, Container> AsRef<Span> for Document<Span, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for Document<Span> {
+impl<Span, Container> IntoSpan<Span> for Document<Span, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for Document<Span> {
-  type Components = (Span, Vec<TypeSystem<Span>>);
+impl<Span, Container> IntoComponents for Document<Span, Container> {
+  type Components = (Span, Container);
 
   fn into_components(self) -> Self::Components {
-    (self.span, self.types)
+    (self.span, self.content)
   }
 }
 
-impl<Span> parse::Parsable<Span> for Document<Span> {
+impl<Span, Container> parse::Parsable<Span> for Document<Span, Container>
+where
+  Container: chumsky::container::Container<TypeSystem<Span>>,
+{
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1417,21 +1657,24 @@ impl<Span> parse::Parsable<Span> for Document<Span> {
       .padded_by(ignored())
       .repeated()
       .collect()
-      .map_with(|types, sp| Self {
+      .map_with(|content, sp| Self {
         span: source::FromMapExtra::from_map_extra(sp),
-        types,
+        content,
       })
   }
 }
 
-impl<Span> Document<Span> {
+impl<Span, Container> Document<Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
   #[inline]
-  pub const fn types(&self) -> &[TypeSystem<Span>] {
-    self.types.as_slice()
+  pub fn content(&self) -> &[TypeSystem<Span>]
+  where
+    Container: AsRef<[TypeSystem<Span>]>,
+  {
+    self.content.as_ref()
   }
 }

@@ -37,7 +37,13 @@ fn enum_type_definition() {
     assert_eq!(north.value().span().source(), &"NORTH");
     assert!(north.description().is_some());
     assert_eq!(
-      north.description().as_ref().unwrap().data().span().source(),
+      north
+        .description()
+        .as_ref()
+        .unwrap()
+        .content()
+        .span()
+        .source(),
       &"\n    description\n    "
     );
     assert!(north.directives().is_none());

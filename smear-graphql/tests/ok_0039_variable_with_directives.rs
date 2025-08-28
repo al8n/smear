@@ -50,7 +50,7 @@ fn variable_with_directives() {
       default_value
         .value()
         .unwrap_string_ref()
-        .data()
+        .content()
         .span()
         .source(),
       &"Config"
@@ -65,6 +65,6 @@ fn variable_with_directives() {
     let argument = &arguments[0];
     assert_eq!(argument.name().span().source(), &"name");
     let value = argument.value().unwrap_string_ref();
-    assert_eq!(value.data().span().source(), &"team-customers");
+    assert_eq!(value.content().span().source(), &"team-customers");
   }
 }
