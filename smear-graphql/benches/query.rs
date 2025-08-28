@@ -1,10 +1,10 @@
-use apollo_parser::cst;
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 use criterion::*;
-use smear_graphql::cst;
 use smear_parser::parse::ParseStr;
 
 fn apollo_parser_parse_query(query: &str) {
+  use apollo_parser::cst;
+
   let parser = apollo_parser::Parser::new(query);
   let tree = parser.parse();
 
@@ -28,6 +28,23 @@ fn apollo_parser_parse_query(query: &str) {
   }
 }
 
+fn smear_parser_parse_query(query: &str) {
+  use smear_graphql::cst;
+
+  let operation =
+    cst::OperationDefinition::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
+      .unwrap();
+  let selection_set = operation
+    .try_unwrap_named_ref()
+    .expect("the node SelectionSet is not optional in the spec; qed")
+    .selection_set();
+  for selection in selection_set.selections() {
+    if let cst::Selection::Field(field) = selection {
+      std::hint::black_box(field.selection_set());
+    }
+  }
+}
+
 fn bench_apollo_query_parser(c: &mut Criterion) {
   let query = "query ExampleQuery($topProductsFirst: Int) {\n  me { \n    id\n  }\n  topProducts(first:  $topProductsFirst) {\n    name\n    price\n    inStock\n weight\n test test test test test test test test test test test test }\n}";
 
@@ -42,21 +59,6 @@ fn bench_apollo_parser_many_aliases(c: &mut Criterion) {
   c.bench_function("apollo-parser/many_aliases", move |b| {
     b.iter(|| apollo_parser_parse_query(query))
   });
-}
-
-fn smear_parser_parse_query(query: &str) {
-  let operation =
-    cst::OperationDefinition::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
-      .unwrap();
-  let selection_set = operation
-    .try_unwrap_named_ref()
-    .expect("the node SelectionSet is not optional in the spec; qed")
-    .selection_set();
-  for selection in selection_set.selections() {
-    if let cst::Selection::Field(field) = selection {
-      std::hint::black_box(field.selection_set());
-    }
-  }
 }
 
 fn bench_smear_query_parser(c: &mut Criterion) {

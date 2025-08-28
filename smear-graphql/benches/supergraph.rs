@@ -1,11 +1,10 @@
-use apollo_parser::cst;
-
 use chumsky::{error::Simple, extra, span::SimpleSpan};
 use criterion::*;
-use smear_graphql::cst;
 use smear_parser::parse::ParseStr;
 
 fn apollo_parser_parse_schema(schema: &str) {
+  use apollo_parser::cst;
+
   let parser = apollo_parser::Parser::new(schema);
   let tree = parser.parse();
   let errors = tree.errors().collect::<Vec<_>>();
@@ -29,6 +28,8 @@ fn apollo_parser_parse_schema(schema: &str) {
 }
 
 fn smear_parser_parse_schema(schema: &str) {
+  use smear_graphql::cst;
+
   let document =
     cst::Document::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(schema).unwrap();
 
