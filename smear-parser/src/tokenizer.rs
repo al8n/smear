@@ -56,20 +56,63 @@ impl<I> Context<I> {
   }
 }
 
+/// The kind of the [`Token`]
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TokenKind {
+  /// The punctuation token.
+  Punctuator,
+  /// The name token.
+  Name,
+  /// The integer value token.
+  IntValue,
+  /// The float value token.
+  FloatValue,
+  /// The string value token.
+  StringValue,
+  /// The block string token.
+  BlockString,
+
+  /// The white spaces.
+  Whitespaces,
+  /// The comment.
+  Comment,
+}
+
 /// The token trait.
-#[allow(clippy::len_without_is_empty)]
-pub trait Token<'a, I: 'a>: Sized + 'a {
+pub trait Token<'a, I>: Sized + 'a
+where
+  I: Source<'a>,
+{
   /// Peeks a token from the input.
   fn peek(input: I) -> Option<Self>;
 
-  /// Returns the size of the token.
-  fn size(&self) -> usize;
+  /// Returns the size of this token.
+  #[inline(always)]
+  fn size(&self) -> usize {
+    self.data().len()
+  }
+
+  /// Returns the kind of this token.
+  fn kind(&self) -> TokenKind;
+
+  /// Returns the source data for this token.
+  fn data(&self) -> &I;
 }
 
 /// The source
 pub trait Source<'a>: 'a {
   /// Returns a subslice of the source with the given range.
   fn slice(&self, range: impl RangeBounds<usize>) -> Self;
+
+  /// Returns the length of the source.
+  fn len(&self) -> usize;
+
+  /// Returns `true` if the source is empty.
+  #[inline(always)]
+  fn is_empty(&self) -> bool {
+    self.len() == 0
+  }
 }
 
 macro_rules! slice {
@@ -94,6 +137,11 @@ macro_rules! slice {
 
 impl<'a> Source<'a> for &'a str {
   #[inline(always)]
+  fn len(&self) -> usize {
+    <str>::len(self)
+  }
+
+  #[inline(always)]
   fn slice(&self, range: impl RangeBounds<usize>) -> Self {
     slice!(self(range))
   }
@@ -103,6 +151,11 @@ impl<'a> Source<'a> for &'a [u8] {
   #[inline(always)]
   fn slice(&self, range: impl RangeBounds<usize>) -> Self {
     slice!(self(range))
+  }
+
+  #[inline(always)]
+  fn len(&self) -> usize {
+    <[u8]>::len(self) 
   }
 }
 
