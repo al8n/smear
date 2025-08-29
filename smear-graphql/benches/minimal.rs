@@ -25,7 +25,6 @@ fn async_graphql_parser_parse_query(query: &str) {
   let _document = async_graphql_parser::parse_query(query).unwrap();
 }
 
-
 fn bench_apollo_parser_minimal(c: &mut Criterion) {
   c.bench_function("apollo-parser/minimal", move |b| {
     b.iter(|| apollo_parser_parse_query(QUERY))

@@ -1,4 +1,3 @@
-
 macro_rules! define_module {
   ($($filename:ident),+$(,)?) => {
     $(
@@ -59,4 +58,3 @@ define_module!(
   ok_0046_parse_queries,
   ok_0047_parse_schemas,
 );
-
