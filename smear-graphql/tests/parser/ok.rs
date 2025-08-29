@@ -53,8 +53,9 @@ define_module!(
   ok_0041_implements_list,
   ok_0042_object_type_definition_without_fields,
   ok_0043_interface_type_definition_without_fields,
-  ok_0044_parse_services,
-  ok_0045_parse_executables,
-  ok_0046_parse_queries,
-  ok_0047_parse_schemas,
+  ok_0044_async_graphql_issue_1039,
+  parse_services,
+  parse_executables,
+  parse_queries,
+  parse_schemas,
 );
