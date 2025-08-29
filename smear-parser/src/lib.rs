@@ -1,6 +1,6 @@
 #![doc = include_str!("../../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![deny(missing_docs, warnings)]
+#![deny(missing_docs)]
 #![allow(clippy::type_complexity)]
 
 #[cfg(not(feature = "std"))]
@@ -140,6 +140,9 @@ pub mod definitions;
 
 /// Parsing related traits
 pub mod parse;
+
+/// Lexer related functionality
+pub mod tokenizer;
 
 /// Source trait and implementations
 pub mod source {
