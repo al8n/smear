@@ -1,4 +1,4 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
+use chumsky::{error::Rich, extra, span::SimpleSpan};
 use smear_graphql::{cst::*, parse::*, WithSource};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0003_selection_with_fields.graphql");
@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0003_selection_with_fie
 #[test]
 fn selection_with_fields() {
   let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
+    extra::Err<Rich<'_, char>>,
   >(ALL)
   .unwrap();
   assert_eq!(selection_set.selections().len(), 2);
