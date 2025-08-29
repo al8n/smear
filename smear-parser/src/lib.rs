@@ -99,6 +99,30 @@ macro_rules! word {
             Self::parser()
           }
         }
+
+        #[cfg(test)]
+        mod [< __ $name:snake _tests >] {
+          use super::*;
+
+          fn keyword_parser<'a>() -> impl $crate::__private::chumsky::Parser<
+            'a,
+            &'a ::core::primitive::str,
+            $name<$crate::__private::WithSource<&'a ::core::primitive::str, $crate::__private::chumsky::prelude::SimpleSpan>>,
+            $crate::__private::chumsky::extra::Err<$crate::__private::chumsky::prelude::Simple<'a, ::core::primitive::char>>,
+          > + Clone {
+            $name::<$crate::__private::WithSource<&::core::primitive::str, $crate::__private::chumsky::prelude::SimpleSpan>>::parser::<&::core::primitive::str, $crate::__private::chumsky::extra::Err<$crate::__private::chumsky::prelude::Simple<::core::primitive::char>>>(
+            )
+          }
+
+          #[test]
+          fn [< test_ $name:snake >]() {
+            use $crate::__private::chumsky::prelude::Parser as _;
+
+            let parser = keyword_parser();
+            let result = parser.parse($label).into_result();
+            assert!(result.is_ok());
+          }
+        }
       )*
     }
   };

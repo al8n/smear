@@ -28,6 +28,7 @@ fn implements_list() {
     let object = types
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
@@ -57,6 +58,7 @@ fn implements_list() {
     let object = types
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
@@ -91,6 +93,7 @@ fn implements_list() {
     let object = types
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();

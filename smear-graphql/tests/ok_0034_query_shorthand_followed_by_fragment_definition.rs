@@ -27,7 +27,6 @@ fn query_shorthand_followed_by_fragment_definition() {
     let query = iter
       .next()
       .unwrap()
-      .unwrap_definition_ref()
       .unwrap_executable_ref()
       .unwrap_operation_ref()
       .unwrap_shorthand_ref();
@@ -42,7 +41,6 @@ fn query_shorthand_followed_by_fragment_definition() {
     let definition = iter
       .next()
       .unwrap()
-      .unwrap_definition_ref()
       .unwrap_executable_ref()
       .unwrap_fragment_ref();
     assert_eq!(definition.name().span().source(), &"friendFields");

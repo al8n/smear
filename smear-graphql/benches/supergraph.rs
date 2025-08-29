@@ -1,72 +1,57 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
 use criterion::*;
-use smear_parser::parse::ParseStr;
+
+const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
 
 fn apollo_parser_parse_schema(schema: &str) {
-  use apollo_parser::cst;
-
   let parser = apollo_parser::Parser::new(schema);
-  let tree = parser.parse();
-  let errors = tree.errors().collect::<Vec<_>>();
-
-  if !errors.is_empty() {
-    panic!("error parsing query: {errors:?}");
-  }
-
-  let document = tree.document();
-
-  for definition in document.definitions() {
-    if let cst::Definition::ObjectTypeDefinition(operation) = definition {
-      let fields = operation
-        .fields_definition()
-        .expect("the node FieldsDefinition is not optional in the spec; qed");
-      for field in fields.field_definitions() {
-        std::hint::black_box(field.ty());
-      }
-    }
-  }
+  let _tree = parser.parse();
 }
 
 fn smear_parser_parse_schema(schema: &str) {
-  use smear_graphql::cst;
+  use chumsky::{error::Simple, extra, span::SimpleSpan, Parser as _};
+  use smear_graphql::{cst, parse::Parsable};
 
-  let document =
-    cst::Document::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(schema).unwrap();
-
-  for definition in document.content() {
-    if let cst::TypeSystem::Definition(cst::Definition::Type(cst::TypeDefinition::Object(
-      operation,
-    ))) = definition
-    {
-      let fields = operation
-        .fields_definition()
-        .expect("the node FieldsDefinition is not optional in the spec; qed");
-      for field in fields.field_definitions() {
-        std::hint::black_box(field.ty());
-      }
-    }
-  }
+  let parser = cst::TypeSystemDocument::<SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>();
+  let _document = parser.parse(schema);
 }
 
-fn bench_apollo_parser_supergraph_parser(c: &mut Criterion) {
-  let schema = include_str!("testdata/supergraph.graphql");
+fn graphql_parser_parse_schema(schema: &str) {
+  let _document = graphql_parser::parse_schema::<&str>(schema).unwrap();
+}
 
+fn async_graphql_parser_parse_schema(schema: &str) {
+  let _document = async_graphql_parser::parse_schema(schema).unwrap();
+}
+
+fn bench_apollo_parser_parse_supergraph(c: &mut Criterion) {
   c.bench_function("apollo-parser/supergraph_parser", move |b| {
-    b.iter(|| apollo_parser_parse_schema(schema))
+    b.iter(|| apollo_parser_parse_schema(SCHEMA))
   });
 }
 
-fn bench_smear_parser_supergraph_parser(c: &mut Criterion) {
-  let schema = include_str!("testdata/supergraph.graphql");
-
+fn bench_smear_parser_parse_supergraph(c: &mut Criterion) {
   c.bench_function("smear-graphql/supergraph_parser", move |b| {
-    b.iter(|| smear_parser_parse_schema(schema))
+    b.iter(|| smear_parser_parse_schema(SCHEMA))
+  });
+}
+
+fn bench_graphql_parser_parse_supergraph(c: &mut Criterion) {
+  c.bench_function("graphql-parser/supergraph_parser", move |b| {
+    b.iter(|| graphql_parser_parse_schema(SCHEMA))
+  });
+}
+
+fn bench_async_graphql_parser_parse_supergraph(c: &mut Criterion) {
+  c.bench_function("async-graphql-parser/supergraph_parser", move |b| {
+    b.iter(|| async_graphql_parser_parse_schema(SCHEMA))
   });
 }
 
 criterion_group!(
   benches,
-  bench_apollo_parser_supergraph_parser,
-  bench_smear_parser_supergraph_parser
+  bench_apollo_parser_parse_supergraph,
+  bench_smear_parser_parse_supergraph,
+  bench_graphql_parser_parse_supergraph,
+  bench_async_graphql_parser_parse_supergraph,
 );
 criterion_main!(benches);

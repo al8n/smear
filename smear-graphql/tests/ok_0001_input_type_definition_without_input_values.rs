@@ -25,6 +25,7 @@ fn input_object_type_definition_without_input_values() {
     let input = iter
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_input_object_ref();
@@ -41,6 +42,7 @@ fn input_object_type_definition_without_input_values() {
     let input = iter
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_input_object_ref();

@@ -339,7 +339,6 @@ impl<Span> parse::Parsable<Span> for ConstInputValue<Span> {
     Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|value| {
-      // scalars (whatever you already have)
       let boolean_value_parser = BooleanValue::parser::<I, E>().map(|v| Self::Boolean(v));
       let null_value_parser = NullValue::parser::<I, E>().map(|v| Self::Null(v));
       let int_value_parser = IntValue::parser::<I, E>().map(|v| Self::Int(v));
@@ -519,6 +518,7 @@ newtype!(struct Field(lang::Field<Arguments<Span>, Directives<Span>, SelectionSe
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum Selection<Span> {
   Field(Field<Span>),
   FragmentSpread(FragmentSpread<Span>),
@@ -596,28 +596,6 @@ impl<Span> Selection<Span> {
 
 newtype!(struct SelectionSet(lang::SelectionSet<Selection<Span>, Span>) {
   parser: {
-    // recursive(|selection_set| {
-    //   let field_p = lang::Field::parser_with(
-    //     Arguments::parser(),
-    //     Directives::parser(),
-    //     selection_set.clone(),
-    //   )
-    //   .map(Field::<Span>);
-
-    //   let inline_p = lang::InlineFragment::parser_with(Name::parser(), Directives::parser(), selection_set)
-    //     .map(InlineFragment::<Span>);
-
-    //   let spread_p =
-    //     lang::FragmentSpread::parser_with(FragmentName::parser(), Directives::parser()).map(FragmentSpread::<Span>);
-
-    //   let selection = choice((
-    //     field_p.map(Selection::<Span>::Field),
-    //     spread_p.map(Selection::<Span>::FragmentSpread),
-    //     inline_p.map(Selection::<Span>::InlineFragment),
-    //   ));
-
-    //   lang::SelectionSet::parser_with(selection).map(Self)
-    // })
     lang::SelectionSet::parser_with(Selection::parser()).map(Self)
   },
   remaining: {
@@ -1141,6 +1119,7 @@ newtype!(struct NamedOperationDefinition(
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum OperationDefinition<Span> {
   Named(NamedOperationDefinition<Span>),
   Shorthand(SelectionSet<Span>),
@@ -1496,7 +1475,116 @@ impl<Span> parse::Parsable<Span> for ExecutableDefinition<Span> {
     E: ParserExtra<'src, I>,
     Span: source::FromMapExtra<'src, I, E>,
   {
-    OperationDefinition::parser().map(Self::Operation).or(FragmentDefinition::parser().map(Self::Fragment))
+    OperationDefinition::parser()
+      .map(Self::Operation)
+      .or(FragmentDefinition::parser().map(Self::Fragment))
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum TypeSystemDefinition<Span> {
+  Type(TypeDefinition<Span>),
+  Directive(DirectiveDefinition<Span>),
+  Schema(SchemaDefinition<Span>),
+}
+
+impl<Span> AsRef<Span> for TypeSystemDefinition<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for TypeSystemDefinition<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Type(t) => t.into_span(),
+      Self::Directive(d) => d.into_span(),
+      Self::Schema(s) => s.into_span(),
+    }
+  }
+}
+
+impl<Span> parse::Parsable<Span> for TypeSystemDefinition<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    choice((
+      boxed!(SchemaDefinition::parser().map(Self::Schema)),
+      boxed!(DirectiveDefinition::parser().map(Self::Directive)),
+      boxed!(TypeDefinition::parser().map(Self::Type)),
+    ))
+  }
+}
+
+impl<Span> TypeSystemDefinition<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Type(t) => t.span(),
+      Self::Directive(d) => d.0.span(),
+      Self::Schema(s) => s.0.span(),
+    }
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum TypeSystemExtension<Span> {
+  Type(TypeExtension<Span>),
+  Schema(SchemaExtension<Span>),
+}
+
+impl<Span> AsRef<Span> for TypeSystemExtension<Span> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span> IntoSpan<Span> for TypeSystemExtension<Span> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Type(t) => t.into_span(),
+      Self::Schema(s) => s.into_span(),
+    }
+  }
+}
+
+impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    TypeExtension::parser()
+      .map(Self::Type)
+      .or(SchemaExtension::parser().map(Self::Schema))
+  }
+}
+
+impl<Span> TypeSystemExtension<Span> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Type(t) => t.span(),
+      Self::Schema(s) => s.0.span(),
+    }
   }
 }
 
@@ -1505,9 +1593,7 @@ impl<Span> parse::Parsable<Span> for ExecutableDefinition<Span> {
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Definition<Span> {
-  Type(TypeDefinition<Span>),
-  Directive(DirectiveDefinition<Span>),
-  Schema(SchemaDefinition<Span>),
+  TypeSystem(TypeSystemDefinitionOrExtension<Span>),
   Executable(ExecutableDefinition<Span>),
 }
 
@@ -1522,9 +1608,7 @@ impl<Span> IntoSpan<Span> for Definition<Span> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
-      Self::Type(t) => t.into_span(),
-      Self::Directive(d) => d.into_span(),
-      Self::Schema(s) => s.into_span(),
+      Self::TypeSystem(t) => t.into_span(),
       Self::Executable(e) => e.into_span(),
     }
   }
@@ -1541,9 +1625,7 @@ impl<Span> parse::Parsable<Span> for Definition<Span> {
   {
     choice((
       boxed!(ExecutableDefinition::parser().map(Self::Executable)),
-      boxed!(SchemaDefinition::parser().map(Self::Schema)),
-      boxed!(DirectiveDefinition::parser().map(Self::Directive)),
-      boxed!(TypeDefinition::parser().map(Self::Type)),
+      boxed!(TypeSystemDefinitionOrExtension::parser().map(Self::TypeSystem)),
     ))
   }
 }
@@ -1552,9 +1634,7 @@ impl<Span> Definition<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
-      Self::Type(t) => t.span(),
-      Self::Directive(d) => d.0.span(),
-      Self::Schema(s) => s.0.span(),
+      Self::TypeSystem(t) => t.span(),
       Self::Executable(e) => e.span(),
     }
   }
@@ -1564,70 +1644,19 @@ impl<Span> Definition<Span> {
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum Extension<Span> {
-  Type(TypeExtension<Span>),
-  Schema(SchemaExtension<Span>),
+pub enum TypeSystemDefinitionOrExtension<Span> {
+  Definition(TypeSystemDefinition<Span>),
+  Extension(TypeSystemExtension<Span>),
 }
 
-impl<Span> AsRef<Span> for Extension<Span> {
+impl<Span> AsRef<Span> for TypeSystemDefinitionOrExtension<Span> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for Extension<Span> {
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Type(t) => t.into_span(),
-      Self::Schema(s) => s.into_span(),
-    }
-  }
-}
-
-impl<Span> parse::Parsable<Span> for Extension<Span> {
-  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: source::FromMapExtra<'src, I, E>,
-  {
-    TypeExtension::parser()
-      .map(Self::Type)
-      .or(SchemaExtension::parser().map(Self::Schema))
-  }
-}
-
-impl<Span> Extension<Span> {
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Schema(s) => s.0.span(),
-    }
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeSystem<Span> {
-  Definition(Definition<Span>),
-  Extension(Extension<Span>),
-}
-
-impl<Span> AsRef<Span> for TypeSystem<Span> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Span> IntoSpan<Span> for TypeSystem<Span> {
+impl<Span> IntoSpan<Span> for TypeSystemDefinitionOrExtension<Span> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
@@ -1637,7 +1666,7 @@ impl<Span> IntoSpan<Span> for TypeSystem<Span> {
   }
 }
 
-impl<Span> parse::Parsable<Span> for TypeSystem<Span> {
+impl<Span> parse::Parsable<Span> for TypeSystemDefinitionOrExtension<Span> {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -1646,13 +1675,13 @@ impl<Span> parse::Parsable<Span> for TypeSystem<Span> {
     E: ParserExtra<'src, I>,
     Span: source::FromMapExtra<'src, I, E>,
   {
-    Definition::parser()
+    TypeSystemDefinition::parser()
       .map(Self::Definition)
-      .or(Extension::parser().map(Self::Extension))
+      .or(TypeSystemExtension::parser().map(Self::Extension))
   }
 }
 
-impl<Span> TypeSystem<Span> {
+impl<Span> TypeSystemDefinitionOrExtension<Span> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -1663,16 +1692,166 @@ impl<Span> TypeSystem<Span> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Document<Span, Container = Vec<TypeSystem<Span>>> {
+pub struct TypeSystemDocument<Span, Container = Vec<TypeSystemDefinitionOrExtension<Span>>> {
   span: Span,
   content: Container,
 }
 
-impl<Span, Container: AsRef<[TypeSystem<Span>]>> AsRef<[TypeSystem<Span>]>
+impl<Span, Container: AsRef<[TypeSystemDefinitionOrExtension<Span>]>>
+  AsRef<[TypeSystemDefinitionOrExtension<Span>]> for TypeSystemDocument<Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &[TypeSystemDefinitionOrExtension<Span>] {
+    self.content()
+  }
+}
+
+impl<Span, Container> AsRef<Span> for TypeSystemDocument<Span, Container> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span, Container> IntoSpan<Span> for TypeSystemDocument<Span, Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span, Container> IntoComponents for TypeSystemDocument<Span, Container> {
+  type Components = (Span, Container);
+
+  fn into_components(self) -> Self::Components {
+    (self.span, self.content)
+  }
+}
+
+impl<Span, Container> parse::Parsable<Span> for TypeSystemDocument<Span, Container>
+where
+  Container: chumsky::container::Container<TypeSystemDefinitionOrExtension<Span>>,
+{
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    TypeSystemDefinitionOrExtension::parser()
+      .padded_by(ignored())
+      .repeated()
+      .collect()
+      .map_with(|content, sp| Self {
+        span: source::FromMapExtra::from_map_extra(sp),
+        content,
+      })
+  }
+}
+
+impl<Span, Container> TypeSystemDocument<Span, Container> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  #[inline]
+  pub fn content(&self) -> &[TypeSystemDefinitionOrExtension<Span>]
+  where
+    Container: AsRef<[TypeSystemDefinitionOrExtension<Span>]>,
+  {
+    self.content.as_ref()
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutableDocument<Span, Container = Vec<ExecutableDefinition<Span>>> {
+  span: Span,
+  content: Container,
+}
+
+impl<Span, Container: AsRef<[ExecutableDefinition<Span>]>> AsRef<[ExecutableDefinition<Span>]>
+  for ExecutableDocument<Span, Container>
+{
+  #[inline]
+  fn as_ref(&self) -> &[ExecutableDefinition<Span>] {
+    self.content()
+  }
+}
+
+impl<Span, Container> AsRef<Span> for ExecutableDocument<Span, Container> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Span, Container> IntoSpan<Span> for ExecutableDocument<Span, Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Span, Container> IntoComponents for ExecutableDocument<Span, Container> {
+  type Components = (Span, Container);
+
+  fn into_components(self) -> Self::Components {
+    (self.span, self.content)
+  }
+}
+
+impl<Span, Container> parse::Parsable<Span> for ExecutableDocument<Span, Container>
+where
+  Container: chumsky::container::Container<ExecutableDefinition<Span>>,
+{
+  fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: source::FromMapExtra<'src, I, E>,
+  {
+    ExecutableDefinition::parser()
+      .padded_by(ignored())
+      .repeated()
+      .collect()
+      .map_with(|content, sp| Self {
+        span: source::FromMapExtra::from_map_extra(sp),
+        content,
+      })
+  }
+}
+
+impl<Span, Container> ExecutableDocument<Span, Container> {
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  #[inline]
+  pub fn content(&self) -> &[ExecutableDefinition<Span>]
+  where
+    Container: AsRef<[ExecutableDefinition<Span>]>,
+  {
+    self.content.as_ref()
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct Document<Span, Container = Vec<Definition<Span>>> {
+  span: Span,
+  content: Container,
+}
+
+impl<Span, Container: AsRef<[Definition<Span>]>> AsRef<[Definition<Span>]>
   for Document<Span, Container>
 {
   #[inline]
-  fn as_ref(&self) -> &[TypeSystem<Span>] {
+  fn as_ref(&self) -> &[Definition<Span>] {
     self.content()
   }
 }
@@ -1701,7 +1880,7 @@ impl<Span, Container> IntoComponents for Document<Span, Container> {
 
 impl<Span, Container> parse::Parsable<Span> for Document<Span, Container>
 where
-  Container: chumsky::container::Container<TypeSystem<Span>>,
+  Container: chumsky::container::Container<Definition<Span>>,
 {
   fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -1711,7 +1890,7 @@ where
     E: ParserExtra<'src, I>,
     Span: source::FromMapExtra<'src, I, E>,
   {
-    TypeSystem::parser()
+    Definition::parser()
       .padded_by(ignored())
       .repeated()
       .collect()
@@ -1729,9 +1908,9 @@ impl<Span, Container> Document<Span, Container> {
   }
 
   #[inline]
-  pub fn content(&self) -> &[TypeSystem<Span>]
+  pub fn content(&self) -> &[Definition<Span>]
   where
-    Container: AsRef<[TypeSystem<Span>]>,
+    Container: AsRef<[Definition<Span>]>,
   {
     self.content.as_ref()
   }

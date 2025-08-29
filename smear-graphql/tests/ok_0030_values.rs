@@ -26,7 +26,6 @@ fn values() {
     .content()
     .first()
     .unwrap()
-    .unwrap_definition_ref()
     .unwrap_executable_ref()
     .unwrap_operation_ref()
     .unwrap_shorthand_ref();

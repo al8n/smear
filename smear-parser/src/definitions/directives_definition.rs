@@ -21,7 +21,7 @@ word!(
   /// directive @auth on QUERY
   /// directive @cache(ttl: 300) on QUERY
   /// ```
-  "query location": QueryLocation: [I::Token::Q, I::Token::U, I::Token::E, I::Token::R, I::Token::Y],
+  "QUERY": QueryLocation: [I::Token::Q, I::Token::U, I::Token::E, I::Token::R, I::Token::Y],
   /// `MUTATION` location - directives can be applied to mutation operations.
   ///
   /// Mutation directives affect the entire mutation operation and can be used
@@ -32,7 +32,7 @@ word!(
   /// directive @rateLimit(max: 10) on MUTATION
   /// directive @requireAuth on MUTATION
   /// ```
-  "mutation location": MutationLocation: [I::Token::M, I::Token::U, I::Token::T, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "MUTATION": MutationLocation: [I::Token::M, I::Token::U, I::Token::T, I::Token::A, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SUBSCRIPTION` location - directives can be applied to subscription operations.
   ///
   /// Subscription directives control real-time data flow and can be used
@@ -43,7 +43,7 @@ word!(
   /// directive @requireSubscription on SUBSCRIPTION
   /// directive @throttle(rate: "1/sec") on SUBSCRIPTION
   /// ```
-  "subscription location": SubscriptionLocation: [I::Token::S, I::Token::U, I::Token::B, I::Token::S, I::Token::C, I::Token::R, I::Token::I, I::Token::P, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "SUBSCRIPTION": SubscriptionLocation: [I::Token::S, I::Token::U, I::Token::B, I::Token::S, I::Token::C, I::Token::R, I::Token::I, I::Token::P, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD_DEFINITION` location - directives can be applied to field definitions in schemas.
   ///
   /// Field definition directives control field behavior, validation, authorization,
@@ -54,7 +54,7 @@ word!(
   /// directive @deprecated(reason: String) on FIELD_DEFINITION
   /// directive @auth(requires: Role) on FIELD_DEFINITION
   /// ```
-  "field definition location": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "FIELD_DEFINITION": FieldDefinitionLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FIELD` location - directives can be applied to field selections in queries.
   ///
   /// Field directives control individual field selection behavior, commonly
@@ -65,7 +65,7 @@ word!(
   /// directive @include(if: Boolean!) on FIELD
   /// directive @skip(if: Boolean!) on FIELD
   /// ```
-  "field location": FieldLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D],
+  "FIELD": FieldLocation: [I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D],
   /// `FRAGMENT_DEFINITION` location - directives can be applied to named fragment definitions.
   ///
   /// Fragment definition directives control fragment behavior and can be used
@@ -76,7 +76,7 @@ word!(
   /// directive @experimental on FRAGMENT_DEFINITION
   /// directive @cache(scope: PRIVATE) on FRAGMENT_DEFINITION
   /// ```
-  "fragment definition location": FragmentDefinitionLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "FRAGMENT_DEFINITION": FragmentDefinitionLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::N, I::Token::T, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `FRAGMENT_SPREAD` location - directives can be applied to fragment spreads.
   ///
   /// Fragment spread directives control when and how fragments are included
@@ -87,7 +87,7 @@ word!(
   /// directive @include(if: Boolean!) on FRAGMENT_SPREAD
   /// directive @defer(label: String) on FRAGMENT_SPREAD
   /// ```
-  "fragment spread location": FragmentSpreadLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::S, I::Token::P, I::Token::R, I::Token::E, I::Token::A, I::Token::D],
+  "FRAGMENT_SPREAD": FragmentSpreadLocation: [I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::N, I::Token::T, I::Token::UNDERSCORE, I::Token::S, I::Token::P, I::Token::R, I::Token::E, I::Token::A, I::Token::D],
   /// `INLINE_FRAGMENT` location - directives can be applied to inline fragments.
   ///
   /// Inline fragment directives control conditional type-specific field selections
@@ -98,7 +98,7 @@ word!(
   /// directive @include(if: Boolean!) on INLINE_FRAGMENT
   /// directive @skip(if: Boolean!) on INLINE_FRAGMENT
   /// ```
-  "inline fragement location": InlineFragmentLocation: [I::Token::I, I::Token::N, I::Token::L, I::Token::I, I::Token::N, I::Token::E, I::Token::UNDERSCORE, I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E],
+  "INLINE_FRAGMENT": InlineFragmentLocation: [I::Token::I, I::Token::N, I::Token::L, I::Token::I, I::Token::N, I::Token::E, I::Token::UNDERSCORE, I::Token::F, I::Token::R, I::Token::A, I::Token::G, I::Token::M, I::Token::E, I::Token::N, I::Token::T],
   /// `VARIABLE_DEFINITION` location - directives can be applied to variable definitions.
   ///
   /// Variable definition directives control variable behavior, validation,
@@ -109,7 +109,7 @@ word!(
   /// directive @deprecated(reason: String) on VARIABLE_DEFINITION
   /// directive @validate(pattern: String) on VARIABLE_DEFINITION
   /// ```
-  "variable definition location": VariableDefinitionLocation: [I::Token::V, I::Token::A, I::Token::R, I::Token::I, I::Token::A, I::Token::B, I::Token::L, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "VARIABLE_DEFINITION": VariableDefinitionLocation: [I::Token::V, I::Token::A, I::Token::R, I::Token::I, I::Token::A, I::Token::B, I::Token::L, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `SCHEMA` location - directives can be applied to the schema definition.
   ///
   /// Schema directives provide global schema-level configuration, metadata,
@@ -120,7 +120,7 @@ word!(
   /// directive @link(url: String!) on SCHEMA
   /// directive @composeDirective(name: String!) on SCHEMA
   /// ```
-  "schema location": SchemaLocation: [I::Token::S, I::Token::C, I::Token::H, I::Token::E, I::Token::M, I::Token::A],
+  "SCHEMA": SchemaLocation: [I::Token::S, I::Token::C, I::Token::H, I::Token::E, I::Token::M, I::Token::A],
   /// `SCALAR` location - directives can be applied to scalar type definitions.
   ///
   /// Scalar directives provide validation, serialization, or metadata
@@ -131,7 +131,7 @@ word!(
   /// directive @specifiedBy(url: String!) on SCALAR
   /// directive @validate(regex: String) on SCALAR
   /// ```
-  "scalar location": ScalarLocation: [I::Token::S, I::Token::C, I::Token::A, I::Token::L, I::Token::A, I::Token::R],
+  "SCALAR": ScalarLocation: [I::Token::S, I::Token::C, I::Token::A, I::Token::L, I::Token::A, I::Token::R],
   /// `OBJECT` location - directives can be applied to object type definitions.
   ///
   /// Object type directives control object behavior, provide metadata,
@@ -142,7 +142,7 @@ word!(
   /// directive @key(fields: String!) on OBJECT
   /// directive @cacheControl(maxAge: Int) on OBJECT
   /// ```
-  "object location": ObjectLocation: [I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
+  "OBJECT": ObjectLocation: [I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `ARGUMENT_DEFINITION` location - directives can be applied to argument definitions.
   ///
   /// Argument definition directives control argument validation, transformation,
@@ -153,7 +153,7 @@ word!(
   /// directive @deprecated(reason: String) on ARGUMENT_DEFINITION
   /// directive @constraint(min: Int, max: Int) on ARGUMENT_DEFINITION
   /// ```
-  "argument definition location": ArgumentDefinitionLocation: [I::Token::A, I::Token::R, I::Token::G, I::Token::U, I::Token::M, I::Token::E, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "ARGUMENT_DEFINITION": ArgumentDefinitionLocation: [I::Token::A, I::Token::R, I::Token::G, I::Token::U, I::Token::M, I::Token::E, I::Token::N, I::Token::T, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
   /// `INTERFACE` location - directives can be applied to interface type definitions.
   ///
   /// Interface directives control interface behavior, provide metadata,
@@ -164,7 +164,7 @@ word!(
   /// directive @key(fields: String!) on INTERFACE
   /// directive @auth(requires: Role) on INTERFACE
   /// ```
-  "interface location": InterfaceLocation: [I::Token::I, I::Token::N, I::Token::T, I::Token::E, I::Token::R, I::Token::F, I::Token::A, I::Token::C, I::Token::E],
+  "INTERFACE": InterfaceLocation: [I::Token::I, I::Token::N, I::Token::T, I::Token::E, I::Token::R, I::Token::F, I::Token::A, I::Token::C, I::Token::E],
   /// `UNION` location - directives can be applied to union type definitions.
   ///
   /// Union directives control union behavior, type resolution,
@@ -175,7 +175,7 @@ word!(
   /// directive @unionMember(type: String!) on UNION
   /// directive @deprecated(reason: String) on UNION
   /// ```
-  "union location": UnionLocation: [I::Token::U, I::Token::N, I::Token::I, I::Token::O, I::Token::N],
+  "UNION": UnionLocation: [I::Token::U, I::Token::N, I::Token::I, I::Token::O, I::Token::N],
   /// `ENUM_VALUE` location - directives can be applied to enum value definitions.
   ///
   /// Enum value directives provide metadata, deprecation information,
@@ -186,7 +186,7 @@ word!(
   /// directive @deprecated(reason: String) on ENUM_VALUE
   /// directive @internal on ENUM_VALUE
   /// ```
-  "enum value location": EnumValueLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M, I::Token::UNDERSCORE, I::Token::V, I::Token::A, I::Token::L, I::Token::U, I::Token::E],
+  "ENUM_VALUE": EnumValueLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M, I::Token::UNDERSCORE, I::Token::V, I::Token::A, I::Token::L, I::Token::U, I::Token::E],
   /// `ENUM` location - directives can be applied to enum type definitions.
   ///
   /// Enum directives control enum behavior, validation,
@@ -197,7 +197,7 @@ word!(
   /// directive @deprecated(reason: String) on ENUM
   /// directive @oneOf on ENUM
   /// ```
-  "enum location": EnumLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M],
+  "ENUM": EnumLocation: [I::Token::E, I::Token::N, I::Token::U, I::Token::M],
   /// `INPUT_OBJECT` location - directives can be applied to input object type definitions.
   ///
   /// Input object directives control input validation, transformation,
@@ -208,7 +208,7 @@ word!(
   /// directive @oneOf on INPUT_OBJECT
   /// directive @validate(schema: String) on INPUT_OBJECT
   /// ```
-  "input object location": InputObjectLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
+  "INPUT_OBJECT": InputObjectLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::O, I::Token::B, I::Token::J, I::Token::E, I::Token::C, I::Token::T],
   /// `INPUT_FIELD_DEFINITION` location - directives can be applied to input field definitions.
   ///
   /// Input field directives control input field validation, transformation,
@@ -219,7 +219,7 @@ word!(
   /// directive @deprecated(reason: String) on INPUT_FIELD_DEFINITION
   /// directive @constraint(min: Int, max: Int) on INPUT_FIELD_DEFINITION
   /// ```
-  "input field definition location": InputFieldDefinitionLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
+  "INPUT_FIELD_DEFINITION": InputFieldDefinitionLocation: [I::Token::I, I::Token::N, I::Token::P, I::Token::U, I::Token::T, I::Token::UNDERSCORE, I::Token::F, I::Token::I, I::Token::E, I::Token::L, I::Token::D, I::Token::UNDERSCORE, I::Token::D, I::Token::E, I::Token::F, I::Token::I, I::Token::N, I::Token::I, I::Token::T, I::Token::I, I::Token::O, I::Token::N],
 );
 
 /// Represents locations where directives can be applied during GraphQL execution.
@@ -1183,28 +1183,5 @@ impl<Name, Args, Locations, Span> DirectiveDefinition<Name, Args, Locations, Spa
           }
         },
       )
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use chumsky::{extra, span::SimpleSpan};
-
-  fn keyword_parser<'a>() -> impl Parser<
-    'a,
-    &'a str,
-    FieldDefinitionLocation<WithSource<&'a str, SimpleSpan>>,
-    extra::Err<Simple<'a, char>>,
-  > + Clone {
-    FieldDefinitionLocation::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>(
-    )
-  }
-
-  #[test]
-  fn test_field_definition_location() {
-    let parser = keyword_parser();
-    let result = parser.parse("FIELD_DEFINITION").into_result();
-    assert!(result.is_ok());
   }
 }

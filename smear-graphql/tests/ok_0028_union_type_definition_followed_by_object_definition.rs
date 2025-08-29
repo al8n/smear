@@ -24,6 +24,7 @@ fn union_type_definition_followed_by_object_definition() {
     let union = iter
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_union_ref();
@@ -42,6 +43,7 @@ fn union_type_definition_followed_by_object_definition() {
     let object = iter
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();

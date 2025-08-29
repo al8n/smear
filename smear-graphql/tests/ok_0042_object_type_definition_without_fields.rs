@@ -22,6 +22,7 @@ fn object_type_definition_without_fields() {
     let object = types
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
@@ -38,6 +39,7 @@ fn object_type_definition_without_fields() {
     let object = types
       .next()
       .unwrap()
+      .unwrap_type_system_ref()
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
