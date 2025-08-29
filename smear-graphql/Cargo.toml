@@ -23,6 +23,7 @@ criterion = "0.7"
 apollo-parser = "0.8"
 graphql-parser = "0.4"
 async-graphql-parser = "7"
+paste = "1"
 
 [[bench]]
 name = "directive_args"
