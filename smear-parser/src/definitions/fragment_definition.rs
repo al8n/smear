@@ -1,9 +1,177 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  lang::{ignored, keywords::Fragment, StringValue, TypeCondition},
+  lang::{ignored, keywords::Fragment, StringValue},
   source::*,
 };
+
+/// Represents the content of a fragment definition in GraphQL.
+///
+/// The difference between this and [`FragmentDefinition`] is that this does not include
+/// the description and the `fragment` keyword. This allows
+/// for more modular parsing and composition when building up full type definitions.
+///
+/// ## Type Parameters
+///
+/// * `Directives` - The type representing directives applied to the fragment
+/// * `SelectionSet` - The type representing the fragment's field selections
+/// * `Span` - The type representing source location information
+///
+/// ## Grammar
+///
+/// ```text
+/// FragmentDefinitionContent : FragmentName TypeCondition Directives? SelectionSet
+/// ```
+///
+/// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
+#[derive(Debug, Clone, Copy)]
+pub struct FragmentDefinitionContent<FragmentName, TypeCondition, Directives, SelectionSet, Span> {
+  span: Span,
+  name: FragmentName,
+  type_condition: TypeCondition,
+  directives: Option<Directives>,
+  selection_set: SelectionSet,
+}
+
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> AsRef<Span>
+  for FragmentDefinitionContent<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
+  for FragmentDefinitionContent<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoComponents
+  for FragmentDefinitionContent<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+{
+  type Components = (
+    Span,
+    FragmentName,
+    TypeCondition,
+    Option<Directives>,
+    SelectionSet,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.name,
+      self.type_condition,
+      self.directives,
+      self.selection_set,
+    )
+  }
+}
+
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+  FragmentDefinitionContent<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+{
+  /// Returns a reference to the span covering the entire fragment definition.
+  ///
+  /// The span includes the optional description, fragment keyword, name,
+  /// type condition, optional directives, and selection set.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the fragment name.
+  ///
+  /// This is the identifier used to reference this fragment in fragment spreads
+  /// within GraphQL operations. Fragment names must be unique within a document
+  /// and cannot be the reserved word "on".
+  #[inline]
+  pub const fn name(&self) -> &FragmentName {
+    &self.name
+  }
+
+  /// Returns a reference to the type condition.
+  ///
+  /// The type condition specifies which GraphQL type this fragment applies to.
+  /// It consists of the "on" keyword followed by a type name. This ensures
+  /// type safety by guaranteeing that the fragment's fields are valid for
+  /// the specified type.
+  #[inline]
+  pub const fn type_condition(&self) -> &TypeCondition {
+    &self.type_condition
+  }
+
+  /// Returns a reference to the optional directives applied to this fragment.
+  ///
+  /// Directives provide metadata or specify behavior for the fragment,
+  /// such as access control, conditional inclusion, or custom processing.
+  /// Fragment-level directives affect the entire fragment when it's used.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns a reference to the selection set containing the fragment's fields.
+  ///
+  /// The selection set defines what fields, nested objects, and other fragments
+  /// to include when this fragment is spread into an operation. This is the
+  /// core content of the fragment that gets reused.
+  #[inline]
+  pub const fn selection_set(&self) -> &SelectionSet {
+    &self.selection_set
+  }
+
+  /// Creates a parser that can parse a complete fragment definition.
+  ///
+  /// This parser handles the full fragment definition syntax including all
+  /// optional and required components. The parsing of selection set and
+  /// directives is delegated to the provided parsers.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the fragment definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  pub fn parser_with<'src, I, E, FP, NP, DP, SP>(
+    fragment_name_parser: FP,
+    type_condition_parser: NP,
+    directives_parser: DP,
+    selection_set_parser: SP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    FP: Parser<'src, I, FragmentName, E> + Clone,
+    NP: Parser<'src, I, TypeCondition, E> + Clone,
+    SP: Parser<'src, I, SelectionSet, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+  {
+    fragment_name_parser
+      .then(type_condition_parser.padded_by(ignored()))
+      .then(directives_parser.then_ignore(ignored()).or_not())
+      .then(selection_set_parser)
+      .map_with(
+        |(((name, type_condition), directives), selection_set), sp| Self {
+          name,
+          type_condition,
+          directives,
+          selection_set,
+          span: Span::from_map_extra(sp),
+        },
+      )
+  }
+}
 
 /// Represents a named fragment definition in GraphQL.
 ///
@@ -111,18 +279,18 @@ use crate::{
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span> {
+pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   fragment: Fragment<Span>,
   name: FragmentName,
-  type_condition: TypeCondition<Name, Span>,
+  type_condition: TypeCondition,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<FragmentName, Name, Directives, SelectionSet, Span> AsRef<Span>
-  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> AsRef<Span>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -130,8 +298,8 @@ impl<FragmentName, Name, Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<FragmentName, Name, Directives, SelectionSet, Span> IntoSpan<Span>
-  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -139,15 +307,15 @@ impl<FragmentName, Name, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-impl<FragmentName, Name, Directives, SelectionSet, Span> IntoComponents
-  for FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoComponents
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
   type Components = (
     Span,
     Option<StringValue<Span>>,
     Fragment<Span>,
     FragmentName,
-    TypeCondition<Name, Span>,
+    TypeCondition,
     Option<Directives>,
     SelectionSet,
   );
@@ -166,8 +334,8 @@ impl<FragmentName, Name, Directives, SelectionSet, Span> IntoComponents
   }
 }
 
-impl<FragmentName, Name, Directives, SelectionSet, Span>
-  FragmentDefinition<FragmentName, Name, Directives, SelectionSet, Span>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+  FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
   /// Returns a reference to the span covering the entire fragment definition.
   ///
@@ -214,7 +382,7 @@ impl<FragmentName, Name, Directives, SelectionSet, Span>
   /// type safety by guaranteeing that the fragment's fields are valid for
   /// the specified type.
   #[inline]
-  pub const fn type_condition(&self) -> &TypeCondition<Name, Span> {
+  pub const fn type_condition(&self) -> &TypeCondition {
     &self.type_condition
   }
 
@@ -251,9 +419,9 @@ impl<FragmentName, Name, Directives, SelectionSet, Span>
   /// whitespace skipping or comment processing around the fragment definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, FP, NP, DP, SP>(
+  pub fn parser_with<'src, I, E, FP, TP, DP, SP>(
     fragment_name_parser: FP,
-    name_parser: NP,
+    type_condition_parser: TP,
     directives_parser: DP,
     selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
@@ -264,29 +432,36 @@ impl<FragmentName, Name, Directives, SelectionSet, Span>
     E: ParserExtra<'src, I>,
     Span: crate::source::FromMapExtra<'src, I, E>,
     FP: Parser<'src, I, FragmentName, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
+    TP: Parser<'src, I, TypeCondition, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     StringValue::parser()
       .or_not()
-      .then(Fragment::parser().padded_by(ignored()))
-      .then(fragment_name_parser)
-      .then(TypeCondition::parser_with(name_parser).padded_by(ignored()))
-      .then(directives_parser.then_ignore(ignored()).or_not())
-      .then(selection_set_parser)
-      .map_with(
-        |(((((description, fragment), name), type_condition), directives), selection_set), sp| {
-          Self {
-            fragment,
-            description,
-            name,
-            type_condition,
-            directives,
-            selection_set,
-            span: Span::from_map_extra(sp),
-          }
-        },
-      )
+      .then(ignored().ignore_then(Fragment::parser()))
+      .then(ignored().or_not().ignore_then(FragmentDefinitionContent::<
+        FragmentName,
+        TypeCondition,
+        Directives,
+        SelectionSet,
+        Span,
+      >::parser_with(
+        fragment_name_parser,
+        type_condition_parser,
+        directives_parser,
+        selection_set_parser,
+      )))
+      .map_with(|((description, fragment), content), sp| {
+        let (_, name, type_condition, directives, selection_set) = content.into_components();
+        Self {
+          fragment,
+          description,
+          name,
+          type_condition,
+          directives,
+          selection_set,
+          span: Span::from_map_extra(sp),
+        }
+      })
   }
 }

@@ -324,7 +324,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// This provides access to the exact `implements` keyword and its location,
   /// useful for error reporting and syntax highlighting.
   #[inline]
-  pub const fn implements(&self) -> &keywords::Implements<Span> {
+  pub const fn implements_keyword(&self) -> &keywords::Implements<Span> {
     &self.implements
   }
 
@@ -333,7 +333,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// The leading interface has special parsing rules where the ampersand is optional,
   /// unlike subsequent interfaces where it's required.
   #[inline]
-  pub const fn leading(&self) -> &LeadingImplementInterface<Name, Span> {
+  pub const fn leading_implement_interface(&self) -> &LeadingImplementInterface<Name, Span> {
     &self.leading
   }
 
@@ -342,7 +342,7 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
   /// All interfaces in this container have required ampersands and represent
   /// the additional interfaces beyond the first one.
   #[inline]
-  pub const fn remaining(&self) -> &Container {
+  pub const fn remaining_implement_interfaces(&self) -> &Container {
     &self.remaining
   }
 
@@ -377,6 +377,165 @@ impl<Name, Span, Container> ImplementInterfaces<Name, Span, Container> {
         implements,
         leading,
         remaining,
+      })
+  }
+}
+
+/// Represents the content of a GraphQL Interface type definition that defines a contract for implementing types.
+///
+/// The difference between this and [`InterfaceTypeDefinition`] is that this struct does not include
+/// the description and `interface` keyword. This allows for more modular parsing and composition
+/// of interface definitions in different contexts.
+///
+/// ## Grammar
+///
+/// ```text
+/// InterfaceTypeDefinitionContent:
+///   Name ImplementsInterfaces? Directives? FieldsDefinition?
+/// ```
+///
+/// Spec: [Interface Type Definition](https://spec.graphql.org/draft/#sec-Interface-Type-Definition)
+#[derive(Debug, Clone, Copy)]
+pub struct InterfaceTypeDefinitionContent<
+  Name,
+  ImplementInterfaces,
+  Directives,
+  FieldsDefinition,
+  Span,
+> {
+  span: Span,
+  name: Name,
+  implements: Option<ImplementInterfaces>,
+  directives: Option<Directives>,
+  fields_definition: Option<FieldsDefinition>,
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceTypeDefinitionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceTypeDefinitionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
+  for InterfaceTypeDefinitionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  type Components = (
+    Span,
+    Name,
+    Option<ImplementInterfaces>,
+    Option<Directives>,
+    Option<FieldsDefinition>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (
+      self.span,
+      self.name,
+      self.implements,
+      self.directives,
+      self.fields_definition,
+    )
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeDefinitionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  /// Returns a reference to the span covering the entire interface definition.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the name of the interface type.
+  ///
+  /// Interface names should clearly indicate the contract or behavior
+  /// they represent, following GraphQL naming conventions.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns a reference to the optional interfaces this interface implements.
+  ///
+  /// Interface inheritance allows interfaces to extend other interfaces,
+  /// creating hierarchical contracts that implementing types must fulfill.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    self.implements.as_ref()
+  }
+
+  /// Returns a reference to the optional directives applied to the interface.
+  ///
+  /// Interface-level directives can specify authorization requirements,
+  /// caching behavior, or other metadata that applies to all implementing types.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns a reference to the optional fields definition.
+  ///
+  /// Interface fields define the contract that implementing types must fulfill.
+  /// Each implementing type must provide all interface fields with compatible
+  /// types and arguments.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.fields_definition.as_ref()
+  }
+
+  /// Creates a parser for interface type definitions.
+  ///
+  /// This parser handles the complete syntax for GraphQL interfaces, including
+  /// interface inheritance through the implements clause.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the interface type definition.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  pub fn parser_with<'src, I, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
+  {
+    name_parser
+      .then(ignored().ignore_then(implement_interfaces_parser).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
+      .then(ignored().ignore_then(fields_definition_parser).or_not())
+      .map_with(|(((name, implements), directives), fields), sp| Self {
+        span: Span::from_map_extra(sp),
+        name,
+        directives,
+        fields_definition: fields,
+        implements,
       })
   }
 }
@@ -580,12 +739,21 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
     StringValue::parser()
       .or_not()
       .then(keywords::Interface::parser().padded_by(ignored()))
-      .then(name_parser)
-      .then(ignored().ignore_then(implement_interfaces_parser).or_not())
-      .then(ignored().ignore_then(directives_parser).or_not())
-      .then(ignored().ignore_then(fields_definition_parser).or_not())
-      .map_with(
-        |(((((description, interface), name), implements), directives), fields), sp| Self {
+      .then(InterfaceTypeDefinitionContent::<
+        Name,
+        ImplementInterfaces,
+        Directives,
+        FieldsDefinition,
+        Span,
+      >::parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|((description, interface), content), sp| {
+        let (_, name, implements, directives, fields) = content.into_components();
+        Self {
           span: Span::from_map_extra(sp),
           description,
           name,
@@ -593,8 +761,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
           fields_definition: fields,
           interface,
           implements,
-        },
-      )
+        }
+      })
   }
 }
 
@@ -607,7 +775,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 ///
 /// These can be combined in various ways to create comprehensive extensions.
 #[derive(Debug, Clone, Copy)]
-pub enum InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
   /// Extension adds directives to an interface, optionally with new interface implementations.
   ///
   /// This variant applies metadata or behavioral modifications without changing
@@ -687,8 +855,37 @@ pub enum InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDe
 }
 
 impl<ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Returns the directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives { directives, .. } => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Implements { .. } => None,
+    }
+  }
+
+  /// Returns the interface implementations if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    match self {
+      Self::Directives { implements, .. } => implements.as_ref(),
+      Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Implements(implements) => Some(implements),
+    }
+  }
+
+  /// Returns the fields definition if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    match self {
+      Self::Fields { fields, .. } => Some(fields),
+      Self::Directives { .. } | Self::Implements { .. } => None,
+    }
+  }
+
   /// Creates a parser for interface extension content with proper precedence handling.
   ///
   /// The parser tries patterns in a specific order to resolve parsing ambiguity:
@@ -700,7 +897,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// This parser does not handle surrounding [ignored tokens].
   /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the interface type extension content.
+  /// whitespace skipping or comment processing around the interface type extension data.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, E, IP, DP, FP>(
@@ -739,6 +936,161 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
   }
 }
 
+/// Represents content of a GraphQL Interface type extension.
+///
+/// The difference between this and [`InterfaceTypeExtension`] is that this struct does not include
+/// the `extend` and `interface` keywords. This allows for more modular
+/// parsing and composition when building up full type extensions.
+///
+/// ## Grammar
+/// ```text
+/// InterfaceTypeExtensionContent:
+///   Name ImplementsInterfaces? Directives? FieldsDefinition
+///   | Name ImplementsInterfaces? Directives  
+///   | Name ImplementsInterfaces
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct InterfaceTypeExtensionContent<
+  Name,
+  ImplementInterfaces,
+  Directives,
+  FieldsDefinition,
+  Span,
+> {
+  span: Span,
+  name: Name,
+  data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
+  for InterfaceTypeExtensionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoSpan<Span>
+  for InterfaceTypeExtensionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponents
+  for InterfaceTypeExtensionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  type Components = (
+    Span,
+    Name,
+    InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.name, self.data)
+  }
+}
+
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+  InterfaceTypeExtensionContent<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
+{
+  /// Returns a reference to the span covering the entire interface extension.
+  ///
+  /// Includes the `extend interface` keywords, interface name, and all extension data.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the name of the interface being extended.
+  ///
+  /// This must reference an existing interface defined elsewhere in the schema.
+  /// Used for extension resolution and validation.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns interface implementations if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    self.data.implements()
+  }
+
+  /// Returns fields if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.data.fields_definition()
+  }
+
+  /// Returns a reference to the content being added by this extension.
+  ///
+  /// The content determines what type of enhancement is being made:
+  /// - `Fields`: New field definitions with optional implementations/directives
+  /// - `Directives`: Metadata/behavioral modifications with optional implementations
+  /// - `Implements`: Interface inheritance relationships only
+  #[inline]
+  pub const fn data(
+    &self,
+  ) -> &InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
+    &self.data
+  }
+
+  /// Creates a parser for interface type extensions.
+  ///
+  /// This parser handles the complete `extend interface` syntax, parsing the keywords,
+  /// interface name, and delegating content parsing to the extension content parser.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the interface type extension.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  pub fn parser_with<'src, I, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: impl Fn() -> IP,
+    directives_parser: impl Fn() -> DP,
+    fields_definition_parser: impl Fn() -> FP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
+  where
+    I: Source<'src>,
+    I::Token: Char + 'src,
+    I::Slice: Slice<Token = I::Token>,
+    E: ParserExtra<'src, I>,
+    Span: crate::source::FromMapExtra<'src, I, E>,
+    NP: Parser<'src, I, Name, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
+  {
+    name_parser
+      .then(
+        ignored().ignore_then(InterfaceTypeExtensionData::parser_with(
+          implement_interfaces_parser,
+          directives_parser,
+          fields_definition_parser,
+        )),
+      )
+      .map_with(|(name, data), sp| Self {
+        span: Span::from_map_extra(sp),
+        name,
+        data,
+      })
+  }
+}
+
 /// Represents a GraphQL Interface type extension.
 ///
 /// Interface extensions add new capabilities to existing interfaces without
@@ -771,7 +1123,7 @@ pub struct InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsD
   extend: keywords::Extend<Span>,
   interface: keywords::Interface<Span>,
   name: Name,
-  content: InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+  data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> AsRef<Span>
@@ -800,18 +1152,12 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span> IntoComponen
     keywords::Extend<Span>,
     keywords::Interface<Span>,
     Name,
-    InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition>,
+    InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.extend,
-      self.interface,
-      self.name,
-      self.content,
-    )
+    (self.span, self.extend, self.interface, self.name, self.data)
   }
 }
 
@@ -820,7 +1166,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
 {
   /// Returns a reference to the span covering the entire interface extension.
   ///
-  /// Includes the `extend interface` keywords, interface name, and all extension content.
+  /// Includes the `extend interface` keywords, interface name, and all extension data.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
@@ -853,6 +1199,24 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
     &self.name
   }
 
+  /// Returns directives if this extension includes them.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns interface implementations if this extension includes them.
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+    self.data.implements()
+  }
+
+  /// Returns fields if this extension includes them.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
+    self.data.fields_definition()
+  }
+
   /// Returns a reference to the content being added by this extension.
   ///
   /// The content determines what type of enhancement is being made:
@@ -860,10 +1224,10 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
   /// - `Directives`: Metadata/behavioral modifications with optional implementations
   /// - `Implements`: Interface inheritance relationships only
   #[inline]
-  pub const fn content(
+  pub const fn data(
     &self,
-  ) -> &InterfaceTypeExtensionContent<ImplementInterfaces, Directives, FieldsDefinition> {
-    &self.content
+  ) -> &InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
+    &self.data
   }
 
   /// Creates a parser for interface type extensions.
@@ -897,20 +1261,28 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Span>
   {
     keywords::Extend::parser()
       .then(keywords::Interface::parser().padded_by(ignored()))
-      .then(name_parser)
-      .then(
-        ignored().ignore_then(InterfaceTypeExtensionContent::parser_with(
-          implement_interfaces_parser,
-          directives_parser,
-          fields_definition_parser,
-        )),
-      )
-      .map_with(|(((extend, interface), name), content), sp| Self {
-        span: Span::from_map_extra(sp),
-        extend,
-        interface,
-        name,
-        content,
+      .then(InterfaceTypeExtensionContent::<
+        Name,
+        ImplementInterfaces,
+        Directives,
+        FieldsDefinition,
+        Span,
+      >::parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|((extend, interface), content), sp| {
+        let (_, name, data) = content.into_components();
+
+        Self {
+          span: Span::from_map_extra(sp),
+          extend,
+          interface,
+          name,
+          data,
+        }
       })
   }
 }

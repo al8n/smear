@@ -11,6 +11,25 @@ extern crate std;
 
 pub use chumsky;
 
+/// On some platforms, the linker fails to compile complex types, the reference issue is
+/// [rust-lang/rust/issues#130729](https://github.com/rust-lang/rust/issues/130729).
+///
+/// This macro conditionally boxes parsers to reduce type complexity on platforms
+/// where the issue occurs.
+#[macro_export]
+macro_rules! boxed {
+  ($expr:expr) => {{
+    #[cfg(not(target_os = "linux"))]
+    {
+      #[allow(unused_imports)]
+      use $crate::__private::chumsky::prelude::Parser as _;
+      $expr.boxed()
+    }
+    #[cfg(target_os = "linux")]
+    $expr
+  }};
+}
+
 macro_rules! word {
   ($(
     $(#[$meta:meta])*
@@ -67,6 +86,43 @@ macro_rules! word {
               .map_with(|_, sp| Self($crate::__private::FromMapExtra::from_map_extra(sp)))
           }
         }
+
+        impl<Span> $crate::__private::parse::Parsable<Span> for $name<Span> {
+          fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
+          where
+            I: $crate::__private::Source<'src>,
+            I::Token: $crate::__private::Char + 'src,
+            I::Slice: $crate::__private::Slice<Token = I::Token>,
+            E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+            Span: $crate::__private::FromMapExtra<'src, I, E>,
+          {
+            Self::parser()
+          }
+        }
+
+        #[cfg(test)]
+        mod [< __ $name:snake _tests >] {
+          use super::*;
+
+          fn keyword_parser<'a>() -> impl $crate::__private::chumsky::Parser<
+            'a,
+            &'a ::core::primitive::str,
+            $name<$crate::__private::WithSource<&'a ::core::primitive::str, $crate::__private::chumsky::prelude::SimpleSpan>>,
+            $crate::__private::chumsky::extra::Err<$crate::__private::chumsky::prelude::Simple<'a, ::core::primitive::char>>,
+          > + Clone {
+            $name::<$crate::__private::WithSource<&::core::primitive::str, $crate::__private::chumsky::prelude::SimpleSpan>>::parser::<&::core::primitive::str, $crate::__private::chumsky::extra::Err<$crate::__private::chumsky::prelude::Simple<::core::primitive::char>>>(
+            )
+          }
+
+          #[test]
+          fn [< test_ $name:snake >]() {
+            use $crate::__private::chumsky::prelude::Parser as _;
+
+            let parser = keyword_parser();
+            let result = parser.parse($label).into_result();
+            assert!(result.is_ok());
+          }
+        }
       )*
     }
   };
@@ -94,7 +150,7 @@ pub mod source {
 pub mod __private {
   pub use chumsky;
 
-  pub use super::source::*;
+  pub use super::{parse, source::*};
 }
 
 #[cfg(all(feature = "std", test))]

@@ -1,0 +1,11 @@
+fragment onboardingFull on OnboardingState {
+  license
+}
+      
+query globalConfig {
+  globalConfig {
+    onboarding {
+      ...onboardingFull
+    }
+  }
+}

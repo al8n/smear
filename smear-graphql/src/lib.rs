@@ -7,10 +7,7 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// Standards-compliant GraphQL parser conbinators.
-pub mod ast;
+/// Standards-compliant GraphQL parser combinators.
+pub mod cst;
 
-pub use smear_parser::parse;
-
-#[test]
-fn t() {}
+pub use smear_parser::{parse, source::WithSource};

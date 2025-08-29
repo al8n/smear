@@ -543,3 +543,118 @@ impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, Sele
       )
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::source::WithSource;
+  use chumsky::{error::Simple, extra};
+
+  fn fragment_name_parser<'a>() -> impl Parser<
+    'a,
+    &'a str,
+    FragmentName<WithSource<&'a str, SimpleSpan>>,
+    extra::Err<Simple<'a, char>>,
+  > + Clone {
+    FragmentName::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
+  }
+
+  #[test]
+  fn accepts_regular_names() {
+    // Valid GraphQL Names that are not the exact reserved words.
+    let ok = [
+      "RED",
+      "Blue",
+      "_internal",
+      "__meta",
+      "A1",
+      "_1",
+      "trueValue",
+      "nullish",
+      "FALSE",
+      "True",
+      "Null",
+      "HTTP_200",
+      "myEnum123",
+    ];
+    for s in ok {
+      let ev = fragment_name_parser().parse(s).into_result().unwrap();
+      assert_eq!(ev.span().source(), &s, "name source mismatch for `{s}`");
+      assert_eq!(
+        ev.span().source(),
+        &s,
+        "outer span should match full input `{s}`"
+      );
+    }
+  }
+
+  #[test]
+  fn rejects_reserved_keywords_exactly() {
+    #[allow(clippy::single_element_loop)]
+    for s in ["on"] {
+      assert!(
+        fragment_name_parser().parse(s).into_result().is_err(),
+        "should reject reserved keyword `{s}`"
+      );
+    }
+  }
+
+  #[test]
+  fn case_variants_of_reserved_are_allowed() {
+    for s in ["TRUE", "False", "Null"] {
+      assert!(
+        fragment_name_parser().parse(s).into_result().is_ok(),
+        "should accept case-variant `{s}`"
+      );
+    }
+  }
+
+  #[test]
+  fn rejects_non_name_starters_and_illegal_chars() {
+    for s in [
+      "1",
+      "1a",
+      "-",
+      "my-fragment-name",
+      "my.fragment.name",
+      "my fragment name",
+      "@directive",
+      "",
+    ] {
+      assert!(
+        fragment_name_parser().parse(s).into_result().is_err(),
+        "should reject non-name `{s}`"
+      );
+    }
+  }
+
+  #[test]
+  fn requires_full_input() {
+    for s in ["FOO,", "Bar ", "trueValue!", "RED\n"] {
+      assert!(
+        fragment_name_parser().parse(s).into_result().is_err(),
+        "should reject with trailing input `{s}`"
+      );
+    }
+  }
+
+  #[test]
+  fn into_span_returns_owned_span_with_same_source() {
+    let s = "MY_FRAGMENT_NAME";
+    let ev1 = fragment_name_parser().parse(s).into_result().unwrap();
+    assert_eq!(ev1.span().source(), &s);
+
+    let ev2 = fragment_name_parser().parse(s).into_result().unwrap();
+    let owned_span = ev2.into_span();
+    assert_eq!(owned_span.source(), &s);
+  }
+
+  #[test]
+  fn labelled_error_exists_for_reserved() {
+    let errs = fragment_name_parser()
+      .parse("on")
+      .into_result()
+      .unwrap_err();
+    assert!(!errs.is_empty());
+  }
+}

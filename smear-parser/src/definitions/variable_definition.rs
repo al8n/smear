@@ -155,7 +155,7 @@ use crate::{
 ///
 /// Spec: [Variable Definition](https://spec.graphql.org/draft/#sec-Variable-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct VariableDefinition<Type, Directives, DefaultValue, Span> {
+pub struct VariableDefinition<Type, DefaultValue, Directives, Span> {
   span: Span,
   description: Option<StringValue<Span>>,
   variable: Variable<Span>,
@@ -165,8 +165,8 @@ pub struct VariableDefinition<Type, Directives, DefaultValue, Span> {
   default_value: Option<DefaultValue>,
 }
 
-impl<Type, Directives, DefaultValue, Span> AsRef<Span>
-  for VariableDefinition<Type, Directives, DefaultValue, Span>
+impl<Type, DefaultValue, Directives, Span> AsRef<Span>
+  for VariableDefinition<Type, DefaultValue, Directives, Span>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -174,8 +174,8 @@ impl<Type, Directives, DefaultValue, Span> AsRef<Span>
   }
 }
 
-impl<Type, Directives, DefaultValue, Span> IntoSpan<Span>
-  for VariableDefinition<Type, Directives, DefaultValue, Span>
+impl<Type, DefaultValue, Directives, Span> IntoSpan<Span>
+  for VariableDefinition<Type, DefaultValue, Directives, Span>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -183,8 +183,8 @@ impl<Type, Directives, DefaultValue, Span> IntoSpan<Span>
   }
 }
 
-impl<Type, Directives, DefaultValue, Span> IntoComponents
-  for VariableDefinition<Type, Directives, DefaultValue, Span>
+impl<Type, DefaultValue, Directives, Span> IntoComponents
+  for VariableDefinition<Type, DefaultValue, Directives, Span>
 {
   type Components = (
     Span,
@@ -210,8 +210,8 @@ impl<Type, Directives, DefaultValue, Span> IntoComponents
   }
 }
 
-impl<Type, Directives, DefaultValue, Span>
-  VariableDefinition<Type, Directives, DefaultValue, Span>
+impl<Type, DefaultValue, Directives, Span>
+  VariableDefinition<Type, DefaultValue, Directives, Span>
 {
   /// Returns a reference to the span covering the entire variable definition.
   ///
@@ -297,10 +297,10 @@ impl<Type, Directives, DefaultValue, Span>
   /// whitespace skipping or comment processing around the variable definition.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E, TP, DP, VP>(
+  pub fn parser<'src, I, E, TP, VP, DP>(
     type_parser: TP,
-    directives_parser: DP,
     default_value_parser: VP,
+    directives_parser: DP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,
@@ -317,10 +317,10 @@ impl<Type, Directives, DefaultValue, Span>
       .then(Variable::parser().padded_by(ignored()))
       .then(Colon::parser())
       .then(ignored().ignore_then(type_parser))
-      .then(ignored().ignore_then(directives_parser).or_not())
       .then(ignored().ignore_then(default_value_parser).or_not())
+      .then(ignored().ignore_then(directives_parser).or_not())
       .map_with(
-        |(((((description, variable), colon), ty), directives), default_value), sp| Self {
+        |(((((description, variable), colon), ty), default_value), directives), sp| Self {
           span: Span::from_map_extra(sp),
           variable,
           description,
