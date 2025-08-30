@@ -9,16 +9,19 @@ license.workspace = true
 [features]
 default = ["std"]
 alloc = ["smear-parser/alloc"]
-std = ["smear-parser/std"]
+std = ["smear-parser/default", "thiserror/default"]
 
 bytes = ["smear-parser/bytes"]
+bstr = ["dep:bstr", "smear-parser/bstr"]
 
 [dependencies]
-bstr = "1"
+
 chumsky.workspace = true
 derive_more.workspace = true
 smear-parser.workspace = true
-thiserror = "2"
+thiserror.workspace = true
+
+bstr = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = "0.7"

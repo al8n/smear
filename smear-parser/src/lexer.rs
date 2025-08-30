@@ -56,6 +56,9 @@ pub trait TokenKind: Copy + Eq + core::fmt::Debug + core::fmt::Display {
 
   /// Returns the token kind represents for the ignore tokens in GraphQL spec
   fn ignored() -> Self;
+
+  /// Returns the token kind represents for the name in the GraphQL spec
+  fn name() -> Self;
 }
 
 /// The token error
@@ -171,8 +174,17 @@ impl<'a> Text<'a> for &'a [u8] {
   }
 
   #[inline(always)]
+  #[cfg(not(feature = "bstr"))]
   fn format(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     <[u8] as core::fmt::Debug>::fmt(self, fmt)
+  }
+
+  #[inline(always)]
+  #[cfg(feature = "bstr")]
+  fn format(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    use bstr::BStr;
+
+    <BStr as core::fmt::Display>::fmt(BStr::new(self), fmt)
   }
 }
 

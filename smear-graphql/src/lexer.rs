@@ -44,6 +44,10 @@ impl lexer::TokenKind for TokenKind {
   fn ignored() -> Self {
     Self::Ignored
   }
+
+  fn name() -> Self {
+    Self::Name
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +136,16 @@ pub struct Token<I, S> {
   span: Span<S>,
 }
 
+impl<'a, I, S> core::fmt::Display for Token<I, S>
+where
+  I: Text<'a>,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayText::from(&self.data).fmt(f)
+  }
+}
+
 impl<I, S> Token<I, S> {
   #[inline(always)]
   const fn new(kind: TokenKind, data: I, span: Span<S>) -> Self {
@@ -189,7 +203,7 @@ where
     let data = input.data();
     let mut bytes = data.iter().enumerate();
 
-    let (idx, cur) = match bytes.next() {
+    let (mut idx, cur) = match bytes.next() {
       Some((i, &b)) => (i, b),
       None => {
         return Ok(None);
@@ -250,6 +264,30 @@ where
           ))
         }
       }
+      b'_' | b'a'..=b'z' | b'A'..=b'Z' => {
+        for (_, &b) in bytes {
+          match b {
+            b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => {
+              idx += 1;
+              continue;
+            },
+            _ => {
+              break;
+            },
+          }
+        }
+
+        state.increase_column_number(idx);
+        let name_end = idx + 1;
+        Ok(Some((
+          name_end,
+          Self::new(
+            TokenKind::Name,
+            &data[..name_end],
+            Span::new(input.global_position(), input.global_position() + name_end, *state),
+          ),
+        )))
+      },
       other => {
         println!("other: {}", other);
         let span = Span::new(idx, idx + 1, *state);
@@ -393,21 +431,27 @@ where
 mod tests {
   use core::convert::Infallible;
 
-  use smear_parser::{lang::{comment, comment1, comment2, ignored1}, lexer::Lexer};
+  use smear_parser::{lang::{comment, comment1, comment2, ignored1, name}, lexer::Lexer};
 
   use super::*;
 
   #[test]
   fn t() {
-    let input = r#"# asdasdasdasd
+    let input = r#" what
+    
+    
+    
+    
+    # asdasdasdas
+    ,,,,
     "#;
 
-    let parser = ignored1::<&[u8], Token<&[u8], ()>, (), extra::Err<EmptyErr>>();
+    let parser = name::<&[u8], Token<&[u8], ()>, (), extra::Err<EmptyErr>>().padded_by(ignored1());
     let res = parser
       .parse(Lexer::<&[u8], Token<&[u8], ()>, ()>::new(input.as_bytes()))
       .into_result()
       .unwrap();
-    println!("{:#?}", res);
+    println!("{}", res);
 
     // println!("input: {}n", core::str::from_utf8(&input.as_bytes()[14..15]).unwrap());
     // let parser = comment::<&str, extra::Err<Rich<char>>>();

@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::source::*;
+use crate::{lexer::{Lexer, LexerError, State, Text, Token, TokenKind}, source::*};
 
 /// A GraphQL name identifier.
 ///
@@ -283,3 +283,24 @@ impl<Span> IntoComponents for Name<Span> {
     self.into_span()
   }
 }
+
+
+
+  /// a.
+  pub fn name<'src, I, T, S, E>() -> impl Parser<'src, Lexer<'src, I, T, S>, T, E> + Clone
+  where
+    I: Text<'src>,
+    T: Token<'src, I, S>,
+    S: State + 'src,
+    E: ParserExtra<'src, Lexer<'src, I, T, S>>,
+    E::Error: From<LexerError<'src, I, T, S>>,
+  {
+    any()
+      .try_map(|res, _| {
+        match res {
+          Ok(tok) => LexerError::check_token_kind(tok, <T::Kind as TokenKind>::name())
+            .map_err(Into::into),
+          Err(e) => Err(E::Error::from(e)),
+        }
+      })
+  }

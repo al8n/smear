@@ -16,8 +16,11 @@ homepage = "https://github.com/al8n/smear"
 license = "Apache-2.0 OR MIT"
 
 [workspace.dependencies]
+bstr = { version = "1", default-features = false }
 chumsky = { version = "0.10", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
+thiserror = { version = "2", default-features = false }
+
 smear-graphql = { path = "smear-graphql", default-features = false }
 smear-parser = { path = "smear-parser", default-features = false }
 smear-utils = { path = "smear-utils", default-features = false }
