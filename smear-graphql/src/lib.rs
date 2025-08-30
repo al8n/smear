@@ -10,4 +10,6 @@ extern crate std;
 /// Standards-compliant GraphQL parser combinators.
 pub mod cst;
 
+mod lexer;
+
 pub use smear_parser::{parse, source::WithSource};

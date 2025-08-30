@@ -142,7 +142,7 @@ pub mod definitions;
 pub mod parse;
 
 /// Lexer related functionality
-pub mod tokenizer;
+pub mod lexer;
 
 /// Source trait and implementations
 pub mod source {

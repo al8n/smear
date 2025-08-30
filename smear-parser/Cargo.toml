@@ -19,5 +19,7 @@ derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
 smear-utils.workspace = true
+thiserror = "2"
 
 bytes = { version = "1", default-features = false, optional = true }
+bstr = { version = "1", default-features = false, optional = true }

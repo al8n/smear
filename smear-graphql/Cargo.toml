@@ -14,9 +14,11 @@ std = ["smear-parser/std"]
 bytes = ["smear-parser/bytes"]
 
 [dependencies]
+bstr = "1"
 chumsky.workspace = true
 derive_more.workspace = true
 smear-parser.workspace = true
+thiserror = "2"
 
 [dev-dependencies]
 criterion = "0.7"
