@@ -23,6 +23,10 @@ fn async_graphql_parser_parse_schema(schema: &str) {
   let _document = async_graphql_parser::parse_schema(schema).unwrap();
 }
 
+fn cynic_parser_parse_schema(schema: &str) {
+  let _document = cynic_parser::parse_type_system_document(schema).unwrap();
+}
+
 fn bench_apollo_parser_parse_github_schema(c: &mut Criterion) {
   c.bench_function("apollo-parser/parse_github_schema", move |b| {
     b.iter(|| apollo_parser_parse_schema(SCHEMA))
@@ -47,11 +51,18 @@ fn bench_async_graphql_parser_parse_github_schema(c: &mut Criterion) {
   });
 }
 
+fn bench_cynic_parser_parse_github_schema(c: &mut Criterion) {
+  c.bench_function("cynic-parser/parse_github_schema", move |b| {
+    b.iter(|| cynic_parser_parse_schema(SCHEMA))
+  });
+}
+
 criterion_group!(
   benches,
   bench_apollo_parser_parse_github_schema,
   bench_smear_parser_parse_github_schema,
   bench_graphql_parser_parse_github_schema,
   bench_async_graphql_parser_parse_github_schema,
+  // bench_cynic_parser_parse_github_schema,
 );
 criterion_main!(benches);

@@ -25,6 +25,10 @@ fn async_graphql_parser_parse_query(query: &str) {
   let _document = async_graphql_parser::parse_query(query).unwrap();
 }
 
+fn cynic_parser_parse_query(query: &str) {
+  let _document = cynic_parser::parse_executable_document(query).unwrap();
+}
+
 fn bench_apollo_parser_minimal(c: &mut Criterion) {
   c.bench_function("apollo-parser/minimal", move |b| {
     b.iter(|| apollo_parser_parse_query(QUERY))
@@ -49,11 +53,18 @@ fn bench_async_graphql_parser_minimal(c: &mut Criterion) {
   });
 }
 
+fn bench_cynic_parser_minimal(c: &mut Criterion) {
+  c.bench_function("cynic-parser/minimal", move |b| {
+    b.iter(|| cynic_parser_parse_query(QUERY))
+  });
+}
+
 criterion_group!(
   benches,
   bench_apollo_parser_minimal,
   bench_smear_parser_minimal,
   bench_graphql_parser_minimal,
   bench_async_graphql_parser_minimal,
+  bench_cynic_parser_minimal,
 );
 criterion_main!(benches);

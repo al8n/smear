@@ -15,7 +15,7 @@ bytes = ["smear-parser/bytes"]
 bstr = ["dep:bstr", "smear-parser/bstr"]
 
 [dependencies]
-
+logos = { version = "0.15", default-features = false, features = ["export_derive"] }
 chumsky.workspace = true
 derive_more.workspace = true
 smear-parser.workspace = true
@@ -28,6 +28,7 @@ criterion = "0.7"
 apollo-parser = "0.8"
 graphql-parser = "0.4"
 async-graphql-parser = "7"
+cynic-parser = "0.10"
 paste = "1"
 
 [[bench]]

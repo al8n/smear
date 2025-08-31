@@ -25,6 +25,10 @@ fn async_graphql_parser_parse_query(query: &str) {
   let _document = async_graphql_parser::parse_query(query).unwrap();
 }
 
+fn cynic_parser_parse_query(query: &str) {
+  let _document = cynic_parser::parse_executable_document(query).unwrap();
+}
+
 fn bench_apollo_parser_kitchen_sink(c: &mut Criterion) {
   c.bench_function("apollo-parser/kitchen_sink", move |b| {
     b.iter(|| apollo_parser_parse_query(QUERY))
@@ -43,6 +47,12 @@ fn bench_graphql_parser_kitchen_sink(c: &mut Criterion) {
   });
 }
 
+fn bench_cynic_parser_kitchen_sink(c: &mut Criterion) {
+  c.bench_function("cynic-parser/kitchen_sink", move |b| {
+    b.iter(|| cynic_parser_parse_query(QUERY))
+  });
+}
+
 // fn bench_async_graphql_parser_kitchen_sink(c: &mut Criterion) {
 //   c.bench_function("async-graphql-parser/kitchen_sink", move |b| {
 //     b.iter(|| async_graphql_parser_parse_query(QUERY))
@@ -54,6 +64,7 @@ criterion_group!(
   bench_apollo_parser_kitchen_sink,
   bench_smear_parser_kitchen_sink,
   bench_graphql_parser_kitchen_sink,
+  bench_cynic_parser_kitchen_sink,
   // bench_async_graphql_parser_kitchen_sink,
 );
 criterion_main!(benches);

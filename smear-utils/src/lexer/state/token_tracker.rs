@@ -1,7 +1,7 @@
 /// An error that occurs when the token limit is exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("token limit exceeded: tokens {}, maximum {}", .0.tokens(), .0.limitation())]
-pub struct TokenLimitExceeded(TokenTracker);
+pub struct TokenLimitExceeded(TokenLimiter);
 
 impl TokenLimitExceeded {
   /// Returns the token tracker that caused the error.
@@ -19,12 +19,12 @@ impl TokenLimitExceeded {
 
 /// A token tracker which tracks the number of tokens.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TokenTracker {
+pub struct TokenLimiter {
   max: usize,
   current: usize,
 }
 
-impl TokenTracker {
+impl TokenLimiter {
   /// Creates a new token tracker without limitation.
   #[inline(always)]
   pub const fn new() -> Self {
@@ -59,7 +59,7 @@ impl TokenTracker {
   }
 }
 
-impl super::State for TokenTracker {
+impl super::State for TokenLimiter {
   type Error = TokenLimitExceeded;
 
   #[inline(always)]

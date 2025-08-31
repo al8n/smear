@@ -13,8 +13,19 @@ use chumsky::{input::StrInput, text::Char as ChumskyChar};
 pub use convert::{FromMapExtra, IntoComponents, IntoSpan};
 pub use with_source::WithSource;
 
+pub use ascii::AsciiChar;
+
 mod convert;
 mod with_source;
+
+/// General utilities for working with the lexer.
+pub mod lexer;
+
+#[doc(hidden)]
+pub mod __private {
+  pub use super::lexer::{self, token, Tokenizer};
+  pub use chumsky;
+}
 
 /// Extension trait providing standardized character constants for GraphQL parsing.
 ///

@@ -141,8 +141,7 @@ pub mod definitions;
 /// Parsing related traits
 pub mod parse;
 
-/// Lexer related functionality
-pub mod lexer;
+pub use smear_utils::lexer;
 
 /// Source trait and implementations
 pub mod source {

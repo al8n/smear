@@ -23,7 +23,11 @@ impl Position {
   /// Creates a new position with the tab width
   #[inline(always)]
   pub const fn with_tab_width(tab_width: usize) -> Self {
-    Self { line: 1, column: 1, tab_width }
+    Self {
+      line: 1,
+      column: 1,
+      tab_width,
+    }
   }
 
   /// Returns the line number (1-based).

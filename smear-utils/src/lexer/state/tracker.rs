@@ -1,4 +1,4 @@
-use super::{Position, RecursionLimitExceeded, RecursionTracker, TokenLimitExceeded, TokenTracker};
+use super::{Position, RecursionLimitExceeded, RecursionLimiter, TokenLimitExceeded, TokenLimiter};
 
 /// The limit exceeded error.
 #[derive(
@@ -26,8 +26,8 @@ pub enum LimitExceeded {
 /// Trackers for tracking number of tokens, recursion depth and the position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tracker {
-  token_tracker: TokenTracker,
-  recursion_tracker: RecursionTracker,
+  token_tracker: TokenLimiter,
+  recursion_tracker: RecursionLimiter,
   position: Position,
 }
 
@@ -42,26 +42,26 @@ impl Tracker {
   /// Creates a new tracker.
   #[inline(always)]
   pub const fn new() -> Self {
-    Self::with_trackers(TokenTracker::new(), RecursionTracker::new())
+    Self::with_trackers(TokenLimiter::new(), RecursionLimiter::new())
   }
 
   /// Creates a new tracker with the given token tracker
   #[inline(always)]
-  pub const fn with_token_tracker(token_tracker: TokenTracker) -> Self {
-    Self::with_trackers(token_tracker, RecursionTracker::new())
+  pub const fn with_token_tracker(token_tracker: TokenLimiter) -> Self {
+    Self::with_trackers(token_tracker, RecursionLimiter::new())
   }
 
   /// Creates a new tracker with the given recursion tracker.
   #[inline(always)]
-  pub const fn with_recursion_tracker(recursion_tracker: RecursionTracker) -> Self {
-    Self::with_trackers(TokenTracker::new(), recursion_tracker)
+  pub const fn with_recursion_tracker(recursion_tracker: RecursionLimiter) -> Self {
+    Self::with_trackers(TokenLimiter::new(), recursion_tracker)
   }
 
   /// Creates a new tracker with the given token and recursion trackers.
   #[inline(always)]
   pub const fn with_trackers(
-    token_tracker: TokenTracker,
-    recursion_tracker: RecursionTracker,
+    token_tracker: TokenLimiter,
+    recursion_tracker: RecursionLimiter,
   ) -> Self {
     Self {
       token_tracker,
@@ -72,25 +72,25 @@ impl Tracker {
 
   /// Returns the token tracker.
   #[inline(always)]
-  pub const fn token(&self) -> &TokenTracker {
+  pub const fn token(&self) -> &TokenLimiter {
     &self.token_tracker
   }
 
   /// Returns the token tracker
   #[inline(always)]
-  pub const fn token_mut(&mut self) -> &mut TokenTracker {
+  pub const fn token_mut(&mut self) -> &mut TokenLimiter {
     &mut self.token_tracker
   }
 
   /// Returns the recursion tracker.
   #[inline(always)]
-  pub const fn recursion(&self) -> &RecursionTracker {
+  pub const fn recursion(&self) -> &RecursionLimiter {
     &self.recursion_tracker
   }
 
   /// Returns the recursion tracker.
   #[inline(always)]
-  pub const fn recursion_mut(&mut self) -> &mut RecursionTracker {
+  pub const fn recursion_mut(&mut self) -> &mut RecursionLimiter {
     &mut self.recursion_tracker
   }
 

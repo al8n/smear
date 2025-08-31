@@ -3,9 +3,9 @@ use chumsky::span;
 /// The span
 #[derive(Debug, Clone, Copy)]
 pub struct Span<S> {
-  start: usize,
-  end: usize,
-  state: S,
+  pub(super) start: usize,
+  pub(super) end: usize,
+  pub(super) state: S,
 }
 
 impl<S> Span<S> {
@@ -15,6 +15,12 @@ impl<S> Span<S> {
   #[inline(always)]
   pub const fn new(start: usize, end: usize, state: S) -> Self {
     Self { start, end, state }
+  }
+
+  /// Returns the range of the span.
+  #[inline(always)]
+  pub fn range(&self) -> core::ops::Range<usize> {
+    self.start..self.end
   }
 
   /// Returns the start of the span.
@@ -27,6 +33,12 @@ impl<S> Span<S> {
   #[inline(always)]
   pub const fn end(&self) -> usize {
     self.end
+  }
+
+  /// Returns the state contained by the span.
+  #[inline(always)]
+  pub const fn state(&self) -> &S {
+    &self.state
   }
 }
 

@@ -1,7 +1,7 @@
 /// An error that occurs when the recursion limit is exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("recursion limit exceeded: depth {}, maximum {}", .0.depth(), .0.limitation())]
-pub struct RecursionLimitExceeded(RecursionTracker);
+pub struct RecursionLimitExceeded(RecursionLimiter);
 
 impl RecursionLimitExceeded {
   /// Returns the recursion tracker that caused the error.
@@ -19,19 +19,19 @@ impl RecursionLimitExceeded {
 
 /// A recursion tracker which tracks the depth of the recursion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RecursionTracker {
+pub struct RecursionLimiter {
   max: usize,
   current: usize,
 }
 
-impl Default for RecursionTracker {
+impl Default for RecursionLimiter {
   #[inline(always)]
   fn default() -> Self {
     Self::new()
   }
 }
 
-impl RecursionTracker {
+impl RecursionLimiter {
   /// Creates a new recursion tracker.
   ///
   /// Defaults to a maximum depth of 500.
@@ -74,7 +74,7 @@ impl RecursionTracker {
   }
 }
 
-impl super::State for RecursionTracker {
+impl super::State for RecursionLimiter {
   type Error = RecursionLimitExceeded;
 
   #[inline(always)]
