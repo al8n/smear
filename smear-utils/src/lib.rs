@@ -23,7 +23,7 @@ pub mod lexer;
 
 #[doc(hidden)]
 pub mod __private {
-  pub use super::lexer::{self, token, Tokenizer};
+  pub use super::lexer::{self, token, Tokenizer, Require};
   pub use chumsky;
 }
 

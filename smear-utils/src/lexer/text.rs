@@ -63,15 +63,59 @@ macro_rules! slice {
   }};
 }
 
+#[inline]
+fn next_char_boundary(s: &str, mut i: usize) -> usize {
+  if i >= s.len() {
+    return s.len();
+  }
+  while !s.is_char_boundary(i) {
+    i += 1;
+  }
+  i
+}
+
+#[inline]
+fn prev_char_boundary(s: &str, mut i: usize) -> usize {
+  if i >= s.len() {
+    return s.len();
+  }
+  while i > 0 && !s.is_char_boundary(i) {
+    i -= 1;
+  }
+  i
+}
+
 impl<'a> Text<'a> for &'a str {
   #[inline(always)]
   fn len(&self) -> usize {
     <str>::len(self)
   }
 
-  #[inline(always)]
+  #[inline]
   fn slice(&self, range: impl RangeBounds<usize>) -> Self {
-    slice!(self(range))
+    let len = self.len();
+    let begin = match range.start_bound() {
+      Bound::Included(&n) => n,
+      Bound::Excluded(&n) => n.saturating_add(1),
+      Bound::Unbounded => 0,
+    }
+    .min(len);
+
+    let end = match range.end_bound() {
+      Bound::Included(&n) => n.saturating_add(1),
+      Bound::Excluded(&n) => n,
+      Bound::Unbounded => len,
+    }
+    .min(len);
+
+    let begin = next_char_boundary(self, begin);
+    let end = prev_char_boundary(self, end);
+
+    if begin >= end {
+      ""
+    } else {
+      unsafe { self.get_unchecked(begin..end) }
+    }
   }
 
   #[inline]

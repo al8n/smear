@@ -1,62 +1,15 @@
-#![allow(clippy::type_complexity)]
+use core::num::NonZeroUsize;
 
-pub use ascii::AsciiChar;
-pub use require::*;
+use chumsky::{primitive::any, Parser};
 
-use super::{LexerError, Span, State, Text, Tokenizer};
-use chumsky::{extra::ParserExtra, prelude::any, Parser};
+use crate::{lexer::Require, require_token_parser_fn};
 
-mod require;
+use super::{Span, State, Text};
 
-/// A macro to create a parser for a specific token type
-#[macro_export]
-macro_rules! require_token_parser {
-  (
-    $(
-      $(#[$meta:meta])*
-      $vis:vis fn $name:ident<$lt:lifetime, $t:ident, $e:ident>($($args:ident: $arg_ty:ty),*) -> <$leading:ident $(::$trait:ident)*>::$output:ident { $expr:expr }
-    )*
-  ) => {
-    $(
-      $(#[$meta])*
-      $vis fn $name<$lt, $t, $e>($($args: $arg_ty),*) -> impl $crate::__private::chumsky::Parser<
-        $lt,
-        $t,
-        $crate::__private::token::SpannedToken<
-          <
-            <$t as $crate::__private::chumsky::input::Input<$lt>>::Token as $leading $(::$trait)*<
-              $lt,
-              <$t as $crate::__private::Tokenizer<$lt>>::Text,
-              <$t as $crate::__private::Tokenizer<$lt>>::State,
-            >
-          >::$output,
-          <$t as $crate::__private::chumsky::input::Input<$lt>>::Span,
-        >,
-        $e,
-      > + ::core::clone::Clone
-      where
-        $t: $crate::__private::Tokenizer<$lt>,
-        $t::Token: $leading $(::$trait)* <
-          $lt,
-          <$t as $crate::__private::Tokenizer<$lt>>::Text,
-          <$t as $crate::__private::Tokenizer<$lt>>::State,
-        >,
-        $e: $crate::__private::chumsky::extra::ParserExtra<$lt, $t>,
-        <$e as $crate::__private::chumsky::extra::ParserExtra<$lt, $t>>::Error:
-          ::core::convert::From<
-            $crate::__private::lexer::LexerError<
-              $lt,
-              <$t as $crate::__private::Tokenizer<$lt>>::Text,
-              <$t as $crate::__private::chumsky::input::Input<$lt>>::Token,
-              <$t as $crate::__private::Tokenizer<$lt>>::State,
-            >,
-          >,
-      {
-        $expr
-      }
-    )*
-  };
-}
+// use crate::lexer::Require;
+
+/// Common kinds of token
+pub mod kind;
 
 /// A structureu wraps a token and a span
 #[derive(Debug, Clone, Copy)]
@@ -107,8 +60,11 @@ pub trait Token<'a, I, S>: Sized + core::fmt::Debug + core::fmt::Display + 'a {
   /// The error type for this token.
   type Error: TokenError<S>;
 
-  /// Peeks a token from the input
-  fn peek(input: I, state: &mut S) -> Option<Self>
+  /// Lex one token that *begins exactly at* `pos`.
+  ///
+  /// Returns the number of consumed from the position and the token. If there is
+  /// no more token, returns `None`, means the end of input has been reached.
+  fn peek_at(input: &I, pos: usize, state: &mut S) -> Option<(NonZeroUsize, Self)>
   where
     I: Text<'a>,
     S: State;
@@ -116,11 +72,10 @@ pub trait Token<'a, I, S>: Sized + core::fmt::Debug + core::fmt::Display + 'a {
   /// Returns the span of this token.
   fn span(&self) -> &Span<S>;
 
-  /// Returns a mutable span of this token.
-  fn span_mut(&mut self) -> &mut Span<S>;
-
   /// Creates a state error token.
-  fn from_state_error(err: S::Error) -> Self where S: State;
+  fn with_state_error(self, err: S::Error) -> Self
+  where
+    S: State;
 
   /// Check the token itself, if this is an error token, then return an error.
   fn check(self) -> Result<Self, Self::Error>
@@ -129,240 +84,164 @@ pub trait Token<'a, I, S>: Sized + core::fmt::Debug + core::fmt::Display + 'a {
     S: State;
 }
 
-/// Returns a parser which skips a whitespace token
-pub fn skip_whitespace<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireWhiteSpace<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  whitespace::<I, E>().ignored()
-}
-
-require_token_parser! {
-  /// Returns a parser which parse a whitespace token
-  pub fn whitespace<'src, I, E>() -> <RequireWhiteSpace>::WhiteSpace {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_whitespace()
-        .map(|tok| SpannedToken::new(tok, sp))
+require_token_parser_fn! {
+  /// Returns a parser which parses a token and requires the parsed token to be of a specific specification.
+  pub fn require_token<'a, I, E, Spec>(spec: Spec) -> Spec {
+    any().try_map(move |tok: I::Token, sp| {
+      tok.require(spec)
+        .map(|o| SpannedToken::new(o, sp))
         .map_err(Into::into)
     })
+  }
+
+  /// Returns a parser which parse a whitespace token
+  pub fn whitespace<'src, I, E>() -> kind::WhiteSpace {
+    require_token(kind::WhiteSpace)
   }
 
   /// Returns a parser which parse a whitespaces token
-  pub fn whitespaces<'src, I, E>() -> <RequireWhiteSpaces>::WhiteSpaces {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_whitespaces()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn whitespaces<'src, I, E>() -> kind::WhiteSpaces {
+    require_token(kind::WhiteSpaces)
   }
 
   /// Returns a parser which parse a line terminator token
-  pub fn line_terminator<'src, I, E>() -> <RequireLineTerminator>::LineTerminator {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_line_terminator()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn line_terminator<'src, I, E>() -> kind::LineTerminator {
+    require_token(kind::LineTerminator)
   }
 
   /// Returns a parser which parse a comment token
-  pub fn comment<'src, I, E>() -> <RequireComment>::Comment {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_comment()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn comment<'src, I, E>() -> kind::Comment {
+    require_token(kind::Comment)
   }
 
   /// Returns a parser which parses many ignore tokens
-  pub fn ignores<'src, I, E>() -> <RequireIgnores>::Ignores {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_ignores()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn ignores<'src, I, E>() -> kind::Ignores {
+    require_token(kind::Ignores)
   }
 
   /// Returns a parser which parse one ignore token
-  pub fn ignore<'src, I, E>() -> <RequireIgnore>::Ignore {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_ignore()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn ignore<'src, I, E>() -> kind::Ignore {
+    require_token(kind::Ignore)
   }
 
   /// Returns a parser which parse an int token
-  pub fn int<'src, I, E>() -> <RequireInt>::Int {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_int()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn int<'src, I, E>() -> kind::IntLiteral {
+    require_token(kind::IntLiteral)
   }
 
   /// Returns a parser which parses a float token
-  pub fn float<'src, I, E>() -> <RequireFloat>::Float {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_float()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn float<'src, I, E>() -> kind::FloatLiteral {
+    require_token(kind::FloatLiteral)
   }
 
   /// Returns a parser which parses a boolean token
-  pub fn boolean<'src, I, E>() -> <RequireBoolean>::Boolean {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_boolean()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn boolean<'src, I, E>() -> kind::BooleanLiteral {
+    require_token(kind::BooleanLiteral)
   }
 
   /// Returns a parser which parses a null token
-  pub fn null<'src, I, E>() -> <RequireNull>::Null {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_null()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn null<'src, I, E>() -> kind::NullLiteral {
+    require_token(kind::NullLiteral)
   }
 
   /// Returns a parser which parses an inline string token
-  pub fn inline_string<'src, I, E>() -> <RequireInlineString>::InlineString {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_inline_string()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn inline_string<'src, I, E>() -> kind::InlineStringLiteral {
+    require_token(kind::InlineStringLiteral)
   }
 
   /// Returns a parser which parses a block string token
-  pub fn block_string<'src, I, E>() -> <RequireBlockString>::BlockString {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_block_string()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn block_string<'src, I, E>() -> kind::BlockStringLiteral {
+    require_token(kind::BlockStringLiteral)
   }
 
   /// Returns a parser which parses a string token
-  pub fn string<'src, I, E>() -> <RequireString>::String {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_string()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn string<'src, I, E>() -> kind::StringLiteral {
+    require_token(kind::StringLiteral)
   }
 
   /// Returns a parser which parsers an identifier token
-  pub fn ident<'src, I, E>() -> <RequireIdent>::Ident {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_ident()
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn ident<'src, I, E>() -> kind::Ident {
+    require_token(kind::Ident)
   }
 
   /// Returns a parser which parses a keyword token
-  pub fn keyword<'src, I, E>(kw: &'src str) -> <RequireKeyword>::Keyword {
-    any().try_map(|tok: I::Token, sp| {
-      tok
-        .require_keyword(kw)
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn keyword<'src, I, E>(kw: &'src str) -> kind::Keyword<'src> {
+    require_token(kind::Keyword(kw))
   }
 
   /// Returns a parser which parses an ASCII character token
-  pub fn ascii<'src, I, E>(ch: AsciiChar) -> <RequireAscii>::Ascii {
-    any().try_map(move |tok: I::Token, sp| {
-      tok
-        .require_ascii(ch)
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn ascii<'src, I, E>(ch: kind::AsciiChar) -> kind::AsciiChar {
+    require_token(ch)
   }
 
   /// Returns a parser which parsers a UTF-8 character token
-  pub fn char<'src, I, E>(ch: char) -> <RequireChar>::Char {
-    any().try_map(move |tok: I::Token, sp| {
-      tok
-        .require_char(ch)
-        .map(|tok| SpannedToken::new(tok, sp))
-        .map_err(Into::into)
-    })
+  pub fn char<'src, I, E>(ch: char) -> char {
+    require_token(ch)
   }
 }
 
-/// Returns a parser which skips a whitespaces token
-pub fn skip_whitespaces<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireWhiteSpaces<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  whitespaces::<I, E>().ignored()
-}
+// /// Returns a parser which skips a whitespace token
+// pub fn skip_whitespace<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireWhiteSpace<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   whitespace::<I, E>().ignored()
+// }
 
-/// Returns a parser which skips a line terminator token
-pub fn skip_line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireLineTerminator<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  line_terminator::<I, E>().ignored()
-}
+// /// Returns a parser which skips a whitespaces token
+// pub fn skip_whitespaces<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireWhiteSpaces<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   whitespaces::<I, E>().ignored()
+// }
 
-/// Returns a parser which skips a comment token
-pub fn skip_comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireComment<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  comment::<I, E>().ignored()
-}
+// /// Returns a parser which skips a line terminator token
+// pub fn skip_line_terminator<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireLineTerminator<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   line_terminator::<I, E>().ignored()
+// }
 
-/// Returns a parser which ignore many ignore tokens
-pub fn ignore_many<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireIgnores<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  ignores::<I, E>().ignored()
-}
+// /// Returns a parser which skips a comment token
+// pub fn skip_comment<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireComment<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   comment::<I, E>().ignored()
+// }
 
-/// Returns a parser which ignore one ignore token
-pub fn ignore_one<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
-where
-  I: Tokenizer<'src>,
-  I::Token: RequireIgnore<'src, I::Text, I::State>,
-  E: ParserExtra<'src, I>,
-  E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-{
-  ignore::<I, E>().ignored()
-}
+// /// Returns a parser which ignore many ignore tokens
+// pub fn ignore_many<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireIgnores<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   ignores::<I, E>().ignored()
+// }
+
+// /// Returns a parser which ignore one ignore token
+// pub fn ignore_one<'src, I, E>() -> impl Parser<'src, I, (), E> + Clone
+// where
+//   I: Tokenizer<'src>,
+//   I::Token: RequireIgnore<'src, I::Text, I::State>,
+//   E: ParserExtra<'src, I>,
+//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
+// {
+//   ignore::<I, E>().ignored()
+// }

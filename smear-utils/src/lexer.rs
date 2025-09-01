@@ -1,16 +1,18 @@
-use core::marker::PhantomData;
+use core::{marker::PhantomData, ops::{Range, RangeFrom}};
 
-use chumsky::input::{ExactSizeInput, Input, ValueInput};
+use chumsky::input::{ExactSizeInput, Input, SliceInput, ValueInput};
 
 pub use error::*;
 pub use span::*;
 pub use state::State;
 pub use text::{DisplayText, Text, TextExt};
 pub use token::Token;
+pub use require::Require;
 
 mod error;
 mod span;
 mod text;
+mod require;
 
 /// The state related structures and traits
 pub mod state;
@@ -26,7 +28,7 @@ pub type StatelessLexer<'a, I, T> = Lexer<'a, I, T, ()>;
 /// - Recursion limit
 /// - Token limit
 /// - Position tracking
-pub type StatefulLexer<'a, I, T> = Lexer<'a, I, T, state::Tracker>; // Fixed typo: "Statefull" -> "Stateful"
+pub type StatefulLexer<'a, I, T> = Lexer<'a, I, T, state::Tracker>;
 
 /// The lexer will limit the maximum recursion depth.
 pub type RecursionLimitedLexer<'a, I, T> = Lexer<'a, I, T, state::RecursionLimiter>;
@@ -105,25 +107,18 @@ where
     this: &mut Self::Cache,
     cursor: &mut Self::Cursor,
   ) -> Option<Self::MaybeToken> {
-    T::peek(this.input.slice(*cursor..), &mut this.state).map(|mut tok| {
-      let span = tok.span_mut();
-      let relative_start = span.start();
-      let relative_end = span.end();
+    T::peek_at(&this.input, *cursor, &mut this.state).map(|(readed, tok)| {
+      *cursor += readed.get();
 
-      let absolute_start = *cursor + relative_start;
-      let absolute_end = *cursor + relative_end;
-
-      span.start = absolute_start;
-      span.end = absolute_end;
-
-      *cursor = absolute_end;
-
-      tok
+      match this.state.check() {
+        Err(e) => tok.with_state_error(e),
+        Ok(_) => tok,
+      }
     })
   }
 
   #[inline(always)]
-  unsafe fn span(this: &mut Self::Cache, range: core::ops::Range<&Self::Cursor>) -> Self::Span {
+  unsafe fn span(this: &mut Self::Cache, range: Range<&Self::Cursor>) -> Self::Span {
     Span::new(*range.start, *range.end, this.state)
   }
 }
@@ -150,6 +145,30 @@ where
     range: core::ops::RangeFrom<&Self::Cursor>,
   ) -> Self::Span {
     Span::new(*range.start, cache.input.len(), cache.state)
+  }
+}
+
+impl<'a, I, T, S> SliceInput<'a> for Lexer<'a, I, T, S>
+where
+  T: Token<'a, I, S>,
+  I: Text<'a> + Clone,
+  S: State,
+{
+  type Slice = I;
+
+  #[inline]
+  fn full_slice(cache: &mut Self::Cache) -> Self::Slice {
+    cache.input.clone()
+  }
+
+  #[inline]
+  unsafe fn slice(cache: &mut Self::Cache, range: Range<&Self::Cursor>) -> Self::Slice {
+    cache.input.slice(range.start..range.end)
+  }
+
+  #[inline]
+  unsafe fn slice_from(cache: &mut Self::Cache, from: RangeFrom<&Self::Cursor>) -> Self::Slice {
+    cache.input.slice(from)
   }
 }
 
