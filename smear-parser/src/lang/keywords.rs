@@ -32,3 +32,117 @@ word!(
   /// `subscription` keyword
   "subscription": Subscription: [I::Token::s, I::Token::u, I::Token::b, I::Token::s, I::Token::c, I::Token::r, I::Token::i, I::Token::p, I::Token::t, I::Token::i, I::Token::o, I::Token::n],
 );
+
+
+/// A macro to define concrete keyword types
+#[macro_export]
+macro_rules! keywords {
+  ($(
+    $(#[$meta:meta])*
+    $label:literal
+  ),+$(,)?) => {
+    paste::paste! {
+      $(
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct [< $label:upper:camel >]<T>(T);
+
+        impl<T> ::core::convert::AsRef<T> for [< $label:upper:camel >]<T> {
+          #[inline]
+          fn as_ref(&self) -> &T {
+            ::core::ops::Deref::deref(self)
+          }
+        }
+
+        impl<T> ::core::ops::Deref for [< $label:upper:camel >]<T> {
+          type Target = T;
+
+          #[inline]
+          fn deref(&self) -> &T {
+            &self.0
+          }
+        }
+
+        impl<T> $crate::__private::IntoComponents for [< $label:upper:camel >]<T> {
+          type Components = T;
+
+          #[inline]
+          fn into_components(self) -> Self::Components {
+            self.0
+          }
+        }
+
+        impl<T> [< $label:upper:camel >]<T> {
+          #[doc = "Returns the parser for the `" $label "` keyword."]
+          pub fn parser<'src, I, E>() -> impl $crate::__private::chumsky::prelude::Parser<'src, I, Self, E> + ::core::clone::Clone
+          where
+            I: $crate::__private::lexer::Tokenizer<'src>,
+            <I as $crate::__private::chumsky::input::Input<'src>>::Token: $crate::__private::lexer::Token<
+              'src,
+              <I as $crate::__private::lexer::Tokenizer<'src>>::Text,
+              <I as $crate::__private::lexer::Tokenizer<'src>>::State,
+            >
+            + $crate::__private::lexer::Require<
+                'src,
+                <I as $crate::__private::lexer::Tokenizer<'src>>::Text,
+                <I as $crate::__private::chumsky::input::Input<'src>>::Token,
+                <I as $crate::__private::lexer::Tokenizer<'src>>::State,
+                $crate::__private::lexer::token::kind::Keyword<'src>,
+                Output = T,
+              >,
+            E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
+            <E as $crate::__private::chumsky::extra::ParserExtra<'src, I>>::Error: ::core::convert::From<
+              $crate::__private::lexer::LexerError<
+                'src,
+                <I as $crate::__private::lexer::Tokenizer<'src>>::Text,
+                <I as $crate::__private::chumsky::input::Input<'src>>::Token,
+                <I as $crate::__private::lexer::Tokenizer<'src>>::State,
+              >
+            >,
+          {
+            use $crate::__private::chumsky::prelude::Parser as _;
+
+            $crate::__private::lexer::token::keyword($label).map(Self)
+          }
+        }
+      )*
+    }
+  };
+}
+
+mod keywords2 {
+  keywords!(
+    /// `repeatable` keyword
+    "repeatable",
+    /// `directive` keyword
+    "directive",
+    /// `on` keyword
+    "on",
+    /// `extend` keyword
+    "extend",
+    /// `scalar` keyword
+    "scalar",
+    /// `enum` keyword
+    "enum",
+    /// `input` keyword
+    "input",
+    /// `type` keyword
+    "type",
+    /// `interface` keyword
+    "interface",
+    /// `implements` keyword
+    "implements",
+    /// `union` keyword
+    "union",
+    /// `fragment` keyword
+    "fragment",
+    /// `schema` keyword
+    "schema",
+    /// `query` keyword
+    "query",
+    /// `mutation` keyword
+    "mutation",
+    /// `subscription` keyword
+    "subscription",
+  );
+}

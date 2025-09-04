@@ -39,18 +39,15 @@ macro_rules! require_token_parser_fn {
       $vis fn $name<$lt, $t, $e $(, $g)*>($($args: $arg_ty),*) -> impl $crate::__private::chumsky::Parser<
         $lt,
         $t,
-        $crate::__private::token::SpannedToken<
-          <
-            <$t as $crate::__private::chumsky::input::Input<$lt>>::Token as $crate::__private::lexer::Require<
-              $lt,
-              <$t as $crate::__private::Tokenizer<$lt>>::Text,
-              <$t as $crate::__private::chumsky::input::Input<$lt>>::Token,
-              <$t as $crate::__private::Tokenizer<$lt>>::State,
-              $tk,
-            >
-          >::Output,
-          <$t as $crate::__private::chumsky::input::Input<$lt>>::Span,
-        >,
+        <
+          <$t as $crate::__private::chumsky::input::Input<$lt>>::Token as $crate::__private::lexer::Require<
+            $lt,
+            <$t as $crate::__private::Tokenizer<$lt>>::Text,
+            <$t as $crate::__private::chumsky::input::Input<$lt>>::Token,
+            <$t as $crate::__private::Tokenizer<$lt>>::State,
+            $tk,
+          >
+        >::Output,
         $e,
       > + ::core::clone::Clone
       where

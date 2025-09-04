@@ -1,5 +1,4 @@
 use chumsky::{extra::ParserExtra, prelude::*};
-use smear_utils::lexer::token::RequireIdent;
 
 use crate::{
   lexer::{Lexer, LexerError, State, Text, Token, Tokenizer},
@@ -287,15 +286,3 @@ impl<Span> IntoComponents for Name<Span> {
     self.into_span()
   }
 }
-
-// /// a.
-// pub fn name<'src, I, E>(
-// ) -> impl Parser<'src, Lexer<'src, I::Text, I::Token, I::State>, I::Token, E> + Clone
-// where
-//   I: Tokenizer<'src>,
-//   I::Token: RequireIdent<'src, I::Text, I::State>,
-//   E: ParserExtra<'src, Lexer<'src, I::Text, I::Token, I::State>>,
-//   E::Error: From<LexerError<'src, I::Text, I::Token, I::State>>,
-// {
-//   any().try_map(|tok: I::Token, _| tok.require_ident().map_err(Into::into))
-// }

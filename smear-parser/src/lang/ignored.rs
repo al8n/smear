@@ -4,10 +4,7 @@ use crate::{
 };
 
 use chumsky::{extra::ParserExtra, prelude::*};
-use smear_utils::lexer::{
-  token::{RequireComment, RequireIgnore, RequireIgnores, RequireLineTerminator},
-  Tokenizer,
-};
+use smear_utils::lexer::Tokenizer;
 
 /// LineTerminator  ::  <LF> | <CR> [<LF>]
 /// Treat CR and CRLF as a single terminator.

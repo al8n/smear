@@ -32,8 +32,6 @@ use smear_parser::lexer::State;
 
 #[derive(Default, Eq, PartialEq)]
 pub struct TokenExtras {
-  tab_width: usize,
-
   /// Token callbacks might store an error token kind in here before failing.
   /// This is then picked up in the parser to turn the `Error` token into a
   /// more specific variant.
@@ -42,11 +40,27 @@ pub struct TokenExtras {
 
 /// Lexer for the GraphQL specification: http://spec.graphql.org/
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(extras = TokenExtras, skip r"[ \t\r\n\f,\ufeff]+|#[^\n\r]*")]
+#[logos(extras = TokenExtras)]
 pub enum Token<'a> {
   ErrorUnterminatedString,
   ErrorUnsupportedStringCharacter,
   ErrorUnterminatedBlockString,
+
+  /// Spec: [Byte Order Mark](https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens.Byte-Order-Mark)
+  #[token("\u{FEFF}")]
+  UnicodeBOM,
+
+  /// Spec: [LineTerminator](https://spec.graphql.org/draft/#LineTerminator).
+  #[regex(r"\r\n|\r|\n")]
+  LineTerminator,
+
+  /// Spec: [WhiteSpace](https://spec.graphql.org/draft/#WhiteSpace)
+  #[regex(r"[ \t]")]
+  Whitespace,
+
+  /// Spec: [Comma](https://spec.graphql.org/draft/#Comma)
+  #[token(",")]
+  Comma,
 
   // Valid tokens
   #[token("&")]
@@ -223,6 +237,7 @@ impl fmt::Display for Token<'_> {
       Token::ErrorUnterminatedString => "unterminated string",
       Token::ErrorUnsupportedStringCharacter => "unsupported character in string",
       Token::ErrorUnterminatedBlockString => "unterminated block string",
+      _ => "a",
     };
     f.write_str(message)
   }
@@ -292,7 +307,16 @@ mod tests {
   }
 
   #[test]
+  fn test_a() {
+    let mut lexer = Token::lexer("1e-");
+    lexer.next().unwrap().unwrap_err();
+  }
+
+  #[test]
   fn test_number_failures() {
+    let mut lexer = Token::lexer("1e-");
+    lexer.next().unwrap().unwrap();
+
     assert_token("00", Token::ErrorNumberLiteralLeadingZero, 2);
     assert_token("01", Token::ErrorNumberLiteralLeadingZero, 2);
     assert_token("-01", Token::ErrorNumberLiteralLeadingZero, 3);

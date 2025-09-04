@@ -1,9 +1,12 @@
 use chumsky::{label::LabelError, prelude::*};
-use smear_parser::lexer::{self, DisplayText, Lexer, LexerError, Positioned, Span, State, Text};
+use smear_parser::lexer::{self, DisplayText, Lexer, LexerError, Span, State, Text};
 
 mod fast_token;
 mod full_token;
 mod token;
+
+/// Float literal lexing
+pub mod float;
 
 // /// Returns a parser that produces a stream of tokens.
 // pub fn lexer<'a, I, S, C, E>() -> impl Parser<'a, Lexer<'a, I, Token<I>, S>, C, E>
@@ -33,11 +36,11 @@ mod tests {
   use core::convert::Infallible;
 
   use smear_parser::{
-    lang::{comment, comment1, comment2, ignored1, name},
+    // lang::{comment, comment1, comment2, ignored1, name},
     lexer::Lexer,
   };
 
-  use crate::lexer::full_token::Token;
+  // use crate::lexer::full_token::Token;
 
   use super::*;
 
@@ -52,13 +55,13 @@ mod tests {
     ,,,,
     "#;
 
-    let parser = name::<Lexer<&[u8], Token<&[u8], ()>, ()>, extra::Err<Simple<Token<&[u8], ()>>>>()
-      .padded_by(ignored1());
-    let res = parser
-      .parse(Lexer::new(input.as_bytes()))
-      .into_result()
-      .unwrap();
-    println!("{}", res);
+    // let parser = name::<Lexer<&[u8], Token<&[u8], ()>, ()>, extra::Err<Simple<Token<&[u8], ()>>>>()
+    //   .padded_by(ignored1());
+    // let res = parser
+    //   .parse(Lexer::new(input.as_bytes()))
+    //   .into_result()
+    //   .unwrap();
+    // println!("{}", res);
 
     // println!("input: {}n", core::str::from_utf8(&input.as_bytes()[14..15]).unwrap());
     // let parser = comment::<&str, extra::Err<Rich<char>>>();

@@ -87,9 +87,8 @@ pub trait Token<'a, I, S>: Sized + core::fmt::Debug + core::fmt::Display + 'a {
 require_token_parser_fn! {
   /// Returns a parser which parses a token and requires the parsed token to be of a specific specification.
   pub fn require_token<'a, I, E, Spec>(spec: Spec) -> Spec {
-    any().try_map(move |tok: I::Token, sp| {
-      tok.require(spec)
-        .map(|o| SpannedToken::new(o, sp))
+    any().try_map(move |tok: I::Token, _| {
+      tok.require(spec) 
         .map_err(Into::into)
     })
   }

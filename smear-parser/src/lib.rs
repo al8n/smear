@@ -152,7 +152,7 @@ pub mod source {
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{parse, source::*};
+  pub use super::{parse, source::*, lexer};
 }
 
 #[cfg(all(feature = "std", test))]

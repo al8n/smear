@@ -130,7 +130,7 @@ where
   S: State,
 {
   unsafe fn next(cache: &mut Self::Cache, cursor: &mut Self::Cursor) -> Option<Self::Token> {
-    <Self as Input<'a>>::next_maybe(cache, cursor)
+    unsafe { <Self as Input<'a>>::next_maybe(cache, cursor) }
   }
 }
 

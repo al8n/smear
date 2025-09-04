@@ -9,7 +9,7 @@ license.workspace = true
 [features]
 default = ["std"]
 alloc = ["smear-utils/alloc"]
-std = ["chumsky/default", "smear-utils/default", "thiserror/default"]
+std = ["chumsky/default", "smear-utils/default", "thiserror/default", "logosky/default"]
 
 bytes = ["chumsky/bytes", "dep:bytes", "smear-utils/bytes"]
 
@@ -20,6 +20,7 @@ either = { version = "1", default-features = false }
 paste = "1"
 smear-utils.workspace = true
 thiserror.workspace = true
+logosky.workspace = true
 
 bytes = { version = "1", default-features = false, optional = true }
 bstr = { workspace = true, optional = true }
