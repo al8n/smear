@@ -118,7 +118,7 @@ impl<C> Default for ExponentError<C> {
 pub enum ExponentBytesToken {
   #[regex(r"[+-]?[0-9]+")]
   #[regex(r"[+-]?(\D)?", |lexer| unexpected_eoe(lexer.slice().iter().copied()))]
-  #[regex(r"[+-]?[0-9]+[^\d \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().iter().last().copied().expect("there is at least one char")))]
+  #[regex(r"[+-]?[0-9]+[^\d \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().last().copied().expect("there is at least one char")))]
   Ok,
 }
 

@@ -136,7 +136,7 @@ where
 pub trait FractionalInput<'c>: sealed::Sealed<'c> {}
 
 mod sealed {
-  use crate::lexer::number::lex_exponent;
+  use crate::lexer::number::{lex_exponent, lex_exponent_with_identifier};
 
   use super::*;
   use logosky::source::CustomSource;
@@ -182,7 +182,7 @@ mod sealed {
                 match ch {
                   b' ' | b'\t' | b'\r' | b'\n' => Ok(()),
                   b'e' | b'E' => {
-                    match lex_exponent(&mut lexer) {
+                    match lex_exponent_with_identifier(&mut lexer) {
                       Ok(_) => Ok(()),
                       Err(e) => Err(e.into()),
                     }
@@ -241,7 +241,7 @@ mod sealed {
                 match ch {
                   ' ' | '\t' | '\r' | '\n' | '\u{feff}' => Ok(()),
                   'e' | 'E' => {
-                    match lex_exponent(&mut lexer) {
+                    match lex_exponent_with_identifier(&mut lexer) {
                       Ok(_) => Ok(()),
                       Err(e) => Err(e.into()),
                     }
