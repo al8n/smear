@@ -6,7 +6,7 @@ mod full_token;
 mod token;
 
 /// Float literal lexing
-pub mod float;
+pub mod number;
 
 // /// Returns a parser that produces a stream of tokens.
 // pub fn lexer<'a, I, S, C, E>() -> impl Parser<'a, Lexer<'a, I, Token<I>, S>, C, E>

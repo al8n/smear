@@ -30,6 +30,11 @@ impl<C> UnexpectedEndOfExponent<C> {
   }
 
   #[inline]
+  const fn with_found(found: C, hint: ExponentHint) -> Self {
+    Self::maybe_found(Some(found), hint)
+  }
+
+  #[inline]
   const fn maybe_found(found: Option<C>, hint: ExponentHint) -> Self {
     Self {
       found,
@@ -45,6 +50,11 @@ impl<C> UnexpectedEndOfExponent<C> {
   #[inline]
   pub const fn hint(&self) -> ExponentHint {
     self.hint
+  }
+
+  #[inline]
+  pub fn into_components(self) -> (Option<C>, ExponentHint) {
+    (self.found, self.hint)
   }
 }
 
@@ -103,21 +113,21 @@ impl<C> Default for ExponentError<C> {
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(error(ExponentError<u8>, |lexer| UnexpectedEndOfExponent::maybe_found(lexer.slice().first().copied(), ExponentHint::Identifier).into()))]
+#[logos(error(ExponentError<u8>, |lexer| UnexpectedEndOfExponent::maybe_found(lexer.slice().first().copied(), ExponentHint::SignOrDigit).into()))]
 #[logos(source = [u8])]
 pub enum ExponentBytesToken {
-  #[regex(r"[eE][+-]?[0-9]+")]
-  #[regex(r"[eE][+-]?(\D)?", |lexer| unexpected_eoe(lexer.slice().iter().copied()))]
-  #[regex(r"[eE][+-]?[0-9]+[^0-9 \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().iter().copied()))]
+  #[regex(r"[+-]?[0-9]+")]
+  #[regex(r"[+-]?(\D)?", |lexer| unexpected_eoe(lexer.slice().iter().copied()))]
+  #[regex(r"[+-]?[0-9]+[^\d \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().iter().last().copied().expect("there is at least one char")))]
   Ok,
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(error(ExponentError<char>, |lexer| UnexpectedEndOfExponent::maybe_found(lexer.slice().chars().next(), ExponentHint::Identifier).into()))]
+#[logos(error(ExponentError<char>, |lexer| UnexpectedEndOfExponent::maybe_found(lexer.slice().chars().next(), ExponentHint::SignOrDigit).into()))]
 pub enum ExponentStrToken {
-  #[regex(r"[eE][+-]?[0-9]+")]
-  #[regex(r"[eE][+-]?(\D)?", |lexer| unexpected_eoe(lexer.slice().chars()))]
-  #[regex(r"[eE][+-]?[0-9]+[^0-9 \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().chars()))]
+  #[regex(r"[+-]?[0-9]+")]
+  #[regex(r"[+-]?(\D)?", |lexer| unexpected_eoe(lexer.slice().chars()))]
+  #[regex(r"[+-]?[0-9]+[^\d \t\r\n,\ufeff]", |lexer| unexpected_suffix(lexer.slice().chars().last().expect("there is at least one char")))]
   Ok,
 }
 
@@ -128,7 +138,6 @@ where
   C: IsAsciiChar,
 {
   let mut iter = remaining.into_iter();
-  assert!(iter.next().is_some(), "there must be an exponent identifier");
 
   Err(match iter.next() {
     Some(ch) if ch.one_of(&[AsciiChar::Plus, AsciiChar::Minus]) => {
@@ -141,33 +150,8 @@ where
 }
 
 #[inline]
-fn unexpected_suffix<S, C>(remaining: S) -> Result<(), ExponentError<C>>
-where
-  S: IntoIterator<Item = C>,
-  C: IsAsciiChar,
-{
-  let mut iter = remaining.into_iter();
-  assert!(iter.next().is_some(), "there must be an exponent identifier");
-
-  match iter.next() {
-    // eat the exponent sign
-    None => {},
-    Some(ch) if ch.one_of(&[AsciiChar::Plus, AsciiChar::Minus]) => {},
-    Some(ch) => {
-      if !ch.is_ascii_digit() {
-        return Err(ExponentError::UnexpectedSuffix(ch)); 
-      }
-    }
-  }
-  
-  // consumes the valid digits
-  for ch in iter {
-    if !ch.is_ascii_digit() {
-      return Err(ExponentError::UnexpectedSuffix(ch));
-    }
-  }
-
-  unreachable!("there must be an invalid character")
+fn unexpected_suffix<C>(ch: C) -> Result<(), ExponentError<C>> {
+  Err(ExponentError::UnexpectedSuffix(ch))
 }
 
 pub fn lex_exponent<'a, T>(lexer: &mut Lexer<'a, T>) -> Result<(), ExponentError<<<T::Source as Source>::Slice<'a> as sealed::Sealed<'a>>::Char>>
@@ -182,7 +166,20 @@ where
   res
 }
 
-pub trait ExponentInput<'c>: sealed::Sealed<'c> {}
+pub fn lex_exponent_with_identifier<'a, T>(lexer: &mut Lexer<'a, T>) -> Result<(), ExponentError<<<T::Source as Source>::Slice<'a> as sealed::Sealed<'a>>::Char>>
+where
+  T: Logos<'a>,
+  <T::Source as Source>::Slice<'a>: ExponentInput<'a>,
+{
+  use sealed::Sealed;
+
+  let (end, res) = lexer.remainder().lex_with_identifier();
+  lexer.bump(end);
+  res
+}
+
+pub trait ExponentInput<'c>: sealed::Sealed<'c> {
+}
 
 mod sealed {
   use super::*;
@@ -195,6 +192,9 @@ mod sealed {
 
     /// Returns a lexer for the exponent suffix.
     fn lex(&self) -> (usize, Result<(), ExponentError<Self::Char>>);
+
+    /// Returns a lexer for the exponent suffix.
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>);
 
     /// Returns an iterator over the characters in the exponent suffix.
     fn iter(slice: Self::Slice) -> impl core::iter::Iterator<Item = Self::Char> + 'c;
@@ -211,13 +211,29 @@ mod sealed {
     fn lex(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
       let mut lexer = Lexer::<Self::Token<'_>>::new(self);
       let res = match lexer.next() {
+        None => Err(UnexpectedEndOfExponent::new(ExponentHint::SignOrDigit).into()),
         Some(tok) => match tok {
           Ok(_) => Ok(()),
           Err(e) => Err(e),
         },
-        None => Err(UnexpectedEndOfExponent::new(ExponentHint::Identifier).into()),
       };
       (lexer.span().end, res)
+    }
+
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      if self.is_empty() {
+        return (0, Err(UnexpectedEndOfExponent::new(ExponentHint::Identifier).into()));
+      }
+
+      let first = self[0];
+      match first {
+        b'e' | b'E' => {},
+        ch => return (1, Err(UnexpectedEndOfExponent::with_found(ch, ExponentHint::Identifier).into())),
+      }
+
+      let (end, res) = self[1..].lex();
+      (end + 1, res)
     }
 
     #[inline(always)]
@@ -235,13 +251,29 @@ mod sealed {
     fn lex(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
       let mut lexer = Lexer::<Self::Token<'_>>::new(self);
       let res = match lexer.next() {
+        None => Err(UnexpectedEndOfExponent::new(ExponentHint::SignOrDigit).into()),
         Some(tok) => match tok {
           Ok(_) => Ok(()),
           Err(e) => Err(e),
         },
-        None => Err(UnexpectedEndOfExponent::new(ExponentHint::Identifier).into()),
       };
       (lexer.span().end, res)
+    }
+
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      match self.chars().next() {
+        None => {
+          (0, Err(UnexpectedEndOfExponent::new(ExponentHint::Identifier).into()))
+        },
+        Some('e') | Some('E') => {
+          let (end, res) = self[1..].lex();
+          (end + 1, res)
+        },
+        Some(ch) => {
+          (1, Err(UnexpectedEndOfExponent::with_found(ch, ExponentHint::Identifier).into()))
+        },
+      }
     }
 
     #[inline(always)]
@@ -260,6 +292,11 @@ mod sealed {
       (**self).lex()
     }
 
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      (**self).lex_with_identifier()
+    }
+
     #[inline(always)]
     fn iter(slice: Self::Slice) -> impl core::iter::Iterator<Item = Self::Char> + 'l {
       T::iter(slice)
@@ -274,6 +311,11 @@ mod sealed {
     #[inline]
     fn lex(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
       self.as_ref().lex()
+    }
+
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      self.as_ref().lex_with_identifier()
     }
 
     #[inline(always)]
@@ -293,6 +335,11 @@ mod sealed {
       (**self).lex()
     }
 
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      (**self).lex_with_identifier()
+    }
+
     #[inline(always)]
     fn iter(slice: Self::Slice) -> impl core::iter::Iterator<Item = Self::Char> + 'l {
       slice.iter().copied()
@@ -310,6 +357,11 @@ mod sealed {
       (**self).lex()
     }
 
+    #[inline]
+    fn lex_with_identifier(&self) -> (usize, Result<(), ExponentError<Self::Char>>) {
+      (**self).lex_with_identifier()
+    }
+
     #[inline(always)]
     fn iter(slice: Self::Slice) -> impl core::iter::Iterator<Item = Self::Char> + 'l {
       slice.iter().copied()
@@ -324,12 +376,12 @@ mod tests {
   #[test]
   fn test_expected_identifier() {
     let mut lexer = Lexer::<ExponentStrToken>::new("");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Identifier);
     assert!(err.found().is_none());
 
     let mut lexer = Lexer::<ExponentStrToken>::new("a");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Identifier);
     assert_eq!(err.found(), Some(&'a'));
   }
@@ -337,12 +389,12 @@ mod tests {
   #[test]
   fn test_expected_sign_or_digit() {
     let mut lexer = Lexer::<ExponentStrToken>::new("e");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::SignOrDigit);
     assert!(err.found().is_none());
 
     let mut lexer = Lexer::<ExponentStrToken>::new("eX");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::SignOrDigit);
     assert_eq!(err.found(), Some(&'X'));
   }
@@ -350,22 +402,22 @@ mod tests {
   #[test]
   fn test_expected_digit() {
     let mut lexer = Lexer::<ExponentStrToken>::new("e+");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Digit);
     assert!(err.found().is_none());
 
     let mut lexer = Lexer::<ExponentStrToken>::new("e-");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Digit);
     assert!(err.found().is_none());
 
     let mut lexer = Lexer::<ExponentStrToken>::new("e+X");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Digit);
     assert_eq!(err.found(), Some(&'X'));
 
     let mut lexer = Lexer::<ExponentStrToken>::new("e-X");
-    let err = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
     assert_eq!(err.hint(), ExponentHint::Digit);
     assert_eq!(err.found(), Some(&'X'));
   }
@@ -373,7 +425,7 @@ mod tests {
   #[test]
   fn test_unexpected_suffix() {
     let mut lexer = Lexer::<ExponentStrToken>::new("e+123x");
-    let ch = lex_exponent::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, 'x');
   }
 
@@ -399,7 +451,7 @@ mod tests {
 
     for &input in INPUT {
       let mut lexer = Lexer::<ExponentStrToken>::new(input);
-      assert!(lex_exponent::<ExponentStrToken>(&mut lexer).is_ok());
+      assert!(lex_exponent_with_identifier::<ExponentStrToken>(&mut lexer).is_ok());
     }
   }
 }
