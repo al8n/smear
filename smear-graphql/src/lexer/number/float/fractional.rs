@@ -1,5 +1,5 @@
 use logos::{Lexer, Logos, Source};
-use derive_more::Display;
+use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 use logosky::IsAsciiChar;
 
 use crate::lexer::token::error::FloatError;
@@ -16,24 +16,14 @@ pub enum FractionalHint {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct FractionalError<C> {
-  found: Option<C>,
+pub struct UnexpectedFractionalCharacter<C> {
+  found: C,
   hint: FractionalHint,
 }
 
-impl<C> FractionalError<C> {
+impl<C> UnexpectedFractionalCharacter<C> {
   #[inline]
-  const fn new(hint: FractionalHint) -> Self {
-    Self::maybe_found(None, hint)
-  }
-
-  #[inline]
-  const fn with_found(found: C, hint: FractionalHint) -> Self {
-    Self::maybe_found(Some(found), hint)
-  }
-
-  #[inline]
-  const fn maybe_found(found: Option<C>, hint: FractionalHint) -> Self {
+  const fn new(found: C, hint: FractionalHint) -> Self {
     Self {
       found,
       hint,
@@ -41,8 +31,8 @@ impl<C> FractionalError<C> {
   }
 
   #[inline]
-  pub const fn found(&self) -> Option<&C> {
-    self.found.as_ref()
+  pub const fn found(&self) -> &C {
+    &self.found
   }
 
   #[inline]
@@ -51,62 +41,89 @@ impl<C> FractionalError<C> {
   }
 
   #[inline]
-  pub fn into_components(self) -> (Option<C>, FractionalHint) {
+  pub fn into_components(self) -> (C, FractionalHint) {
     (self.found, self.hint)
   }
 }
 
-impl<C> core::default::Default for FractionalError<C> {
-  #[inline(always)]
-  fn default() -> Self {
-    Self {
-      found: None,
-      hint: FractionalHint::Dot,
-    }
+
+impl<C: core::fmt::Display> core::fmt::Display for UnexpectedFractionalCharacter<C> {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(
+      f,
+      "unexpected character '{}' in fractional, expected {}",
+      self.found, self.hint
+    )
   }
+}
+
+impl<C: core::fmt::Display + core::fmt::Debug> core::error::Error for UnexpectedFractionalCharacter<C> {}
+
+/// Fractional parsing error
+#[derive(Debug, Clone, Copy, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref)]
+#[try_unwrap(ref)]
+pub enum FractionalError<C> {
+  UnexpectedEof(FractionalHint),
+  UnexpectedCharacter(UnexpectedFractionalCharacter<C>),
 }
 
 impl<C: core::fmt::Display> core::fmt::Display for FractionalError<C> {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    match &self.found {
-      Some(ch) => write!(
-        f,
-        "unexpected character '{}' in fractional, expected {}",
-        ch, self.hint
-      ),
-      None => write!(f, "unexpected end of input in fractional, expected {}", self.hint),
+    match self {
+      Self::UnexpectedEof(hint) => write!(f, "unexpected end of input in fractional, expected {hint}"),
+      Self::UnexpectedCharacter(err) => write!(f, "{err}"),
     }
   }
 }
 
 impl<C: core::fmt::Display + core::fmt::Debug> core::error::Error for FractionalError<C> {}
 
+impl<C> Default for FractionalError<C> {
+  #[inline(always)]
+  fn default() -> Self {
+    Self::UnexpectedEof(FractionalHint::Digit)
+  }
+}
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(error(FractionalError<u8>, |lexer| FractionalError::maybe_found(lexer.slice().first().copied(), FractionalHint::Dot)))]
+#[logos(error(FractionalError<u8>, |lexer| default_error(lexer.slice().first().copied())))]
 #[logos(source = [u8])]
 pub enum FractionalBytesToken {
   #[regex(r"[0-9]+")] 
-  #[regex(r"(\D)?", |lexer| unexpected_end_of_fractional(lexer.slice().iter().copied()))]
+  #[regex(r"(\D)?", |lexer| fractional_error(lexer.slice().iter().copied()))]
   Ok,
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(error(FractionalError<char>, |lexer| FractionalError::maybe_found(lexer.slice().chars().next(), FractionalHint::Dot)))]
+#[logos(error(FractionalError<char>, |lexer| default_error(lexer.slice().chars().next())))]
 pub enum FractionalStrToken {
   #[regex(r"[0-9]+")]
-  #[regex(r"(\D)?", |lexer| unexpected_end_of_fractional(lexer.slice().chars()))]
+  #[regex(r"(\D)?", |lexer| fractional_error(lexer.slice().chars()))]
   Ok,
 }
 
-fn unexpected_end_of_fractional<S, C>(remaining: S) -> Result<(), FractionalError<C>>
+fn fractional_error<S, C>(remaining: S) -> Result<(), FractionalError<C>>
 where
   S: IntoIterator<Item = C>,
   C: IsAsciiChar,
 {
   let mut iter = remaining.into_iter();
-  Err(FractionalError::maybe_found(iter.next(), FractionalHint::Digit))
+
+  match iter.next() {
+    None => Err(FractionalHint::Digit.into()),
+    Some(ch) => Err(UnexpectedFractionalCharacter::new(ch, FractionalHint::Digit).into()),
+  }
+}
+
+#[inline(always)]
+fn default_error<C>(ch: Option<C>) -> FractionalError<C> {
+  match ch {
+    None => FractionalError::UnexpectedEof(FractionalHint::Digit),
+    Some(ch) => FractionalError::UnexpectedCharacter(UnexpectedFractionalCharacter::new(ch, FractionalHint::Digit)),
+  }
 }
 
 pub fn lex_fractional<'a, T>(lexer: &mut Lexer<'a, T>) -> Result<(), FloatError<<<T::Source as Source>::Slice<'a> as sealed::Sealed<'a>>::Char>>
@@ -136,7 +153,7 @@ where
 pub trait FractionalInput<'c>: sealed::Sealed<'c> {}
 
 mod sealed {
-  use crate::lexer::number::{lex_exponent, lex_exponent_with_identifier};
+  use crate::lexer::number::lex_exponent_with_identifier;
 
   use super::*;
   use logosky::source::CustomSource;
@@ -169,7 +186,7 @@ mod sealed {
 
       let mut lexer = Lexer::<Self::Token<'_>>::new(self);
       let res = match lexer.next() {
-        None => Err(FractionalError::new(FractionalHint::Digit).into()),
+        None => Err(FractionalHint::Digit.into()),
         Some(tok) => match tok {
           Err(e) => Err(e.into()),
           Ok(_) => {
@@ -201,12 +218,12 @@ mod sealed {
     #[inline]
     fn lex_with_dot(&self) -> (usize, Result<(), FloatError<Self::Char>>) {
       if self.is_empty() {
-        return (0, Err(FractionalError::new(FractionalHint::Dot).into()));
+        return (0, Err(FractionalHint::Dot.into()));
       }
 
       let first = self[0];
       if first != b'.' {
-        return (0, Err(FractionalError::with_found(first, FractionalHint::Dot).into()));
+        return (0, Err(UnexpectedFractionalCharacter::new(first, FractionalHint::Dot).into()));
       }
 
       let (end, res) = self[1..].lex();
@@ -228,7 +245,7 @@ mod sealed {
     fn lex(&self) -> (usize, Result<(), FloatError<Self::Char>>) {
       let mut lexer = Lexer::<Self::Token<'_>>::new(self);
       let res = match lexer.next() {
-        None => Err(FractionalError::new(FractionalHint::Digit).into()),
+        None => Err(FractionalHint::Digit.into()),
         Some(tok) => match tok {
           Err(e) => Err(e.into()),
           Ok(_) => {
@@ -259,12 +276,12 @@ mod sealed {
     #[inline]
     fn lex_with_dot(&self) -> (usize, Result<(), FloatError<Self::Char>>) {
       match self.chars().next() {
-        None => (0, Err(FractionalError::new(FractionalHint::Dot).into())),
+        None => (0, Err(FractionalHint::Dot.into())),
         Some('.') => {
           let (end, res) = self[1..].lex();
           (end + 1, res)
         },
-        Some(ch) => (1, Err(FractionalError::with_found(ch, FractionalHint::Dot).into())),
+        Some(ch) => (1, Err(UnexpectedFractionalCharacter::new(ch, FractionalHint::Dot).into())),
       }
     }
 
@@ -370,136 +387,128 @@ mod tests {
   #[test]
   fn test_expected_dot() {
     let mut lexer = Lexer::<FractionalStrToken>::new("");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Dot));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Fractional(FractionalHint::Dot));
 
     let mut lexer = Lexer::<FractionalStrToken>::new("a");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Dot));
-    assert_eq!(err.found(), Some(&'a'));
+    assert_eq!(err.found(), &'a');
   }
 
   #[test]
   fn test_bytes_expected_dot() {
     let mut lexer = Lexer::<FractionalBytesToken>::new(b"");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Dot));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Fractional(FractionalHint::Dot));
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b"a");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Dot));
-    assert_eq!(err.found(), Some(&b'a'));
+    assert_eq!(err.found(), &b'a');
   }
 
   #[test]
   fn test_unexpected_eof() {
     let mut lexer = Lexer::<FractionalStrToken>::new(".");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Digit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Fractional(FractionalHint::Digit));
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".a");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Digit));
-    assert_eq!(err.found(), Some(&'a'));
+    assert_eq!(err.found(), &'a');
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::SignOrDigit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Exponent(ExponentHint::SignOrDigit));
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e+");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::Digit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Exponent(ExponentHint::Digit));
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e+a");
-    let err = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::Digit));
-    assert_eq!(err.found(), Some(&'a'));
+    assert_eq!(err.found(), &'a');
   }
 
   #[test]
   fn test_bytes_unexpected_eof() {
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Digit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Fractional(FractionalHint::Digit));
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".a");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Fractional(FractionalHint::Digit));
-    assert_eq!(err.found(), Some(&b'a'));
+    assert_eq!(err.found(), &b'a');
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::SignOrDigit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Exponent(ExponentHint::SignOrDigit));
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e+");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
-    assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::Digit));
-    assert!(err.found().is_none());
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    assert_eq!(err, FloatHint::Exponent(ExponentHint::Digit));
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e+a");
-    let err = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_eof();
+    let err = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_character();
     assert_eq!(err.hint(), FloatHint::Exponent(ExponentHint::Digit));
-    assert_eq!(err.found(), Some(&b'a'));
+    assert_eq!(err.found(), &b'a');
   }
 
   #[test]
   fn test_unexpected_suffix() {
     let mut lexer = Lexer::<FractionalStrToken>::new(".1a");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, 'a');
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1.");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, '.');
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e1a");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, 'a');
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e1.");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, '.');
 
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e+1a");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, 'a');
   
     let mut lexer = Lexer::<FractionalStrToken>::new(".1e+1.");
-    let ch = lex_fractional::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, '.');
   }
 
   #[test]
   fn test_bytes_unexpected_suffix() {
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1a");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'a');
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1.");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'.');
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e1a");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'a');
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e1.");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'.');
 
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e+1a");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'a');
   
     let mut lexer = Lexer::<FractionalBytesToken>::new(b".1e+1.");
-    let ch = lex_fractional::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
+    let ch = lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).unwrap_err().unwrap_unexpected_suffix();
     assert_eq!(ch, b'.');
   }
 
@@ -525,7 +534,7 @@ mod tests {
 
     for &input in INPUT {
       let mut lexer = Lexer::<FractionalStrToken>::new(input);
-      assert!(lex_fractional::<FractionalStrToken>(&mut lexer).is_ok(), "fail on input: {input}");
+      assert!(lex_fractional_with_dot::<FractionalStrToken>(&mut lexer).is_ok(), "fail on input: {input}");
     }
   }
 
@@ -551,7 +560,7 @@ mod tests {
 
     for &input in INPUT {
       let mut lexer = Lexer::<FractionalBytesToken>::new(input);
-      assert!(lex_fractional::<FractionalBytesToken>(&mut lexer).is_ok(), "fail on input: {input:?}");
+      assert!(lex_fractional_with_dot::<FractionalBytesToken>(&mut lexer).is_ok(), "fail on input: {input:?}");
     }
   }
 }
