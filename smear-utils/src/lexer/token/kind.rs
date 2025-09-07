@@ -1,4 +1,3 @@
-
 pub use ascii::AsciiChar;
 
 /// A token kind for whitespace

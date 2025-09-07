@@ -1,9 +1,9 @@
-use core::{fmt, ops::Range};
+use core::fmt;
 
 use std::borrow::Cow;
 
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, UnexpectedEnd, UnexpectedLexeme};
+use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
 /// The hint about what is expected for the next character
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
@@ -189,17 +189,85 @@ pub enum IntError<Char> {
 
 // impl<Char> error::Error for IntError<Char> where Char: fmt::Debug + fmt::Display {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, thiserror::Error)]
-// #[unwrap(ref)]
-// #[try_unwrap(ref)]
-pub enum StringError {
-  #[error("unterminated string")]
-  UnterminatedString,
-  #[error("unsupported string character")]
-  UnsupportedStringCharacter,
-  #[error("unterminated block string")]
-  UnterminatedBlockString,
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum StringHint {
+  #[display("\"")]
+  Quote,
+  #[display(r#"""""#)]
+  TripleQuote,
 }
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum LineTerminator {
+  #[display("'\\n'")]
+  NewLine,
+  #[display("'\\r'")]
+  CarriageReturn,
+  #[display("'\\r\\n'")]
+  CarriageReturnNewLine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum StringError<Char> {
+  UnsupportedStringCharacter,
+  UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminator>),
+  UnexpectedEnd(UnexpectedEnd<StringHint>),
+}
+
+impl<Char> StringError<Char> {
+  /// Creates an unterminated string error.
+  #[inline]
+  pub const fn unterminated_string() -> Self {
+    Self::UnexpectedEnd(UnexpectedEnd::with_name(Cow::Borrowed("string"), StringHint::Quote))
+  }
+
+  /// Creates an unterminated block string error.
+  #[inline]
+  pub const fn unterminated_block_string() -> Self {
+    Self::UnexpectedEnd(UnexpectedEnd::with_name(Cow::Borrowed("string"), StringHint::TripleQuote))
+  }
+
+  /// Creates an unexpected new line error.
+  #[inline]
+  pub const fn unexpected_new_line(ch: Char, position: usize) -> Self {
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
+      PositionedChar::with_position(ch, position),
+      LineTerminator::NewLine,
+    ))
+  }
+
+  /// Creates an unexpected carriage return error.
+  #[inline]
+  pub const fn unexpected_carriage_return(ch: Char, position: usize) -> Self {
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
+      PositionedChar::with_position(ch, position),
+      LineTerminator::CarriageReturn,
+    ))
+  }
+
+  /// Creates an unexpected carriage return + new line error.
+  #[inline]
+  pub const fn unexpected_carriage_return_new_line(span: Span) -> Self {
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_span_const(
+      span,
+      LineTerminator::CarriageReturnNewLine,
+    ))
+  }
+}
+
+// impl<Char> fmt::Display for StringError<Char> {
+//   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//     match self {
+//       Self::UnsupportedStringCharacter => write!(f, "unsupported string character"),
+//       Self::UnexpectedEnd(e) => match e.hint() {
+//         StringHint::Quote => write!(f, "unexpected end of data, found unterminated string, expected '\"'"),
+//         StringHint::TripleQuote => write!(f, "unexpected end of data, found unterminated block string, expected '\"\"\"'"),
+//       },
+//     }
+//   }
+// }
 
 /// An error encountered during lexing tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
@@ -210,6 +278,8 @@ pub enum ErrorData<Char> {
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
   Int(IntError<Char>),
+  /// An error encountered during lexing for string literals.
+  String(StringError<Char>),
   /// Unexpected token character.
   #[from(skip)]
   UnexpectedLexeme(Lexeme<Char>),
@@ -277,71 +347,80 @@ impl<Char> ErrorData<Char> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Error<Char> {
-  span: Range<usize>,
+  span: Span,
   data: ErrorData<Char>,
 }
 
 impl<Char> Default for Error<Char> {
   #[inline(always)]
   fn default() -> Self {
-    Self::unexpected_eoi(0..0)
+    Self::unexpected_eoi(Span::from(0..0))
   }
 }
 
 impl<Char> Error<Char> {
   /// Create a new error with the given span and data.
   #[inline]
-  pub const fn new(span: Range<usize>, data: ErrorData<Char>) -> Self {
+  pub const fn const_new(span: Span, data: ErrorData<Char>) -> Self {
     Self { span, data }
+  }
+
+  /// Create a new error with the given span and data.
+  #[inline]
+  pub fn new(span: impl Into<Span>, data: ErrorData<Char>) -> Self {
+    Self {
+      span: span.into(),
+      data,
+    }
   }
 
   /// Creates a new float error.
   #[inline]
-  pub const fn float(span: Range<usize>, error: FloatError<Char>) -> Self {
-    Self::new(span, ErrorData::Float(error))
+  pub const fn float(span: Span, error: FloatError<Char>) -> Self {
+    Self::const_new(span, ErrorData::Float(error))
   }
 
   /// Creates a new int error.
   #[inline]
-  pub const fn int(span: Range<usize>, error: IntError<Char>) -> Self {
-    Self::new(span, ErrorData::Int(error))
+  pub const fn int(span: Span, error: IntError<Char>) -> Self {
+    Self::const_new(span, ErrorData::Int(error))
   }
 
   /// Creates a new unexpected lexeme error.
   #[inline]
-  pub const fn unexpected_lexeme(span: Range<usize>, lexeme: Lexeme<Char>) -> Self {
-    Self::new(span, ErrorData::UnexpectedLexeme(lexeme))
+  pub const fn unexpected_lexeme(span: Span, lexeme: Lexeme<Char>) -> Self {
+    Self::const_new(span, ErrorData::UnexpectedLexeme(lexeme))
   }
 
   /// Creates a new unknown lexeme error.
   #[inline]
-  pub const fn unknown_lexeme(span: Range<usize>, lexeme: Lexeme<Char>) -> Self {
-    Self::new(span, ErrorData::UnknownLexeme(lexeme))
+  pub const fn unknown_lexeme(span: Span, lexeme: Lexeme<Char>) -> Self {
+    Self::const_new(span, ErrorData::UnknownLexeme(lexeme))
   }
 
   /// Creates a new unexpected lexeme error from a positioned character.
   #[inline]
-  pub const fn unexpected_char(span: Range<usize>, char: Char, position: usize) -> Self {
-    Self::new(span, ErrorData::unexpected_char(char, position))
+  pub const fn unexpected_char(span: Span, char: Char, position: usize) -> Self {
+    Self::const_new(span, ErrorData::unexpected_char(char, position))
   }
 
   /// Creates a new unknown lexeme error from a positioned character.
   #[inline]
-  pub const fn unknown_char(span: Range<usize>, char: Char, position: usize) -> Self {
-    Self::new(span, ErrorData::unknown_char(char, position))
+  pub const fn unknown_char(span: Span, char: Char, position: usize) -> Self {
+    Self::const_new(span, ErrorData::unknown_char(char, position))
   }
 
   /// Creates an End of Input error.
   #[inline]
-  pub const fn unexpected_eoi(span: Range<usize>) -> Self {
-    Self::new(span, ErrorData::UnexpectedEndOfInput)
+  pub const fn unexpected_eoi(span: Span) -> Self {
+    Self::const_new(span, ErrorData::UnexpectedEndOfInput)
   }
 
   /// Get the span of the error. The span contains the start and end byte indices in the source,
   /// where the error occurred, the data may also contain a span for more precise information.
   #[inline]
-  pub const fn span(&self) -> &Range<usize> {
-    &self.span
+  pub const fn span(&self) -> Span {
+    self.span
   }
 
   /// Get the data of the error.
@@ -358,7 +437,7 @@ impl<Char> Error<Char> {
 
   /// Consumes the error and returns its components.
   #[inline]
-  pub fn into_components(self) -> (Range<usize>, ErrorData<Char>) {
+  pub fn into_components(self) -> (Span, ErrorData<Char>) {
     (self.span, self.data)
   }
 }
