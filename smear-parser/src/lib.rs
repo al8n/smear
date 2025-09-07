@@ -155,6 +155,9 @@ pub mod __private {
   pub use super::{parse, source::*, lexer};
 }
 
+/// Utility types and traits
+pub mod utils;
+
 #[cfg(all(feature = "std", test))]
 mod tests;
 

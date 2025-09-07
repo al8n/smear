@@ -5,6 +5,8 @@ mod fast_token;
 mod full_token;
 mod token;
 
+const BOM: &[u8] = b"\xef\xbb\xbf";
+
 /// Float literal lexing
 pub mod number;
 
