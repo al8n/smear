@@ -429,8 +429,8 @@ mod tests {
   type Err<'a> = extra::Err<Simple<'a, char>>;
   type Span = SimpleSpan;
 
-  fn string_parser<'a>(
-  ) -> impl Parser<'a, &'a str, StringValue<WithSource<&'a str, Span>>, Err<'a>> + Clone {
+  fn string_parser<'a>()
+  -> impl Parser<'a, &'a str, StringValue<WithSource<&'a str, Span>>, Err<'a>> + Clone {
     StringValue::<WithSource<&str, Span>>::parser::<&str, Err>().then_ignore(end())
   }
 

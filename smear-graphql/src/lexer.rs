@@ -1,14 +1,8 @@
 use chumsky::{label::LabelError, prelude::*};
 use smear_parser::lexer::{self, DisplayText, Lexer, LexerError, Span, State, Text};
 
-mod fast_token;
-mod full_token;
-mod token;
-
-const BOM: &[u8] = b"\xef\xbb\xbf";
-
-/// Float literal lexing
-pub mod number;
+/// The tokens for the GraphQL lexer.
+pub mod token;
 
 // /// Returns a parser that produces a stream of tokens.
 // pub fn lexer<'a, I, S, C, E>() -> impl Parser<'a, Lexer<'a, I, Token<I>, S>, C, E>

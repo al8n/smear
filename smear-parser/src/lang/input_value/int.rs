@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  lang::{punct::Minus, UintValue},
+  lang::{UintValue, punct::Minus},
   source::*,
 };
 
@@ -142,9 +142,9 @@ mod tests {
   use super::*;
   use crate::source::WithSource;
 
-  fn int_parser<'a>(
-  ) -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
-       + Clone {
+  fn int_parser<'a>()
+  -> impl Parser<'a, &'a str, IntValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
+  + Clone {
     IntValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
       .then_ignore(end())
   }

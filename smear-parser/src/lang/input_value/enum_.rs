@@ -136,9 +136,9 @@ mod tests {
   use crate::source::WithSource;
   use chumsky::{error::Simple, extra};
 
-  fn enum_parser<'a>(
-  ) -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
-       + Clone {
+  fn enum_parser<'a>()
+  -> impl Parser<'a, &'a str, EnumValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
+  + Clone {
     EnumValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
   }
 

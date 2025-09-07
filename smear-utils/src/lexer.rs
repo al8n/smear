@@ -1,18 +1,21 @@
-use core::{marker::PhantomData, ops::{Range, RangeFrom}};
+use core::{
+  marker::PhantomData,
+  ops::{Range, RangeFrom},
+};
 
 use chumsky::input::{ExactSizeInput, Input, SliceInput, ValueInput};
 
 pub use error::*;
+pub use require::Require;
 pub use span::*;
 pub use state::State;
 pub use text::{DisplayText, Text, TextExt};
 pub use token::Token;
-pub use require::Require;
 
 mod error;
+mod require;
 mod span;
 mod text;
-mod require;
 
 /// The state related structures and traits
 pub mod state;

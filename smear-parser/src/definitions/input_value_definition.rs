@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  lang::{ignored, punct::Colon, Name, StringValue},
+  lang::{Name, StringValue, ignored, punct::Colon},
   source::*,
 };
 

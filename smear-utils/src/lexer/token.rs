@@ -1,6 +1,6 @@
 use core::num::NonZeroUsize;
 
-use chumsky::{primitive::any, Parser};
+use chumsky::{Parser, primitive::any};
 
 use crate::{lexer::Require, require_token_parser_fn};
 
@@ -88,7 +88,7 @@ require_token_parser_fn! {
   /// Returns a parser which parses a token and requires the parsed token to be of a specific specification.
   pub fn require_token<'a, I, E, Spec>(spec: Spec) -> Spec {
     any().try_map(move |tok: I::Token, _| {
-      tok.require(spec) 
+      tok.require(spec)
         .map_err(Into::into)
     })
   }

@@ -2,8 +2,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   lang::{
-    punct::{Dot, Minus, Plus},
     Digits,
+    punct::{Dot, Minus, Plus},
   },
   source::*,
 };
@@ -623,7 +623,8 @@ mod tests {
   use crate::source::WithSource;
   use chumsky::{error::Simple, extra};
 
-  fn float_parser<'a>() -> impl Parser<
+  fn float_parser<'a>()
+  -> impl Parser<
     'a,
     &'a str,
     FloatValue<WithSource<&'a str, SimpleSpan>>,

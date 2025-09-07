@@ -1,7 +1,7 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
-  lang::{ignored, keywords::Fragment, StringValue},
+  lang::{StringValue, ignored, keywords::Fragment},
   source::*,
 };
 

@@ -31,7 +31,7 @@ pub trait State: Copy + core::fmt::Debug {
   fn decrease_recursion(&mut self);
 
   /// Checks the state, returning an error if the state is invalid.
-  /// 
+  ///
   /// This function will be automatically invoked when yielding every token,
   /// if an error is returned than a state error token will be created by
   /// [`Token::from_state_error`](super::Token::from_state_error)

@@ -2,9 +2,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::super::{
   super::source::*,
-  ignored,
+  Name, ignored,
   punct::{Colon, LBrace, RBrace},
-  Name,
 };
 
 /// A single field within a GraphQL input object literal.

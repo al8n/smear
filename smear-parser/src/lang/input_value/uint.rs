@@ -101,9 +101,9 @@ mod tests {
 
   use super::*;
 
-  fn uint_parser<'a>(
-  ) -> impl Parser<'a, &'a str, UintValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
-       + Clone {
+  fn uint_parser<'a>()
+  -> impl Parser<'a, &'a str, UintValue<WithSource<&'a str, SimpleSpan>>, extra::Err<Simple<'a, char>>>
+  + Clone {
     UintValue::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
       .then_ignore(end())
   }

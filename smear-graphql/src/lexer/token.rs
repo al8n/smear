@@ -1,4 +1,3 @@
-
 /// Lossless GraphQL token
 pub mod lossless;
 

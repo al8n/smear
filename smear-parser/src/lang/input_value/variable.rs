@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::super::{super::source::*, ignored, punct::Dollar, Name};
+use super::super::{super::source::*, Name, ignored, punct::Dollar};
 
 /// A GraphQL variable reference.
 ///

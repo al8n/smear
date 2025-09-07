@@ -2,9 +2,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use super::{
   super::source::*,
-  ignored,
+  Name, ignored,
   punct::{Colon, LParen, RParen},
-  Name,
 };
 
 use core::marker::PhantomData;

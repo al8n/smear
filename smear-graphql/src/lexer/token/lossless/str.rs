@@ -243,7 +243,6 @@ impl fmt::Display for Token<'_> {
   }
 }
 
-
 #[cfg(test)]
 mod tests {
   use super::*;

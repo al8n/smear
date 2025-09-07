@@ -2,9 +2,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   lang::{
-    ignored, keywords,
+    StringValue, ignored, keywords,
     punct::{At, Pipe},
-    StringValue,
   },
   source::*,
 };

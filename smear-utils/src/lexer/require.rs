@@ -1,20 +1,20 @@
 use super::{LexerError, State, Text, Token};
 
 /// A macro to create a parser fn for a specific token kind
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```rust
 /// use smear_utils::{require_token_parser_fn, lexer::token::require_token};
-/// 
+///
 /// #[derive(Copy, Clone)]
 /// struct MyTokenKindFoo;
-/// 
+///
 /// #[derive(Copy, Clone)]
 /// struct MyTokenKindBar;
-/// 
+///
 /// require_token_parser_fn! {
-///   /// Returns a parser which parses a MyTokenKindFoo token 
+///   /// Returns a parser which parses a MyTokenKindFoo token
 ///   pub fn foo<'src, I, E>() -> MyTokenKindFoo {
 ///     require_token(MyTokenKindFoo)
 ///   }

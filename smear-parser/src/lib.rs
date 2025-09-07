@@ -152,7 +152,7 @@ pub mod source {
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{parse, source::*, lexer};
+  pub use super::{lexer, parse, source::*};
 }
 
 /// Utility types and traits

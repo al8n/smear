@@ -1,8 +1,7 @@
 use smear_parser::lexer::state::{RecursionLimiter, TokenLimiter};
 
-
-mod str;
-
+/// A token based on `str` input.
+pub mod str;
 
 #[derive(Default, Clone, Copy, Eq, PartialEq)]
 pub struct TokenOptions {
@@ -37,7 +36,7 @@ impl TokenOptions {
   }
 
   /// Enable or disable fast error mode.
-  /// 
+  ///
   /// When fast error mode is enabled, the lexer will not attempt to give a detailed
   /// error on invalid tokens.
   #[inline]
@@ -64,4 +63,3 @@ impl TokenOptions {
     self.fast_error
   }
 }
-

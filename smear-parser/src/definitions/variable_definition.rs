@@ -4,9 +4,8 @@ use chumsky::{extra::ParserExtra, prelude::*};
 
 use crate::{
   lang::{
-    ignored,
+    StringValue, Variable, ignored,
     punct::{Colon, LParen, RParen},
-    StringValue, Variable,
   },
   source::*,
 };

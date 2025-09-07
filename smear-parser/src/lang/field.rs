@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use super::{super::source::*, ignored, punct::Colon, Name};
+use super::{super::source::*, Name, ignored, punct::Colon};
 
 /// Represents a field alias in GraphQL syntax.
 ///

@@ -33,7 +33,6 @@ word!(
   "subscription": Subscription: [I::Token::s, I::Token::u, I::Token::b, I::Token::s, I::Token::c, I::Token::r, I::Token::i, I::Token::p, I::Token::t, I::Token::i, I::Token::o, I::Token::n],
 );
 
-
 /// A macro to define concrete keyword types
 #[macro_export]
 macro_rules! keywords {

@@ -13,6 +13,7 @@ std = ["smear-parser/default", "thiserror/default", "either/default"]
 
 bytes = ["dep:bytes", "smear-parser/bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "smear-parser/bstr", "logosky/bstr"]
+smallvec = ["dep:smallvec"]
 
 [dependencies]
 chumsky.workspace = true
@@ -23,6 +24,7 @@ logos = { version = "0.15", default-features = false, features = ["export_derive
 smear-parser.workspace = true
 thiserror.workspace = true
 
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 
