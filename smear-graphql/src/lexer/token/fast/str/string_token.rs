@@ -28,7 +28,10 @@
 use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span};
 
-use crate::lexer::token::error::{InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError, StringErrors, UnicodeError};
+use crate::lexer::token::error::{
+  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError, StringErrors,
+  UnicodeError,
+};
 
 use super::{Error, Token};
 
@@ -40,7 +43,7 @@ enum StringToken {
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
 
-  #[regex(r#"\\u[0-9A-Fa-f]{4}"#)]
+  #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_unicode_escape)]
   #[regex(r#"\\u"#, handle_invalid_escaped_unicode)]
   EscapedUnicode,
 
@@ -63,7 +66,6 @@ enum StringToken {
   StringCharacters,
 }
 
-
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum BlockStringToken {
   /// \\"\\"\\" inside block string
@@ -79,7 +81,61 @@ enum BlockStringToken {
 }
 
 #[inline(always)]
-fn handle_invalid_escaped_unicode<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<char>> {
+const fn is_high_surrogate(code_point: u32) -> bool {
+  matches!(code_point, 0xD800..=0xDBFF)
+}
+
+#[inline(always)]
+const fn is_low_surrogate(code_point: u32) -> bool {
+  matches!(code_point, 0xDC00..=0xDFFF)
+}
+
+#[inline(always)]
+fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
+  match (remainder.len() >= 6, remainder.strip_prefix("\\u")) {
+    (true, Some(src)) => {
+      if !src.is_char_boundary(4) {
+        return None;
+      }
+      u32::from_str_radix(&src[..4], 16).ok()
+    }
+    _ => None,
+  }
+}
+
+#[inline(always)]
+fn handle_unicode_escape<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<char>> {
+  let slice = lexer.slice();
+  let hex_part = &slice[2..];
+  let code_point = u32::from_str_radix(hex_part, 16).unwrap(); // Safe due to regex
+
+  if is_high_surrogate(code_point) {
+    // Look ahead for low surrogate
+    let remainder = lexer.remainder();
+    if let Some(low_cp) = try_parse_next_unicode_escape(remainder)
+      && is_low_surrogate(low_cp)
+    {
+      // Valid surrogate pair
+      lexer.bump(6); // consume the low surrogate
+      return Ok(());
+    }
+
+    // Unpaired high surrogate
+    return Err(UnicodeError::unpaired_high_surrogate(Lexeme::Span(lexer.span().into())).into());
+  }
+
+  if is_low_surrogate(code_point) {
+    // Low surrogate without preceding high surrogate is always invalid
+    return Err(UnicodeError::unpaired_low_surrogate(Lexeme::Span(lexer.span().into())).into());
+  }
+
+  Ok(())
+}
+
+#[inline]
+fn handle_invalid_escaped_unicode<'a>(
+  lexer: &mut Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
   let remainder = lexer.remainder();
   let mut idx = 0;
 
@@ -92,11 +148,12 @@ fn handle_invalid_escaped_unicode<'a>(lexer: &mut Lexer<'a, StringToken>) -> Res
     buf
   };
 
-
   if idx != 4 && chars[..idx].iter().all(|c| c.is_ascii_hexdigit()) {
     let span = lexer.span();
     lexer.bump(idx);
-    return Err(UnicodeError::Incomplete(Lexeme::Span(Span::from(span.start..span.end + idx))).into());
+    return Err(
+      UnicodeError::Incomplete(Lexeme::Span(Span::from(span.start..span.end + idx))).into(),
+    );
   }
 
   Err(StringError::Unicode(match &chars[..idx] {
@@ -124,7 +181,7 @@ fn handle_invalid_escaped_unicode<'a>(lexer: &mut Lexer<'a, StringToken>) -> Res
       }
 
       InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
-    },
+    }
     [a, b, c] => {
       let span = lexer.span();
       lexer.bump(3);
@@ -147,7 +204,7 @@ fn handle_invalid_escaped_unicode<'a>(lexer: &mut Lexer<'a, StringToken>) -> Res
       } else {
         InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
       }
-    },
+    }
     [a, b] => {
       let span = lexer.span();
       lexer.bump(2);
@@ -166,40 +223,48 @@ fn handle_invalid_escaped_unicode<'a>(lexer: &mut Lexer<'a, StringToken>) -> Res
       } else {
         InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
       }
-    },
+    }
     [a] => {
       let span = lexer.span();
       lexer.bump(1);
-      
-      if a.is_ascii_hexdigit() {  
+
+      if a.is_ascii_hexdigit() {
         UnicodeError::Incomplete(Lexeme::Span(lexer.span().into()))
       } else {
         InvalidUnicodeSequence::new(
           PositionedChar::with_position(*a, span.end).into(),
           lexer.span().into(),
-        ).into()
+        )
+        .into()
       }
-    },
+    }
     [] => UnicodeError::Incomplete(Lexeme::Span(lexer.span().into())),
     _ => unreachable!("impossible array length"),
   }))
 }
 
 #[inline(always)]
-fn handle_invalid_escaped_character<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<char>> {
+fn handle_invalid_escaped_character<'a>(
+  lexer: &mut Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
-  
+
   match slice.chars().last() {
     Some(c) => {
       let span = lexer.span();
       let pos = span.start + 1;
-      Err(StringError::unexpected_escaped_character(span.into(), c, pos))
-    },
+      Err(StringError::unexpected_escaped_character(
+        span.into(),
+        c,
+        pos,
+      ))
+    }
     None => unreachable!("regex must match at least two characters"),
   }
 }
 
-pub(super) fn lex_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn lex_inline_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+  let lexer_span = lexer.span();
   let remainder = lexer.remainder();
   let mut string_lexer = StringToken::lexer(remainder);
 
@@ -217,17 +282,10 @@ pub(super) fn lex_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str
         return Ok(lexer.slice());
       }
       Ok(StringToken::LineTerminator(lt)) => {
-        let span = lexer.span();
-        lexer.bump(string_lexer.span().end);
-        
-        let pos = span.end + string_lexer.span().start;
+        let pos = lexer_span.end + string_lexer.span().start;
         let err = match lt {
-          LineTerminatorHint::NewLine => {
-            StringError::unexpected_new_line('\n', pos)
-          },
-          LineTerminatorHint::CarriageReturn => {
-            StringError::unexpected_carriage_return('\r', pos)
-          },
+          LineTerminatorHint::NewLine => StringError::unexpected_new_line('\n', pos),
+          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return('\r', pos),
           LineTerminatorHint::CarriageReturnNewLine => {
             StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
           }
@@ -237,17 +295,16 @@ pub(super) fn lex_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str
       Ok(
         StringToken::EscapedCharacter | StringToken::EscapedUnicode | StringToken::StringCharacters,
       ) => {}
-      Err(e) => {
+      Err(mut e) => {
+        e.bump(lexer_span.end);
         errs.push(e);
       }
     }
   }
 
   lexer.bump(string_lexer.span().end);
-  Err(Error::new(
-    lexer.span(),
-    StringErrors::from(StringError::unterminated_inline_string()).into()
-  ))
+  errs.push(StringError::unterminated_inline_string());
+  Err(Error::new(lexer.span(), errs.into()))
 }
 
 pub(super) fn lex_block_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
@@ -266,7 +323,6 @@ pub(super) fn lex_block_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&
 
   Err(Error::new(
     lexer.span(),
-    StringErrors::from(StringError::unterminated_block_string()).into()
+    StringErrors::from(StringError::unterminated_block_string()).into(),
   ))
 }
-

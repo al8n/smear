@@ -7,21 +7,39 @@ use super::{
   TokenOptions,
 };
 
-pub use string_token::*;
+use string_token::*;
 
 mod string_token;
+
+#[cfg(test)]
+mod tests;
 
 pub type Error = error::Error<char>;
 pub type ErrorData = error::ErrorData<char>;
 pub type Errors = error::Errors<char>;
 
 /// Lexer for the GraphQL specification: http://spec.graphql.org/
-#[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+  Logos,
+  Copy,
+  Clone,
+  Debug,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  derive_more::IsVariant,
+  derive_more::Unwrap,
+  derive_more::TryUnwrap,
+)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[logos(
   extras = TokenOptions,
-  skip r"[ \t,\u{FEFF}]+|#([^\n\r]*(\r\n|\r|\n))*",
+  skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
   error(Errors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => Error::unexpected_char(lexer.span().into(), ch, lexer.span().start),
+    Some(ch) => Error::unknown_char(lexer.span().into(), ch, lexer.span().start),
     None => Error::unexpected_eoi(lexer.span().into()),
   }.into())
 )]
@@ -93,7 +111,7 @@ pub enum Token<'a> {
   #[token("-", |lexer| Err(Error::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(Error::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   IntegerLiteral(&'a str),
-  #[token("\"", lex_string)]
+  #[token("\"", lex_inline_string)]
   StringLiteral(&'a str),
   #[token("\"\"\"", lex_block_string)]
   BlockStringLiteral(&'a str),
@@ -446,6 +464,3 @@ impl fmt::Display for Token<'_> {
     f.write_str(message)
   }
 }
-
-#[cfg(test)]
-mod tests;

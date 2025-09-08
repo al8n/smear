@@ -1,4 +1,4 @@
-use core::{fmt, num::NonZeroUsize};
+use core::fmt;
 
 use std::borrow::Cow;
 
@@ -212,20 +212,38 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
   }
 
   #[inline(always)]
-  fn push(&mut self, ch: PositionedChar<Char>) {
-    *self = match core::mem::take(self) {
-      Self::Zero => {
-        Self::One(ch)
-      }
+  const fn bump(&mut self, n: usize) -> &mut Self {
+    match self {
+      Self::Zero => {}
       Self::One(a) => {
-        Self::Two([a, ch])
+        a.bump_position(n);
       }
       Self::Two([a, b]) => {
-        Self::Three([a, b, ch])
+        a.bump_position(n);
+        b.bump_position(n);
       }
       Self::Three([a, b, c]) => {
-        Self::Four([a, b, c, ch])
+        a.bump_position(n);
+        b.bump_position(n);
+        c.bump_position(n);
       }
+      Self::Four([a, b, c, d]) => {
+        a.bump_position(n);
+        b.bump_position(n);
+        c.bump_position(n);
+        d.bump_position(n);
+      }
+    }
+    self
+  }
+
+  #[inline(always)]
+  fn push(&mut self, ch: PositionedChar<Char>) {
+    *self = match core::mem::take(self) {
+      Self::Zero => Self::One(ch),
+      Self::One(a) => Self::Two([a, ch]),
+      Self::Two([a, b]) => Self::Three([a, b, ch]),
+      Self::Three([a, b, c]) => Self::Four([a, b, c, ch]),
       Self::Four(_) => {
         panic!("InvalidUnicodeHexDigits can only hold up to 4 digits, tried to push a 5th");
       }
@@ -274,7 +292,7 @@ impl<Char> From<[PositionedChar<Char>; 4]> for InvalidUnicodeHexDigits<Char> {
 
 impl<Char> InvalidUnicodeHexDigits<Char> {
   /// Returns the length of the invalid unicode sequence.
-  /// 
+  ///
   /// The returned length will be in the range of `1..=4`.
   #[inline(always)]
   pub const fn len(&self) -> usize {
@@ -285,6 +303,13 @@ impl<Char> InvalidUnicodeHexDigits<Char> {
   #[inline(always)]
   pub const fn is_empty(&self) -> bool {
     matches!(self.0, InvalidUnicodeHexDigitsRepr::Zero)
+  }
+
+  /// Bumps the position of all characters by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    self.0.bump(n);
+    self
   }
 
   /// # Panics
@@ -359,7 +384,10 @@ impl<Char> InvalidUnicodeSequence<Char> {
 
   /// Get the invalid unicode hex digits.
   #[inline(always)]
-  pub const fn digits(&self) -> InvalidUnicodeHexDigits<Char> where Char: Copy {
+  pub const fn digits(&self) -> InvalidUnicodeHexDigits<Char>
+  where
+    Char: Copy,
+  {
     self.digits
   }
 
@@ -392,8 +420,23 @@ impl<Char> InvalidUnicodeSequence<Char> {
   pub const fn span_mut(&mut self) -> &mut Span {
     &mut self.span
   }
+
+  /// Bumps the span of the invalid unicode sequence by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump_span(n);
+    self.digits_mut().bump(n);
+    self
+  }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
+pub enum UnpairedSurrogateHint {
+  #[display("high surrogate")]
+  High,
+  #[display("low surrogate")]
+  Low,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
@@ -401,7 +444,39 @@ impl<Char> InvalidUnicodeSequence<Char> {
 pub enum UnicodeError<Char> {
   #[from(skip)]
   Incomplete(Lexeme<Char>),
-  Invalid(InvalidUnicodeSequence<Char>),
+  InvalidSequence(InvalidUnicodeSequence<Char>),
+  UnpairedSurrogate(UnexpectedLexeme<Char, UnpairedSurrogateHint>),
+}
+
+impl<Char> UnicodeError<Char> {
+  /// Creates a unpaired high surrogate error.
+  #[inline]
+  pub const fn unpaired_high_surrogate(lexeme: Lexeme<Char>) -> Self {
+    Self::UnpairedSurrogate(UnexpectedLexeme::new(lexeme, UnpairedSurrogateHint::High))
+  }
+
+  /// Creates a unpaired low surrogate error.
+  #[inline]
+  pub const fn unpaired_low_surrogate(lexeme: Lexeme<Char>) -> Self {
+    Self::UnpairedSurrogate(UnexpectedLexeme::new(lexeme, UnpairedSurrogateHint::Low))
+  }
+
+  /// Bumps the span or position of the error by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    match self {
+      Self::Incomplete(lexeme) => {
+        lexeme.bump(n);
+      }
+      Self::InvalidSequence(seq) => {
+        seq.bump(n);
+      }
+      Self::UnpairedSurrogate(lexeme) => {
+        lexeme.bump(n);
+      }
+    }
+    self
+  }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
@@ -437,20 +512,29 @@ impl<Char> EscapedCharacter<Char> {
 
   /// Get the escaped character.
   #[inline(always)]
-  pub const fn char(&self) -> PositionedChar<Char> where Char: Copy {
-    self.char
+  pub const fn char(&self) -> Char
+  where
+    Char: Copy,
+  {
+    self.char.char()
   }
 
   /// Get the reference to the escaped character.
   #[inline(always)]
-  pub const fn char_ref(&self) -> &PositionedChar<Char> {
-    &self.char
+  pub const fn char_ref(&self) -> &Char {
+    self.char.char_ref()
   }
 
   /// Get the mutable reference to the escaped character.
   #[inline(always)]
-  pub const fn char_mut(&mut self) -> &mut PositionedChar<Char> {
-    &mut self.char
+  pub const fn char_mut(&mut self) -> &mut Char {
+    self.char.char_mut()
+  }
+
+  /// Returns the position of the escaped character.
+  #[inline(always)]
+  pub const fn position(&self) -> usize {
+    self.char.position()
   }
 
   /// Get the span of the escaped character. The span covers the entire escape sequence, e.g. `\d`, `\r`.
@@ -469,6 +553,14 @@ impl<Char> EscapedCharacter<Char> {
   #[inline(always)]
   pub const fn span_mut(&mut self) -> &mut Span {
     &mut self.span
+  }
+
+  /// Bumps the span and the position of the character by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump_span(n);
+    self.char.bump_position(n);
+    self
   }
 }
 
@@ -496,13 +588,19 @@ impl<Char> StringError<Char> {
   /// Creates an unterminated string error.
   #[inline]
   pub const fn unterminated_inline_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(Cow::Borrowed("string value"), UnterminatedHint::Quote))
+    Self::Unterminated(UnexpectedEnd::with_name(
+      Cow::Borrowed("string value"),
+      UnterminatedHint::Quote,
+    ))
   }
 
   /// Creates an unterminated block string error.
   #[inline]
   pub const fn unterminated_block_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(Cow::Borrowed("string value"), UnterminatedHint::TripleQuote))
+    Self::Unterminated(UnexpectedEnd::with_name(
+      Cow::Borrowed("string value"),
+      UnterminatedHint::TripleQuote,
+    ))
   }
 
   /// Creates an unexpected new line error.
@@ -535,7 +633,32 @@ impl<Char> StringError<Char> {
   /// Creates an unexpected escaped character error.
   #[inline]
   pub(crate) const fn unexpected_escaped_character(span: Span, ch: Char, position: usize) -> Self {
-    Self::UnexpectedEscapedCharacter(EscapedCharacter::new(PositionedChar::with_position(ch, position), span))
+    Self::UnexpectedEscapedCharacter(EscapedCharacter::new(
+      PositionedChar::with_position(ch, position),
+      span,
+    ))
+  }
+
+  /// Bumps the span or position of the error by `n`.
+  #[inline]
+  pub fn bump(&mut self, n: usize) -> &mut Self {
+    match self {
+      Self::UnexpectedLineTerminator(lexeme) => {
+        lexeme.bump(n);
+      }
+      Self::UnexpectedEscapedCharacter(esc_char) => {
+        esc_char.bump(n);
+      }
+      Self::UnsupportedCharacter(ch) => {
+        ch.bump(n);
+      }
+      Self::Unicode(unicode) => {
+        unicode.bump(n);
+      }
+      Self::Other(_) | Self::Unterminated(_) => {}
+    };
+
+    self
   }
 }
 
