@@ -248,7 +248,7 @@ fn test_float_leading_zeros_and_other() {
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()
-    .unwrap_unexpected_eof_ref();
+    .unwrap_unexpected_end_ref();
   assert_eq!(err2.hint(), &FloatHint::Fractional);
   assert_eq!(errs[1].span(), Span::from(0..3));
 
@@ -265,7 +265,7 @@ fn test_float_leading_zeros_and_other() {
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()
-    .unwrap_unexpected_eof_ref();
+    .unwrap_unexpected_end_ref();
   assert_eq!(err2.hint(), &FloatHint::Fractional);
   assert_eq!(errs[1].span(), Span::from(0..4));
 
@@ -730,7 +730,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Fractional);
 
   let mut lexer = Token::lexer("-1.");
@@ -742,7 +742,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Fractional);
 
   let mut lexer = Token::lexer("1e");
@@ -754,7 +754,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
   let mut lexer = Token::lexer("-1e");
@@ -766,7 +766,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
   let mut lexer = Token::lexer("1e+");
@@ -778,7 +778,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("-1e+");
@@ -790,7 +790,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("1e-");
@@ -802,7 +802,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("-1e-");
@@ -814,7 +814,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("1.0e");
@@ -826,7 +826,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
   let mut lexer = Token::lexer("-1.0e");
@@ -838,7 +838,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
   let mut lexer = Token::lexer("1.0e-");
@@ -850,7 +850,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("-1.0e-");
@@ -862,7 +862,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("1.0e+");
@@ -874,7 +874,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
   let mut lexer = Token::lexer("-1.0e+");
@@ -886,7 +886,7 @@ fn test_unexpected_float_eof() {
     .unwrap()
     .into_data()
     .unwrap_float()
-    .unwrap_unexpected_eof();
+    .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 }
 
@@ -1192,10 +1192,117 @@ fn test_float_ok() {
 
 #[test]
 fn test_unterminated_inline_string() {
-  let mut lexer = Token::lexer(r#"""#);
+  // let mut lexer = Token::lexer(r#"""#);
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs
+  //   .pop()
+  //   .unwrap()
+  //   .into_data()
+  //   .unwrap_string()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unterminated();
+  // assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  // assert_eq!(errs[0].span(), Span::from(0..1));
+
+
+  // let mut lexer = Token::lexer(r#""unterminated"#);
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs
+  //   .pop()
+  //   .unwrap()
+  //   .into_data()
+  //   .unwrap_string()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unterminated();
+  // assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  // assert_eq!(errs[0].span(), Span::from(0..13));
+
+  // let mut lexer = Token::lexer(r#""escaped \" quote"#);
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs
+  //   .pop()
+  //   .unwrap()
+  //   .into_data()
+  //   .unwrap_string()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unterminated();
+  // assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  // assert_eq!(errs[0].span(), Span::from(0..17));
+
+  // let mut lexer = Token::lexer(r#""escaped 
+  // new line""#);
+
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs
+  //   .pop()
+  //   .unwrap()
+  //   .into_data()
+  //   .unwrap_string()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unexpected_line_terminator();
+  // match err1.hint() {
+  //   LineTerminatorHint::NewLine => {
+  //     assert_eq!(err1.lexeme().unwrap_char_ref().char(), &'\n');
+  //     assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
+  //     assert_eq!(errs[0].span(), Span::from(0..10));
+  //   },
+  //   LineTerminatorHint::CarriageReturn => {
+  //     assert_eq!(err1.lexeme().unwrap_char_ref().char(), &'\r');
+  //     assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
+  //     assert_eq!(errs[0].span(), Span::from(0..10));
+  //   },
+  //   LineTerminatorHint::CarriageReturnNewLine => {
+  //     assert_eq!(err1.lexeme().unwrap_span(), Span::from(9..11));
+  //     assert_eq!(errs[0].span(), Span::from(0..11));
+  //   },
+  // }
+
+  // let mut lexer = Token::lexer(r#""hello✨"#);
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs
+  //   .pop()
+  //   .unwrap()
+  //   .into_data()
+  //   .unwrap_string()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unterminated();
+  // assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  // assert_eq!(err1.span(), Span::from(0..r#""hello✨"#.len()));
+
+  // let mut lexer = Token::lexer(r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#);
+  // let mut errs = lexer.next().unwrap().unwrap_err();
+  // assert_eq!(errs.len(), 1);
+  // let err1 = errs[0]
+  //   .data()
+  //   .unwrap_string_ref()
+  //   .pop()
+  //   .unwrap()
+  //   .unwrap_unterminated_ref();
+  // assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  // assert_eq!(errs[0].span(), Span::from(0..r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#.len()));
+}
+
+#[test]
+fn test_unexpected_escaped() {
+  // "This is \"\"a test \a\d\q description"
+  let mut lexer = Token::lexer(r#""This is \"\"a test \a\d\q description""#);
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
-  // assert_eq!(errs[0].hint(), &StringHint::Unterminated);
+  let err1 = errs[0]
+    .data()
+    .unwrap_string_ref();
+  println!("{:#?}", err1);
+
 }
 
 // #[test]

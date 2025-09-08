@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{fmt, num::NonZeroUsize};
 
 use std::borrow::Cow;
 
@@ -70,7 +70,7 @@ pub enum FloatError<Char> {
   /// Unexpected lexeme in float literal, e.g. `1.x`, `1.ex`, `1.e+x`
   UnexpectedLexeme(UnexpectedLexeme<Char, FloatHint>),
   /// Unexpected end of input in float literal.
-  UnexpectedEof(UnexpectedEnd<FloatHint>),
+  UnexpectedEnd(UnexpectedEnd<FloatHint>),
   /// Float must not have non-significant leading zeroes.
   #[from(skip)]
   LeadingZeros(Lexeme<Char>),
@@ -95,7 +95,7 @@ pub enum FloatError<Char> {
 //       Self::UnexpectedCharacter(e) => {
 //         write!(f, "unexpected character '{}' in float, expected {}", e.found(), e.hint())
 //       }
-//       Self::UnexpectedEof(e) => {
+//       Self::UnexpectedEnd(e) => {
 //         write!(f, "unexpected end of input in float, expected {e}")
 //       }
 //     }
@@ -109,7 +109,7 @@ pub enum FloatError<Char> {
 //   fn from(e: ExponentError<Char>) -> Self {
 //     match e {
 //       ExponentError::UnexpectedSuffix(c) => Self::UnexpectedSuffix(c),
-//       ExponentError::UnexpectedEof(e) => Self::UnexpectedEof(e.into()),
+//       ExponentError::UnexpectedEnd(e) => Self::UnexpectedEnd(e.into()),
 //       ExponentError::UnexpectedLexeme(e) => Self::UnexpectedCharacter(e.into()),
 //     }
 //   }
@@ -120,7 +120,7 @@ pub enum FloatError<Char> {
 //   fn from(e: FractionalError<Char>) -> Self {
 //     match e {
 //       FractionalError::UnexpectedCharacter(e) => Self::UnexpectedCharacter(e.into()),
-//       FractionalError::UnexpectedEof(e) => Self::UnexpectedEof(e.into()),
+//       FractionalError::UnexpectedEnd(e) => Self::UnexpectedEnd(e.into()),
 //     }
 //   }
 // }
@@ -135,7 +135,7 @@ pub enum FloatError<Char> {
 // impl<Char> From<FractionalHint> for FloatError<Char> {
 //   #[inline]
 //   fn from(e: FractionalHint) -> Self {
-//     Self::UnexpectedEof(e.into())
+//     Self::UnexpectedEnd(e.into())
 //   }
 // }
 
@@ -149,7 +149,7 @@ pub enum FloatError<Char> {
 // impl<Char> From<ExponentHint> for FloatError<Char> {
 //   #[inline]
 //   fn from(e: ExponentHint) -> Self {
-//     Self::UnexpectedEof(e.into())
+//     Self::UnexpectedEnd(e.into())
 //   }
 // }
 
@@ -162,7 +162,7 @@ pub enum IntError<Char> {
   #[from(skip)]
   UnexpectedSuffix(Lexeme<Char>),
   /// Unexpected character in integer literal, e.g. `-A`
-  UnexpectedEof(UnexpectedEnd<IntHint>),
+  UnexpectedEnd(UnexpectedEnd<IntHint>),
   // #[error("integer must not have non-significant leading zeroes")]
   #[from(skip)]
   LeadingZeros(Lexeme<Char>),
@@ -189,8 +189,223 @@ pub enum IntError<Char> {
 
 // impl<Char> error::Error for IntError<Char> where Char: fmt::Debug + fmt::Display {}
 
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
+enum InvalidUnicodeHexDigitsRepr<Char> {
+  #[default]
+  Zero,
+  One(PositionedChar<Char>),
+  Two([PositionedChar<Char>; 2]),
+  Three([PositionedChar<Char>; 3]),
+  Four([PositionedChar<Char>; 4]),
+}
+
+impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
+  #[inline(always)]
+  const fn len(&self) -> usize {
+    match self {
+      Self::Zero => 0,
+      Self::One(_) => 1,
+      Self::Two(_) => 2,
+      Self::Three(_) => 3,
+      Self::Four(_) => 4,
+    }
+  }
+
+  #[inline(always)]
+  fn push(&mut self, ch: PositionedChar<Char>) {
+    *self = match core::mem::take(self) {
+      Self::Zero => {
+        Self::One(ch)
+      }
+      Self::One(a) => {
+        Self::Two([a, ch])
+      }
+      Self::Two([a, b]) => {
+        Self::Three([a, b, ch])
+      }
+      Self::Three([a, b, c]) => {
+        Self::Four([a, b, c, ch])
+      }
+      Self::Four(_) => {
+        panic!("InvalidUnicodeHexDigits can only hold up to 4 digits, tried to push a 5th");
+      }
+    };
+  }
+}
+
+/// A container designed for storing between 1 and 4 invalid unicode hex digits.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct InvalidUnicodeHexDigits<Char>(InvalidUnicodeHexDigitsRepr<Char>);
+
+impl<Char> Default for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn default() -> Self {
+    Self(InvalidUnicodeHexDigitsRepr::Zero)
+  }
+}
+
+impl<Char> From<PositionedChar<Char>> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn from(c: PositionedChar<Char>) -> Self {
+    Self(InvalidUnicodeHexDigitsRepr::One(c))
+  }
+}
+
+impl<Char> From<[PositionedChar<Char>; 2]> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn from(c: [PositionedChar<Char>; 2]) -> Self {
+    Self(InvalidUnicodeHexDigitsRepr::Two(c))
+  }
+}
+
+impl<Char> From<[PositionedChar<Char>; 3]> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn from(c: [PositionedChar<Char>; 3]) -> Self {
+    Self(InvalidUnicodeHexDigitsRepr::Three(c))
+  }
+}
+
+impl<Char> From<[PositionedChar<Char>; 4]> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn from(c: [PositionedChar<Char>; 4]) -> Self {
+    Self(InvalidUnicodeHexDigitsRepr::Four(c))
+  }
+}
+
+impl<Char> InvalidUnicodeHexDigits<Char> {
+  /// Returns the length of the invalid unicode sequence.
+  /// 
+  /// The returned length will be in the range of `1..=4`.
+  #[inline(always)]
+  pub const fn len(&self) -> usize {
+    self.0.len()
+  }
+
+  /// Returns `true` if the length of the invalid unicode sequence is empty.
+  #[inline(always)]
+  pub const fn is_empty(&self) -> bool {
+    matches!(self.0, InvalidUnicodeHexDigitsRepr::Zero)
+  }
+
+  /// # Panics
+  /// - If the length is already 4.
+  #[inline(always)]
+  pub(crate) fn push(&mut self, ch: PositionedChar<Char>) {
+    self.0.push(ch);
+  }
+}
+
+impl<Char> AsRef<[PositionedChar<Char>]> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn as_ref(&self) -> &[PositionedChar<Char>] {
+    self
+  }
+}
+
+impl<Char> AsMut<[PositionedChar<Char>]> for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn as_mut(&mut self) -> &mut [PositionedChar<Char>] {
+    self
+  }
+}
+
+impl<Char> core::ops::Deref for InvalidUnicodeHexDigits<Char> {
+  type Target = [PositionedChar<Char>];
+
+  #[inline(always)]
+  fn deref(&self) -> &Self::Target {
+    match &self.0 {
+      InvalidUnicodeHexDigitsRepr::Zero => &[],
+      InvalidUnicodeHexDigitsRepr::One(a) => core::slice::from_ref(a),
+      InvalidUnicodeHexDigitsRepr::Two(ab) => ab,
+      InvalidUnicodeHexDigitsRepr::Three(abc) => abc,
+      InvalidUnicodeHexDigitsRepr::Four(abcd) => abcd,
+    }
+  }
+}
+
+impl<Char> core::ops::DerefMut for InvalidUnicodeHexDigits<Char> {
+  #[inline(always)]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    match &mut self.0 {
+      InvalidUnicodeHexDigitsRepr::Zero => &mut [],
+      InvalidUnicodeHexDigitsRepr::One(a) => core::slice::from_mut(a),
+      InvalidUnicodeHexDigitsRepr::Two(ab) => ab,
+      InvalidUnicodeHexDigitsRepr::Three(abc) => abc,
+      InvalidUnicodeHexDigitsRepr::Four(abcd) => abcd,
+    }
+  }
+}
+
+/// An invalid unicode sequence error.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct InvalidUnicodeSequence<Char> {
+  digits: InvalidUnicodeHexDigits<Char>,
+  span: Span,
+}
+
+impl<Char> InvalidUnicodeSequence<Char> {
+  /// Create a new invalid unicode sequence error.
+  #[inline(always)]
+  pub(crate) const fn new(digits: InvalidUnicodeHexDigits<Char>, span: Span) -> Self {
+    Self { digits, span }
+  }
+
+  /// Returns `true` if the sequence also incomplete.
+  #[inline(always)]
+  pub const fn is_incomplete(&self) -> bool {
+    self.span.len() < 6 // \u[0-9a-fA-F]{4} is 6 characters long
+  }
+
+  /// Get the invalid unicode hex digits.
+  #[inline(always)]
+  pub const fn digits(&self) -> InvalidUnicodeHexDigits<Char> where Char: Copy {
+    self.digits
+  }
+
+  /// Get the reference to the invalid unicode hex digits.
+  #[inline(always)]
+  pub const fn digits_ref(&self) -> &InvalidUnicodeHexDigits<Char> {
+    &self.digits
+  }
+
+  /// Get the mutable reference to the invalid unicode hex digits.
+  #[inline(always)]
+  pub const fn digits_mut(&mut self) -> &mut InvalidUnicodeHexDigits<Char> {
+    &mut self.digits
+  }
+
+  /// Get the span of the invalid unicode sequence.
+  #[inline(always)]
+  pub const fn span(&self) -> Span {
+    self.span
+  }
+
+  /// Get the span of the invalid unicode sequence as a reference.
+  #[inline(always)]
+  pub const fn span_ref(&self) -> &Span {
+    &self.span
+  }
+
+  /// Get the mutable span of the invalid unicode sequence.
+  #[inline(always)]
+  pub const fn span_mut(&mut self) -> &mut Span {
+    &mut self.span
+  }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum UnicodeError<Char> {
+  #[from(skip)]
+  Incomplete(Lexeme<Char>),
+  Invalid(InvalidUnicodeSequence<Char>),
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum StringHint {
+pub enum UnterminatedHint {
   #[display("\"")]
   Quote,
   #[display(r#"""""#)]
@@ -198,7 +413,7 @@ pub enum StringHint {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum LineTerminator {
+pub enum LineTerminatorHint {
   #[display("'\\n'")]
   NewLine,
   #[display("'\\r'")]
@@ -207,26 +422,87 @@ pub enum LineTerminator {
   CarriageReturnNewLine,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EscapedCharacter<Char> {
+  char: PositionedChar<Char>,
+  span: Span,
+}
+
+impl<Char> EscapedCharacter<Char> {
+  /// Create a new escaped character error.
+  #[inline(always)]
+  pub(crate) const fn new(char: PositionedChar<Char>, span: Span) -> Self {
+    Self { char, span }
+  }
+
+  /// Get the escaped character.
+  #[inline(always)]
+  pub const fn char(&self) -> PositionedChar<Char> where Char: Copy {
+    self.char
+  }
+
+  /// Get the reference to the escaped character.
+  #[inline(always)]
+  pub const fn char_ref(&self) -> &PositionedChar<Char> {
+    &self.char
+  }
+
+  /// Get the mutable reference to the escaped character.
+  #[inline(always)]
+  pub const fn char_mut(&mut self) -> &mut PositionedChar<Char> {
+    &mut self.char
+  }
+
+  /// Get the span of the escaped character. The span covers the entire escape sequence, e.g. `\d`, `\r`.
+  #[inline(always)]
+  pub const fn span(&self) -> Span {
+    self.span
+  }
+
+  /// Get the reference to the span of the escaped character.
+  #[inline(always)]
+  pub const fn span_ref(&self) -> &Span {
+    &self.span
+  }
+
+  /// Get the mutable reference to the span of the escaped character.
+  #[inline(always)]
+  pub const fn span_mut(&mut self) -> &mut Span {
+    &mut self.span
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum StringError<Char> {
-  UnsupportedStringCharacter,
-  UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminator>),
-  UnexpectedEnd(UnexpectedEnd<StringHint>),
+  #[from(skip)]
+  UnsupportedCharacter(Lexeme<Char>),
+  UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
+  UnexpectedEscapedCharacter(EscapedCharacter<Char>),
+  Unterminated(UnexpectedEnd<UnterminatedHint>),
+  Unicode(UnicodeError<Char>),
+  Other(Cow<'static, str>),
+}
+
+impl<Char> Default for StringError<Char> {
+  #[inline(always)]
+  fn default() -> Self {
+    Self::Other(Cow::Borrowed("unknown"))
+  }
 }
 
 impl<Char> StringError<Char> {
   /// Creates an unterminated string error.
   #[inline]
-  pub const fn unterminated_string() -> Self {
-    Self::UnexpectedEnd(UnexpectedEnd::with_name(Cow::Borrowed("string"), StringHint::Quote))
+  pub const fn unterminated_inline_string() -> Self {
+    Self::Unterminated(UnexpectedEnd::with_name(Cow::Borrowed("string value"), UnterminatedHint::Quote))
   }
 
   /// Creates an unterminated block string error.
   #[inline]
   pub const fn unterminated_block_string() -> Self {
-    Self::UnexpectedEnd(UnexpectedEnd::with_name(Cow::Borrowed("string"), StringHint::TripleQuote))
+    Self::Unterminated(UnexpectedEnd::with_name(Cow::Borrowed("string value"), UnterminatedHint::TripleQuote))
   }
 
   /// Creates an unexpected new line error.
@@ -234,7 +510,7 @@ impl<Char> StringError<Char> {
   pub const fn unexpected_new_line(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
       PositionedChar::with_position(ch, position),
-      LineTerminator::NewLine,
+      LineTerminatorHint::NewLine,
     ))
   }
 
@@ -243,7 +519,7 @@ impl<Char> StringError<Char> {
   pub const fn unexpected_carriage_return(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
       PositionedChar::with_position(ch, position),
-      LineTerminator::CarriageReturn,
+      LineTerminatorHint::CarriageReturn,
     ))
   }
 
@@ -252,34 +528,65 @@ impl<Char> StringError<Char> {
   pub const fn unexpected_carriage_return_new_line(span: Span) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_span_const(
       span,
-      LineTerminator::CarriageReturnNewLine,
+      LineTerminatorHint::CarriageReturnNewLine,
     ))
+  }
+
+  /// Creates an unexpected escaped character error.
+  #[inline]
+  pub(crate) const fn unexpected_escaped_character(span: Span, ch: Char, position: usize) -> Self {
+    Self::UnexpectedEscapedCharacter(EscapedCharacter::new(PositionedChar::with_position(ch, position), span))
   }
 }
 
-// impl<Char> fmt::Display for StringError<Char> {
-//   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//     match self {
-//       Self::UnsupportedStringCharacter => write!(f, "unsupported string character"),
-//       Self::UnexpectedEnd(e) => match e.hint() {
-//         StringHint::Quote => write!(f, "unexpected end of data, found unterminated string, expected '\"'"),
-//         StringHint::TripleQuote => write!(f, "unexpected end of data, found unterminated block string, expected '\"\"\"'"),
-//       },
-//     }
-//   }
-// }
+#[cfg(feature = "smallvec")]
+type DefaultStringErrorsContainer<Char> = smallvec::SmallVec<[StringError<Char>; 1]>;
+
+#[cfg(not(feature = "smallvec"))]
+type DefaultStringErrorsContainer<Char> = std::vec::Vec<StringError<Char>>;
+
+#[derive(
+  Debug,
+  Default,
+  Clone,
+  PartialEq,
+  Eq,
+  Hash,
+  derive_more::From,
+  derive_more::Into,
+  derive_more::Deref,
+  derive_more::DerefMut,
+  derive_more::AsMut,
+  derive_more::AsRef,
+)]
+pub struct StringErrors<Char>(DefaultStringErrorsContainer<Char>);
+
+impl<Char> From<StringError<Char>> for StringErrors<Char> {
+  #[inline]
+  fn from(error: StringError<Char>) -> Self {
+    Self(core::iter::once(error).collect())
+  }
+}
+
+impl<Char> StringErrors<Char> {
+  /// Create a new empty errors container with given capacity.
+  #[inline]
+  pub fn with_capacity(capacity: usize) -> Self {
+    Self(DefaultStringErrorsContainer::with_capacity(capacity))
+  }
+}
 
 /// An error encountered during lexing tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ErrorData<Char> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
   Int(IntError<Char>),
   /// An error encountered during lexing for string literals.
-  String(StringError<Char>),
+  String(StringErrors<Char>),
   /// Unexpected token character.
   #[from(skip)]
   UnexpectedLexeme(Lexeme<Char>),
@@ -429,6 +736,12 @@ impl<Char> Error<Char> {
     &self.data
   }
 
+  /// Get the mutable data of the error.
+  #[inline]
+  pub fn data_mut(&mut self) -> &mut ErrorData<Char> {
+    &mut self.data
+  }
+
   /// Consume the error and return the error data.
   #[inline]
   pub fn into_data(self) -> ErrorData<Char> {
@@ -450,7 +763,7 @@ impl<Char> From<Error<Char>> for ErrorData<Char> {
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<Char> = smallvec::SmallVec<[Error<Char>; 2]>;
+type DefaultErrorsContainer<Char> = smallvec::SmallVec<[Error<Char>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
 type DefaultErrorsContainer<Char> = std::vec::Vec<Error<Char>>;
@@ -462,6 +775,8 @@ type DefaultErrorsContainer<Char> = std::vec::Vec<Error<Char>>;
   PartialEq,
   Eq,
   Hash,
+  derive_more::From,
+  derive_more::Into,
   derive_more::Deref,
   derive_more::DerefMut,
   derive_more::AsMut,
@@ -473,20 +788,6 @@ impl<Char> From<Error<Char>> for Errors<Char> {
   #[inline]
   fn from(error: Error<Char>) -> Self {
     Self(core::iter::once(error).collect())
-  }
-}
-
-impl<Char> From<DefaultErrorsContainer<Char>> for Errors<Char> {
-  #[inline]
-  fn from(errors: DefaultErrorsContainer<Char>) -> Self {
-    Self(errors)
-  }
-}
-
-impl<Char> From<Errors<Char>> for DefaultErrorsContainer<Char> {
-  #[inline]
-  fn from(errors: Errors<Char>) -> Self {
-    errors.0
   }
 }
 
@@ -513,6 +814,19 @@ impl<Char> TryFrom<Errors<Char>> for Error<Char> {
 
   #[inline]
   fn try_from(value: Errors<Char>) -> Result<Self, Self::Error> {
+    match value.len() {
+      0 => Err(LengthError::Empty),
+      1 => Ok(value.0.into_iter().next().unwrap()),
+      _ => Err(LengthError::TooManyErrors),
+    }
+  }
+}
+
+impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
+  type Error = LengthError;
+
+  #[inline]
+  fn try_from(value: StringErrors<Char>) -> Result<Self, Self::Error> {
     match value.len() {
       0 => Err(LengthError::Empty),
       1 => Ok(value.0.into_iter().next().unwrap()),

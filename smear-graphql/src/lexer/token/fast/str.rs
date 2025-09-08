@@ -199,13 +199,13 @@ fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
     None | Some(' ' | '\t' | '\r' | '\n' | '\u{feff}' | ',') => {
       UnexpectedEnd::with_name("float".into(), FloatHint::Fractional).into()
     }
-    Some(ch @ ('a'..='z' | 'A'..='Z' | '_' | '.' | '+' | '-')) => {
+    Some(ch @ ('a'..='z' | 'A'..='Z' | '_' | '.')) => {
       // The first char is already consumed.
       let mut curr = 1;
       let span = lexer.span();
 
       for ch in iter {
-        if matches!(ch, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.' | '+' | '-') {
+        if matches!(ch, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.') {
           curr += 1;
           continue;
         }
@@ -284,13 +284,13 @@ fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
     None | Some(' ' | '\t' | '\r' | '\n' | '\u{feff}' | ',') => {
       UnexpectedEnd::with_name("float".into(), hint()).into()
     }
-    Some(ch @ ('a'..='z' | 'A'..='Z' | '_' | '.' | '+' | '-')) => {
+    Some(ch @ ('a'..='z' | 'A'..='Z' | '_' | '.')) => {
       // The first char is already consumed.
       let mut curr = 1;
       let span = lexer.span();
 
       for ch in iter {
-        if matches!(ch, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.' | '+' | '-') {
+        if matches!(ch, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.') {
           curr += 1;
           continue;
         }
