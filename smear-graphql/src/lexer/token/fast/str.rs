@@ -1,11 +1,11 @@
 use core::fmt;
 use logos::{Lexer, Logos};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
-
-use super::{
-  super::error::{self, *},
-  TokenOptions,
+use logosky::utils::{
+  Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+  recursion_tracker::RecursionLimiter,
 };
+
+use super::super::error::{self, *};
 
 use string_token::*;
 
@@ -36,7 +36,7 @@ pub type Errors = error::Errors<char>;
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[logos(
-  extras = TokenOptions,
+  extras = RecursionLimiter,
   skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
   error(Errors, |lexer| match lexer.slice().chars().next() {
     Some(ch) => Error::unknown_char(lexer.span().into(), ch, lexer.span().start),
@@ -51,13 +51,13 @@ pub enum Token<'a> {
   #[token("@")]
   At,
 
-  #[token("}")]
+  #[token("}", decrease_recursion_depth)]
   BraceClose,
 
-  #[token("]")]
+  #[token("]", decrease_recursion_depth)]
   BracketClose,
 
-  #[token(")")]
+  #[token(")", decrease_recursion_depth)]
   ParenClose,
 
   #[token(":")]
@@ -72,13 +72,13 @@ pub enum Token<'a> {
   #[token("!")]
   Bang,
 
-  #[token("{")]
+  #[token("{", increase_recursion_depth)]
   BraceOpen,
 
-  #[token("[")]
+  #[token("[", increase_recursion_depth)]
   BracketOpen,
 
-  #[token("(")]
+  #[token("(", increase_recursion_depth)]
   ParenOpen,
 
   #[token("|")]
@@ -118,12 +118,19 @@ pub enum Token<'a> {
 }
 
 #[inline(always)]
-fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'_>>) -> Result<(), Error> {
-  lexer.extras.recursion_limiter.increase();
+fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+  lexer.extras.increase();
 
-  Ok(())
+  lexer
+    .extras
+    .check()
+    .map_err(|e| Error::new(lexer.span(), e.into()))
 }
 
+#[inline(always)]
+fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
+  lexer.extras.decrease();
+}
 
 #[inline(always)]
 fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {

@@ -1,9 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 
-use crate::{
-  lexer::{Lexer, LexerError, State, Text, Token, Tokenizer},
-  source::*,
-};
+use crate::source::*;
 
 /// A GraphQL name identifier.
 ///

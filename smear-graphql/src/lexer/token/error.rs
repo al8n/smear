@@ -3,7 +3,10 @@ use core::fmt;
 use std::borrow::Cow;
 
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use logosky::utils::{
+  Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+  recursion_tracker::RecursionLimitExceeded,
+};
 
 /// The hint about what is expected for the next character
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
@@ -720,6 +723,8 @@ pub enum ErrorData<Char> {
   UnexpectedEndOfInput,
   /// Unterminated spread operator.
   UnterminatedSpreadOperator,
+  /// Reached maximum recursion depth.
+  RecursionLimitExceeded(RecursionLimitExceeded),
   /// Other error.
   Other(Cow<'static, str>),
 }

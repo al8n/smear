@@ -1,6 +1,4 @@
 use chumsky::{label::LabelError, prelude::*};
-use smear_parser::lexer::{self, DisplayText, Lexer, LexerError, Span, State, Text};
-
 /// The tokens for the GraphQL lexer.
 pub mod token;
 
@@ -30,11 +28,6 @@ pub mod token;
 #[cfg(test)]
 mod tests {
   use core::convert::Infallible;
-
-  use smear_parser::{
-    // lang::{comment, comment1, comment2, ignored1, name},
-    lexer::Lexer,
-  };
 
   // use crate::lexer::full_token::Token;
 

@@ -141,8 +141,6 @@ pub mod definitions;
 /// Parsing related traits
 pub mod parse;
 
-pub use smear_utils::lexer;
-
 /// Source trait and implementations
 pub mod source {
   pub use smear_utils::*;
@@ -152,7 +150,7 @@ pub mod source {
 pub mod __private {
   pub use chumsky;
 
-  pub use super::{lexer, parse, source::*};
+  pub use super::{parse, source::*};
 }
 
 /// Utility types and traits

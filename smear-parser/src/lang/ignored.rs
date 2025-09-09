@@ -1,10 +1,6 @@
-use crate::{
-  lexer::{Lexer, LexerError, State, Text, Token},
-  source::*,
-};
+use crate::source::*;
 
 use chumsky::{extra::ParserExtra, prelude::*};
-use smear_utils::lexer::Tokenizer;
 
 /// LineTerminator  ::  <LF> | <CR> [<LF>]
 /// Treat CR and CRLF as a single terminator.

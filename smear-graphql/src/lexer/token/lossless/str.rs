@@ -28,7 +28,6 @@
 use core::fmt;
 
 use logos::{Lexer, Logos};
-use smear_parser::lexer::State;
 
 #[derive(Default, Eq, PartialEq)]
 pub struct TokenExtras {

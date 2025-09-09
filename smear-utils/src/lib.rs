@@ -18,12 +18,8 @@ pub use ascii::AsciiChar;
 mod convert;
 mod with_source;
 
-/// General utilities for working with the lexer.
-pub mod lexer;
-
 #[doc(hidden)]
 pub mod __private {
-  pub use super::lexer::{self, Require, Tokenizer, token};
   pub use chumsky;
 }
 

@@ -1589,3 +1589,30 @@ fn test_bom_lexing() {
 
   assert_eq!(lexer.next(), None);
 }
+
+#[test]
+fn test_recursion_limit() {
+  let depth = 65;
+  let field = "a {".repeat(depth) + &"}".repeat(depth);
+  let query = field.replace("{}", "{b}").to_string();
+
+  let lexer = Token::lexer_with_extras(query.as_str(), RecursionLimiter::with_limitation(depth - 1));
+
+  for result in lexer {
+    match result {
+      Ok(_) => {}
+      Err(mut errors) => {
+        let err = errors
+          .pop()
+          .unwrap()
+          .into_data()
+          .unwrap_recursion_limit_exceeded();
+        assert_eq!(err.depth(), depth);
+        assert_eq!(err.limitation(), depth - 1);
+        return;
+      }
+    }
+  }
+
+  panic!("expected recursion limit exceeded error");
+}
