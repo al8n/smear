@@ -1206,6 +1206,60 @@ fn test_float_ok() {
 }
 
 #[test]
+fn test_inline_string_ok() {
+  const INPUT: &[(&str, Token, usize)] = &[
+    (r#""""#, Token::StringLiteral(r#""""#), 2),
+    {
+      const CASE: &str = r#""hello""#;
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""hello world""#;
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""hello✨""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \" quote""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \\ backslash""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \n new line""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \r carriage return""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \t tab""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+    {
+      const CASE: &str = r#""escaped \u1234 unicode\"""#;
+
+      (CASE, Token::StringLiteral(CASE), CASE.len())
+    },
+  ];
+
+  for (source, kind, length) in INPUT {
+    assert_token(source, *kind, *length);
+  }
+}
+
+#[test]
 fn test_unterminated_inline_string() {
   let mut lexer = Token::lexer(r#"""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1434,174 +1488,98 @@ fn test_surrogate_pair() {
   }
 }
 
-// #[test]
-// fn test_invalid_surrogate() {
+#[test]
+fn test_invalid_surrogate_pair() {
+  let mut lexer = Token::lexer(r#""Backwards pair \uDE00\uD83D""#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let errs = errs.pop().unwrap().into_data().unwrap_string();
+  assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
+  let err1 = &errs[0];
+  let err = err1.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
+  assert_eq!(err.span(), Span::from(16..22));
 
-//   let mut lexer = Token::lexer(r#""Backwards pair \uDE00\uD83D""#);
-//   let mut errs = lexer.next().unwrap().unwrap_err();
-//   assert_eq!(errs.len(), 1);
-//   let errs = errs.pop().unwrap().into_data().unwrap_string();
-//   assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
-//   let err1 = &errs[0];
-//   let err = err1.unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(16..22));
+  let err2 = &errs[1];
+  let err = err2.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
+  assert_eq!(err.span(), Span::from(22..28));
 
-//   let err2 = &errs[1];
-//   let err = err2.unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(22..28));
+  let mut lexer = Token::lexer(r#""split pair \uD83D \uDE00""#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let errs = errs.pop().unwrap().into_data().unwrap_string();
+  assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
+  let err1 = &errs[0];
+  let err = err1.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
+  assert_eq!(err.span(), Span::from(12..18));
 
-//   let mut lexer = Token::lexer(r#""split pair \uD83D \uDE00""#);
-//   let mut errs = lexer.next().unwrap().unwrap_err();
-//   assert_eq!(errs.len(), 1);
-//   let errs = errs.pop().unwrap().into_data().unwrap_string();
-//   assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
-//   let err1 = &errs[0];
-//   let err = err1.unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(12..18));
+  let err2 = &errs[1];
+  let err = err2.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
+  assert_eq!(err.span(), Span::from(19..25));
 
-//   let err2 = &errs[1];
-//   let err = err2.unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(19..25));
+  let mut lexer = Token::lexer(r#""Lone lead surrogate \uD83E""#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let errs = errs.pop().unwrap().into_data().unwrap_string();
+  assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
+  let err = errs[0].unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
+  assert_eq!(err.span(), Span::from(21..27));
 
-//   let mut lexer = Token::lexer(r#""Lone lead surrogate \uD83E""#);
-//   let mut errs = lexer.next().unwrap().unwrap_err();
-//   assert_eq!(errs.len(), 1);
-//   let errs = errs.pop().unwrap().into_data().unwrap_string();
-//   assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
-//   let err = errs[0].unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(21..27));
+  let mut lexer = Token::lexer(r#""Lone trail surrogate \uDD80""#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let errs = errs.pop().unwrap().into_data().unwrap_string();
+  assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
+  let err = errs[0].unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
+  assert_eq!(err.span(), Span::from(22..28));
+}
 
-//   let mut lexer = Token::lexer(r#""Lone trail surrogate \uDD80""#);
-//   let mut errs = lexer.next().unwrap().unwrap_err();
-//   assert_eq!(errs.len(), 1);
-//   let errs = errs.pop().unwrap().into_data().unwrap_string();
-//   assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
-//   let err = errs[0].unwrap_unicode_ref().unwrap_invalid_surrogate_ref();
-//   assert_eq!(err.span(), Span::from(22..28));
-// }
+#[test]
+fn test_unterminated_block_string() {
+  let mut lexer = Token::lexer(r#"""""#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let err = errs.pop().unwrap();
+  assert_eq!(err.span(), Span::from(0..3));
+  let err1 = err
+    .into_data()
+    .unwrap_string()
+    .pop()
+    .unwrap()
+    .unwrap_unterminated();
+  assert_eq!(err1.hint(), &UnterminatedHint::TripleQuote);
+  assert_eq!(lexer.span(), 0..3);
 
-// #[test]
-// fn test_string_lexing() {
-//   let input = r#"
-//            "test"
-//            "escaped \" quote"
-//            "unterminated
-//            "
-//        "#;
-//   let mut lexer = Token::lexer(input);
+  let mut lexer = Token::lexer(r#""""\"#);
+  let mut errs = lexer.next().unwrap().unwrap_err();
+  assert_eq!(errs.len(), 1);
+  let err = errs.pop().unwrap();
+  assert_eq!(err.span(), Span::from(0..4));
+  let err1 = err
+    .into_data()
+    .unwrap_string()
+    .pop()
+    .unwrap()
+    .unwrap_unterminated();
+  assert_eq!(err1.hint(), &UnterminatedHint::TripleQuote);
+  assert_eq!(lexer.span(), 0..4);
+}
 
-//   assert_eq!(lexer.next(), Some(Ok(Token::StringLiteral("\"test\""))));
-//   assert_eq!(lexer.slice(), "\"test\"");
-
-//   assert_eq!(
-//     lexer.next(),
-//     Some(Ok(Token::StringLiteral(r#""escaped \" quote""#)))
-//   );
-//   assert_eq!(lexer.slice(), r#""escaped \" quote""#);
-
-//   // assert_eq!(lexer.next(), Some(Err(())));
-//   // assert_eq!(
-//   //   lexer.extras.error_token,
-//   //   Some(Token::ErrorUnterminatedString)
-//   // );
-//   assert_eq!(lexer.slice(), "\"unterminated");
-// }
-
-// #[test]
-// fn test_invalid_character_lexing() {
-//   let input = r#"
-//            {
-//                %%%
-//                __typename
-//                *
-//            }
-//        "#;
-//   let mut lexer = Token::lexer(input);
-
-//   assert_eq!(lexer.next(), Some(Ok(Token::BraceOpen)));
-//   assert_eq!(lexer.slice(), "{");
-
-//   assert_eq!(lexer.next(), Some(Err(())));
-//   assert_eq!(lexer.slice(), "%");
-
-//   assert_eq!(lexer.next(), Some(Err(())));
-//   assert_eq!(lexer.slice(), "%");
-
-//   assert_eq!(lexer.next(), Some(Err(())));
-//   assert_eq!(lexer.slice(), "%");
-
-//   assert_eq!(lexer.next(), Some(Ok(Token::Identifier("__typename"))));
-//   assert_eq!(lexer.slice(), "__typename");
-
-//   assert_eq!(lexer.next(), Some(Err(())));
-//   assert_eq!(lexer.slice(), "*");
-
-//   assert_eq!(lexer.next(), Some(Ok(Token::BraceClose)));
-//   assert_eq!(lexer.slice(), "}");
-
-//   assert_eq!(lexer.next(), None);
-// }
-
-// #[test]
-// fn test_block_string_lexing() {
-//   let input = r#"
-//            # escaped
-//            """tes\"""t"""
-//            # empty
-//            """"""
-//            # 2 quotes in a string
-//            """"" """
-//            """
-//                multi-
-//                line
-//            """
-//            """unterminated
-//        "#;
-//   let mut lexer = Token::lexer(input);
-
-//   assert_eq!(
-//     lexer.next(),
-//     Some(Ok(Token::BlockStringLiteral(r#""""tes\"""t""""#)))
-//   );
-//   assert_eq!(lexer.slice(), r#""""tes\"""t""""#);
-
-//   assert_eq!(
-//     lexer.next(),
-//     Some(Ok(Token::BlockStringLiteral(r#""""""""#)))
-//   );
-//   assert_eq!(lexer.slice(), r#""""""""#);
-
-//   assert_eq!(
-//     lexer.next(),
-//     Some(Ok(Token::BlockStringLiteral(r#"""""" """"#)))
-//   );
-//   assert_eq!(lexer.slice(), r#"""""" """"#);
-
-//   assert_eq!(
-//     lexer.next(),
-//     Some(Ok(Token::BlockStringLiteral(
-//       r#""""
-//                multi-
-//                line
-//            """"#
-//     )))
-//   );
-//   assert_eq!(
-//     lexer.slice(),
-//     r#""""
-//                multi-
-//                line
-//            """"#
-//   );
-
-//   // assert_eq!(lexer.next(), Some(Err(())));
-//   // assert_eq!(
-//   //   lexer.extras.error_token,
-//   //   Some(Token::ErrorUnterminatedBlockString)
-//   // );
-//   // Unterminated string just consumes the starting quotes
-//   assert_eq!(lexer.slice(), r#"""""#);
-// }
+#[test]
+fn test_surrogate_pair_in_block_string() {
+  let mut lexer = Token::lexer(r#""""string with unicode surrogate pair escape \uD83D\uDE00""""#);
+  let token = lexer.next().unwrap().expect("Should lex successfully");
+  assert_eq!(
+    token,
+    Token::BlockStringLiteral(r#""""string with unicode surrogate pair escape \uD83D\uDE00""""#),
+    "Should match"
+  );
+}
 
 #[test]
 fn test_bom_lexing() {

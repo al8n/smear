@@ -1,5 +1,5 @@
 /*
-* The code in this file is taken from
+* The code in this file is modified based on
 * https://github.com/facebook/relay/blob/main/compiler/crates/graphql-syntax/src/lexer.rs
 *
 * Licensed under the MIT license:
@@ -50,34 +50,20 @@ enum StringToken {
   #[token("\"")]
   Quote,
 
-  #[regex(r#"\n|\r|\r\n"#, |lexer| {
-    let slice = lexer.slice();
-    match slice {
-      "\n" => LineTerminatorHint::NewLine,
-      "\r" => LineTerminatorHint::CarriageReturn,
+  #[regex(r#"\r\n|\n|\r"#, |lexer| {
+    match lexer.slice() {
       "\r\n" => LineTerminatorHint::CarriageReturnNewLine,
+      "\n"   => LineTerminatorHint::NewLine,
+      "\r"   => LineTerminatorHint::CarriageReturn,
       _ => unreachable!("regex matched unexpected line terminator"),
     }
   })]
   LineTerminator(LineTerminatorHint),
 
-  /// Valid Unicode scalar values excluding surrogates and controls
-  #[regex(r#"[\u0009\u0020-\u0021\u0023-\u005B\u005D-\uD7FF\uE000-\uFFFF\u{10000}-\u{10FFFF}]+"#)]
+  /// Any run of allowed string characters:
+  /// all Unicode scalars except: quote, backslash, and line terminators.
+  #[regex(r#"[^"\\\r\n]+"#)]
   StringCharacters,
-}
-
-#[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum BlockStringToken {
-  /// \\"\\"\\" inside block string
-  #[token("\\\"\"\"")]
-  EscapedTripleQuote,
-  /// terminator
-  #[token("\"\"\"")]
-  TripleQuote,
-  /// Any run without a double-quote and excluding disallowed C0 controls.
-  /// Newlines are fine in block strings; normalization is done later.
-  #[regex(r#"[^"\x00-\x08\x0B\x0C\x0E-\x1F]+"#)]
-  Other,
 }
 
 #[inline(always)]
@@ -104,7 +90,10 @@ fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
 }
 
 #[inline(always)]
-fn handle_unicode_escape<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<char>> {
+fn handle_unicode_escape<'a, T>(lexer: &mut Lexer<'a, T>) -> Result<(), StringError<char>>
+where
+  T: Logos<'a, Source = str>,
+{
   let slice = lexer.slice();
   let hex_part = &slice[2..];
   let code_point = u32::from_str_radix(hex_part, 16).unwrap(); // Safe due to regex
@@ -307,22 +296,45 @@ pub(super) fn lex_inline_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<
   Err(Error::new(lexer.span(), errs.into()))
 }
 
+#[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[logos(error(StringError<char>))]
+enum BlockStringToken {
+  /// \\"\\"\\" inside block string
+  #[token("\\\"\"\"")]
+  EscapedTripleQuote,
+  /// terminator
+  #[token("\"\"\"")]
+  TripleQuote,
+  /// Runs of any characters except the double quote; includes newlines and C0 controls.
+  #[regex(r#"[^"]+"#)]
+  Continue,
+  /// A single quote that is **not** part of `"""` (content)
+  #[token("\"")]
+  Quote,
+}
+
 pub(super) fn lex_block_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
   let remainder = lexer.remainder();
+  let lexer_span = lexer.span();
   let mut string_lexer = BlockStringToken::lexer(remainder);
+  let mut errs = StringErrors::default();
   while let Some(string_token) = string_lexer.next() {
     match string_token {
       Ok(BlockStringToken::TripleQuote) => {
         lexer.bump(string_lexer.span().end);
         return Ok(lexer.slice());
       }
-      Ok(BlockStringToken::EscapedTripleQuote | BlockStringToken::Other) => {}
-      Err(_) => unreachable!(),
+      Ok(
+        BlockStringToken::EscapedTripleQuote | BlockStringToken::Continue | BlockStringToken::Quote,
+      ) => {}
+      Err(mut e) => {
+        e.bump(lexer_span.end);
+        errs.push(e);
+      }
     }
   }
 
-  Err(Error::new(
-    lexer.span(),
-    StringErrors::from(StringError::unterminated_block_string()).into(),
-  ))
+  lexer.bump(string_lexer.span().end);
+  errs.push(StringError::unterminated_block_string());
+  Err(Error::new(lexer.span(), errs.into()))
 }
