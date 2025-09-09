@@ -28,7 +28,7 @@
 use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span};
 
-use crate::lexer::token::error::{
+use crate::lexer::error::{
   InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError, StringErrors,
   UnicodeError,
 };

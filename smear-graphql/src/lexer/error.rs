@@ -2,7 +2,7 @@ use core::fmt;
 
 use std::borrow::Cow;
 
-use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{Display, From, Into, Deref, DerefMut, AsMut, AsRef, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::{
   Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
   recursion_tracker::RecursionLimitExceeded,
@@ -22,6 +22,7 @@ pub enum ExponentHint {
   Identifier,
 }
 
+/// The hint about what is expected for the next character
 #[derive(
   Copy,
   Clone,
@@ -66,7 +67,7 @@ impl fmt::Display for FloatHint {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
-pub enum FloatError<Char> {
+pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
   #[from(skip)]
   UnexpectedSuffix(Lexeme<Char>),
@@ -82,85 +83,11 @@ pub enum FloatError<Char> {
   MissingIntegerPart,
 }
 
-// impl<Char> fmt::Display for FloatError<Char>
-// where
-//   Char: fmt::Display,
-// {
-//   #[inline]
-//   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//     match self {
-//       Self::UnexpectedSuffix(c) => {
-//         write!(f, "unexpected character '{c}' as float suffix")
-//       }
-//       Self::LeadingZero => {
-//         write!(f, "float must not have non-significant leading zeroes")
-//       },
-//       Self::UnexpectedCharacter(e) => {
-//         write!(f, "unexpected character '{}' in float, expected {}", e.found(), e.hint())
-//       }
-//       Self::UnexpectedEnd(e) => {
-//         write!(f, "unexpected end of input in float, expected {e}")
-//       }
-//     }
-//   }
-// }
-
-// impl<Char> error::Error for FloatError<Char> where Char: fmt::Debug + fmt::Display {}
-
-// impl<Char> From<ExponentError<Char>> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: ExponentError<Char>) -> Self {
-//     match e {
-//       ExponentError::UnexpectedSuffix(c) => Self::UnexpectedSuffix(c),
-//       ExponentError::UnexpectedEnd(e) => Self::UnexpectedEnd(e.into()),
-//       ExponentError::UnexpectedLexeme(e) => Self::UnexpectedCharacter(e.into()),
-//     }
-//   }
-// }
-
-// impl<Char> From<FractionalError<Char>> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: FractionalError<Char>) -> Self {
-//     match e {
-//       FractionalError::UnexpectedCharacter(e) => Self::UnexpectedCharacter(e.into()),
-//       FractionalError::UnexpectedEnd(e) => Self::UnexpectedEnd(e.into()),
-//     }
-//   }
-// }
-
-// impl<Char> From<UnexpectedFractionalCharacter<Char>> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: UnexpectedFractionalCharacter<Char>) -> Self {
-//     Self::UnexpectedCharacter(e.into())
-//   }
-// }
-
-// impl<Char> From<FractionalHint> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: FractionalHint) -> Self {
-//     Self::UnexpectedEnd(e.into())
-//   }
-// }
-
-// impl<Char> From<UnexpectedExponentCharacter<Char>> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: UnexpectedExponentCharacter<Char>) -> Self {
-//     Self::UnexpectedCharacter(e.into())
-//   }
-// }
-
-// impl<Char> From<ExponentHint> for FloatError<Char> {
-//   #[inline]
-//   fn from(e: ExponentHint) -> Self {
-//     Self::UnexpectedEnd(e.into())
-//   }
-// }
-
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
-pub enum IntError<Char> {
+pub enum IntError<Char = char> {
   /// Unexpected character in integer literal suffix, e.g. `123abc`
   #[from(skip)]
   UnexpectedSuffix(Lexeme<Char>),
@@ -171,29 +98,8 @@ pub enum IntError<Char> {
   LeadingZeros(Lexeme<Char>),
 }
 
-// impl<Char> fmt::Display for IntError<Char>
-// where
-//   Char: fmt::Display,
-// {
-//   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//     match self {
-//       Self::UnexpectedSuffix(c) => {
-//         write!(f, "unexpected character '{c}' as integer suffix")
-//       }
-//       Self::LeadingZero => {
-//         write!(f, "integer must not have non-significant leading zeroes")
-//       }
-//       Self::UnexpectedCharacter(e) => {
-//         write!(f, "unexpected character '{}' in integer, expected digit", e.found())
-//       }
-//     }
-//   }
-// }
-
-// impl<Char> error::Error for IntError<Char> where Char: fmt::Debug + fmt::Display {}
-
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
-enum InvalidUnicodeHexDigitsRepr<Char> {
+enum InvalidUnicodeHexDigitsRepr<Char = char> {
   #[default]
   Zero,
   One(PositionedChar<Char>),
@@ -256,7 +162,7 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
 
 /// A container designed for storing between 1 and 4 invalid unicode hex digits.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct InvalidUnicodeHexDigits<Char>(InvalidUnicodeHexDigitsRepr<Char>);
+pub struct InvalidUnicodeHexDigits<Char = char>(InvalidUnicodeHexDigitsRepr<Char>);
 
 impl<Char> Default for InvalidUnicodeHexDigits<Char> {
   #[inline(always)]
@@ -367,7 +273,7 @@ impl<Char> core::ops::DerefMut for InvalidUnicodeHexDigits<Char> {
 
 /// An invalid unicode sequence error.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct InvalidUnicodeSequence<Char> {
+pub struct InvalidUnicodeSequence<Char = char> {
   digits: InvalidUnicodeHexDigits<Char>,
   span: Span,
 }
@@ -433,18 +339,22 @@ impl<Char> InvalidUnicodeSequence<Char> {
   }
 }
 
+/// An unpaired surrogate error.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
 pub enum UnpairedSurrogateHint {
+  /// An unpaired high surrogate.
   #[display("high surrogate")]
   High,
+  /// An unpaired low surrogate.
   #[display("low surrogate")]
   Low,
 }
 
+/// An error encountered during lexing for unicode sequences.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum UnicodeError<Char> {
+pub enum UnicodeError<Char = char> {
   #[from(skip)]
   Incomplete(Lexeme<Char>),
   InvalidSequence(InvalidUnicodeSequence<Char>),
@@ -482,6 +392,7 @@ impl<Char> UnicodeError<Char> {
   }
 }
 
+/// An unterminated string hint.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
 pub enum UnterminatedHint {
   #[display("\"")]
@@ -490,6 +401,7 @@ pub enum UnterminatedHint {
   TripleQuote,
 }
 
+/// A hint about what line terminator was unexpected in a GraphQL inlined string.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
 pub enum LineTerminatorHint {
   #[display("'\\n'")]
@@ -500,8 +412,9 @@ pub enum LineTerminatorHint {
   CarriageReturnNewLine,
 }
 
+/// An escaped character in a GraphQL inline string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EscapedCharacter<Char> {
+pub struct EscapedCharacter<Char = char> {
   char: PositionedChar<Char>,
   span: Span,
 }
@@ -567,16 +480,23 @@ impl<Char> EscapedCharacter<Char> {
   }
 }
 
+/// An error encountered during lexing for string literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum StringError<Char> {
+pub enum StringError<Char = char> {
+  /// An unsupported character in a string literal.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
+  /// An unexpected line terminator in a string literal.
   UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
+  /// An unexpected escaped character in a string literal.
   UnexpectedEscapedCharacter(EscapedCharacter<Char>),
+  /// An unterminated string literal.
   Unterminated(UnexpectedEnd<UnterminatedHint>),
+  /// A unicode error in a string literal.
   Unicode(UnicodeError<Char>),
+  /// Any other error in a string literal.
   Other(Cow<'static, str>),
 }
 
@@ -666,11 +586,12 @@ impl<Char> StringError<Char> {
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultStringErrorsContainer<Char> = smallvec::SmallVec<[StringError<Char>; 1]>;
+type DefaultStringErrorsContainer<Char = char> = smallvec::SmallVec<[StringError<Char>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultStringErrorsContainer<Char> = std::vec::Vec<StringError<Char>>;
+type DefaultStringErrorsContainer<Char = char> = std::vec::Vec<StringError<Char>>;
 
+/// A container for storing multiple string errors.
 #[derive(
   Debug,
   Default,
@@ -678,14 +599,14 @@ type DefaultStringErrorsContainer<Char> = std::vec::Vec<StringError<Char>>;
   PartialEq,
   Eq,
   Hash,
-  derive_more::From,
-  derive_more::Into,
-  derive_more::Deref,
-  derive_more::DerefMut,
-  derive_more::AsMut,
-  derive_more::AsRef,
+  From,
+  Into,
+  Deref,
+  DerefMut,
+  AsMut,
+  AsRef,
 )]
-pub struct StringErrors<Char>(DefaultStringErrorsContainer<Char>);
+pub struct StringErrors<Char = char>(DefaultStringErrorsContainer<Char>);
 
 impl<Char> From<StringError<Char>> for StringErrors<Char> {
   #[inline]
@@ -702,11 +623,11 @@ impl<Char> StringErrors<Char> {
   }
 }
 
-/// An error encountered during lexing tokens.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+/// The data of the lexer error.
+#[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<Char> {
+pub enum ErrorData<Char = char> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
@@ -725,6 +646,8 @@ pub enum ErrorData<Char> {
   UnterminatedSpreadOperator,
   /// Reached maximum recursion depth.
   RecursionLimitExceeded(RecursionLimitExceeded),
+  /// Not a valid UTF-8 source.
+  InvalidUtf8(core::str::Utf8Error),
   /// Other error.
   Other(Cow<'static, str>),
 }
@@ -780,8 +703,9 @@ impl<Char> ErrorData<Char> {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Error<Char> {
+/// A lexer error with span and data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Error<Char = char> {
   span: Span,
   data: ErrorData<Char>,
 }
@@ -891,26 +815,26 @@ impl<Char> From<Error<Char>> for ErrorData<Char> {
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<Char> = smallvec::SmallVec<[Error<Char>; 1]>;
+type DefaultErrorsContainer<Char = char> = smallvec::SmallVec<[Error<Char>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<Char> = std::vec::Vec<Error<Char>>;
+type DefaultErrorsContainer<Char = char> = std::vec::Vec<Error<Char>>;
 
+/// A container for storing multiple lexer errors.
 #[derive(
   Debug,
   Default,
   Clone,
   PartialEq,
   Eq,
-  Hash,
-  derive_more::From,
-  derive_more::Into,
-  derive_more::Deref,
-  derive_more::DerefMut,
-  derive_more::AsMut,
-  derive_more::AsRef,
+  From,
+  Into,
+  Deref,
+  DerefMut,
+  AsMut,
+  AsRef,
 )]
-pub struct Errors<Char>(DefaultErrorsContainer<Char>);
+pub struct Errors<Char = char>(DefaultErrorsContainer<Char>);
 
 impl<Char> From<Error<Char>> for Errors<Char> {
   #[inline]
@@ -927,6 +851,7 @@ impl<Char> Errors<Char> {
   }
 }
 
+/// Length error when converting from a list of errors to a single error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum LengthError {
   /// The error list contains more than one error.

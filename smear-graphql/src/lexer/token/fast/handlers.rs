@@ -1,124 +1,10 @@
-use core::fmt;
-use logos::{Lexer, Logos};
-use logosky::utils::{
-  Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
-  recursion_tracker::RecursionLimiter,
-};
+use logos::Lexer;
+use logosky::utils::{PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
-use super::super::error::{self, *};
-
-use string_token::*;
-
-mod string_token;
-
-#[cfg(test)]
-mod tests;
-
-pub type Error = error::Error<char>;
-pub type ErrorData = error::ErrorData<char>;
-pub type Errors = error::Errors<char>;
-
-/// Lexer for the GraphQL specification: http://spec.graphql.org/
-#[derive(
-  Logos,
-  Copy,
-  Clone,
-  Debug,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  derive_more::IsVariant,
-  derive_more::Unwrap,
-  derive_more::TryUnwrap,
-)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[logos(
-  extras = RecursionLimiter,
-  skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
-  error(Errors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => Error::unknown_char(lexer.span().into(), ch, lexer.span().start),
-    None => Error::unexpected_eoi(lexer.span().into()),
-  }.into())
-)]
-pub enum Token<'a> {
-  // Valid tokens
-  #[token("&")]
-  Ampersand,
-
-  #[token("@")]
-  At,
-
-  #[token("}", decrease_recursion_depth)]
-  BraceClose,
-
-  #[token("]", decrease_recursion_depth)]
-  BracketClose,
-
-  #[token(")", decrease_recursion_depth)]
-  ParenClose,
-
-  #[token(":")]
-  Colon,
-
-  #[token("$")]
-  Dollar,
-
-  #[token("=")]
-  Equals,
-
-  #[token("!")]
-  Bang,
-
-  #[token("{", increase_recursion_depth)]
-  BraceOpen,
-
-  #[token("[", increase_recursion_depth)]
-  BracketOpen,
-
-  #[token("(", increase_recursion_depth)]
-  ParenOpen,
-
-  #[token("|")]
-  Pipe,
-
-  #[token("...")]
-  #[token("..", unterminated_spread_operator)]
-  #[token(".", unterminated_spread_operator)]
-  Spread,
-
-  #[regex("-?0[0-9]+(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix))]
-  #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
-  #[regex(
-    "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    handle_float_missing_integer_part_error_and_suffix
-  )]
-  #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", handle_leading_zeros_and_exponent_error)]
-  #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", handle_exponent_error)]
-  #[regex("-?0[0-9]+\\.", handle_leading_zeros_and_fractional_error)]
-  #[regex("-?(0|[1-9][0-9]*)\\.", handle_fractional_error)]
-  #[regex("-?0[0-9]+[eE][+-]?", handle_leading_zeros_and_exponent_error)]
-  #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", handle_exponent_error)]
-  FloatLiteral(&'a str),
-
-  #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
-  Identifier(&'a str),
-
-  #[regex("-?(0|[1-9][0-9]*)", |lexer| handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-  #[regex("-?0[0-9]+", |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))]
-  #[token("-", |lexer| Err(Error::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
-  #[token("+", |lexer| Err(Error::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
-  IntegerLiteral(&'a str),
-  #[token("\"", lex_inline_string)]
-  StringLiteral(&'a str),
-  #[token("\"\"\"", lex_block_string)]
-  BlockStringLiteral(&'a str),
-}
+use super::{Lexeme, Error, Errors, ExponentHint, FloatError, FloatHint, ErrorData, Token};
 
 #[inline(always)]
-fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
   lexer.extras.increase();
 
   lexer
@@ -128,20 +14,20 @@ fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), 
 }
 
 #[inline(always)]
-fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
+pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
   lexer.extras.decrease();
 }
 
 #[inline(always)]
-fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+pub(super) fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
   Err(Error::new(
     lexer.span(),
     ErrorData::UnterminatedSpreadOperator,
   ))
 }
 
-#[inline(always)]
-fn leading_zero_error<'a, E>(
+#[inline]
+pub(super) fn leading_zero_error<'a, E>(
   lexer: &mut Lexer<'a, Token<'a>>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> E,
 ) -> Error
@@ -182,7 +68,7 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline(always)]
-fn handle_leading_zero_and_number_suffix_error<'a, LE, SE>(
+pub(super) fn handle_leading_zero_and_number_suffix_error<'a, LE, SE>(
   lexer: &mut Lexer<'a, Token<'a>>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> LE,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> SE,
@@ -205,7 +91,7 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-fn handle_float_missing_integer_part_error_and_suffix<'a>(
+pub(super) fn handle_float_missing_integer_part_error_and_suffix<'a>(
   lexer: &mut Lexer<'a, Token<'a>>,
 ) -> Result<&'a str, Errors> {
   let mut errs = Errors::default();
@@ -224,7 +110,7 @@ fn handle_float_missing_integer_part_error_and_suffix<'a>(
 }
 
 #[inline]
-fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
+pub(super) fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
   let remainder = lexer.remainder();
   let mut iter = remainder.chars();
 
@@ -285,13 +171,13 @@ fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
 }
 
 #[inline(always)]
-fn handle_fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn handle_fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
   Err(fractional_error(lexer))
 }
 
 #[allow(clippy::result_large_err)]
 #[inline]
-fn handle_leading_zeros_and_fractional_error<'a>(
+pub(super) fn handle_leading_zeros_and_fractional_error<'a>(
   lexer: &mut Lexer<'a, Token<'a>>,
 ) -> Result<&'a str, Errors> {
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
@@ -302,7 +188,7 @@ fn handle_leading_zeros_and_fractional_error<'a>(
 }
 
 #[inline]
-fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
+pub(super) fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
   let remainder = lexer.remainder();
   let mut iter = remainder.chars();
   let slice = lexer.slice();
@@ -368,13 +254,13 @@ fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
 }
 
 #[inline(always)]
-fn handle_exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn handle_exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
   Err(exponent_error(lexer))
 }
 
 #[allow(clippy::result_large_err)]
 #[inline]
-fn handle_leading_zeros_and_exponent_error<'a>(
+pub(super) fn handle_leading_zeros_and_exponent_error<'a>(
   lexer: &mut Lexer<'a, Token<'a>>,
 ) -> Result<&'a str, Errors> {
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
@@ -385,7 +271,7 @@ fn handle_leading_zeros_and_exponent_error<'a>(
 }
 
 #[inline]
-fn handle_number_suffix<'a, E>(
+pub(super) fn handle_number_suffix<'a, E>(
   lexer: &mut Lexer<'a, Token<'a>>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
 ) -> Result<&'a str, Error>
@@ -443,39 +329,5 @@ where
     }
     // For other characters, just return the float literal
     Some(_) | None => Ok(lexer.slice()),
-  }
-}
-
-impl fmt::Display for Token<'_> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let message = match self {
-      Token::Ampersand => "ampersand ('&')",
-      Token::At => "at ('@')",
-      Token::BraceClose => "closing brace ('}')",
-      Token::BracketClose => "closing bracket (']')",
-      Token::ParenClose => "closing paren (')')",
-      Token::Colon => "colon (':')",
-      Token::Dollar => "dollar ('$')",
-      Token::Equals => "equals ('=')",
-      Token::Bang => "exclamation mark ('!')",
-      // Token::FloatLiteral(_) => "floating point value (e.g. '3.14')",
-      Token::Identifier(_) => "non-variable identifier (e.g. 'x' or 'Foo')",
-      // Token::IntegerLiteral(_) => "integer value (e.g. '0' or '42')",
-      Token::BraceOpen => "open brace ('{')",
-      Token::BracketOpen => "open bracket ('[')",
-      Token::ParenOpen => "open parenthesis ('(')",
-      Token::Pipe => "pipe ('|')",
-      Token::Spread => "spread ('...')",
-      // Token::BlockStringLiteral(_) => "block string (e.g. '\"\"\"hi\"\"\"')",
-      // // Token::ErrorFloatLiteralMissingZero => "unsupported number (int or float) literal",
-      // // Token::ErrorNumberLiteralLeadingZero => "unsupported number (int or float) literal",
-      // // Token::ErrorNumberLiteralTrailingInvalid => "unsupported number (int or float) literal",
-      // Token::StringLiteral(_) => "string literal (e.g. '\"...\"')",
-      // Token::ErrorUnterminatedString => "unterminated string",
-      // Token::ErrorUnsupportedStringCharacter => "unsupported character in string",
-      // Token::ErrorUnterminatedBlockString => "unterminated block string",
-      _ => todo!(),
-    };
-    f.write_str(message)
   }
 }

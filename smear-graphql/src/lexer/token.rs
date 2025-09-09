@@ -6,5 +6,4 @@ pub mod fast;
 
 // [ \t\f\u{FEFF}]+|#([^\n\r]*(\r\n|\r|\n))*
 
-/// Error types for tokens.
-pub mod error;
+
