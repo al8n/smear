@@ -118,6 +118,14 @@ pub enum Token<'a> {
 }
 
 #[inline(always)]
+fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'_>>) -> Result<(), Error> {
+  lexer.extras.recursion_limiter.increase();
+
+  Ok(())
+}
+
+
+#[inline(always)]
 fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
   Err(Error::new(
     lexer.span(),

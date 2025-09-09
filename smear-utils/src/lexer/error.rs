@@ -44,8 +44,6 @@ where
 {
   /// The token error happens when trying to pull the next token.
   Token(T::Error),
-  /// The state error
-  State(S::Error),
   /// The unexpected token error
   UnexpectedToken {
     /// The expected token name

@@ -1,4 +1,4 @@
-use super::{Position, RecursionLimitExceeded, RecursionLimiter, TokenLimitExceeded, TokenLimiter};
+use super::{RecursionLimitExceeded, RecursionLimiter, TokenLimitExceeded, TokenLimiter};
 
 /// The limit exceeded error.
 #[derive(
@@ -28,7 +28,6 @@ pub enum LimitExceeded {
 pub struct Tracker {
   token_tracker: TokenLimiter,
   recursion_tracker: RecursionLimiter,
-  position: Position,
 }
 
 impl Default for Tracker {
@@ -66,7 +65,6 @@ impl Tracker {
     Self {
       token_tracker,
       recursion_tracker,
-      position: Position::new(),
     }
   }
 
@@ -94,59 +92,31 @@ impl Tracker {
     &mut self.recursion_tracker
   }
 
-  /// Returns the position.
+  /// Increases the token count.
   #[inline(always)]
-  pub const fn position(&self) -> &Position {
-    &self.position
-  }
-
-  /// Returns the position.
-  #[inline(always)]
-  pub const fn position_mut(&mut self) -> &mut Position {
-    &mut self.position
-  }
-}
-
-impl super::State for Tracker {
-  type Error = LimitExceeded;
-
-  #[inline(always)]
-  fn increase_token(&mut self) {
+  pub const fn increase_token(&mut self) {
     self.token_mut().increase();
   }
 
+  /// Increases the recursion depth.
   #[inline(always)]
-  fn increase_column_number(&mut self, num: usize) {
-    self.position_mut().increase_column_number(num);
-  }
-
-  #[inline(always)]
-  fn increase_line_number(&mut self, num: usize) {
-    self.position_mut().increase_line_number(num);
-  }
-
-  #[inline(always)]
-  fn increase_recursion(&mut self) {
+  pub const fn increase_recursion(&mut self) {
     self.recursion_mut().increase();
   }
 
+  /// Decreases the recursion depth.
   #[inline(always)]
-  fn decrease_recursion(&mut self) {
+  pub const fn decrease_recursion(&mut self) {
     self.recursion_mut().decrease();
   }
 
   #[inline(always)]
-  fn check(&self) -> Result<(), Self::Error> {
+  pub fn check(&self) -> Result<(), LimitExceeded> {
     self
       .recursion_tracker
       .check()
       .map_err(LimitExceeded::from)?;
     self.token_tracker.check().map_err(LimitExceeded::from)?;
     Ok(())
-  }
-
-  #[inline(always)]
-  fn tab_width(&self) -> usize {
-    self.position.tab_width()
   }
 }

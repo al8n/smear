@@ -37,7 +37,6 @@ use super::{Error, Token};
 
 #[derive(Logos, Debug)]
 #[logos(error(StringError<char>))]
-#[logos(extras = bool)] // whether collect verbose errors or not.
 enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
