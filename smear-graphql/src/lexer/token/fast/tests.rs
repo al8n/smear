@@ -60,7 +60,6 @@ fn test_int_leading_zeros_and_suffix() {
   tests::test_int_leading_zeros_and_suffix::<Token<'_>, RecursionLimitExceeded>();
 }
 
-
 #[test]
 fn test_float_leading_zeros_and_other() {
   tests::test_float_leading_zeros_and_other::<Token<'_>, RecursionLimitExceeded>();
@@ -138,7 +137,7 @@ fn test_invalid_surrogate_pair() {
 
 #[test]
 fn test_unterminated_block_string() {
-  tests::test_unterminated_block_string::<Token<'_>, RecursionLimitExceeded>();  
+  tests::test_unterminated_block_string::<Token<'_>, RecursionLimitExceeded>();
 }
 
 #[test]

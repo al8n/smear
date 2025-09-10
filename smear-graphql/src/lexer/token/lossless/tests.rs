@@ -139,7 +139,7 @@ fn test_invalid_surrogate_pair() {
 
 #[test]
 fn test_unterminated_block_string() {
-  tests::test_unterminated_block_string::<Token<'_>, LimitExceeded>();  
+  tests::test_unterminated_block_string::<Token<'_>, LimitExceeded>();
 }
 
 #[test]
@@ -153,8 +153,10 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let lexer =
-    Token::lexer_with_extras(query.as_str(), Tracker::with_recursion_tracker(RecursionLimiter::with_limitation(depth - 1)));
+  let lexer = Token::lexer_with_extras(
+    query.as_str(),
+    Tracker::with_recursion_tracker(RecursionLimiter::with_limitation(depth - 1)),
+  );
 
   for result in lexer {
     match result {
@@ -164,7 +166,8 @@ fn test_recursion_limit() {
           .pop()
           .unwrap()
           .into_data()
-          .unwrap_recursion_limit_exceeded();
+          .unwrap_state()
+          .unwrap_recursion();
         assert_eq!(err.depth(), depth);
         assert_eq!(err.limitation(), depth - 1);
         return;
@@ -180,17 +183,16 @@ fn test_token_limit() {
   let limit = 300;
   let source = "a ".repeat(limit);
 
-  let lexer = Token::lexer_with_extras(source.as_str(), Tracker::with_token_tracker(TokenLimiter::with_limitation(limit - 1)));
+  let lexer = Token::lexer_with_extras(
+    source.as_str(),
+    Tracker::with_token_tracker(TokenLimiter::with_limitation(limit - 1)),
+  );
 
   for result in lexer {
     match result {
       Ok(_) => {}
       Err(mut errors) => {
-        let err = errors
-          .pop()
-          .unwrap()
-          .into_data()
-          .unwrap_state();
+        let err = errors.pop().unwrap().into_data().unwrap_state();
         assert_eq!(err.unwrap_token_ref().limitation(), limit - 1);
         return;
       }

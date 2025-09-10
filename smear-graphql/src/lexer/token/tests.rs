@@ -1,7 +1,10 @@
-use logos::{Lexer, Logos};
+use logos::{Lexer, Logos, Source};
 use logosky::utils::Span;
 
-use crate::lexer::error::{ErrorData, Errors, ExponentHint, FloatError, FloatHint, IntError, LineTerminatorHint, UnpairedSurrogateHint, UnterminatedHint};
+use crate::lexer::error::{
+  ErrorData, Errors, ExponentHint, FloatError, FloatHint, IntError, LineTerminatorHint,
+  UnpairedSurrogateHint, UnterminatedHint,
+};
 
 fn assert_token<'a, Token, StateError>(source: &'a str, kind: Token, length: usize)
 where
@@ -9,7 +12,7 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer(source);
+  let mut lexer = Token::test_lexer(source);
   assert_eq!(
     lexer.next(),
     Some(Ok(kind)),
@@ -22,7 +25,7 @@ where
   );
 }
 
-pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy {
+pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy + core::fmt::Debug {
   fn is_ignored(&self) -> bool;
 
   fn block_string_literal(&self) -> Option<&'a str>;
@@ -65,7 +68,7 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
           } else {
             return Some(Ok(tok));
           }
-        },
+        }
         Some(Err(e)) => return Some(Err(e)),
       }
     }
@@ -91,8 +94,11 @@ impl<'a, T: Logos<'a>> TestLexer<'a, T> {
   pub fn span(&self) -> core::ops::Range<usize> {
     self.inner.span()
   }
-}
 
+  pub fn slice(&self) -> <T::Source as Source>::Slice<'a> {
+    self.inner.slice()
+  }
+}
 
 pub(super) fn test_unexpected_character<'a, Token, StateError>()
 where
@@ -100,7 +106,7 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("+1");
+  let mut lexer = Token::test_lexer("+1");
   let err = lexer
     .next()
     .unwrap()
@@ -113,7 +119,7 @@ where
   assert_eq!(err.char_ref(), &'+');
   assert_eq!(err.position(), 0);
 
-  let mut lexer = Token::lexer("-A");
+  let mut lexer = Token::test_lexer("-A");
   let err = lexer
     .next()
     .unwrap()
@@ -127,14 +133,13 @@ where
   assert_eq!(err.position(), 0);
 }
 
-
 pub(super) fn test_unknown_character<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("<");
+  let mut lexer = Token::test_lexer("<");
   let err = lexer
     .next()
     .unwrap()
@@ -159,7 +164,7 @@ where
  # U+2029
   "#;
 
-  let mut lexer = Token::lexer(INPUT);
+  let mut lexer = Token::test_lexer(INPUT);
   for expected_char in [
     '\u{000B}', '\u{000C}', '\u{0085}', '\u{00A0}', '\u{200E}', '\u{200F}', '\u{2028}', '\u{2029}',
   ] {
@@ -176,14 +181,13 @@ where
   }
 }
 
-
 pub(super) fn test_number_leading_zero<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("00");
+  let mut lexer = Token::test_lexer("00");
   assert!(matches!(
     lexer
       .next()
@@ -195,7 +199,7 @@ where
     ErrorData::Int(IntError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("-01");
+  let mut lexer = Token::test_lexer("-01");
   assert!(matches!(
     lexer
       .next()
@@ -207,7 +211,7 @@ where
     ErrorData::Int(IntError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("01.23"); 
+  let mut lexer = Token::test_lexer("01.23");
   assert!(matches!(
     lexer
       .next()
@@ -219,7 +223,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("-01.23");
+  let mut lexer = Token::test_lexer("-01.23");
   assert!(matches!(
     lexer
       .next()
@@ -231,7 +235,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("01e3");
+  let mut lexer = Token::test_lexer("01e3");
   assert!(matches!(
     lexer
       .next()
@@ -243,7 +247,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("-01E3");
+  let mut lexer = Token::test_lexer("-01E3");
   assert!(matches!(
     lexer
       .next()
@@ -255,7 +259,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("01e+3");
+  let mut lexer = Token::test_lexer("01e+3");
   assert!(matches!(
     lexer
       .next()
@@ -267,7 +271,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("-01E+3");
+  let mut lexer = Token::test_lexer("-01E+3");
   assert!(matches!(
     lexer
       .next()
@@ -279,7 +283,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("01e-3");
+  let mut lexer = Token::test_lexer("01e-3");
   assert!(matches!(
     lexer
       .next()
@@ -291,7 +295,7 @@ where
     ErrorData::Float(FloatError::LeadingZeros(_))
   ));
 
-  let mut lexer = Token::lexer("-01E-3");
+  let mut lexer = Token::test_lexer("-01E-3");
   assert!(matches!(
     lexer
       .next()
@@ -304,14 +308,13 @@ where
   ));
 }
 
-
 pub(super) fn test_int_leading_zeros_and_suffix<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("00abc");
+  let mut lexer = Token::test_lexer("00abc");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   let err1 = errs[0]
@@ -327,7 +330,7 @@ where
     .unwrap_span_ref();
   assert_eq!(err2, &Span::from(2..5));
 
-  let mut lexer = Token::lexer("-00abc");
+  let mut lexer = Token::test_lexer("-00abc");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   let err1 = errs[0]
@@ -344,14 +347,13 @@ where
   assert_eq!(err2, &Span::from(3..6));
 }
 
-
 pub(super) fn test_float_leading_zeros_and_other<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("01.");
+  let mut lexer = Token::test_lexer("01.");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   let err1 = errs[0]
@@ -368,7 +370,7 @@ where
   assert_eq!(err2.hint(), &FloatHint::Fractional);
   assert_eq!(errs[1].span(), Span::from(0..3));
 
-  let mut lexer = Token::lexer("-01.");
+  let mut lexer = Token::test_lexer("-01.");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   let err1 = errs[0]
@@ -385,7 +387,7 @@ where
   assert_eq!(err2.hint(), &FloatHint::Fractional);
   assert_eq!(errs[1].span(), Span::from(0..4));
 
-  let mut lexer = Token::lexer("00001.23abcd");
+  let mut lexer = Token::test_lexer("00001.23abcd");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   let err1 = errs[0]
@@ -402,14 +404,13 @@ where
   assert_eq!(err2, &Span::from(8..12));
 }
 
-
 pub(super) fn test_invalid_number_suffix<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("0abc");
+  let mut lexer = Token::test_lexer("0abc");
   let err = lexer
     .next()
     .unwrap()
@@ -422,7 +423,7 @@ where
     .unwrap_span();
   assert_eq!(err, (1..4).into());
 
-  let mut lexer = Token::lexer("0a");
+  let mut lexer = Token::test_lexer("0a");
   let err = lexer
     .next()
     .unwrap()
@@ -436,7 +437,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 1);
 
-  let mut lexer = Token::lexer("-0abc");
+  let mut lexer = Token::test_lexer("-0abc");
   let err = lexer
     .next()
     .unwrap()
@@ -449,7 +450,7 @@ where
     .unwrap_span();
   assert_eq!(err, Span::from(2..5));
 
-  let mut lexer = Token::lexer("-0a");
+  let mut lexer = Token::test_lexer("-0a");
   let err = lexer
     .next()
     .unwrap()
@@ -463,7 +464,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 2);
 
-  let mut lexer = Token::lexer("123abc");
+  let mut lexer = Token::test_lexer("123abc");
   let err = lexer
     .next()
     .unwrap()
@@ -476,7 +477,7 @@ where
     .unwrap_span();
   assert_eq!(err, Span::from(3..6));
 
-  let mut lexer = Token::lexer("123a");
+  let mut lexer = Token::test_lexer("123a");
   let err = lexer
     .next()
     .unwrap()
@@ -490,7 +491,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 3);
 
-  let mut lexer = Token::lexer("-123abc");
+  let mut lexer = Token::test_lexer("-123abc");
   let err = lexer
     .next()
     .unwrap()
@@ -503,7 +504,7 @@ where
     .unwrap_span();
   assert_eq!(err, Span::from(4..7));
 
-  let mut lexer = Token::lexer("-123a");
+  let mut lexer = Token::test_lexer("-123a");
   let err = lexer
     .next()
     .unwrap()
@@ -517,7 +518,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 4);
 
-  let mut lexer = Token::lexer("123.45a");
+  let mut lexer = Token::test_lexer("123.45a");
   let err = lexer
     .next()
     .unwrap()
@@ -531,7 +532,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
 
-  let mut lexer = Token::lexer("-123.45a");
+  let mut lexer = Token::test_lexer("-123.45a");
   let err = lexer
     .next()
     .unwrap()
@@ -545,7 +546,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
 
-  let mut lexer = Token::lexer("123e3a");
+  let mut lexer = Token::test_lexer("123e3a");
   let err = lexer
     .next()
     .unwrap()
@@ -559,7 +560,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 5);
 
-  let mut lexer = Token::lexer("-123E3a");
+  let mut lexer = Token::test_lexer("-123E3a");
   let err = lexer
     .next()
     .unwrap()
@@ -573,7 +574,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
 
-  let mut lexer = Token::lexer("123e+3a");
+  let mut lexer = Token::test_lexer("123e+3a");
   let err = lexer
     .next()
     .unwrap()
@@ -587,7 +588,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
 
-  let mut lexer = Token::lexer("-123E+3a");
+  let mut lexer = Token::test_lexer("-123E+3a");
   let err = lexer
     .next()
     .unwrap()
@@ -601,7 +602,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
 
-  let mut lexer = Token::lexer("123e-3a");
+  let mut lexer = Token::test_lexer("123e-3a");
   let err = lexer
     .next()
     .unwrap()
@@ -615,7 +616,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
 
-  let mut lexer = Token::lexer("-123E-3a");
+  let mut lexer = Token::test_lexer("-123E-3a");
   let err = lexer
     .next()
     .unwrap()
@@ -629,7 +630,7 @@ where
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
 
-  let mut lexer = Token::lexer("1.23.4");
+  let mut lexer = Token::test_lexer("1.23.4");
   let err = lexer
     .next()
     .unwrap()
@@ -642,7 +643,7 @@ where
     .unwrap_span();
   assert_eq!(err, Span::from(4..6));
 
-  let mut lexer = Token::lexer("-1.23.4 ");
+  let mut lexer = Token::test_lexer("-1.23.4 ");
   let err = lexer
     .next()
     .unwrap()
@@ -657,7 +658,7 @@ where
   assert_eq!(lexer.span(), 0..7);
 
   // check that we don't consume trailing valid items
-  let mut lexer = Token::lexer("1.23.{}");
+  let mut lexer = Token::test_lexer("1.23.{}");
   let err = lexer
     .next()
     .unwrap()
@@ -672,7 +673,7 @@ where
   assert_eq!(err.position(), 4);
   assert_eq!(lexer.span(), 0..5);
 
-  let mut lexer = Token::lexer("1.23. {}");
+  let mut lexer = Token::test_lexer("1.23. {}");
   let err = lexer
     .next()
     .unwrap()
@@ -687,7 +688,7 @@ where
   assert_eq!(err.position(), 4);
   assert_eq!(lexer.span(), 0..5);
 
-  let mut lexer = Token::lexer("1.23. []");
+  let mut lexer = Token::test_lexer("1.23. []");
   let err = lexer
     .next()
     .unwrap()
@@ -702,7 +703,7 @@ where
   assert_eq!(err.position(), 4);
   assert_eq!(lexer.span(), 0..5);
 
-  let mut lexer = Token::lexer("1.23. foo");
+  let mut lexer = Token::test_lexer("1.23. foo");
   let err = lexer
     .next()
     .unwrap()
@@ -717,7 +718,7 @@ where
   assert_eq!(err.position(), 4);
   assert_eq!(lexer.span(), 0..5);
 
-  let mut lexer = Token::lexer("1.23. $foo");
+  let mut lexer = Token::test_lexer("1.23. $foo");
   let err = lexer
     .next()
     .unwrap()
@@ -732,7 +733,6 @@ where
   assert_eq!(err.position(), 4);
   assert_eq!(lexer.span(), 0..5);
 }
-
 
 pub(super) fn test_missing_integer_part<'a, Token, StateError>()
 where
@@ -740,7 +740,7 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer(".123");
+  let mut lexer = Token::test_lexer(".123");
   assert!(matches!(
     lexer
       .next()
@@ -752,7 +752,7 @@ where
     ErrorData::Float(FloatError::MissingIntegerPart)
   ));
 
-  let mut lexer = Token::lexer("-.123");
+  let mut lexer = Token::test_lexer("-.123");
   assert!(matches!(
     lexer
       .next()
@@ -764,7 +764,7 @@ where
     ErrorData::Float(FloatError::MissingIntegerPart)
   ));
 
-  let mut lexer = Token::lexer(".123e3");
+  let mut lexer = Token::test_lexer(".123e3");
   assert!(matches!(
     lexer
       .next()
@@ -775,7 +775,7 @@ where
       .into_data(),
     ErrorData::Float(FloatError::MissingIntegerPart)
   ));
-  let mut lexer = Token::lexer("-.123E3");
+  let mut lexer = Token::test_lexer("-.123E3");
   assert!(matches!(
     lexer
       .next()
@@ -787,7 +787,7 @@ where
     ErrorData::Float(FloatError::MissingIntegerPart)
   ));
 
-  let mut lexer = Token::lexer(".123e+3");
+  let mut lexer = Token::test_lexer(".123e+3");
   assert!(matches!(
     lexer
       .next()
@@ -798,7 +798,7 @@ where
       .into_data(),
     ErrorData::Float(FloatError::MissingIntegerPart)
   ));
-  let mut lexer = Token::lexer("-.123E+3");
+  let mut lexer = Token::test_lexer("-.123E+3");
   assert!(matches!(
     lexer
       .next()
@@ -811,14 +811,13 @@ where
   ));
 }
 
-
 pub(super) fn test_missing_integer_part_and_invalid_suffix<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer(".123abcd");
+  let mut lexer = Token::test_lexer(".123abcd");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
 
@@ -833,7 +832,7 @@ where
     .unwrap_span();
   assert_eq!(err2, Span::from(4..8));
 
-  let mut lexer = Token::lexer("-.123abcd");
+  let mut lexer = Token::test_lexer("-.123abcd");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
   errs[0]
@@ -848,14 +847,13 @@ where
   assert_eq!(err2, Span::from(5..9));
 }
 
-
 pub(super) fn test_unexpected_float_eof<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("1.");
+  let mut lexer = Token::test_lexer("1.");
   let err = lexer
     .next()
     .unwrap()
@@ -867,7 +865,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Fractional);
 
-  let mut lexer = Token::lexer("-1.");
+  let mut lexer = Token::test_lexer("-1.");
   let err = lexer
     .next()
     .unwrap()
@@ -879,7 +877,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Fractional);
 
-  let mut lexer = Token::lexer("1e");
+  let mut lexer = Token::test_lexer("1e");
   let err = lexer
     .next()
     .unwrap()
@@ -891,7 +889,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
-  let mut lexer = Token::lexer("-1e");
+  let mut lexer = Token::test_lexer("-1e");
   let err = lexer
     .next()
     .unwrap()
@@ -903,7 +901,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
-  let mut lexer = Token::lexer("1e+");
+  let mut lexer = Token::test_lexer("1e+");
   let err = lexer
     .next()
     .unwrap()
@@ -915,7 +913,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("-1e+");
+  let mut lexer = Token::test_lexer("-1e+");
   let err = lexer
     .next()
     .unwrap()
@@ -927,7 +925,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("1e-");
+  let mut lexer = Token::test_lexer("1e-");
   let err = lexer
     .next()
     .unwrap()
@@ -939,7 +937,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("-1e-");
+  let mut lexer = Token::test_lexer("-1e-");
   let err = lexer
     .next()
     .unwrap()
@@ -951,7 +949,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("1.0e");
+  let mut lexer = Token::test_lexer("1.0e");
   let err = lexer
     .next()
     .unwrap()
@@ -963,7 +961,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
-  let mut lexer = Token::lexer("-1.0e");
+  let mut lexer = Token::test_lexer("-1.0e");
   let err = lexer
     .next()
     .unwrap()
@@ -975,7 +973,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
 
-  let mut lexer = Token::lexer("1.0e-");
+  let mut lexer = Token::test_lexer("1.0e-");
   let err = lexer
     .next()
     .unwrap()
@@ -987,7 +985,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("-1.0e-");
+  let mut lexer = Token::test_lexer("-1.0e-");
   let err = lexer
     .next()
     .unwrap()
@@ -999,7 +997,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("1.0e+");
+  let mut lexer = Token::test_lexer("1.0e+");
   let err = lexer
     .next()
     .unwrap()
@@ -1011,7 +1009,7 @@ where
     .unwrap_unexpected_end();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 
-  let mut lexer = Token::lexer("-1.0e+");
+  let mut lexer = Token::test_lexer("-1.0e+");
   let err = lexer
     .next()
     .unwrap()
@@ -1024,14 +1022,13 @@ where
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::Digit));
 }
 
-
 pub(super) fn test_unexpected_number_lexme<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
-  let mut lexer = Token::lexer("1.a");
+  let mut lexer = Token::test_lexer("1.a");
   let err = lexer
     .next()
     .unwrap()
@@ -1046,7 +1043,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 2);
   assert_eq!(lexer.span(), 0..3);
 
-  let mut lexer = Token::lexer("-1.a");
+  let mut lexer = Token::test_lexer("-1.a");
   let err = lexer
     .next()
     .unwrap()
@@ -1061,7 +1058,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 3);
   assert_eq!(lexer.span(), 0..4);
 
-  let mut lexer = Token::lexer("1.A");
+  let mut lexer = Token::test_lexer("1.A");
   let err = lexer
     .next()
     .unwrap()
@@ -1076,7 +1073,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 2);
   assert_eq!(lexer.span(), 0..3);
 
-  let mut lexer = Token::lexer("-1.A");
+  let mut lexer = Token::test_lexer("-1.A");
   let err = lexer
     .next()
     .unwrap()
@@ -1091,7 +1088,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 3);
   assert_eq!(lexer.span(), 0..4);
 
-  let mut lexer = Token::lexer("1.abc");
+  let mut lexer = Token::test_lexer("1.abc");
   let err = lexer
     .next()
     .unwrap()
@@ -1105,7 +1102,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (2..5).into());
   assert_eq!(lexer.span(), (0..5));
 
-  let mut lexer = Token::lexer("-1.abc");
+  let mut lexer = Token::test_lexer("-1.abc");
   let err = lexer
     .next()
     .unwrap()
@@ -1119,7 +1116,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (3..6).into());
   assert_eq!(lexer.span(), (0..6));
 
-  let mut lexer = Token::lexer("1.e1");
+  let mut lexer = Token::test_lexer("1.e1");
   let err = lexer
     .next()
     .unwrap()
@@ -1133,7 +1130,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (2..4).into());
   assert_eq!(lexer.span(), (0..4));
 
-  let mut lexer = Token::lexer("-1.e1");
+  let mut lexer = Token::test_lexer("-1.e1");
   let err = lexer
     .next()
     .unwrap()
@@ -1147,7 +1144,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (3..5).into());
   assert_eq!(lexer.span(), (0..5));
 
-  let mut lexer = Token::lexer("1.0eA");
+  let mut lexer = Token::test_lexer("1.0eA");
   let err = lexer
     .next()
     .unwrap()
@@ -1162,7 +1159,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 4);
   assert_eq!(lexer.span(), (0..5));
 
-  let mut lexer = Token::lexer("-1.0eA");
+  let mut lexer = Token::test_lexer("-1.0eA");
   let err = lexer
     .next()
     .unwrap()
@@ -1177,7 +1174,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 5);
   assert_eq!(lexer.span(), 0..6);
 
-  let mut lexer = Token::lexer("1.0eA123.456 some_name");
+  let mut lexer = Token::test_lexer("1.0eA123.456 some_name");
   let err = lexer
     .next()
     .unwrap()
@@ -1191,7 +1188,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (4..12).into());
   assert_eq!(lexer.span(), 0..12);
 
-  let mut lexer = Token::lexer("-1.0eA123.456 some_name");
+  let mut lexer = Token::test_lexer("-1.0eA123.456 some_name");
   let err = lexer
     .next()
     .unwrap()
@@ -1205,7 +1202,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (5..13).into());
   assert_eq!(lexer.span(), 0..13);
 
-  let mut lexer = Token::lexer("1eA");
+  let mut lexer = Token::test_lexer("1eA");
   let err = lexer
     .next()
     .unwrap()
@@ -1220,7 +1217,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 2);
   assert_eq!(lexer.span(), 0..3);
 
-  let mut lexer = Token::lexer("-1eA");
+  let mut lexer = Token::test_lexer("-1eA");
   let err = lexer
     .next()
     .unwrap()
@@ -1235,7 +1232,7 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 3);
   assert_eq!(lexer.span(), 0..4);
 
-  let mut lexer = Token::lexer("1eA123.456");
+  let mut lexer = Token::test_lexer("1eA123.456");
   let err = lexer
     .next()
     .unwrap()
@@ -1249,7 +1246,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (2..10).into());
   assert_eq!(lexer.span(), 0..10);
 
-  let mut lexer = Token::lexer("-1eA123.456");
+  let mut lexer = Token::test_lexer("-1eA123.456");
   let err = lexer
     .next()
     .unwrap()
@@ -1263,7 +1260,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (3..11).into());
   assert_eq!(lexer.span(), (0..11));
 
-  let mut lexer = Token::lexer("1eA123.456 some_name");
+  let mut lexer = Token::test_lexer("1eA123.456 some_name");
   let err = lexer
     .next()
     .unwrap()
@@ -1277,7 +1274,7 @@ where
   assert_eq!(err.lexeme().unwrap_span(), (2..10).into());
   assert_eq!(lexer.span(), (0..10));
 
-  let mut lexer = Token::lexer("-1eA123.456 some_name");
+  let mut lexer = Token::test_lexer("-1eA123.456 some_name");
   let err = lexer
     .next()
     .unwrap()
@@ -1310,7 +1307,6 @@ where
     assert_token(source, *kind, *length);
   }
 }
-
 
 pub(super) fn test_float_ok<'a, Token, StateError>()
 where
@@ -1402,7 +1398,7 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug,
 {
-  let mut lexer = Token::lexer(r#"""#);
+  let mut lexer = Token::test_lexer(r#"""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1416,7 +1412,7 @@ where
   assert_eq!(err1.hint(), &UnterminatedHint::Quote);
   assert_eq!(lexer.span(), 0..1);
 
-  let mut lexer = Token::lexer(r#""unterminated"#);
+  let mut lexer = Token::test_lexer(r#""unterminated"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
 
@@ -1432,7 +1428,7 @@ where
   assert_eq!(err1.hint(), &UnterminatedHint::Quote);
   assert_eq!(lexer.span(), 0..13);
 
-  let mut lexer = Token::lexer(r#""escaped \" quote"#);
+  let mut lexer = Token::test_lexer(r#""escaped \" quote"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1445,7 +1441,7 @@ where
     .unwrap_unterminated();
   assert_eq!(err1.hint(), &UnterminatedHint::Quote);
 
-  let mut lexer = Token::lexer(
+  let mut lexer = Token::test_lexer(
     r#""escaped 
   new line""#,
   );
@@ -1473,7 +1469,7 @@ where
     }
   }
 
-  let mut lexer = Token::lexer(r#""hello✨"#);
+  let mut lexer = Token::test_lexer(r#""hello✨"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1486,7 +1482,7 @@ where
     .unwrap_unterminated();
   assert_eq!(err1.hint(), &UnterminatedHint::Quote);
 
-  let mut lexer = Token::lexer(r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#);
+  let mut lexer = Token::test_lexer(r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1504,14 +1500,13 @@ where
   assert_eq!(err1.hint(), &UnterminatedHint::Quote);
 }
 
-
 pub(super) fn test_incomplete_unicode_and_eof<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
   StateError: core::fmt::Debug,
 {
-  let mut lexer = Token::lexer(r#""\u222"#);
+  let mut lexer = Token::test_lexer(r#""\u222"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1527,7 +1522,7 @@ where
   assert_eq!(err2.hint(), &UnterminatedHint::Quote);
   assert_eq!(lexer.span(), 0..6);
 
-  let mut lexer = Token::lexer(r#""\u"#);
+  let mut lexer = Token::test_lexer(r#""\u"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
@@ -1550,7 +1545,7 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug,
 {
-  let mut lexer = Token::lexer(
+  let mut lexer = Token::test_lexer(
     r#""
 hello
 ""#,
@@ -1594,7 +1589,6 @@ hello
   assert_eq!(lexer.span(), 0..9);
 }
 
-
 pub(super) fn test_unexpected_escaped<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
@@ -1602,7 +1596,7 @@ where
   StateError: core::fmt::Debug,
 {
   // "This is \"\"a test \a\d\q description"
-  let mut lexer = Token::lexer(r#""This is \"\"a test \a\d\q description""#);
+  let mut lexer = Token::test_lexer(r#""This is \"\"a test \a\d\q description""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err1 = errs.pop().unwrap().into_data().unwrap_string();
@@ -1625,7 +1619,6 @@ where
   assert_eq!(unexpected.position(), 25);
 }
 
-
 pub(super) fn test_surrogate_pair<'a, Token, StateError>()
 where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
@@ -1639,7 +1632,7 @@ where
   ];
 
   for case in CASES {
-    let mut lexer = Token::lexer(case);
+    let mut lexer = Token::test_lexer(case);
     let token = lexer.next().unwrap().expect(case).inline_string_literal();
     assert_eq!(token, Some(*case), "case: {case}");
 
@@ -1653,7 +1646,7 @@ where
   Token: TestToken<'a, Source = str, Error = Errors<char, StateError>> + core::fmt::Debug,
   Token::Extras: Default,
 {
-  let mut lexer = Token::lexer(r#""Backwards pair \uDE00\uD83D""#);
+  let mut lexer = Token::test_lexer(r#""Backwards pair \uDE00\uD83D""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
@@ -1668,7 +1661,7 @@ where
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
   assert_eq!(err.span(), Span::from(22..28));
 
-  let mut lexer = Token::lexer(r#""split pair \uD83D \uDE00""#);
+  let mut lexer = Token::test_lexer(r#""split pair \uD83D \uDE00""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
@@ -1683,7 +1676,7 @@ where
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
   assert_eq!(err.span(), Span::from(19..25));
 
-  let mut lexer = Token::lexer(r#""Lone lead surrogate \uD83E""#);
+  let mut lexer = Token::test_lexer(r#""Lone lead surrogate \uD83E""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
@@ -1692,7 +1685,7 @@ where
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
   assert_eq!(err.span(), Span::from(21..27));
 
-  let mut lexer = Token::lexer(r#""Lone trail surrogate \uDD80""#);
+  let mut lexer = Token::test_lexer(r#""Lone trail surrogate \uDD80""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
@@ -1742,7 +1735,8 @@ where
   Token::Extras: Default,
   StateError: core::fmt::Debug,
 {
-  let mut lexer = Token::lexer(r#""""string with unicode surrogate pair escape \uD83D\uDE00""""#);
+  let mut lexer =
+    Token::test_lexer(r#""""string with unicode surrogate pair escape \uD83D\uDE00""""#);
   let token = lexer.next().unwrap().expect("Should lex successfully");
   let block_string = token.block_string_literal();
   assert_eq!(

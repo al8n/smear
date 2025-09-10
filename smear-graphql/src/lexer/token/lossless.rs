@@ -253,10 +253,7 @@ impl<'a> Token<'a> {
   /// Returns `true` if the token belongs to a whitespace category.
   #[inline(always)]
   pub const fn is_whitespace(&self) -> bool {
-    matches!(
-      self,
-      Self::Space | Self::Tab | Self::BOM | Self::Comma
-    )
+    matches!(self, Self::Space | Self::Tab | Self::BOM | Self::Comma)
   }
 
   /// Returns `true` if the token belongs to terminator category.
@@ -265,7 +262,7 @@ impl<'a> Token<'a> {
     matches!(
       self,
       Self::NewLine | Self::CarriageReturn | Self::CarriageReturnNewLine
-    ) 
+    )
   }
 
   /// Returns `true` if the token belongs to an ignored category.
