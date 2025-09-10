@@ -29,14 +29,12 @@ use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span};
 
 use crate::lexer::error::{
-  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError, StringErrors,
-  UnicodeError,
+  Error, InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError,
+  StringErrors, UnicodeError,
 };
 
-use super::{Error, Token};
-
 #[derive(Logos, Debug)]
-#[logos(error(StringError<char>))]
+#[logos(error(StringError))]
 enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -251,7 +249,12 @@ fn handle_invalid_escaped_character<'a>(
   }
 }
 
-pub(super) fn lex_inline_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn lex_inline_string<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Error<char, Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   let lexer_span = lexer.span();
   let remainder = lexer.remainder();
   let mut string_lexer = StringToken::lexer(remainder);
@@ -312,7 +315,12 @@ enum BlockStringToken {
   Quote,
 }
 
-pub(super) fn lex_block_string<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn lex_block_string<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Error<char, Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   let remainder = lexer.remainder();
   let lexer_span = lexer.span();
   let mut string_lexer = BlockStringToken::lexer(remainder);

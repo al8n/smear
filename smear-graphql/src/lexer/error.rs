@@ -2,7 +2,9 @@ use core::fmt;
 
 use std::borrow::Cow;
 
-use derive_more::{Display, From, Into, Deref, DerefMut, AsMut, AsRef, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{
+  AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
+};
 use logosky::utils::{
   Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
   recursion_tracker::RecursionLimitExceeded,
@@ -401,7 +403,7 @@ pub enum UnterminatedHint {
   TripleQuote,
 }
 
-/// A hint about what line terminator was unexpected in a GraphQL inlined string.
+/// A hint about what line terminator was found.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
 pub enum LineTerminatorHint {
   #[display("'\\n'")]
@@ -592,20 +594,7 @@ type DefaultStringErrorsContainer<Char = char> = smallvec::SmallVec<[StringError
 type DefaultStringErrorsContainer<Char = char> = std::vec::Vec<StringError<Char>>;
 
 /// A container for storing multiple string errors.
-#[derive(
-  Debug,
-  Default,
-  Clone,
-  PartialEq,
-  Eq,
-  Hash,
-  From,
-  Into,
-  Deref,
-  DerefMut,
-  AsMut,
-  AsRef,
-)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct StringErrors<Char = char>(DefaultStringErrorsContainer<Char>);
 
 impl<Char> From<StringError<Char>> for StringErrors<Char> {
@@ -627,7 +616,7 @@ impl<Char> StringErrors<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<Char = char> {
+pub enum ErrorData<Char = char, State = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
@@ -646,20 +635,23 @@ pub enum ErrorData<Char = char> {
   UnterminatedSpreadOperator,
   /// Reached maximum recursion depth.
   RecursionLimitExceeded(RecursionLimitExceeded),
+  /// The lexer state related error.
+  #[from(skip)]
+  State(State),
   /// Not a valid UTF-8 source.
   InvalidUtf8(core::str::Utf8Error),
   /// Other error.
   Other(Cow<'static, str>),
 }
 
-impl<Char> Default for ErrorData<Char> {
+impl<Char, State> Default for ErrorData<Char, State> {
   #[inline(always)]
   fn default() -> Self {
     Self::Other(Cow::Borrowed("unknown"))
   }
 }
 
-impl<Char> ErrorData<Char> {
+impl<Char, State> ErrorData<Char, State> {
   /// Create a new error data with the given message.
   #[inline]
   pub fn other(message: impl Into<Cow<'static, str>>) -> Self {
@@ -705,28 +697,28 @@ impl<Char> ErrorData<Char> {
 
 /// A lexer error with span and data.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error<Char = char> {
+pub struct Error<Char = char, State = ()> {
   span: Span,
-  data: ErrorData<Char>,
+  data: ErrorData<Char, State>,
 }
 
-impl<Char> Default for Error<Char> {
+impl<Char, State> Default for Error<Char, State> {
   #[inline(always)]
   fn default() -> Self {
     Self::unexpected_eoi(Span::from(0..0))
   }
 }
 
-impl<Char> Error<Char> {
+impl<Char, State> Error<Char, State> {
   /// Create a new error with the given span and data.
   #[inline]
-  pub const fn const_new(span: Span, data: ErrorData<Char>) -> Self {
+  pub const fn const_new(span: Span, data: ErrorData<Char, State>) -> Self {
     Self { span, data }
   }
 
   /// Create a new error with the given span and data.
   #[inline]
-  pub fn new(span: impl Into<Span>, data: ErrorData<Char>) -> Self {
+  pub fn new(span: impl Into<Span>, data: ErrorData<Char, State>) -> Self {
     Self {
       span: span.into(),
       data,
@@ -784,66 +776,61 @@ impl<Char> Error<Char> {
 
   /// Get the data of the error.
   #[inline]
-  pub const fn data(&self) -> &ErrorData<Char> {
+  pub const fn data(&self) -> &ErrorData<Char, State> {
     &self.data
   }
 
   /// Get the mutable data of the error.
   #[inline]
-  pub fn data_mut(&mut self) -> &mut ErrorData<Char> {
+  pub fn data_mut(&mut self) -> &mut ErrorData<Char, State> {
     &mut self.data
   }
 
   /// Consume the error and return the error data.
   #[inline]
-  pub fn into_data(self) -> ErrorData<Char> {
+  pub fn into_data(self) -> ErrorData<Char, State> {
     self.data
   }
 
   /// Consumes the error and returns its components.
   #[inline]
-  pub fn into_components(self) -> (Span, ErrorData<Char>) {
+  pub fn into_components(self) -> (Span, ErrorData<Char, State>) {
     (self.span, self.data)
   }
 }
 
-impl<Char> From<Error<Char>> for ErrorData<Char> {
+impl<Char, State> From<Error<Char, State>> for ErrorData<Char, State> {
   #[inline]
-  fn from(error: Error<Char>) -> Self {
+  fn from(error: Error<Char, State>) -> Self {
     error.into_data()
   }
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<Char = char> = smallvec::SmallVec<[Error<Char>; 1]>;
+type DefaultErrorsContainer<Char = char, State = ()> = smallvec::SmallVec<[Error<Char, State>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<Char = char> = std::vec::Vec<Error<Char>>;
+type DefaultErrorsContainer<Char = char, State = ()> = std::vec::Vec<Error<Char, State>>;
 
 /// A container for storing multiple lexer errors.
-#[derive(
-  Debug,
-  Default,
-  Clone,
-  PartialEq,
-  Eq,
-  From,
-  Into,
-  Deref,
-  DerefMut,
-  AsMut,
-  AsRef,
-)]
-pub struct Errors<Char = char>(DefaultErrorsContainer<Char>);
+#[derive(Debug, Clone, PartialEq, Eq, From, Into, Deref, DerefMut, AsMut, AsRef)]
+pub struct Errors<Char = char, State = ()>(DefaultErrorsContainer<Char, State>);
 
-impl<Char> From<Error<Char>> for Errors<Char> {
+impl<Char, State> Default for Errors<Char, State> {
+  #[inline(always)]
+  fn default() -> Self {
+    Self(DefaultErrorsContainer::default())
+  }
+}
+
+impl<Char, State> From<Error<Char, State>> for Errors<Char, State> {
   #[inline]
-  fn from(error: Error<Char>) -> Self {
+  fn from(error: Error<Char, State>) -> Self {
     Self(core::iter::once(error).collect())
   }
 }
 
-impl<Char> Errors<Char> {
+impl<Char, State> Errors<Char, State> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
@@ -862,11 +849,11 @@ pub enum LengthError {
   Empty,
 }
 
-impl<Char> TryFrom<Errors<Char>> for Error<Char> {
+impl<Char, State> TryFrom<Errors<Char, State>> for Error<Char, State> {
   type Error = LengthError;
 
   #[inline]
-  fn try_from(value: Errors<Char>) -> Result<Self, Self::Error> {
+  fn try_from(value: Errors<Char, State>) -> Result<Self, Self::Error> {
     match value.len() {
       0 => Err(LengthError::Empty),
       1 => Ok(value.0.into_iter().next().unwrap()),

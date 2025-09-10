@@ -1,25 +1,19 @@
-use logos::Lexer;
-use logosky::utils::{PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use logos::{Lexer, Logos};
+use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
-use super::{Lexeme, Error, Errors, ExponentHint, FloatError, FloatHint, ErrorData, Token};
+use crate::lexer::error::{self, ExponentHint, FloatError, FloatHint};
 
-#[inline(always)]
-pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| Error::new(lexer.span(), e.into()))
-}
+type Error<Extras> = error::Error<char, Extras>;
+type Errors<Extras> = error::Errors<char, Extras>;
+type ErrorData<Extras> = error::ErrorData<char, Extras>;
 
 #[inline(always)]
-pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
-  lexer.extras.decrease();
-}
-
-#[inline(always)]
-pub(super) fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+pub(super) fn unterminated_spread_operator<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), Error<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   Err(Error::new(
     lexer.span(),
     ErrorData::UnterminatedSpreadOperator,
@@ -27,12 +21,13 @@ pub(super) fn unterminated_spread_operator<'a>(lexer: &mut Lexer<'a, Token<'a>>)
 }
 
 #[inline]
-pub(super) fn leading_zero_error<'a, E>(
-  lexer: &mut Lexer<'a, Token<'a>>,
+pub(super) fn leading_zero_error<'a, E, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> E,
-) -> Error
+) -> Error<Extras>
 where
-  E: Into<ErrorData>,
+  E: Into<ErrorData<Extras>>,
+  T: Logos<'a, Source = str>,
 {
   let slice = lexer.slice();
   let mut zeros = 0;
@@ -68,14 +63,15 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline(always)]
-pub(super) fn handle_leading_zero_and_number_suffix_error<'a, LE, SE>(
-  lexer: &mut Lexer<'a, Token<'a>>,
+pub(super) fn handle_leading_zero_and_number_suffix_error<'a, T, LE, SE, Extras>(
+  lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> LE,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> SE,
-) -> Result<&'a str, Errors>
+) -> Result<&'a str, Errors<Extras>>
 where
-  LE: Into<ErrorData>,
-  SE: Into<ErrorData>,
+  LE: Into<ErrorData<Extras>>,
+  SE: Into<ErrorData<Extras>>,
+  T: Logos<'a, Source = str>,
 {
   let err = leading_zero_error(lexer, leading_zeros);
   let mut errs = Errors::default();
@@ -91,9 +87,12 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(super) fn handle_float_missing_integer_part_error_and_suffix<'a>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-) -> Result<&'a str, Errors> {
+pub(super) fn handle_float_missing_integer_part_error_and_suffix<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Errors<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   let mut errs = Errors::default();
   errs.push(Error::new(
     lexer.span(),
@@ -110,7 +109,10 @@ pub(super) fn handle_float_missing_integer_part_error_and_suffix<'a>(
 }
 
 #[inline]
-pub(super) fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
+pub(super) fn fractional_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> Error<Extras>
+where
+  T: Logos<'a, Source = str>,
+{
   let remainder = lexer.remainder();
   let mut iter = remainder.chars();
 
@@ -171,15 +173,23 @@ pub(super) fn fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
 }
 
 #[inline(always)]
-pub(super) fn handle_fractional_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn handle_fractional_error<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Error<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   Err(fractional_error(lexer))
 }
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(super) fn handle_leading_zeros_and_fractional_error<'a>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-) -> Result<&'a str, Errors> {
+pub(super) fn handle_leading_zeros_and_fractional_error<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Errors<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
   let mut errs = Errors::with_capacity(2);
   errs.push(err);
@@ -188,7 +198,10 @@ pub(super) fn handle_leading_zeros_and_fractional_error<'a>(
 }
 
 #[inline]
-pub(super) fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
+pub(super) fn exponent_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> Error<Extras>
+where
+  T: Logos<'a, Source = str>,
+{
   let remainder = lexer.remainder();
   let mut iter = remainder.chars();
   let slice = lexer.slice();
@@ -254,15 +267,23 @@ pub(super) fn exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Error {
 }
 
 #[inline(always)]
-pub(super) fn handle_exponent_error<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<&'a str, Error> {
+pub(super) fn handle_exponent_error<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Error<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   Err(exponent_error(lexer))
 }
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(super) fn handle_leading_zeros_and_exponent_error<'a>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-) -> Result<&'a str, Errors> {
+pub(super) fn handle_leading_zeros_and_exponent_error<'a, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<&'a str, Errors<Extras>>
+where
+  T: Logos<'a, Source = str>,
+{
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
   let mut errs = Errors::with_capacity(2);
   errs.push(err);
@@ -271,12 +292,13 @@ pub(super) fn handle_leading_zeros_and_exponent_error<'a>(
 }
 
 #[inline]
-pub(super) fn handle_number_suffix<'a, E>(
-  lexer: &mut Lexer<'a, Token<'a>>,
+pub(super) fn handle_number_suffix<'a, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
-) -> Result<&'a str, Error>
+) -> Result<&'a str, Error<Extras>>
 where
-  E: Into<ErrorData>,
+  E: Into<ErrorData<Extras>>,
+  T: Logos<'a, Source = str>,
 {
   let remainder = lexer.remainder();
   let mut iter = remainder.chars();

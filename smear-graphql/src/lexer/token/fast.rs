@@ -1,42 +1,41 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logos::Logos;
-use logosky::utils::{
-  Lexeme,
-  recursion_tracker::RecursionLimiter,
+use logos::{Lexer, Logos};
+use logosky::utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter};
+
+use super::{
+  super::error::{self, *},
+  handlers::*,
+  string_token::*,
 };
-
-use super::super::error::{self, *};
-
-use handlers::*;
-use string_token::*;
-
-mod string_token;
-mod handlers;
 
 #[cfg(test)]
 mod tests;
 
-/// The error type for the GraphQL lexer based on the fast token.
-pub type Error = error::Error<char>;
-/// The error data for the GraphQL lexer based on the fast token.
-pub type ErrorData = error::ErrorData<char>;
-/// A container for storing multiple lexer errors.
-pub type Errors = error::Errors<char>;
+/// The error data type for lexing based on fast [`Token`].
+pub type ErrorData = error::ErrorData<char, RecursionLimitExceeded>;
+/// The error type for lexing based on fast [`Token`].
+pub type Error = error::Error<char, RecursionLimitExceeded>;
+/// A collection of errors of fast [`Token`].
+pub type Errors = error::Errors<char, RecursionLimitExceeded>;
+
+#[inline(always)]
+pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+  lexer.extras.increase();
+
+  lexer
+    .extras
+    .check()
+    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e)))
+}
+
+#[inline(always)]
+pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
+  lexer.extras.decrease();
+}
 
 /// Lexer for the GraphQL specification: http://spec.graphql.org/
 #[derive(
-  Logos,
-  Copy,
-  Clone,
-  Debug,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
+  Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
