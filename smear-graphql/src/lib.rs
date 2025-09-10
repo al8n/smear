@@ -13,4 +13,7 @@ pub mod cst;
 /// Lexer for Standard GraphQL
 pub mod lexer;
 
+/// Parser for Standard GraphQL.
+pub mod parser;
+
 pub use smear_parser::{parse, source::WithSource};

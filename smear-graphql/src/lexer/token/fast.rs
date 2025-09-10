@@ -1,6 +1,6 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logos::{Lexer, Logos};
-use logosky::utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter};
+use logosky::{Require, token::kind::Ident, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}};
 
 use super::{
   super::error::{self, *},
@@ -135,4 +135,74 @@ pub enum Token<'a> {
   StringLiteral(&'a str),
   #[token("\"\"\"", lex_block_string)]
   BlockStringLiteral(&'a str),
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(u16)]
+pub enum TokenKind {
+  Identifier,
+  Int,
+  Float,
+  String,
+  BlockString,
+  Dollar,
+  ParenOpen,
+  ParenClose,
+  Spread,
+  Colon,
+  Equals,
+  At,
+  BracketOpen,
+  BracketClose,
+  BraceOpen,
+  BraceClose,
+  Pipe,
+  Bang,
+  Ampersand,
+}
+
+impl<'a> logosky::Token<'a> for Token<'a> {
+  type Kind = TokenKind;
+}
+
+impl<'a> Token<'a> {
+  /// Returns the kind of the token.
+  #[inline]
+  pub const fn kind(&self) -> TokenKind {
+    match self {
+      Self::Identifier(_) => TokenKind::Identifier,
+      Self::IntegerLiteral(_) => TokenKind::Int,
+      Self::FloatLiteral(_) => TokenKind::Float,
+      Self::StringLiteral(_) => TokenKind::String,
+      Self::BlockStringLiteral(_) => TokenKind::BlockString,
+      Self::Dollar => TokenKind::Dollar,
+      Self::ParenOpen => TokenKind::ParenOpen,
+      Self::ParenClose => TokenKind::ParenClose,
+      Self::Spread => TokenKind::Spread,
+      Self::Colon => TokenKind::Colon,
+      Self::Equals => TokenKind::Equals,
+      Self::At => TokenKind::At,
+      Self::BracketOpen => TokenKind::BracketOpen,
+      Self::BracketClose => TokenKind::BracketClose,
+      Self::BraceOpen => TokenKind::BraceOpen,
+      Self::BraceClose => TokenKind::BraceClose,
+      Self::Pipe => TokenKind::Pipe,
+      Self::Bang => TokenKind::Bang,
+      Self::Ampersand => TokenKind::Ampersand,
+    }
+  }
+}
+
+impl<'a> From<Token<'a>> for TokenKind {
+  #[inline]
+  fn from(token: Token<'a>) -> Self {
+    TokenKind::from(&token)
+  }
+}
+
+impl<'a> From<&Token<'a>> for TokenKind {
+  #[inline]
+  fn from(token: &Token<'a>) -> Self {
+    token.kind()
+  }
 }
