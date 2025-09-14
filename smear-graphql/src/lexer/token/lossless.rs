@@ -3,31 +3,32 @@ use logos::{Lexer, Logos};
 use logosky::utils::tracker::{LimitExceeded, Tracker};
 
 use super::{
-  super::error::{self, *},
   handlers::*,
   string_token::*,
 };
+
+use crate::error::{self, *};
 
 #[cfg(test)]
 mod tests;
 
 /// The error data type for lexing based on lossless [`Token`].
-pub type ErrorData = error::ErrorData<char, LimitExceeded>;
+pub type LexerErrorData = error::LexerErrorData<char, LimitExceeded>;
 /// The error type for lexing based on lossless [`Token`].
-pub type Error = error::Error<char, LimitExceeded>;
+pub type LexerError = error::LexerError<char, LimitExceeded>;
 /// A collection of errors of lossless [`Token`].
-pub type Errors = error::Errors<char, LimitExceeded>;
+pub type LexerErrors = error::LexerErrors<char, LimitExceeded>;
 
 #[inline(always)]
 pub(super) fn increase_recursion_depth_and_token<'a>(
   lexer: &mut Lexer<'a, Token<'a>>,
-) -> Result<(), Error> {
+) -> Result<(), LexerError> {
   lexer.extras.increase_recursion();
   lexer.extras.increase_token();
   lexer
     .extras
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e)))
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e)))
 }
 
 #[inline(always)]
@@ -45,13 +46,13 @@ pub(super) fn increase_token<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
 #[inline(always)]
 fn tt_hook_and_then<'a, O>(
   lexer: &mut Lexer<'a, Token<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, Error>,
-) -> Result<O, Error> {
+  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, LexerError>,
+) -> Result<O, LexerError> {
   lexer
     .extras
     .token()
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e.into())))
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
     .and_then(|_| {
       f(lexer).inspect(|_| {
         increase_token(lexer);
@@ -63,13 +64,13 @@ fn tt_hook_and_then<'a, O>(
 #[inline(always)]
 fn tt_hook_and_then_into_errors<'a, O>(
   lexer: &mut Lexer<'a, Token<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, Errors>,
-) -> Result<O, Errors> {
+  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, LexerErrors>,
+) -> Result<O, LexerErrors> {
   lexer
     .extras
     .token()
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e.into())).into())
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())).into())
     .and_then(|_| {
       f(lexer).inspect(|_| {
         increase_token(lexer);
@@ -81,12 +82,12 @@ fn tt_hook_and_then_into_errors<'a, O>(
 fn tt_hook_map<'a, O>(
   lexer: &mut Lexer<'a, Token<'a>>,
   f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> O,
-) -> Result<O, Error> {
+) -> Result<O, LexerError> {
   lexer
     .extras
     .token()
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e.into())))
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
     .map(|_| {
       increase_token(lexer);
       f(lexer)
@@ -94,12 +95,12 @@ fn tt_hook_map<'a, O>(
 }
 
 #[inline(always)]
-fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
   lexer
     .extras
     .token()
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e.into())))
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
     .inspect(|_| {
       increase_token(lexer);
     })
@@ -113,12 +114,12 @@ fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
 #[try_unwrap(ref, ref_mut)]
 #[logos(
   extras = Tracker,
-  error(Errors, |lexer| match lexer.slice().chars().next() {
+  error(LexerErrors, |lexer| match lexer.slice().chars().next() {
     Some(ch) => {
       lexer.extras.increase_token();
-      Error::unknown_char(lexer.span().into(), ch, lexer.span().start)
+      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
     },
-    None => Error::unexpected_eoi(lexer.span().into()),
+    None => LexerError::unexpected_eoi(lexer.span().into()),
   }.into())
 )]
 pub enum Token<'a> {
@@ -237,10 +238,10 @@ pub enum Token<'a> {
     tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))
   })]
   #[token("-", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(Error::unexpected_char(lexer.span().into(), '-', lexer.span().start)))
+    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))
   })]
   #[token("+", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(Error::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
+    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
   })]
   IntegerLiteral(&'a str),
   #[token("\"", |lexer| { tt_hook_and_then(lexer, lex_inline_string) })]

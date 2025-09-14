@@ -1,31 +1,32 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logos::{Lexer, Logos};
-use logosky::{Require, token::kind::Ident, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}};
+use logosky::{utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}};
 
 use super::{
-  super::error::{self, *},
   handlers::*,
   string_token::*,
 };
+
+use crate::error::{self, *};
 
 #[cfg(test)]
 mod tests;
 
 /// The error data type for lexing based on fast [`Token`].
-pub type ErrorData = error::ErrorData<char, RecursionLimitExceeded>;
+pub type LexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on fast [`Token`].
-pub type Error = error::Error<char, RecursionLimitExceeded>;
+pub type LexerError = error::LexerError<char, RecursionLimitExceeded>;
 /// A collection of errors of fast [`Token`].
-pub type Errors = error::Errors<char, RecursionLimitExceeded>;
+pub type LexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
 
 #[inline(always)]
-pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), Error> {
+pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
   lexer.extras.increase();
 
   lexer
     .extras
     .check()
-    .map_err(|e| Error::new(lexer.span(), ErrorData::State(e)))
+    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e)))
 }
 
 #[inline(always)]
@@ -42,9 +43,9 @@ pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
 #[logos(
   extras = RecursionLimiter,
   skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
-  error(Errors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => Error::unknown_char(lexer.span().into(), ch, lexer.span().start),
-    None => Error::unexpected_eoi(lexer.span().into()),
+  error(LexerErrors, |lexer| match lexer.slice().chars().next() {
+    Some(ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
+    None => LexerError::unexpected_eoi(lexer.span().into()),
   }.into())
 )]
 pub enum Token<'a> {
@@ -128,8 +129,8 @@ pub enum Token<'a> {
   /// Integer literal token
   #[regex("-?(0|[1-9][0-9]*)", |lexer| handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
   #[regex("-?0[0-9]+", |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))]
-  #[token("-", |lexer| Err(Error::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
-  #[token("+", |lexer| Err(Error::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
+  #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
+  #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   IntegerLiteral(&'a str),
   #[token("\"", lex_inline_string)]
   StringLiteral(&'a str),
@@ -163,6 +164,7 @@ pub enum TokenKind {
 
 impl<'a> logosky::Token<'a> for Token<'a> {
   type Kind = TokenKind;
+  type Char = char;
 }
 
 impl<'a> Token<'a> {

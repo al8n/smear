@@ -10,6 +10,9 @@ extern crate std;
 /// Standards-compliant GraphQL parser combinators.
 pub mod cst;
 
+/// Error types.
+pub mod error;
+
 /// Lexer for Standard GraphQL
 pub mod lexer;
 

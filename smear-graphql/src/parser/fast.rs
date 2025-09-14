@@ -1,6 +1,6 @@
 
 use logosky::{Require, token::kind::Ident, utils::Span};
 
-use crate::{lexer::token::fast::Token, parser::error::Error};
+use crate::lexer::token::fast::Token;
 
 

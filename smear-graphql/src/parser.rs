@@ -8,3 +8,6 @@ pub mod lossless;
 pub mod error;
 
 mod name;
+mod float;
+mod int;
+mod string;

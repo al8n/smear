@@ -28,8 +28,8 @@
 use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span};
 
-use crate::lexer::error::{
-  Error, InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError,
+use crate::error::{
+  LexerError, InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError,
   StringErrors, UnicodeError,
 };
 
@@ -251,7 +251,7 @@ fn handle_invalid_escaped_character<'a>(
 
 pub(super) fn lex_inline_string<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Error<char, Extras>>
+) -> Result<&'a str, LexerError<char, Extras>>
 where
   T: Logos<'a, Source = str>,
 {
@@ -268,7 +268,7 @@ where
       Ok(StringToken::Quote) => {
         lexer.bump(string_lexer.span().end);
         if !errs.is_empty() {
-          return Err(Error::new(lexer.span(), errs.into()));
+          return Err(LexerError::new(lexer.span(), errs.into()));
         }
         return Ok(lexer.slice());
       }
@@ -295,7 +295,7 @@ where
 
   lexer.bump(string_lexer.span().end);
   errs.push(StringError::unterminated_inline_string());
-  Err(Error::new(lexer.span(), errs.into()))
+  Err(LexerError::new(lexer.span(), errs.into()))
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -317,7 +317,7 @@ enum BlockStringToken {
 
 pub(super) fn lex_block_string<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Error<char, Extras>>
+) -> Result<&'a str, LexerError<char, Extras>>
 where
   T: Logos<'a, Source = str>,
 {
@@ -343,5 +343,5 @@ where
 
   lexer.bump(string_lexer.span().end);
   errs.push(StringError::unterminated_block_string());
-  Err(Error::new(lexer.span(), errs.into()))
+  Err(LexerError::new(lexer.span(), errs.into()))
 }

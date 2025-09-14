@@ -1,22 +1,22 @@
 use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
-use crate::lexer::error::{self, ExponentHint, FloatError, FloatHint};
+use crate::error::{self, ExponentHint, FloatError, FloatHint};
 
-type Error<Extras> = error::Error<char, Extras>;
-type Errors<Extras> = error::Errors<char, Extras>;
-type ErrorData<Extras> = error::ErrorData<char, Extras>;
+type LexerError<Extras> = error::LexerError<char, Extras>;
+type LexerErrors<Extras> = error::LexerErrors<char, Extras>;
+type LexerErrorData<Extras> = error::LexerErrorData<char, Extras>;
 
 #[inline(always)]
 pub(super) fn unterminated_spread_operator<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<(), Error<Extras>>
+) -> Result<(), LexerError<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
-  Err(Error::new(
+  Err(LexerError::new(
     lexer.span(),
-    ErrorData::UnterminatedSpreadOperator,
+    LexerErrorData::UnterminatedSpreadOperator,
   ))
 }
 
@@ -24,9 +24,9 @@ where
 pub(super) fn leading_zero_error<'a, E, T, Extras>(
   lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> E,
-) -> Error<Extras>
+) -> LexerError<Extras>
 where
-  E: Into<ErrorData<Extras>>,
+  E: Into<LexerErrorData<Extras>>,
   T: Logos<'a, Source = str>,
 {
   let slice = lexer.slice();
@@ -58,7 +58,7 @@ where
     Lexeme::Span(Span::from(zero_start_at..(zero_start_at + zeros)))
   };
 
-  Error::new(lexer.span(), leading_zeros(l).into())
+  LexerError::new(lexer.span(), leading_zeros(l).into())
 }
 
 #[allow(clippy::result_large_err)]
@@ -67,14 +67,14 @@ pub(super) fn handle_leading_zero_and_number_suffix_error<'a, T, LE, SE, Extras>
   lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> LE,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> SE,
-) -> Result<&'a str, Errors<Extras>>
+) -> Result<&'a str, LexerErrors<Extras>>
 where
-  LE: Into<ErrorData<Extras>>,
-  SE: Into<ErrorData<Extras>>,
+  LE: Into<LexerErrorData<Extras>>,
+  SE: Into<LexerErrorData<Extras>>,
   T: Logos<'a, Source = str>,
 {
   let err = leading_zero_error(lexer, leading_zeros);
-  let mut errs = Errors::default();
+  let mut errs = LexerErrors::default();
   errs.push(err);
   match handle_number_suffix(lexer, unexpected_suffix) {
     Ok(_) => Err(errs),
@@ -89,14 +89,14 @@ where
 #[inline]
 pub(super) fn handle_float_missing_integer_part_error_and_suffix<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Errors<Extras>>
+) -> Result<&'a str, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
-  let mut errs = Errors::default();
-  errs.push(Error::new(
+  let mut errs = LexerErrors::default();
+  errs.push(LexerError::new(
     lexer.span(),
-    ErrorData::Float(FloatError::MissingIntegerPart),
+    LexerErrorData::Float(FloatError::MissingIntegerPart),
   ));
 
   match handle_number_suffix(lexer, FloatError::UnexpectedSuffix) {
@@ -109,7 +109,7 @@ where
 }
 
 #[inline]
-pub(super) fn fractional_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> Error<Extras>
+pub(super) fn fractional_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
   T: Logos<'a, Source = str>,
 {
@@ -141,7 +141,7 @@ where
           Lexeme::Span(Span::from(span.end..(span.end + curr)))
         };
 
-        return Error::float(
+        return LexerError::float(
           lexer.span().into(),
           UnexpectedLexeme::new(l, FloatHint::Fractional).into(),
         );
@@ -169,13 +169,13 @@ where
     }
   };
 
-  Error::float(lexer.span().into(), err)
+  LexerError::float(lexer.span().into(), err)
 }
 
 #[inline(always)]
 pub(super) fn handle_fractional_error<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Error<Extras>>
+) -> Result<&'a str, LexerError<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
@@ -186,19 +186,19 @@ where
 #[inline]
 pub(super) fn handle_leading_zeros_and_fractional_error<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Errors<Extras>>
+) -> Result<&'a str, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
-  let mut errs = Errors::with_capacity(2);
+  let mut errs = LexerErrors::with_capacity(2);
   errs.push(err);
   errs.push(fractional_error(lexer));
   Err(errs)
 }
 
 #[inline]
-pub(super) fn exponent_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> Error<Extras>
+pub(super) fn exponent_error<'a, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
   T: Logos<'a, Source = str>,
 {
@@ -237,7 +237,7 @@ where
           Lexeme::Span(Span::from(span.end..(span.end + curr)))
         };
 
-        return Error::float(lexer.span().into(), UnexpectedLexeme::new(l, hint()).into());
+        return LexerError::float(lexer.span().into(), UnexpectedLexeme::new(l, hint()).into());
       }
 
       // we reached the end of remainder
@@ -263,13 +263,13 @@ where
     }
   };
 
-  Error::float(lexer.span().into(), err)
+  LexerError::float(lexer.span().into(), err)
 }
 
 #[inline(always)]
 pub(super) fn handle_exponent_error<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Error<Extras>>
+) -> Result<&'a str, LexerError<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
@@ -280,12 +280,12 @@ where
 #[inline]
 pub(super) fn handle_leading_zeros_and_exponent_error<'a, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, Errors<Extras>>
+) -> Result<&'a str, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = str>,
 {
   let err = leading_zero_error(lexer, FloatError::LeadingZeros);
-  let mut errs = Errors::with_capacity(2);
+  let mut errs = LexerErrors::with_capacity(2);
   errs.push(err);
   errs.push(exponent_error(lexer));
   Err(errs)
@@ -295,9 +295,9 @@ where
 pub(super) fn handle_number_suffix<'a, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
-) -> Result<&'a str, Error<Extras>>
+) -> Result<&'a str, LexerError<Extras>>
 where
-  E: Into<ErrorData<Extras>>,
+  E: Into<LexerErrorData<Extras>>,
   T: Logos<'a, Source = str>,
 {
   let remainder = lexer.remainder();
@@ -331,7 +331,7 @@ where
         } else {
           Lexeme::Span(Span::from(span.end..(span.end + curr)))
         };
-        return Err(Error::new(lexer.span(), unexpected_suffix(l).into()));
+        return Err(LexerError::new(lexer.span(), unexpected_suffix(l).into()));
       }
 
       // we reached the end of remainder
@@ -347,7 +347,7 @@ where
       };
 
       // return the range of the invalid sequence
-      Err(Error::new(lexer.span(), unexpected_suffix(l).into()))
+      Err(LexerError::new(lexer.span(), unexpected_suffix(l).into()))
     }
     // For other characters, just return the float literal
     Some(_) | None => Ok(lexer.slice()),

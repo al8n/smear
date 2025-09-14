@@ -612,11 +612,16 @@ impl<Char> StringErrors<Char> {
   }
 }
 
+pub struct UnexpectedToken<T, TK> {
+  pub found: T,
+  pub expected: TK,
+}
+
 /// The data of the lexer error.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<Char = char, State = ()> {
+pub enum LexerErrorData<Char = char, StateError = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
@@ -637,21 +642,21 @@ pub enum ErrorData<Char = char, State = ()> {
   RecursionLimitExceeded(RecursionLimitExceeded),
   /// The lexer state related error.
   #[from(skip)]
-  State(State),
+  State(StateError),
   /// Not a valid UTF-8 source.
   InvalidUtf8(core::str::Utf8Error),
   /// Other error.
   Other(Cow<'static, str>),
 }
 
-impl<Char, State> Default for ErrorData<Char, State> {
+impl<Char, StateError> Default for LexerErrorData<Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
     Self::Other(Cow::Borrowed("unknown"))
   }
 }
 
-impl<Char, State> ErrorData<Char, State> {
+impl<Char, StateError> LexerErrorData<Char, StateError> {
   /// Create a new error data with the given message.
   #[inline]
   pub fn other(message: impl Into<Cow<'static, str>>) -> Self {
@@ -697,28 +702,28 @@ impl<Char, State> ErrorData<Char, State> {
 
 /// A lexer error with span and data.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error<Char = char, State = ()> {
+pub struct LexerError<Char = char, StateError = ()> {
   span: Span,
-  data: ErrorData<Char, State>,
+  data: LexerErrorData<Char, StateError>,
 }
 
-impl<Char, State> Default for Error<Char, State> {
+impl<Char, StateError> Default for LexerError<Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
     Self::unexpected_eoi(Span::from(0..0))
   }
 }
 
-impl<Char, State> Error<Char, State> {
+impl<Char, StateError> LexerError<Char, StateError> {
   /// Create a new error with the given span and data.
   #[inline]
-  pub const fn const_new(span: Span, data: ErrorData<Char, State>) -> Self {
+  pub const fn const_new(span: Span, data: LexerErrorData<Char, StateError>) -> Self {
     Self { span, data }
   }
 
   /// Create a new error with the given span and data.
   #[inline]
-  pub fn new(span: impl Into<Span>, data: ErrorData<Char, State>) -> Self {
+  pub fn new(span: impl Into<Span>, data: LexerErrorData<Char, StateError>) -> Self {
     Self {
       span: span.into(),
       data,
@@ -728,43 +733,43 @@ impl<Char, State> Error<Char, State> {
   /// Creates a new float error.
   #[inline]
   pub const fn float(span: Span, error: FloatError<Char>) -> Self {
-    Self::const_new(span, ErrorData::Float(error))
+    Self::const_new(span, LexerErrorData::Float(error))
   }
 
   /// Creates a new int error.
   #[inline]
   pub const fn int(span: Span, error: IntError<Char>) -> Self {
-    Self::const_new(span, ErrorData::Int(error))
+    Self::const_new(span, LexerErrorData::Int(error))
   }
 
   /// Creates a new unexpected lexeme error.
   #[inline]
   pub const fn unexpected_lexeme(span: Span, lexeme: Lexeme<Char>) -> Self {
-    Self::const_new(span, ErrorData::UnexpectedLexeme(lexeme))
+    Self::const_new(span, LexerErrorData::UnexpectedLexeme(lexeme))
   }
 
   /// Creates a new unknown lexeme error.
   #[inline]
   pub const fn unknown_lexeme(span: Span, lexeme: Lexeme<Char>) -> Self {
-    Self::const_new(span, ErrorData::UnknownLexeme(lexeme))
+    Self::const_new(span, LexerErrorData::UnknownLexeme(lexeme))
   }
 
   /// Creates a new unexpected lexeme error from a positioned character.
   #[inline]
   pub const fn unexpected_char(span: Span, char: Char, position: usize) -> Self {
-    Self::const_new(span, ErrorData::unexpected_char(char, position))
+    Self::const_new(span, LexerErrorData::unexpected_char(char, position))
   }
 
   /// Creates a new unknown lexeme error from a positioned character.
   #[inline]
   pub const fn unknown_char(span: Span, char: Char, position: usize) -> Self {
-    Self::const_new(span, ErrorData::unknown_char(char, position))
+    Self::const_new(span, LexerErrorData::unknown_char(char, position))
   }
 
   /// Creates an End of Input error.
   #[inline]
   pub const fn unexpected_eoi(span: Span) -> Self {
-    Self::const_new(span, ErrorData::UnexpectedEndOfInput)
+    Self::const_new(span, LexerErrorData::UnexpectedEndOfInput)
   }
 
   /// Get the span of the error. The span contains the start and end byte indices in the source,
@@ -776,61 +781,61 @@ impl<Char, State> Error<Char, State> {
 
   /// Get the data of the error.
   #[inline]
-  pub const fn data(&self) -> &ErrorData<Char, State> {
+  pub const fn data(&self) -> &LexerErrorData<Char, StateError> {
     &self.data
   }
 
   /// Get the mutable data of the error.
   #[inline]
-  pub fn data_mut(&mut self) -> &mut ErrorData<Char, State> {
+  pub fn data_mut(&mut self) -> &mut LexerErrorData<Char, StateError> {
     &mut self.data
   }
 
   /// Consume the error and return the error data.
   #[inline]
-  pub fn into_data(self) -> ErrorData<Char, State> {
+  pub fn into_data(self) -> LexerErrorData<Char, StateError> {
     self.data
   }
 
   /// Consumes the error and returns its components.
   #[inline]
-  pub fn into_components(self) -> (Span, ErrorData<Char, State>) {
+  pub fn into_components(self) -> (Span, LexerErrorData<Char, StateError>) {
     (self.span, self.data)
   }
 }
 
-impl<Char, State> From<Error<Char, State>> for ErrorData<Char, State> {
+impl<Char, StateError> From<LexerError<Char, StateError>> for LexerErrorData<Char, StateError> {
   #[inline]
-  fn from(error: Error<Char, State>) -> Self {
+  fn from(error: LexerError<Char, StateError>) -> Self {
     error.into_data()
   }
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<Char = char, State = ()> = smallvec::SmallVec<[Error<Char, State>; 1]>;
+type DefaultErrorsContainer<Char = char, StateError = ()> = smallvec::SmallVec<[LexerError<Char, StateError>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<Char = char, State = ()> = std::vec::Vec<Error<Char, State>>;
+type DefaultErrorsContainer<Char = char, StateError = ()> = std::vec::Vec<LexerError<Char, StateError>>;
 
 /// A container for storing multiple lexer errors.
 #[derive(Debug, Clone, PartialEq, Eq, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct Errors<Char = char, State = ()>(DefaultErrorsContainer<Char, State>);
+pub struct LexerErrors<Char = char, StateError = ()>(DefaultErrorsContainer<Char, StateError>);
 
-impl<Char, State> Default for Errors<Char, State> {
+impl<Char, StateError> Default for LexerErrors<Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }
 }
 
-impl<Char, State> From<Error<Char, State>> for Errors<Char, State> {
+impl<Char, StateError> From<LexerError<Char, StateError>> for LexerErrors<Char, StateError> {
   #[inline]
-  fn from(error: Error<Char, State>) -> Self {
+  fn from(error: LexerError<Char, StateError>) -> Self {
     Self(core::iter::once(error).collect())
   }
 }
 
-impl<Char, State> Errors<Char, State> {
+impl<Char, StateError> LexerErrors<Char, StateError> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
@@ -849,11 +854,11 @@ pub enum LengthError {
   Empty,
 }
 
-impl<Char, State> TryFrom<Errors<Char, State>> for Error<Char, State> {
+impl<Char, StateError> TryFrom<LexerErrors<Char, StateError>> for LexerError<Char, StateError> {
   type Error = LengthError;
 
   #[inline]
-  fn try_from(value: Errors<Char, State>) -> Result<Self, Self::Error> {
+  fn try_from(value: LexerErrors<Char, StateError>) -> Result<Self, Self::Error> {
     match value.len() {
       0 => Err(LengthError::Empty),
       1 => Ok(value.0.into_iter().next().unwrap()),

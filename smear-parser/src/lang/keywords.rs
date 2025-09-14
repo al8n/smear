@@ -91,7 +91,7 @@ word!(
 //               >,
 //             E: $crate::__private::chumsky::extra::ParserExtra<'src, I>,
 //             <E as $crate::__private::chumsky::extra::ParserExtra<'src, I>>::Error: ::core::convert::From<
-//               $crate::__private::lexer::LexerError<
+//               $crate::__private::lexer::Error<
 //                 'src,
 //                 <I as $crate::__private::lexer::Tokenizer<'src>>::Text,
 //                 <I as $crate::__private::chumsky::input::Input<'src>>::Token,
