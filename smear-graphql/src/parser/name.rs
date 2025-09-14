@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use logosky::utils::{sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree, Span};
+use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Name<'a> {
@@ -31,7 +31,6 @@ impl<'a> core::ops::Deref for Name<'a> {
   }
 }
 
-
 impl<'a> Name<'a> {
   /// Creates a new name.
   #[inline]
@@ -61,13 +60,24 @@ impl<'a> DisplaySDL for Name<'a> {
 
 impl<'a> DisplaySyntaxTree for Name<'a> {
   #[inline]
-  fn fmt(&self, level: usize, indent: usize, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
     let mut padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
     writeln!(f, "- NAME@{}..{}", self.span.start(), self.span.end())?;
     padding += indent;
     write!(f, "{:indent$}", "", indent = padding)?;
-    write!(f, "- IDENT@{}..{} \"{}\"", self.span.start(), self.span.end(), self.value)
+    write!(
+      f,
+      "- IDENT@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
+      self.value
+    )
   }
 }
 
@@ -78,7 +88,7 @@ fn test_name_display_syntax_tree() {
   assert_eq!(
     output,
     r#"- NAME@0..4
-    - IDENT@0..4 "Test""#  
+    - IDENT@0..4 "Test""#
   );
 }
 

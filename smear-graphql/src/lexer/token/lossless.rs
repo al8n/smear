@@ -2,10 +2,7 @@ use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logos::{Lexer, Logos};
 use logosky::utils::tracker::{LimitExceeded, Tracker};
 
-use super::{
-  handlers::*,
-  string_token::*,
-};
+use super::{handlers::*, string_token::*};
 
 use crate::error::{self, *};
 

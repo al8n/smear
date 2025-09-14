@@ -1,11 +1,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logos::{Lexer, Logos};
-use logosky::{utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}};
+use logosky::utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter};
 
-use super::{
-  handlers::*,
-  string_token::*,
-};
+use super::{handlers::*, string_token::*};
 
 use crate::error::{self, *};
 
@@ -20,7 +17,9 @@ pub type LexerError = error::LexerError<char, RecursionLimitExceeded>;
 pub type LexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
 
 #[inline(always)]
-pub(super) fn increase_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
+pub(super) fn increase_recursion_depth<'a>(
+  lexer: &mut Lexer<'a, Token<'a>>,
+) -> Result<(), LexerError> {
   lexer.extras.increase();
 
   lexer
@@ -165,6 +164,11 @@ pub enum TokenKind {
 impl<'a> logosky::Token<'a> for Token<'a> {
   type Kind = TokenKind;
   type Char = char;
+
+  #[inline(always)]
+  fn kind(&self) -> Self::Kind {
+    self.kind()
+  }
 }
 
 impl<'a> Token<'a> {

@@ -2,7 +2,7 @@ use logos::{Lexer, Logos, Source};
 use logosky::utils::Span;
 
 use crate::error::{
-  LexerErrorData, LexerErrors, ExponentHint, FloatError, FloatHint, IntError, LineTerminatorHint,
+  ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,
   UnpairedSurrogateHint, UnterminatedHint,
 };
 

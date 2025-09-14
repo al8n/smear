@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use logosky::utils::{sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree, Span};
+use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Float<'a> {
@@ -60,10 +60,21 @@ impl<'a> DisplaySDL for Float<'a> {
 
 impl<'a> DisplaySyntaxTree for Float<'a> {
   #[inline]
-  fn fmt(&self, level: usize, indent: usize, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
     let padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(f, "- FLOAT@{}..{} \"{}\"", self.span.start(), self.span.end(), self.as_str())
+    writeln!(
+      f,
+      "- FLOAT@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
+      self.as_str()
+    )
   }
 }
 

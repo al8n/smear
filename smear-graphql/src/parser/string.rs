@@ -1,9 +1,12 @@
 use core::fmt::Display;
 
 use chumsky::{Parser, extra::Full, prelude::any};
-use logosky::{Lexed, TokenStream, Tokenizer, utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree}};
+use logos::Logos;
+use logosky::{
+  Lexed, Token, TokenStream, Tokenizer, utils::{Span, recursion_tracker::RecursionLimitExceeded, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree}
+};
 
-use crate::lexer::token::fast;
+use crate::{error::{Err, Error, Errors}, lexer::token::fast};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Kind {
@@ -55,27 +58,27 @@ impl<'a> StringValue<'a> {
     self.content
   }
 
-  pub fn parser() -> impl Parser<'a, TokenStream<'a, fast::Token<'a>>, Self, super::ParserExtra<'a, fast::Token<'a>>>
-  {
-    any().try_map(|res, span| {
-      match res {
-        Lexed::Token(tok) => {
-          match tok {
-            fast::Token::StringLiteral(data) => {
-              todo!()
-            },
-            fast::Token::BlockStringLiteral(data) => {
-              todo!()
-            },
-            _ => Err(todo!()),
-          }
-        },
-        Lexed::Error(err) => {
-          todo!()
-        }
-      }
-    })
-  }
+  // pub fn parser<I, T>()
+  // -> impl Parser<'a, I, Self, Err<T, T::Kind, T::Char, T::Extras>>
+  // where
+  //   T: Token<'a>,
+  //   I: Tokenizer<'a, Token = Lexed<'a, T>>,
+  // {
+  //   any().try_map(|res, span| match res {
+  //     Lexed::Token(tok) => match tok {
+  //       fast::Token::StringLiteral(data) => {
+  //         todo!()
+  //       }
+  //       fast::Token::BlockStringLiteral(data) => {
+  //         todo!()
+  //       }
+  //       _ => Err(todo!()),
+  //     },
+  //     Lexed::Error(err) => {
+  //       todo!()
+  //     }
+  //   })
+  // }
 }
 
 impl<'a> DisplaySDL for StringValue<'a> {
@@ -87,9 +90,60 @@ impl<'a> DisplaySDL for StringValue<'a> {
 
 impl<'a> DisplaySyntaxTree for StringValue<'a> {
   #[inline]
-  fn fmt(&self, level: usize, indent: usize, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
     let padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(f, "- STRING@{}..{} \"{}\"", self.span.start(), self.span.end(), self.raw)
+    writeln!(
+      f,
+      "- STRING@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
+      self.raw
+    )
+  }
+}
+
+pub trait Parseable<'a, I, E> {
+  type Token: Token<'a>;
+
+  fn parser() -> impl Parser<'a, I, Self, E>
+  where
+    Self: Sized,
+    I: Tokenizer<'a, Token = Lexed<'a, Self::Token>, Span = Span>,
+    E: chumsky::extra::ParserExtra<'a, I>;
+}
+
+impl<'a> Parseable<'a, TokenStream<'a, fast::Token<'a>>, Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>> for StringValue<'a> {
+  type Token = fast::Token<'a>;
+
+  fn parser() -> impl Parser<'a, TokenStream<'a, fast::Token<'a>>, Self, Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>>
+  where
+    Self: Sized,
+    TokenStream<'a, fast::Token<'a>>: Tokenizer<'a, Token = Lexed<'a, Self::Token>>,
+    Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>: chumsky::extra::ParserExtra<'a, TokenStream<'a, fast::Token<'a>>>
+  {
+    any().try_map(|res, span: Span| match res {
+      Lexed::Token(tok) => match tok {
+        fast::Token::StringLiteral(raw) => Ok(StringValue {
+          span,
+          raw,
+          content: raw,
+          kind: Kind::Inline,
+        }),
+        fast::Token::BlockStringLiteral(raw) => Ok(StringValue {
+          span,
+          raw,
+          content: raw,
+          kind: Kind::Block,
+        }),
+        tok => Err(Error::unexpected_token(tok, fast::TokenKind::String, span)),
+      },
+      Lexed::Error(err) => todo!(),
+    })  
   }
 }

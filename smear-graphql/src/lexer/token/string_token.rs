@@ -29,7 +29,7 @@ use logos::{Lexer, Logos};
 use logosky::utils::{Lexeme, PositionedChar, Span};
 
 use crate::error::{
-  LexerError, InvalidUnicodeHexDigits, InvalidUnicodeSequence, LineTerminatorHint, StringError,
+  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, LineTerminatorHint, StringError,
   StringErrors, UnicodeError,
 };
 

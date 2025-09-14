@@ -812,10 +812,12 @@ impl<Char, StateError> From<LexerError<Char, StateError>> for LexerErrorData<Cha
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<Char = char, StateError = ()> = smallvec::SmallVec<[LexerError<Char, StateError>; 1]>;
+type DefaultErrorsContainer<Char = char, StateError = ()> =
+  smallvec::SmallVec<[LexerError<Char, StateError>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<Char = char, StateError = ()> = std::vec::Vec<LexerError<Char, StateError>>;
+type DefaultErrorsContainer<Char = char, StateError = ()> =
+  std::vec::Vec<LexerError<Char, StateError>>;
 
 /// A container for storing multiple lexer errors.
 #[derive(Debug, Clone, PartialEq, Eq, From, Into, Deref, DerefMut, AsMut, AsRef)]
