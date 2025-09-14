@@ -103,6 +103,38 @@ fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
     })
 }
 
+/// The token kind for lossless lexing.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(u16)]
+pub enum TokenKind {
+  Ampersand,
+  At,
+  BraceClose,
+  BraceOpen,
+  BracketClose,
+  BracketOpen,
+  ParenClose,
+  ParenOpen,
+  Bang,
+  Colon,
+  Comma,
+  Dollar,
+  Equals,
+  Float,
+  Identifier,
+  Int,
+  NewLine,
+  CarriageReturnNewLine,
+  CarriageReturn,
+  Space,
+  Tab,
+  BOM,
+  Pipe,
+  Spread,
+  String,
+  Comment,
+}
+
 /// Lexer for the GraphQL specification: http://spec.graphql.org/
 #[derive(
   Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
@@ -223,7 +255,7 @@ pub enum Token<'a> {
   #[regex("-?(0|[1-9][0-9]*)\\.", |lexer| tt_hook_and_then(lexer, handle_fractional_error))]
   #[regex("-?0[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
   #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
-  FloatLiteral(&'a str),
+  Float(&'a str),
 
   /// Identifier token
   #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice())  })]
@@ -240,11 +272,49 @@ pub enum Token<'a> {
   #[token("+", |lexer| {
     tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
   })]
-  IntegerLiteral(&'a str),
+  Int(&'a str),
   #[token("\"", |lexer| { tt_hook_and_then(lexer, lex_inline_string) })]
   StringLiteral(&'a str),
   #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, lex_block_string) })]
   BlockStringLiteral(&'a str),
+}
+
+impl<'a> logosky::Token<'a> for Token<'a> {
+  type Kind = TokenKind;
+  type Char = char;
+
+  #[inline(always)]
+  fn kind(&self) -> Self::Kind {
+    match self {
+      Self::Ampersand => TokenKind::Ampersand,
+      Self::At => TokenKind::At,
+      Self::BraceClose => TokenKind::BraceClose,
+      Self::BraceOpen => TokenKind::BraceOpen,
+      Self::BracketClose => TokenKind::BracketClose,
+      Self::BracketOpen => TokenKind::BracketOpen,
+      Self::ParenClose => TokenKind::ParenClose,
+      Self::ParenOpen => TokenKind::ParenOpen,
+      Self::Bang => TokenKind::Bang,
+      Self::Colon => TokenKind::Colon,
+      Self::Comma => TokenKind::Comma,
+      Self::Dollar => TokenKind::Dollar,
+      Self::Equals => TokenKind::Equals,
+      Self::Float(_) => TokenKind::Float,
+      Self::Identifier(_) => TokenKind::Identifier,
+      Self::Int(_) => TokenKind::Int,
+      Self::NewLine => TokenKind::NewLine,
+      Self::CarriageReturnNewLine => TokenKind::CarriageReturnNewLine,
+      Self::CarriageReturn => TokenKind::CarriageReturn,
+      Self::Space => TokenKind::Space,
+      Self::Tab => TokenKind::Tab,
+      Self::BOM => TokenKind::BOM,
+      Self::Pipe => TokenKind::Pipe,
+      Self::Spread => TokenKind::Spread,
+      Self::StringLiteral(_) => TokenKind::String,
+      Self::BlockStringLiteral(_) => TokenKind::String,
+      Self::Comment(_) => TokenKind::Comment,
+    }
+  }
 }
 
 impl<'a> Token<'a> {

@@ -1,0 +1,67 @@
+use chumsky::{Parser, extra::ParserExtra, prelude::any};
+use logosky::{Lexed, Parseable, TokenStream, Tokenizer};
+
+use crate::{
+  error::{Error, Errors},
+  parser::string::{Kind, StringValue},
+};
+
+use super::*;
+
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for StringValue<'a> {
+  type Token = Token<'a>;
+  type Error = Errors<Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  where
+    Self: Sized,
+    TokenStream<'a, Token<'a>>: Tokenizer<'a, Self::Token>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+  {
+    any().try_map(|res, span: Span| match res {
+      Lexed::Token(tok) => Ok(match tok {
+        Token::StringLiteral(raw) => {
+          StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
+        }
+        Token::BlockStringLiteral(raw) => {
+          StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
+        }
+        tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
+      }),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+    })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_string_value_parser() {
+    let parser = StringValue::parser::<FastParserExtra>();
+    let input = r#""Hello, World!""#;
+    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    assert_eq!(parsed.as_str(), "Hello, World!");
+    assert_eq!(parsed.kind, Kind::Inline);
+    assert_eq!(parsed.span(), Span::new(0, 15));
+    assert_eq!(parsed.raw, r#""Hello, World!""#);
+  }
+
+  #[test]
+  fn test_block_string_value_parser() {
+    let parser = StringValue::parser::<FastParserExtra>();
+    let input = r#""""Hello,
+World!""""#;
+    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    assert_eq!(parsed.as_str(), "Hello,\nWorld!");
+    assert_eq!(parsed.kind, Kind::Block);
+    assert_eq!(parsed.span(), Span::new(0, 19));
+    assert_eq!(
+      parsed.raw,
+      r#""""Hello,
+World!""""#
+    );
+  }
+}

@@ -119,7 +119,7 @@ pub enum Token<'a> {
   #[regex("-?(0|[1-9][0-9]*)\\.", handle_fractional_error)]
   #[regex("-?0[0-9]+[eE][+-]?", handle_leading_zeros_and_exponent_error)]
   #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", handle_exponent_error)]
-  FloatLiteral(&'a str),
+  Float(&'a str),
 
   /// Identifier token
   #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
@@ -130,7 +130,7 @@ pub enum Token<'a> {
   #[regex("-?0[0-9]+", |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))]
   #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
-  IntegerLiteral(&'a str),
+  Int(&'a str),
   #[token("\"", lex_inline_string)]
   StringLiteral(&'a str),
   #[token("\"\"\"", lex_block_string)]
@@ -177,8 +177,8 @@ impl<'a> Token<'a> {
   pub const fn kind(&self) -> TokenKind {
     match self {
       Self::Identifier(_) => TokenKind::Identifier,
-      Self::IntegerLiteral(_) => TokenKind::Int,
-      Self::FloatLiteral(_) => TokenKind::Float,
+      Self::Int(_) => TokenKind::Int,
+      Self::Float(_) => TokenKind::Float,
       Self::StringLiteral(_) => TokenKind::String,
       Self::BlockStringLiteral(_) => TokenKind::BlockString,
       Self::Dollar => TokenKind::Dollar,

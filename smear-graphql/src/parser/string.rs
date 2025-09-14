@@ -1,12 +1,6 @@
 use core::fmt::Display;
 
-use chumsky::{Parser, extra::Full, prelude::any};
-use logos::Logos;
-use logosky::{
-  Lexed, Token, TokenStream, Tokenizer, utils::{Span, recursion_tracker::RecursionLimitExceeded, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree}
-};
-
-use crate::{error::{Err, Error, Errors}, lexer::token::fast};
+use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Kind {
@@ -46,6 +40,16 @@ impl<'a> core::ops::Deref for StringValue<'a> {
 }
 
 impl<'a> StringValue<'a> {
+  #[inline(always)]
+  pub(crate) const fn new(span: Span, raw: &'a str, content: &'a str, kind: Kind) -> Self {
+    Self {
+      span,
+      raw,
+      content,
+      kind,
+    }
+  }
+
   /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> Span {
@@ -57,28 +61,6 @@ impl<'a> StringValue<'a> {
   pub const fn as_str(&self) -> &'a str {
     self.content
   }
-
-  // pub fn parser<I, T>()
-  // -> impl Parser<'a, I, Self, Err<T, T::Kind, T::Char, T::Extras>>
-  // where
-  //   T: Token<'a>,
-  //   I: Tokenizer<'a, Token = Lexed<'a, T>>,
-  // {
-  //   any().try_map(|res, span| match res {
-  //     Lexed::Token(tok) => match tok {
-  //       fast::Token::StringLiteral(data) => {
-  //         todo!()
-  //       }
-  //       fast::Token::BlockStringLiteral(data) => {
-  //         todo!()
-  //       }
-  //       _ => Err(todo!()),
-  //     },
-  //     Lexed::Error(err) => {
-  //       todo!()
-  //     }
-  //   })
-  // }
 }
 
 impl<'a> DisplaySDL for StringValue<'a> {
@@ -105,45 +87,5 @@ impl<'a> DisplaySyntaxTree for StringValue<'a> {
       self.span.end(),
       self.raw
     )
-  }
-}
-
-pub trait Parseable<'a, I, E> {
-  type Token: Token<'a>;
-
-  fn parser() -> impl Parser<'a, I, Self, E>
-  where
-    Self: Sized,
-    I: Tokenizer<'a, Token = Lexed<'a, Self::Token>, Span = Span>,
-    E: chumsky::extra::ParserExtra<'a, I>;
-}
-
-impl<'a> Parseable<'a, TokenStream<'a, fast::Token<'a>>, Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>> for StringValue<'a> {
-  type Token = fast::Token<'a>;
-
-  fn parser() -> impl Parser<'a, TokenStream<'a, fast::Token<'a>>, Self, Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>>
-  where
-    Self: Sized,
-    TokenStream<'a, fast::Token<'a>>: Tokenizer<'a, Token = Lexed<'a, Self::Token>>,
-    Err<fast::Token<'a>, fast::TokenKind, char, RecursionLimitExceeded>: chumsky::extra::ParserExtra<'a, TokenStream<'a, fast::Token<'a>>>
-  {
-    any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        fast::Token::StringLiteral(raw) => Ok(StringValue {
-          span,
-          raw,
-          content: raw,
-          kind: Kind::Inline,
-        }),
-        fast::Token::BlockStringLiteral(raw) => Ok(StringValue {
-          span,
-          raw,
-          content: raw,
-          kind: Kind::Block,
-        }),
-        tok => Err(Error::unexpected_token(tok, fast::TokenKind::String, span)),
-      },
-      Lexed::Error(err) => todo!(),
-    })  
   }
 }

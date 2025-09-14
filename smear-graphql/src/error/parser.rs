@@ -5,8 +5,8 @@ use chumsky::{
   error::{self, LabelError},
   util::{Maybe, MaybeRef},
 };
-use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::{Lexed, Token, TokenStream, Tokenizer, utils::Span};
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
+use logosky::{Lexed, Token, TokenStream, utils::Span};
 
 use crate::error::LexerErrors;
 
@@ -61,10 +61,16 @@ impl<T, TK, Char, StateError> Error<T, TK, Char, StateError> {
   /// Creates an unexpected token error.
   #[inline]
   pub const fn unexpected_token(found: T, expected: TK, span: Span) -> Self {
-    Self {
+    Self::new(
       span,
-      data: ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
-    }
+      ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
+    )
+  }
+
+  /// Creates an error from a lexer error.
+  #[inline]
+  pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
+    Self::new(span, ErrorData::Lexer(err))
   }
 }
 
@@ -111,6 +117,15 @@ impl<T, TK, Char, StateError> IntoIterator for Errors<T, TK, Char, StateError> {
   #[inline(always)]
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_iter()
+  }
+}
+
+impl<T, TK, Char, StateError> Extend<Error<T, TK, Char, StateError>>
+  for Errors<T, TK, Char, StateError>
+{
+  #[inline(always)]
+  fn extend<I: IntoIterator<Item = Error<T, TK, Char, StateError>>>(&mut self, iter: I) {
+    self.0.extend(iter);
   }
 }
 
@@ -180,7 +195,7 @@ where
     let new_errors = Self::expected_found(expected, found, span);
 
     // Merge the new errors into self
-    self.extend(new_errors.into_iter());
+    self.extend(new_errors);
     self
   }
 }

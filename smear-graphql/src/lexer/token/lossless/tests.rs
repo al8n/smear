@@ -25,12 +25,12 @@ impl<'a> TestToken<'a> for Token<'a> {
 
   #[inline]
   fn from_float_literal(s: &'a str) -> Self {
-    Token::FloatLiteral(s)
+    Token::Float(s)
   }
 
   #[inline]
   fn from_integer_literal(s: &'a str) -> Self {
-    Token::IntegerLiteral(s)
+    Token::Int(s)
   }
 
   #[inline]

@@ -6,4 +6,5 @@ mod lexer;
 mod parser;
 
 /// An extra alias
-pub type Err<T, TK, Char = char, StateError = ()> = chumsky::extra::Err<Errors<T, TK, Char, StateError>>;
+pub type Extra<T, TK, Char = char, StateError = ()> =
+  chumsky::extra::Err<Errors<T, TK, Char, StateError>>;
