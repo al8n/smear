@@ -612,11 +612,6 @@ impl<Char> StringErrors<Char> {
   }
 }
 
-pub struct UnexpectedToken<T, TK> {
-  pub found: T,
-  pub expected: TK,
-}
-
 /// The data of the lexer error.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]

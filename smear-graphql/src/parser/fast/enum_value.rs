@@ -3,12 +3,12 @@ use logosky::{Lexed, Parseable, TokenStream, Tokenizer};
 
 use crate::{
   error::{Error, Errors},
-  parser::int::Int,
+  parser::enum_value::EnumValue,
 };
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Int<'a> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for EnumValue<'a> {
   type Token = Token<'a>;
   type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
@@ -21,8 +21,11 @@ impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Int<'a> {
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
-        Token::Int(val) => Ok(Int::new(span, val)),
-        tok => Err(Error::unexpected_token(tok, TokenKind::Int, span).into()),
+        Token::Identifier(name) => match name {
+          "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
+          _ => Ok(EnumValue::new(span, name)),
+        },
+        tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
       },
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
@@ -34,11 +37,11 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_int_parser() {
-    let parser = Int::parser::<FastParserExtra>();
-    let input = r#"42"#;
+  fn test_enum_value_parser() {
+    let parser = EnumValue::parser::<FastParserExtra>();
+    let input = r#"foo"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "42");
-    assert_eq!(parsed.span(), Span::new(0, 2));
+    assert_eq!(parsed.as_str(), "foo");
+    assert_eq!(parsed.span(), Span::new(0, 3));
   }
 }

@@ -8,10 +8,11 @@ use crate::{
   lexer::token::lossless::{Token, TokenKind},
 };
 
+mod enum_value;
 mod float;
 mod int;
 mod name;
 mod string;
 
 pub type LosslessTokenStream<'a> = TokenStream<'a, Token<'a>>;
-pub type LosslessParserExtra<'a> = Extra<Token<'a>, TokenKind, char, LimitExceeded>;
+pub type LosslessParserExtra<'a> = Extra<'a, Token<'a>, TokenKind, char, LimitExceeded>;

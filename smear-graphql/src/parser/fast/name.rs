@@ -10,7 +10,7 @@ use super::*;
 
 impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Name<'a> {
   type Token = Token<'a>;
-  type Error = Errors<Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
