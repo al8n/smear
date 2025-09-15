@@ -8,9 +8,9 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for StringValue<'a> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for StringValue<&'a str> {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
@@ -40,26 +40,26 @@ mod tests {
 
   #[test]
   fn test_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra>();
+    let parser = StringValue::parser::<LosslessParserExtra>();
     let input = r#""Hello, World!""#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "Hello, World!");
+    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    assert_eq!(*parsed.content(), "Hello, World!");
     assert_eq!(parsed.kind, Kind::Inline);
     assert_eq!(parsed.span(), Span::new(0, 15));
-    assert_eq!(parsed.raw, r#""Hello, World!""#);
+    assert_eq!(*parsed.raw(), r#""Hello, World!""#);
   }
 
   #[test]
   fn test_block_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra>();
+    let parser = StringValue::parser::<LosslessParserExtra>();
     let input = r#""""Hello,
 World!""""#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "Hello,\nWorld!");
+    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    assert_eq!(*parsed.content(), "Hello,\nWorld!");
     assert_eq!(parsed.kind, Kind::Block);
     assert_eq!(parsed.span(), Span::new(0, 19));
     assert_eq!(
-      parsed.raw,
+      *parsed.raw(),
       r#""""Hello,
 World!""""#
     );

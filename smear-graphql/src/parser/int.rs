@@ -1,40 +1,46 @@
 use core::fmt::Display;
 
-use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
+use logosky::utils::{
+  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  syntax_tree_display::DisplaySyntaxTree,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Int<'a> {
+pub struct Int<S> {
   span: Span,
-  value: &'a str,
+  value: S,
 }
 
-impl<'a> Display for Int<'a> {
+impl<S> Display for Int<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
-impl<'a> AsRef<str> for Int<'a> {
+impl<S> AsRef<S> for Int<S> {
   #[inline]
-  fn as_ref(&self) -> &str {
-    self.value
+  fn as_ref(&self) -> &S {
+    self
   }
 }
 
-impl<'a> core::ops::Deref for Int<'a> {
-  type Target = str;
+impl<S> core::ops::Deref for Int<S> {
+  type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.value
+    &self.value
   }
 }
 
-impl<'a> Int<'a> {
+impl<S> Int<S> {
   /// Creates a new name.
   #[inline]
-  pub const fn new(span: Span, value: &'a str) -> Self {
+  pub const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 
@@ -44,21 +50,27 @@ impl<'a> Int<'a> {
     self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the source of the int.
   #[inline]
-  pub const fn as_str(&self) -> &'a str {
-    self.value
+  pub const fn source(&self) -> &S {
+    &self.value
   }
 }
 
-impl<'a> DisplaySDL for Int<'a> {
+impl<S> DisplaySDL for Int<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.value.fmt(f)
   }
 }
 
-impl<'a> DisplaySyntaxTree for Int<'a> {
+impl<S> DisplaySyntaxTree for Int<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(
     &self,
@@ -73,7 +85,7 @@ impl<'a> DisplaySyntaxTree for Int<'a> {
       "- INT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.as_str()
+      self.source().display()
     )
   }
 }

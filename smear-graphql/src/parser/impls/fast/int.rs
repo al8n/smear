@@ -8,7 +8,7 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Int<'a> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Int<&'a str> {
   type Token = Token<'a>;
   type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
@@ -38,7 +38,7 @@ mod tests {
     let parser = Int::parser::<FastParserExtra>();
     let input = r#"42"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "42");
+    assert_eq!(*parsed.source(), "42");
     assert_eq!(parsed.span(), Span::new(0, 2));
   }
 }

@@ -1,16 +1,13 @@
-/// Parser for Standard GraphQL.
-pub mod fast;
-
-/// Lossless parser for Standard GraphQL.
-pub mod lossless;
-
 mod enum_value;
 mod float;
+mod impls;
 mod int;
 mod list;
 mod name;
 mod punctuator;
 mod string;
+mod value;
+mod variable;
 
 pub mod ast {
   pub use super::{
@@ -21,5 +18,6 @@ pub mod ast {
     name::Name,
     punctuator::{LBracket, RBracket},
     string::StringValue,
+    variable::Variable,
   };
 }

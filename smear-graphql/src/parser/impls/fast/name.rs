@@ -8,9 +8,9 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Name<'a> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Name<&'a str> {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
@@ -35,10 +35,10 @@ mod tests {
 
   #[test]
   fn test_name_parser() {
-    let parser = Name::parser::<LosslessParserExtra>();
+    let parser = Name::parser::<FastParserExtra>();
     let input = r#"foo"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "foo");
+    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    assert_eq!(*parsed.source(), "foo");
     assert_eq!(parsed.span(), Span::new(0, 3));
   }
 }

@@ -5,8 +5,11 @@ use chumsky::{
   error::{self, LabelError},
   util::{Maybe, MaybeRef},
 };
-use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
-use logosky::{Lexed, Token, TokenStream, utils::Span};
+use derive_more::{AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant};
+use logosky::{
+  Lexed, Token, TokenStream,
+  utils::{Span, UnexpectedEnd},
+};
 
 use crate::error::LexerErrors;
 
@@ -36,11 +39,23 @@ impl<T, TK> UnexpectedToken<T, TK> {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum VariableValueHint {
+  /// A [`Name`](crate::parser::ast::Name) was expected.
+  #[display("name")]
+  Name,
+  /// A [`Dollar`](crate::parser::ast::Dollar) was expected.
+  #[display("dollar")]
+  Dollar,
+}
+
 #[derive(Debug, Clone)]
 pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
   Lexer(LexerErrors<Char, StateError>),
   InvalidEnumValue(&'a str),
+  UnclosedList,
   UnexpectedToken(UnexpectedToken<T, TK>),
+  UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   /// An end of input was found.
   EndOfInput,
   Other(Cow<'static, str>),
@@ -66,6 +81,24 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
       span,
       ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
     )
+  }
+
+  /// Creates a missing name in variable error.
+  #[inline]
+  pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
+        Cow::Borrowed("variable value"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unclosed list error.
+  #[inline]
+  pub const fn unclosed_list(span: Span) -> Self {
+    Self::new(span, ErrorData::UnclosedList)
   }
 
   /// Creates an error from a lexer error.
@@ -94,7 +127,7 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
 
   /// Returns a mutable reference to the data of the error.
   #[inline]
-  pub fn data_mut(&mut self) -> &mut ErrorData<'a, T, TK, Char, StateError> {
+  pub const fn data_mut(&mut self) -> &mut ErrorData<'a, T, TK, Char, StateError> {
     &mut self.data
   }
 

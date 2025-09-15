@@ -8,7 +8,7 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for EnumValue<'a> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for EnumValue<&'a str> {
   type Token = Token<'a>;
   type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
@@ -41,7 +41,7 @@ mod tests {
     let parser = EnumValue::parser::<LosslessParserExtra>();
     let input = r#"foo"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.as_str(), "foo");
+    assert_eq!(*parsed.source(), "foo");
     assert_eq!(parsed.span(), Span::new(0, 3));
   }
 }

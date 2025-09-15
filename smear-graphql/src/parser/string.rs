@@ -1,6 +1,9 @@
 use core::fmt::Display;
 
-use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
+use logosky::utils::{
+  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  syntax_tree_display::DisplaySyntaxTree,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Kind {
@@ -9,39 +12,26 @@ pub(crate) enum Kind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StringValue<'a> {
+pub struct StringValue<S> {
   pub(crate) span: Span,
-  pub(crate) raw: &'a str,
-  pub(crate) content: &'a str,
+  pub(crate) raw: S,
+  pub(crate) content: S,
   pub(crate) kind: Kind,
 }
 
-impl<'a> Display for StringValue<'a> {
+impl<S> Display for StringValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     DisplaySDL::fmt(self, f)
   }
 }
 
-impl<'a> AsRef<str> for StringValue<'a> {
-  #[inline]
-  fn as_ref(&self) -> &str {
-    self.content
-  }
-}
-
-impl<'a> core::ops::Deref for StringValue<'a> {
-  type Target = str;
-
-  #[inline]
-  fn deref(&self) -> &Self::Target {
-    self.content
-  }
-}
-
-impl<'a> StringValue<'a> {
+impl<S> StringValue<S> {
   #[inline(always)]
-  pub(crate) const fn new(span: Span, raw: &'a str, content: &'a str, kind: Kind) -> Self {
+  pub(crate) const fn new(span: Span, raw: S, content: S, kind: Kind) -> Self {
     Self {
       span,
       raw,
@@ -56,21 +46,33 @@ impl<'a> StringValue<'a> {
     self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the full raw string, including delimiters.
   #[inline]
-  pub const fn as_str(&self) -> &'a str {
-    self.content
+  pub const fn raw(&self) -> &S {
+    &self.raw
+  }
+
+  /// Returns the string content, without delimiters.
+  #[inline]
+  pub const fn content(&self) -> &S {
+    &self.content
   }
 }
 
-impl<'a> DisplaySDL for StringValue<'a> {
+impl<S> DisplaySDL for StringValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.raw.fmt(f)
+    DisplayHuman::fmt(&self.raw, f)
   }
 }
 
-impl<'a> DisplaySyntaxTree for StringValue<'a> {
+impl<S> DisplaySyntaxTree for StringValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(
     &self,
@@ -85,7 +87,7 @@ impl<'a> DisplaySyntaxTree for StringValue<'a> {
       "- STRING@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.raw
+      self.raw.display(),
     )
   }
 }

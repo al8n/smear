@@ -1,40 +1,46 @@
 use core::fmt::Display;
 
-use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
+use logosky::utils::{
+  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  syntax_tree_display::DisplaySyntaxTree,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Name<'a> {
+pub struct Name<S> {
   span: Span,
-  value: &'a str,
+  value: S,
 }
 
-impl<'a> Display for Name<'a> {
+impl<S> Display for Name<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
-impl<'a> AsRef<str> for Name<'a> {
+impl<S> AsRef<S> for Name<S> {
   #[inline]
-  fn as_ref(&self) -> &str {
-    self.value
+  fn as_ref(&self) -> &S {
+    self
   }
 }
 
-impl<'a> core::ops::Deref for Name<'a> {
-  type Target = str;
+impl<S> core::ops::Deref for Name<S> {
+  type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.value
+    self.source()
   }
 }
 
-impl<'a> Name<'a> {
+impl<S> Name<S> {
   /// Creates a new name.
   #[inline]
-  pub const fn new(span: Span, value: &'a str) -> Self {
+  pub const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 
@@ -45,20 +51,26 @@ impl<'a> Name<'a> {
   }
 
   /// Returns the name as a string slice.
-  #[inline]
-  pub const fn as_str(&self) -> &'a str {
-    self.value
+  #[inline(always)]
+  pub const fn source(&self) -> &S {
+    &self.value
   }
 }
 
-impl<'a> DisplaySDL for Name<'a> {
+impl<S> DisplaySDL for Name<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.value.fmt(f)
   }
 }
 
-impl<'a> DisplaySyntaxTree for Name<'a> {
+impl<S> DisplaySyntaxTree for Name<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(
     &self,
@@ -76,7 +88,7 @@ impl<'a> DisplaySyntaxTree for Name<'a> {
       "- IDENT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.value
+      self.value.display(),
     )
   }
 }

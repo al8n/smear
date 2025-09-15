@@ -1,39 +1,45 @@
 use core::fmt::Display;
 
-use logosky::utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree};
+use logosky::utils::{
+  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  syntax_tree_display::DisplaySyntaxTree,
+};
 
 use crate::parser::ast::Name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumValue<'a>(Name<'a>);
+pub struct EnumValue<S>(Name<S>);
 
-impl<'a> Display for EnumValue<'a> {
+impl<S> Display for EnumValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
-impl<'a> AsRef<str> for EnumValue<'a> {
+impl<S> AsRef<S> for EnumValue<S> {
   #[inline]
-  fn as_ref(&self) -> &str {
+  fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<'a> core::ops::Deref for EnumValue<'a> {
-  type Target = str;
+impl<S> core::ops::Deref for EnumValue<S> {
+  type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    &self.0
+    self.source()
   }
 }
 
-impl<'a> EnumValue<'a> {
+impl<S> EnumValue<S> {
   /// Creates a new name.
   #[inline]
-  pub const fn new(span: Span, value: &'a str) -> Self {
+  pub const fn new(span: Span, value: S) -> Self {
     Self(Name::new(span, value))
   }
 
@@ -45,19 +51,25 @@ impl<'a> EnumValue<'a> {
 
   /// Returns the name as a string slice.
   #[inline]
-  pub const fn as_str(&self) -> &'a str {
-    self.0.as_str()
+  pub const fn source(&self) -> &S {
+    self.0.source()
   }
 }
 
-impl<'a> DisplaySDL for EnumValue<'a> {
+impl<S> DisplaySDL for EnumValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    <Name<'a> as DisplaySDL>::fmt(&self.0, f)
+    self.source().fmt(f)
   }
 }
 
-impl<'a> DisplaySyntaxTree for EnumValue<'a> {
+impl<S> DisplaySyntaxTree for EnumValue<S>
+where
+  S: DisplayHuman,
+{
   #[inline]
   fn fmt(
     &self,
@@ -73,7 +85,7 @@ impl<'a> DisplaySyntaxTree for EnumValue<'a> {
       self.span().start(),
       self.span().end()
     )?;
-    <Name<'a> as DisplaySyntaxTree>::fmt(&self.0, level + 1, indent, f)
+    <Name<S> as DisplaySyntaxTree>::fmt(&self.0, level + 1, indent, f)
   }
 }
 
