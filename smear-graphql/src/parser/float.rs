@@ -6,12 +6,12 @@ use logosky::utils::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Float<S> {
+pub struct FloatValue<S> {
   span: Span,
   value: S,
 }
 
-impl<S> Display for Float<S>
+impl<S> Display for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -21,14 +21,14 @@ where
   }
 }
 
-impl<S> AsRef<S> for Float<S> {
+impl<S> AsRef<S> for FloatValue<S> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S> core::ops::Deref for Float<S> {
+impl<S> core::ops::Deref for FloatValue<S> {
   type Target = S;
 
   #[inline]
@@ -37,10 +37,10 @@ impl<S> core::ops::Deref for Float<S> {
   }
 }
 
-impl<S> Float<S> {
+impl<S> FloatValue<S> {
   /// Creates a new name.
   #[inline]
-  pub const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 
@@ -57,7 +57,7 @@ impl<S> Float<S> {
   }
 }
 
-impl<S> DisplaySDL for Float<S>
+impl<S> DisplaySDL for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -67,7 +67,7 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for Float<S>
+impl<S> DisplaySyntaxTree for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -92,7 +92,7 @@ where
 
 #[test]
 fn test_float_display_syntax_tree() {
-  let name = Float::new(Span::new(0, 6), "-4.123");
+  let name = FloatValue::new(Span::new(0, 6), "-4.123");
   let output = format!("{}", DisplaySyntaxTree::display(&name, 0, 6));
   assert_eq!(
     output,
@@ -103,7 +103,7 @@ fn test_float_display_syntax_tree() {
 
 #[test]
 fn test_float_display_sdl() {
-  let name = Float::new(Span::new(0, 6), "-4.123");
+  let name = FloatValue::new(Span::new(0, 6), "-4.123");
   let output = format!("{}", DisplaySDL::display(&name));
   assert_eq!(output, "-4.123");
 }

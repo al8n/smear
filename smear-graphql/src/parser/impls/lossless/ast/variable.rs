@@ -10,13 +10,13 @@ use super::*;
 
 impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Variable<&'a str> {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
   {
     <Dollar as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
       .or_not()
@@ -47,9 +47,9 @@ mod tests {
 
   #[test]
   fn test_variable_parser() {
-    let parser = Variable::parser::<FastParserExtra>();
+    let parser = Variable::parser::<LosslessParserExtra>();
     let input = r#"$foo"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.slice(), "$foo");
     assert_eq!(*parsed.name().source(), "foo");
     assert_eq!(parsed.span(), Span::new(0, 4));

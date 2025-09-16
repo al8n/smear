@@ -16,11 +16,11 @@ macro_rules! punctuator_parser {
         type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
         #[inline]
-        fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+        fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
         where
           Self: Sized,
           TokenStream<'a, Token<'a>>: Tokenizer<'a, Self::Token>,
-          E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+          E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
         {
           any().try_map(|res, span: Span| match res {
             Lexed::Token(tok) => match tok {

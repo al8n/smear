@@ -1,46 +1,52 @@
 use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::{Parseable, TokenStream};
+use logosky::Parseable;
 
 use crate::{
-  error::{Error, Errors},
+  error::Error,
   parser::ast::{LBracket, List, RBracket},
 };
 
 use super::*;
 
-impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for List<V>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>> for List<V>
 where
-  V: Parseable<
-      'a,
-      TokenStream<'a, Token<'a>>,
-      Token = Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>,
-    >,
+  V: Parseable<'a, FastTokenStream<'a>, Token = Token<'a>, Error = FastTokenErrors<'a>> + 'a,
 {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = FastTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
   {
-    <LBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-      .then(V::parser().repeated().collect())
-      .then(<RBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser().or_not())
-      .try_map(|((l, values), r), span| match r {
-        Some(r) => Ok(Self::new(span, l, r, values)),
-        None => Err(Error::unclosed_list(span).into()),
-      })
+    list_parser(V::parser())
   }
+}
+
+pub fn list_parser<'a, V, VP, E>(
+  value_parser: VP,
+) -> impl Parser<'a, FastTokenStream<'a>, List<V>, E> + Clone
+where
+  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+  VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
+  V: 'a,
+{
+  <LBracket as Parseable<'a, FastTokenStream<'a>>>::parser()
+    .then(value_parser.repeated().collect())
+    .then(<RBracket as Parseable<'a, FastTokenStream<'a>>>::parser().or_not())
+    .try_map(|((l, values), r), span| match r {
+      Some(r) => Ok(List::new(span, l, r, values)),
+      None => Err(Error::unclosed_list(span).into()),
+    })
 }
 
 #[cfg(test)]
 mod tests {
   use crate::{
     error::{ErrorData, Unclosed},
-    parser::ast::StringValue,
+    parser::{ast::StringValue, fast::FastParserExtra},
   };
 
   use super::*;

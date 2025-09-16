@@ -1,21 +1,17 @@
-use logosky::utils::{Span, recursion_tracker::RecursionLimitExceeded};
+use logosky::utils::recursion_tracker::RecursionLimitExceeded;
 
 use crate::{
-  error::Extra,
+  error::{Errors, Extra},
   lexer::token::fast::{Token, TokenKind},
 };
 
-mod enum_value;
-mod float;
-mod int;
-mod list;
-mod name;
-mod object;
-mod punctuator;
-mod string;
-mod variable;
+pub use ast::*;
 
 /// The token stream type used for the fast parser implementation.
 pub type FastTokenStream<'a> = logosky::TokenStream<'a, Token<'a>>;
 /// The parser extra type used for the fast parser implementation.
 pub type FastParserExtra<'a> = Extra<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+/// The errors type used for the fast parser implementation.
+pub type FastTokenErrors<'a> = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+
+mod ast;

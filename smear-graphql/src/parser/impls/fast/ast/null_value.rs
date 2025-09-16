@@ -3,27 +3,27 @@ use logosky::{Lexed, Parseable, TokenStream, Tokenizer};
 
 use crate::{
   error::{Error, Errors},
-  parser::enum_value::EnumValue,
+  parser::null::NullValue,
 };
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for EnumValue<&'a str> {
+impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for NullValue<&'a str> {
   type Token = Token<'a>;
   type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
   where
     Self: Sized,
     TokenStream<'a, Token<'a>>: Tokenizer<'a, Self::Token>,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
         Token::Identifier(name) => match name {
-          "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
-          _ => Ok(EnumValue::new(span, name)),
+          "null" => Ok(NullValue::new(span, name)),
+          val => Err(Error::invalid_null_value(val, span).into()),
         },
         tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
       },
@@ -34,14 +34,16 @@ impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for EnumValue<&'a str> {
 
 #[cfg(test)]
 mod tests {
+  use crate::parser::fast::FastParserExtra;
+
   use super::*;
 
   #[test]
-  fn test_enum_value_parser() {
-    let parser = EnumValue::parser::<FastParserExtra>();
-    let input = r#"foo"#;
+  fn test_null_value_parser() {
+    let parser = NullValue::parser::<FastParserExtra>();
+    let input = r#"null"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), Span::new(0, 3));
+    assert_eq!(*parsed.source(), "null");
+    assert_eq!(parsed.span(), Span::new(0, 4));
   }
 }

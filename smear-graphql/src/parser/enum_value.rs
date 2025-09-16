@@ -39,7 +39,7 @@ impl<S> core::ops::Deref for EnumValue<S> {
 impl<S> EnumValue<S> {
   /// Creates a new name.
   #[inline]
-  pub const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self {
     Self(Name::new(span, value))
   }
 

@@ -113,6 +113,8 @@ pub enum Unclosed {
 pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
   Lexer(LexerErrors<Char, StateError>),
   InvalidEnumValue(&'a str),
+  InvalidBooleanValue(&'a str),
+  InvalidNullValue(&'a str),
   Unclosed(Unclosed),
   UnexpectedToken(UnexpectedToken<T, TK>),
   UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
@@ -210,6 +212,18 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
   #[inline]
   pub const fn invalid_enum_value(value: &'a str, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidEnumValue(value))
+  }
+
+  /// Creates an invalid boolean value error.
+  #[inline]
+  pub const fn invalid_boolean_value(value: &'a str, span: Span) -> Self {
+    Self::new(span, ErrorData::InvalidBooleanValue(value))
+  }
+
+  /// Creates an invalid null value error.
+  #[inline]
+  pub const fn invalid_null_value(value: &'a str, span: Span) -> Self {
+    Self::new(span, ErrorData::InvalidNullValue(value))
   }
 
   /// Returns the span of the error.

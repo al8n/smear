@@ -6,12 +6,12 @@ use logosky::utils::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct IntValue<S> {
+pub struct NullValue<S> {
+  source: S,
   span: Span,
-  value: S,
 }
 
-impl<S> Display for IntValue<S>
+impl<S> Display for NullValue<S>
 where
   S: DisplayHuman,
 {
@@ -21,26 +21,30 @@ where
   }
 }
 
-impl<S> AsRef<S> for IntValue<S> {
+impl<S> AsRef<S> for NullValue<S> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S> core::ops::Deref for IntValue<S> {
+impl<S> core::ops::Deref for NullValue<S> {
   type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    &self.value
+    self.source()
   }
 }
 
-impl<S> IntValue<S> {
+impl<S> NullValue<S> {
+  /// Creates a new null value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self { span, value }
+    Self {
+      source: value,
+      span,
+    }
   }
 
   /// Returns the span of the name.
@@ -49,24 +53,24 @@ impl<S> IntValue<S> {
     self.span
   }
 
-  /// Returns the source of the int.
+  /// Returns the name as a string slice.
   #[inline]
   pub const fn source(&self) -> &S {
-    &self.value
+    &self.source
   }
 }
 
-impl<S> DisplaySDL for IntValue<S>
+impl<S> DisplaySDL for NullValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.value.fmt(f)
+    self.source().fmt(f)
   }
 }
 
-impl<S> DisplaySyntaxTree for IntValue<S>
+impl<S> DisplaySyntaxTree for NullValue<S>
 where
   S: DisplayHuman,
 {
@@ -77,32 +81,40 @@ where
     indent: usize,
     f: &mut core::fmt::Formatter<'_>,
   ) -> core::fmt::Result {
-    let padding = level * indent;
+    let mut padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
     writeln!(
       f,
-      "- INT@{}..{} \"{}\"",
-      self.span.start(),
-      self.span.end(),
-      self.source().display()
+      "- NULL_VALUE@{}..{}",
+      self.span().start(),
+      self.span().end()
+    )?;
+    padding += indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    write!(
+      f,
+      "- null_KW@{}..{} \"{}\"",
+      self.span().start(),
+      self.span().end(),
+      self.source().display(),
     )
   }
 }
 
 #[test]
-fn test_int_display_syntax_tree() {
-  let name = IntValue::new(Span::new(0, 2), "-4");
-  let output = format!("{}", DisplaySyntaxTree::display(&name, 0, 2));
+fn test_null_value_display_syntax_tree() {
+  let name = NullValue::new(Span::new(0, 4), "null");
+  let output = format!("{}", DisplaySyntaxTree::display(&name, 0, 4));
   assert_eq!(
     output,
-    r#"- INT@0..2 "-4"
-"#
+    r#"- NULL_VALUE@0..4
+    - null_KW@0..4 "null""#
   );
 }
 
 #[test]
-fn test_int_display_sdl() {
-  let name = IntValue::new(Span::new(0, 2), "-4");
+fn test_null_value_display_sdl() {
+  let name = NullValue::new(Span::new(0, 4), "null");
   let output = format!("{}", DisplaySDL::display(&name));
-  assert_eq!(output, "-4");
+  assert_eq!(output, "null");
 }

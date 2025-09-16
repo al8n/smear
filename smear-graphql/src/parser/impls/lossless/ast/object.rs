@@ -4,10 +4,10 @@ use smear_parser::source::{IntoComponents, IntoSpan};
 
 use crate::{
   error::{Error, Errors},
-  parser::ast::{Colon, LBrace, Name, Object, RBrace},
+  parser::{ast::{Colon, LBrace, Name, Object, RBrace}, lossless::LosslessTokenErrors},
 };
 
-use super::*;
+use super::{padded::Padded, *};
 
 /// A single field within a GraphQL input object literal.
 ///
@@ -40,11 +40,11 @@ use super::*;
 /// - **Field name**: A GraphQL name identifier
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ObjectField<InputValue, S> {
   span: Span,
   name: Name<S>,
-  colon: Colon,
+  colon: Padded<Colon, S>,
   value: InputValue,
 }
 
@@ -63,7 +63,7 @@ impl<InputValue, S> IntoSpan<Span> for ObjectField<InputValue, S> {
 }
 
 impl<InputValue, S> IntoComponents for ObjectField<InputValue, S> {
-  type Components = (Span, Name<S>, Colon, InputValue);
+  type Components = (Span, Name<S>, Padded<Colon, S>, InputValue);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -73,7 +73,12 @@ impl<InputValue, S> IntoComponents for ObjectField<InputValue, S> {
 
 impl<InputValue, S> ObjectField<InputValue, S> {
   #[inline]
-  pub(crate) const fn new(span: Span, name: Name<S>, colon: Colon, value: InputValue) -> Self {
+  pub(crate) const fn new(
+    span: Span,
+    name: Name<S>,
+    colon: Padded<Colon, S>,
+    value: InputValue,
+  ) -> Self {
     Self {
       span,
       name,
@@ -98,7 +103,7 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   /// name from its value, including its exact source position. Useful
   /// for syntax highlighting and precise error reporting.
   #[inline]
-  pub const fn colon(&self) -> &Colon {
+  pub const fn colon(&self) -> &Padded<Colon, S> {
     &self.colon
   }
 
@@ -129,55 +134,84 @@ where
       'a,
       TokenStream<'a, Token<'a>>,
       Token = Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>,
+      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
     >,
 {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
   {
     <Name<&'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-      .then(<Colon as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser())
+      .then(<Padded<Colon, &'a str> as Parseable<
+        'a,
+        TokenStream<'a, Token<'a>>,
+      >>::parser())
       .then(V::parser())
       .map_with(|((name, colon), value), exa| Self::new(exa.span(), name, colon, value))
   }
 }
 
-impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for Object<ObjectField<V, &'a str>>
+impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>>
+  for Object<Padded<ObjectField<V, &'a str>, &'a str>>
 where
   V: Parseable<
       'a,
       TokenStream<'a, Token<'a>>,
       Token = Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>,
-    >,
+      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
+    > + 'a,
 {
   type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
   {
-    <LBrace as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-      .then(
-        <ObjectField<V, &'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-          .repeated()
-          .collect(),
-      )
-      .then(<RBrace as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser().or_not())
-      .try_map(|((l, values), r), span| match r {
-        Some(r) => Ok(Self::new(span, l, values, r)),
-        None => Err(Error::unclosed_object(span).into()),
-      })
+    object_parser(V::parser())
   }
+}
+
+pub fn object_field_parser<'a, V, VP, E>(
+  value_parser: VP,
+) -> impl Parser<'a, LosslessTokenStream<'a>, ObjectField<V, &'a str>, E> + Clone
+where
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  V: 'a,
+{
+  <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>>>::parser()
+    .then(<Padded<Colon, &'a str> as Parseable<'a, LosslessTokenStream<'a>>>::parser())
+    .then(value_parser)
+    .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
+}
+
+pub fn object_parser<'a, V, VP, E>(
+  value_parser: VP,
+) -> impl Parser<'a, LosslessTokenStream<'a>, Object<Padded<ObjectField<V, &'a str>, &'a str>>, E> + Clone
+where
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  V: 'a,
+{
+  <LBrace as Parseable<'a, LosslessTokenStream<'a>>>::parser()
+    .then(
+      padded::padded_parser(object_field_parser::<V, VP, E>(value_parser))
+        .repeated()
+        .collect(),
+    )
+    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>>>::parser().or_not())
+    .try_map(|((l, values), r), span| match r {
+      Some(r) => Ok(Object::new(span, l, values, r)),
+      None => Err(Error::unclosed_object(span).into()),
+    })
 }
 
 #[cfg(test)]
@@ -191,30 +225,38 @@ mod tests {
 
   #[test]
   fn test_object_field_parser() {
-    let parser = ObjectField::<StringValue<&str>, &str>::parser::<FastParserExtra>();
+    let parser = ObjectField::<StringValue<&str>, &str>::parser::<LosslessParserExtra>();
     let input = r#"name: "Jane""#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.name().source(), "name");
     assert_eq!(*parsed.value().content(), "Jane");
   }
 
   #[test]
   fn test_object_parser() {
-    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra>();
-    let input = r#"{a: "a", b: "b", c: "c"}"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    let parser =
+      Object::<Padded<ObjectField<StringValue<&str>, &str>, &str>>::parser::<LosslessParserExtra>();
+    let input = r#"{
+      # A comment
+      a: "a",
+      # Another comment
+      b: "b",
+      c: "c", # Trailing comment
+    }"#;
+    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(parsed.fields().len(), 3);
-    assert_eq!(*parsed.fields()[0].value().content(), "a");
-    assert_eq!(*parsed.fields()[1].value().content(), "b");
-    assert_eq!(*parsed.fields()[2].value().content(), "c");
+    assert_eq!(*parsed.fields()[0].value().value().content(), "a");
+    assert_eq!(*parsed.fields()[1].value().value().content(), "b");
+    assert_eq!(*parsed.fields()[2].value().value().content(), "c");
   }
 
   #[test]
   fn test_unclosed_object_parser() {
-    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra>();
+    let parser =
+      Object::<Padded<ObjectField<StringValue<&str>, &str>, &str>>::parser::<LosslessParserExtra>();
     let input = r#"{a: "a", b: "b", c: "c""#;
     let mut parsed = parser
-      .parse(FastTokenStream::new(input))
+      .parse(LosslessTokenStream::new(input))
       .into_result()
       .unwrap_err();
     assert_eq!(parsed.len(), 1);

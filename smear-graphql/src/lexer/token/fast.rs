@@ -142,6 +142,7 @@ pub enum Token<'a> {
 pub enum TokenKind {
   Identifier,
   Int,
+  Boolean,
   Float,
   String,
   BlockString,

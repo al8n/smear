@@ -6,7 +6,7 @@ use crate::{
   parser::ast::{LBracket, List, RBracket},
 };
 
-use super::{*, padded::Padded};
+use super::{padded::Padded, *};
 
 impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for List<Padded<V, &'a str>>
 where
@@ -15,25 +15,36 @@ where
       TokenStream<'a, Token<'a>>,
       Token = Token<'a>,
       Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
-    >,
+    > + 'a,
 {
   type Token = Token<'a>;
   type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E>
+  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
+    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
   {
-    <LBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-      .then(Padded::<V, &'a str>::parser().repeated().collect())
-      .then(<RBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser().or_not())
-      .try_map(|((l, values), r), span| match r {
-        Some(r) => Ok(Self::new(span, l, r, values)),
-        None => Err(Error::unclosed_list(span).into()),
-      })
+    list_parser(V::parser())
   }
+}
+
+pub fn list_parser<'a, V, VP, E>(
+  value_parser: VP,
+) -> impl Parser<'a, LosslessTokenStream<'a>, List<Padded<V, &'a str>>, E> + Clone
+where
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  V: 'a,
+{
+  <LBracket as Parseable<'a, LosslessTokenStream<'a>>>::parser()
+    .then(padded::padded_parser(value_parser).repeated().collect())
+    .then(<RBracket as Parseable<'a, LosslessTokenStream<'a>>>::parser().or_not())
+    .try_map(|((l, values), r), span| match r {
+      Some(r) => Ok(List::new(span, l, r, values)),
+      None => Err(Error::unclosed_list(span).into()),
+    })
 }
 
 #[cfg(test)]
