@@ -29,8 +29,7 @@ pub enum InputValue<S> {
   Object(Object<ObjectField<InputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>> for InputValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>> for InputValue<&'a str> {
   type Error = FastTokenErrors<'a>;
 
   #[inline]
@@ -79,8 +78,7 @@ pub enum ConstInputValue<S> {
   Object(Object<ObjectField<ConstInputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>> for ConstInputValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>> for ConstInputValue<&'a str> {
   type Error = FastTokenErrors<'a>;
 
   #[inline]

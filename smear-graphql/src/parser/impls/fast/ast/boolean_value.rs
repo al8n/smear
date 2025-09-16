@@ -1,5 +1,5 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable, TokenStream, Tokenizer};
+use logosky::{Lexed, Parseable};
 
 use crate::{
   error::{Error, Errors},
@@ -8,16 +8,14 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for BooleanValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>> for BooleanValue<&'a str> {
   type Error = Errors<'a, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    TokenStream<'a, Token<'a>>: Tokenizer<'a, Self::Token>,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {

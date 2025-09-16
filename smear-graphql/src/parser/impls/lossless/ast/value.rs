@@ -23,8 +23,7 @@ pub enum InputValue<S> {
   Object(Object<Padded<ObjectField<InputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>> for InputValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for InputValue<&'a str> {
   type Error = LosslessTokenErrors<'a>;
 
   #[inline]
@@ -73,8 +72,7 @@ pub enum ConstInputValue<S> {
   Object(Object<Padded<ObjectField<ConstInputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>> for ConstInputValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for ConstInputValue<&'a str> {
   type Error = LosslessTokenErrors<'a>;
 
   #[inline]

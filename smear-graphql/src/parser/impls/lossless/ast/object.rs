@@ -1,5 +1,5 @@
 use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::{Parseable, TokenStream};
+use logosky::Parseable;
 use smear_parser::source::{IntoComponents, IntoSpan};
 
 use crate::{
@@ -131,52 +131,46 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 }
 
-impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for ObjectField<V, &'a str>
+impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for ObjectField<V, &'a str>
 where
   V: Parseable<
       'a,
-      TokenStream<'a, Token<'a>>,
-      Token = Token<'a>,
+      LosslessTokenStream<'a>,
+      Token<'a>,
       Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
     >,
 {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
-    <Name<&'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
+    <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
       .then(<Padded<Colon, &'a str> as Parseable<
         'a,
-        TokenStream<'a, Token<'a>>,
+        LosslessTokenStream<'a>,
+        Token<'a>,
       >>::parser())
       .then(V::parser())
       .map_with(|((name, colon), value), exa| Self::new(exa.span(), name, colon, value))
   }
 }
 
-impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>>
+impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>>
   for Object<Padded<ObjectField<V, &'a str>, &'a str>>
 where
-  V: Parseable<
-      'a,
-      TokenStream<'a, Token<'a>>,
-      Token = Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
-    > + 'a,
+  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, Error = LosslessTokenErrors<'a>> + 'a,
 {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     object_parser(V::parser())
   }
@@ -190,10 +184,11 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>>>::parser()
+  <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
     .then(<Padded<Colon, &'a str> as Parseable<
       'a,
       LosslessTokenStream<'a>,
+      Token<'a>,
     >>::parser())
     .then(value_parser)
     .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
@@ -207,13 +202,13 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBrace as Parseable<'a, LosslessTokenStream<'a>>>::parser()
+  <LBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
     .then(
       padded::padded_parser(object_field_parser::<V, VP, E>(value_parser))
         .repeated()
         .collect(),
     )
-    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>>>::parser().or_not())
+    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(Object::new(span, l, values, r)),
       None => Err(Error::unclosed_object(span).into()),

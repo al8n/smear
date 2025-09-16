@@ -1,7 +1,7 @@
 use logosky::utils::Span;
 use smear_parser::source::{IntoComponents, IntoSpan};
 
-use crate::parser::punctuator::{LBrace, RBrace};
+use crate::parser::ast::{LBrace, RBrace};
 
 /// A GraphQL input object literal value.
 ///

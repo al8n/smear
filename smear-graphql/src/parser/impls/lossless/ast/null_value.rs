@@ -1,19 +1,17 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable, Tokenizer};
+use logosky::{Lexed, Parseable};
 
 use crate::{error::Error, parser::null::NullValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>> for NullValue<&'a str> {
-  type Token = Token<'a>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for NullValue<&'a str> {
   type Error = LosslessTokenErrors<'a>;
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    LosslessTokenStream<'a>: Tokenizer<'a, Self::Token>,
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {

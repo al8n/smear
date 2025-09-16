@@ -8,6 +8,7 @@ pub use input_value::*;
 pub use name::*;
 pub use selection_set::*;
 
+mod argument;
 mod arguments;
 mod digits;
 mod directives;
@@ -23,3 +24,6 @@ pub mod punct;
 
 /// The common keywords
 pub mod keywords;
+
+/// Punctuation tokens.
+pub mod punctuator;

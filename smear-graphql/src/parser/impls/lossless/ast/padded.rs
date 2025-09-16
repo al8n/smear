@@ -1,8 +1,8 @@
 use chumsky::{IterParser, Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable, TokenStream, utils::Span};
+use logosky::{Lexed, Parseable, utils::Span};
 
 use crate::{
-  error::{Error, Errors, LineTerminatorHint, WhiteSpaceHint},
+  error::{Error, LineTerminatorHint, WhiteSpaceHint},
   parser::ast::Comma,
 };
 
@@ -31,15 +31,14 @@ impl LineTerminator {
   }
 }
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for LineTerminator {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for LineTerminator {
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -74,15 +73,14 @@ impl Bom {
   }
 }
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Bom {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Bom {
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -117,14 +115,14 @@ impl Whitespace {
   }
 }
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Whitespace {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Whitespace {
+  type Error = LosslessTokenErrors<'a>;
+
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -160,14 +158,14 @@ impl<S> Comment<S> {
   }
 }
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Comment<&'a str> {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Comment<&'a str> {
+  type Error = LosslessTokenErrors<'a>;
+
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -200,15 +198,14 @@ impl<S> Ignored<S> {
   }
 }
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Ignored<&'a str> {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Ignored<&'a str> {
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => Ok(match tok {
@@ -274,23 +271,17 @@ impl<T, S> Padded<T, S> {
   }
 }
 
-impl<'a, T> Parseable<'a, TokenStream<'a, Token<'a>>> for Padded<T, &'a str>
+impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Padded<T, &'a str>
 where
-  T: Parseable<
-      'a,
-      TokenStream<'a, Token<'a>>,
-      Token = Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
-    > + 'a,
+  T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, Error = LosslessTokenErrors<'a>> + 'a,
 {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
     padded_parser(T::parser())
   }
@@ -304,12 +295,12 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Ignored<&'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
+  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
     .repeated()
     .collect()
     .then(value_parser)
     .then(
-      <Ignored<&'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
+      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
         .repeated()
         .collect(),
     )

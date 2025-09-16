@@ -1,26 +1,25 @@
 use chumsky::{Parser, extra::ParserExtra};
-use logosky::{Parseable, TokenStream};
+use logosky::Parseable;
 
 use crate::{
-  error::{Error, Errors, VariableValueHint},
-  parser::{name::Name, punctuator::Dollar, variable::Variable},
+  error::{Error, VariableValueHint},
+  parser::ast::{Dollar, Name, Variable},
 };
 
 use super::*;
 
-impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Variable<&'a str> {
-  type Token = Token<'a>;
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for Variable<&'a str> {
+  type Error = LosslessTokenErrors<'a>;
 
   #[inline]
-  fn parser<E>() -> impl Parser<'a, TokenStream<'a, Token<'a>>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
   {
-    <Dollar as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
+    <Dollar as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
       .or_not()
-      .then(<Name<&'a str> as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser().or_not())
+      .then(<Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser().or_not())
       .try_map_with(|(dollar, name), exa| {
         let span = exa.span();
         let slice = exa.slice();

@@ -8,11 +8,10 @@ use crate::{
 
 use super::*;
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>> for List<V>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>> for List<V>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token = Token<'a>, Error = FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, Error = FastTokenErrors<'a>> + 'a,
 {
-  type Token = Token<'a>;
   type Error = FastTokenErrors<'a>;
 
   #[inline]
@@ -33,9 +32,9 @@ where
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBracket as Parseable<'a, FastTokenStream<'a>>>::parser()
+  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser()
     .then(value_parser.repeated().collect())
-    .then(<RBracket as Parseable<'a, FastTokenStream<'a>>>::parser().or_not())
+    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(List::new(span, l, r, values)),
       None => Err(Error::unclosed_list(span).into()),

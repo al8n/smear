@@ -5,7 +5,7 @@ use logosky::utils::{
   syntax_tree_display::DisplaySyntaxTree,
 };
 
-use crate::parser::{ast::Name, punctuator::Dollar};
+use crate::parser::ast::{Dollar, Name};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Variable<S> {
