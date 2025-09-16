@@ -43,6 +43,8 @@ impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for Variable<&'a str> {
 
 #[cfg(test)]
 mod tests {
+  use crate::parser::lossless::LosslessParserExtra;
+
   use super::*;
 
   #[test]

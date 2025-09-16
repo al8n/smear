@@ -119,8 +119,9 @@ pub enum TokenKind {
   Colon,
   Comma,
   Dollar,
-  Equals,
+  Equal,
   Float,
+  Boolean,
   Identifier,
   Int,
   LineTerminator,
@@ -179,7 +180,7 @@ pub enum Token<'a> {
 
   /// Equals `=` token
   #[token("=", tt_hook)]
-  Equals,
+  Equal,
 
   /// Exclamation mark `!` token
   #[token("!", tt_hook)]
@@ -295,7 +296,7 @@ impl<'a> logosky::Token<'a> for Token<'a> {
       Self::Colon => TokenKind::Colon,
       Self::Comma => TokenKind::Comma,
       Self::Dollar => TokenKind::Dollar,
-      Self::Equals => TokenKind::Equals,
+      Self::Equal => TokenKind::Equal,
       Self::Float(_) => TokenKind::Float,
       Self::Identifier(_) => TokenKind::Identifier,
       Self::Int(_) => TokenKind::Int,

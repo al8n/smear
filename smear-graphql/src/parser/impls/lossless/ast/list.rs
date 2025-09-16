@@ -51,7 +51,7 @@ where
 mod tests {
   use crate::{
     error::{ErrorData, Unclosed},
-    parser::ast::StringValue,
+    parser::{ast::StringValue, lossless::LosslessParserExtra},
   };
 
   use super::*;

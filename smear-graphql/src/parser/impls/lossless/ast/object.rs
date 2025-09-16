@@ -4,7 +4,10 @@ use smear_parser::source::{IntoComponents, IntoSpan};
 
 use crate::{
   error::{Error, Errors},
-  parser::{ast::{Colon, LBrace, Name, Object, RBrace}, lossless::LosslessTokenErrors},
+  parser::{
+    ast::{Colon, LBrace, Name, Object, RBrace},
+    lossless::LosslessTokenErrors,
+  },
 };
 
 use super::{padded::Padded, *};
@@ -188,7 +191,10 @@ where
   V: 'a,
 {
   <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>>>::parser()
-    .then(<Padded<Colon, &'a str> as Parseable<'a, LosslessTokenStream<'a>>>::parser())
+    .then(<Padded<Colon, &'a str> as Parseable<
+      'a,
+      LosslessTokenStream<'a>,
+    >>::parser())
     .then(value_parser)
     .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
 }
@@ -218,7 +224,7 @@ where
 mod tests {
   use crate::{
     error::{ErrorData, Unclosed},
-    parser::ast::StringValue,
+    parser::{ast::StringValue, lossless::LosslessParserExtra},
   };
 
   use super::*;

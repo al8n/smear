@@ -31,6 +31,8 @@ impl<'a> Parseable<'a, TokenStream<'a, Token<'a>>> for FloatValue<&'a str> {
 
 #[cfg(test)]
 mod tests {
+  use crate::parser::lossless::LosslessParserExtra;
+
   use super::*;
 
   #[test]
