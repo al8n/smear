@@ -3,7 +3,7 @@ use logosky::{Lexed, Parseable, TokenStream, Tokenizer};
 
 use crate::{
   error::{Error, Errors},
-  parser::punctuator::{Colon, Comma, Dollar, LBrace, LBracket, RBrace, RBracket},
+  parser::punctuator::*,
 };
 
 use super::*;
@@ -36,6 +36,9 @@ macro_rules! punctuator_parser {
 }
 
 punctuator_parser! {
+  At,
+  Ampersand,
+  Bang,
   Colon,
   Comma,
   Dollar,
@@ -43,4 +46,6 @@ punctuator_parser! {
   RBrace,
   LBracket,
   RBracket,
+  LParen,
+  RParen,
 }

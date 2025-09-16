@@ -55,6 +55,9 @@ macro_rules! punctuator {
 }
 
 punctuator!(
+  (At, "AT", "@"),
+  (Ampersand, "AMPERSAND", "&"),
+  (Bang, "BANG", "!"),
   (Comma, "COMMA", ","),
   (Colon, "COLON", ":"),
   (Dollar, "DOLAR", "$"),
@@ -65,4 +68,6 @@ punctuator!(
   (RBracket, "R_BRACKET", "]"),
   (LBrace, "L_BRACE", "{{"),
   (RBrace, "R_BRACE", "}}"),
+  (LParen, "L_PAREN", "("),
+  (RParen, "R_PAREN", ")"),
 );

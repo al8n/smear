@@ -7,9 +7,6 @@ use super::{
   punct::{Colon, Equal, LAngle},
 };
 
-/// Groto input value and const input value parsers
-pub mod groto;
-
 pub use boolean::*;
 pub use enum_::*;
 pub use float::*;
