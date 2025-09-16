@@ -13,6 +13,8 @@ mod float;
 mod int;
 mod list;
 mod name;
+mod object;
+mod padded;
 mod punctuator;
 mod string;
 mod variable;

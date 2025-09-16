@@ -6,9 +6,9 @@ use crate::{
   parser::ast::{LBracket, List, RBracket},
 };
 
-use super::*;
+use super::{*, padded::Padded};
 
-impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for List<V>
+impl<'a, V> Parseable<'a, TokenStream<'a, Token<'a>>> for List<Padded<V, &'a str>>
 where
   V: Parseable<
       'a,
@@ -27,7 +27,7 @@ where
     E: ParserExtra<'a, TokenStream<'a, Token<'a>>, Error = Self::Error>,
   {
     <LBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser()
-      .then(V::parser().repeated().collect())
+      .then(Padded::<V, &'a str>::parser().repeated().collect())
       .then(<RBracket as Parseable<'a, TokenStream<'a, Token<'a>>>>::parser().or_not())
       .try_map(|((l, values), r), span| match r {
         Some(r) => Ok(Self::new(span, l, r, values)),
@@ -38,25 +38,28 @@ where
 
 #[cfg(test)]
 mod tests {
-  use crate::{error::ErrorData, parser::ast::StringValue};
+  use crate::{
+    error::{ErrorData, Unclosed},
+    parser::ast::StringValue,
+  };
 
   use super::*;
 
   #[test]
   fn test_list_parser() {
-    let parser = List::<StringValue<&str>>::parser::<LosslessParserExtra>();
+    let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra>();
     let input = r#"["a", "b", "c"]"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(parsed.values().len(), 3);
-    assert_eq!(*parsed.values()[0].content(), "a");
-    assert_eq!(*parsed.values()[1].content(), "b");
-    assert_eq!(*parsed.values()[2].content(), "c");
+    assert_eq!(*parsed.values()[0].value().content(), "a");
+    assert_eq!(*parsed.values()[1].value().content(), "b");
+    assert_eq!(*parsed.values()[2].value().content(), "c");
     assert_eq!(parsed.span(), &Span::new(0, 15));
   }
 
   #[test]
   fn test_unclosed_list_parser() {
-    let parser = List::<StringValue<&str>>::parser::<LosslessParserExtra>();
+    let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra>();
     let input = r#"["a", "b", "c""#;
     let mut parsed = parser
       .parse(LosslessTokenStream::new(input))
@@ -67,6 +70,6 @@ mod tests {
     assert_eq!(err.len(), 1);
     let err = err.pop().unwrap();
     let data = err.data();
-    assert!(matches!(data, ErrorData::UnclosedList));
+    assert!(matches!(data, ErrorData::Unclosed(Unclosed::List)));
   }
 }

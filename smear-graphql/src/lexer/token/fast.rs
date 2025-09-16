@@ -58,15 +58,15 @@ pub enum Token<'a> {
 
   /// Comma `,` token
   #[token("}", decrease_recursion_depth)]
-  BraceClose,
+  RBrace,
 
   /// Bracket `]` token
   #[token("]", decrease_recursion_depth)]
-  BracketClose,
+  RBracket,
 
   /// Parenthesis `)` token
   #[token(")", decrease_recursion_depth)]
-  ParenClose,
+  RParen,
 
   /// Dot `.` token
   #[token(":")]
@@ -86,15 +86,15 @@ pub enum Token<'a> {
 
   /// Left curly brace `{` token
   #[token("{", increase_recursion_depth)]
-  BraceOpen,
+  LBrace,
 
   /// Left square bracket `[` token
   #[token("[", increase_recursion_depth)]
-  BracketOpen,
+  LBracket,
 
   /// Left parenthesis `(` token
   #[token("(", increase_recursion_depth)]
-  ParenOpen,
+  LParen,
 
   /// Pipe `|` token
   #[token("|")]
@@ -146,16 +146,16 @@ pub enum TokenKind {
   String,
   BlockString,
   Dollar,
-  ParenOpen,
-  ParenClose,
+  LParen,
+  RParen,
   Spread,
   Colon,
   Equals,
   At,
-  BracketOpen,
-  BracketClose,
-  BraceOpen,
-  BraceClose,
+  LBracket,
+  RBracket,
+  LBrace,
+  RBrace,
   Pipe,
   Bang,
   Ampersand,
@@ -182,16 +182,16 @@ impl<'a> Token<'a> {
       Self::StringLiteral(_) => TokenKind::String,
       Self::BlockStringLiteral(_) => TokenKind::BlockString,
       Self::Dollar => TokenKind::Dollar,
-      Self::ParenOpen => TokenKind::ParenOpen,
-      Self::ParenClose => TokenKind::ParenClose,
+      Self::LParen => TokenKind::LParen,
+      Self::RParen => TokenKind::RParen,
       Self::Spread => TokenKind::Spread,
       Self::Colon => TokenKind::Colon,
       Self::Equals => TokenKind::Equals,
       Self::At => TokenKind::At,
-      Self::BracketOpen => TokenKind::BracketOpen,
-      Self::BracketClose => TokenKind::BracketClose,
-      Self::BraceOpen => TokenKind::BraceOpen,
-      Self::BraceClose => TokenKind::BraceClose,
+      Self::LBracket => TokenKind::LBracket,
+      Self::RBracket => TokenKind::RBracket,
+      Self::LBrace => TokenKind::LBrace,
+      Self::RBrace => TokenKind::RBrace,
       Self::Pipe => TokenKind::Pipe,
       Self::Bang => TokenKind::Bang,
       Self::Ampersand => TokenKind::Ampersand,

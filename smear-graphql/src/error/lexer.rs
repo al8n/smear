@@ -414,6 +414,15 @@ pub enum LineTerminatorHint {
   CarriageReturnNewLine,
 }
 
+/// A hint about what line terminator was found.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum WhiteSpaceHint {
+  #[display(" ")]
+  Space,
+  #[display("'\\t'")]
+  Tab,
+}
+
 /// An escaped character in a GraphQL inline string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EscapedCharacter<Char = char> {

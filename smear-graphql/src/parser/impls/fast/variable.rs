@@ -1,5 +1,5 @@
 use chumsky::{Parser, extra::ParserExtra};
-use logosky::{Parseable, TokenStream, Tokenizer};
+use logosky::{Parseable, TokenStream};
 
 use crate::{
   error::{Error, Errors, VariableValueHint},

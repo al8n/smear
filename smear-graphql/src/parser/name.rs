@@ -5,7 +5,7 @@ use logosky::utils::{
   syntax_tree_display::DisplaySyntaxTree,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Name<S> {
   span: Span,
   value: S,

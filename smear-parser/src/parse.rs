@@ -38,7 +38,7 @@ pub trait Parsable<S>: Sized {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     S: FromMapExtra<'src, I, E>;
 }
 
@@ -87,7 +87,7 @@ pub trait ParsableExt<S>: Parsable<S> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     S: FromMapExtra<'src, I, E>,
   {
     <Self as Parsable<S>>::parser::<I, E>().padded_by(super::lang::ignored())
@@ -132,7 +132,7 @@ pub trait ParseStr<'src, S>: Parsable<S> {
   /// without surrounding whitespace or comments.
   fn parse_str<E>(input: &'src str) -> Result<Self, Vec<E::Error>>
   where
-    E: ParserExtra<'src, &'src str>,
+    E: ParserExtra<'src, &'src str> + 'src,
     E::Context: Default,
     E::State: Default,
     S: FromMapExtra<'src, &'src str, E>,
@@ -147,7 +147,7 @@ pub trait ParseStr<'src, S>: Parsable<S> {
   /// where the input might contain formatting.
   fn parse_str_padded<E>(input: &'src str) -> Result<Self, Vec<E::Error>>
   where
-    E: ParserExtra<'src, &'src str>,
+    E: ParserExtra<'src, &'src str> + 'src,
     E::Context: Default,
     E::State: Default,
     S: FromMapExtra<'src, &'src str, E>,
@@ -180,7 +180,7 @@ pub trait ParseSlice<'src, S>: Parsable<S> {
   /// Parse a byte slice directly without padding.
   fn parse_slice<E>(input: &'src [u8]) -> Result<Self, Vec<E::Error>>
   where
-    E: ParserExtra<'src, &'src [u8]>,
+    E: ParserExtra<'src, &'src [u8]> + 'src,
     E::Context: Default,
     E::State: Default,
     S: FromMapExtra<'src, &'src [u8], E>,
@@ -191,7 +191,7 @@ pub trait ParseSlice<'src, S>: Parsable<S> {
   /// Parse a byte slice with whitespace and comment handling.
   fn parse_slice_padded<E>(input: &'src [u8]) -> Result<Self, Vec<E::Error>>
   where
-    E: ParserExtra<'src, &'src [u8]>,
+    E: ParserExtra<'src, &'src [u8]> + 'src,
     E::Context: Default,
     E::State: Default,
     S: FromMapExtra<'src, &'src [u8], E>,
@@ -244,7 +244,7 @@ mod _bytes {
     /// Parse `Bytes` directly without any padding or special handling.
     fn parse_bytes<'a, E>(input: Bytes) -> Result<Self, Vec<E::Error>>
     where
-      E: ParserExtra<'a, Bytes>,
+      E: ParserExtra<'a, Bytes> + 'a,
       E::Context: Default,
       E::State: Default,
       S: FromMapExtra<'a, Bytes, E>,
@@ -255,7 +255,7 @@ mod _bytes {
     /// Parse `Bytes` with automatic whitespace and comment handling.
     fn parse_bytes_padded<'a, E>(input: Bytes) -> Result<Self, Vec<E::Error>>
     where
-      E: ParserExtra<'a, Bytes>,
+      E: ParserExtra<'a, Bytes> + 'a,
       E::Context: Default,
       E::State: Default,
       S: FromMapExtra<'a, Bytes, E>,

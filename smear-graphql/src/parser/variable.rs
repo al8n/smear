@@ -45,7 +45,12 @@ impl<S> Variable<S> {
   /// Creates a new name.
   #[inline]
   pub(crate) const fn new(span: Span, slice: S, dollar: Dollar, name: Name<S>) -> Self {
-    Self { span, slice, dollar, name }
+    Self {
+      span,
+      slice,
+      dollar,
+      name,
+    }
   }
 
   /// Returns the source slice of the variable, including the `$`.

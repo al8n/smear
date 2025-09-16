@@ -38,7 +38,10 @@ where
 
 #[cfg(test)]
 mod tests {
-  use crate::{error::ErrorData, parser::ast::StringValue};
+  use crate::{
+    error::{ErrorData, Unclosed},
+    parser::ast::StringValue,
+  };
 
   use super::*;
 
@@ -67,6 +70,6 @@ mod tests {
     assert_eq!(err.len(), 1);
     let err = err.pop().unwrap();
     let data = err.data();
-    assert!(matches!(data, ErrorData::UnclosedList));
+    assert!(matches!(data, ErrorData::Unclosed(Unclosed::List)));
   }
 }

@@ -104,7 +104,7 @@ macro_rules! newtype {
         I: Source<'src>,
         I::Token: Char + 'src,
         I::Slice: Slice<Token = I::Token>,
-        E: ParserExtra<'src, I>,
+        E: ParserExtra<'src, I> + 'src,
         Span: source::FromMapExtra<'src, I, E>,
       {
         $parser
@@ -242,7 +242,7 @@ impl<Span> parse::Parsable<Span> for InputValue<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|value| {
@@ -335,7 +335,7 @@ impl<Span> parse::Parsable<Span> for ConstInputValue<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|value| {
@@ -549,7 +549,7 @@ impl<Span> parse::Parsable<Span> for Selection<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     recursive(|selection| {
@@ -1148,7 +1148,7 @@ impl<Span> parse::Parsable<Span> for OperationDefinition<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     definitions::OperationDefinition::parser_with(
@@ -1280,7 +1280,7 @@ impl<Span> parse::Parsable<Span> for TypeDefinitionContent<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
@@ -1334,7 +1334,7 @@ impl<Span> parse::Parsable<Span> for TypeDefinition<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
@@ -1402,7 +1402,7 @@ impl<Span> parse::Parsable<Span> for TypeExtension<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
@@ -1472,7 +1472,7 @@ impl<Span> parse::Parsable<Span> for ExecutableDefinition<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     OperationDefinition::parser()
@@ -1515,7 +1515,7 @@ impl<Span> parse::Parsable<Span> for TypeSystemDefinition<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
@@ -1569,7 +1569,7 @@ impl<Span> parse::Parsable<Span> for TypeSystemExtension<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     TypeExtension::parser()
@@ -1620,7 +1620,7 @@ impl<Span> parse::Parsable<Span> for Definition<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     choice((
@@ -1672,7 +1672,7 @@ impl<Span> parse::Parsable<Span> for TypeSystemDefinitionOrExtension<Span> {
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     TypeSystemDefinition::parser()
@@ -1737,7 +1737,7 @@ where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     TypeSystemDefinitionOrExtension::parser()
@@ -1812,7 +1812,7 @@ where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     ExecutableDefinition::parser()
@@ -1887,7 +1887,7 @@ where
     I: Source<'src>,
     I::Token: Char + 'src,
     I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
+    E: ParserExtra<'src, I> + 'src,
     Span: source::FromMapExtra<'src, I, E>,
   {
     Definition::parser()

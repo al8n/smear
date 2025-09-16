@@ -5,7 +5,9 @@ use chumsky::{
   error::{self, LabelError},
   util::{Maybe, MaybeRef},
 };
-use derive_more::{AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant};
+use derive_more::{
+  AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
+};
 use logosky::{
   Lexed, Token, TokenStream,
   utils::{Span, UnexpectedEnd},
@@ -49,13 +51,73 @@ pub enum VariableValueHint {
   Dollar,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum ObjectFieldValueHint {
+  /// A [`Colon`](crate::parser::ast::Colon) was expected.
+  #[display("colon")]
+  Colon,
+  /// A value was expected.
+  #[display("value")]
+  Value,
+  /// A [`Name`](crate::parser::ast::Name) was expected.
+  #[display("name")]
+  Name,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct UnexpectedObjectFieldValueShape {
+  has_name: bool,
+  has_colon: bool,
+  has_value: bool,
+}
+
+impl UnexpectedObjectFieldValueShape {
+  /// Creates a new unexpected object field value shape error.
+  #[inline]
+  pub const fn new(has_name: bool, has_colon: bool, has_value: bool) -> Self {
+    Self {
+      has_name,
+      has_colon,
+      has_value,
+    }
+  }
+
+  /// Returns `true` if the object field value has a name.
+  #[inline]
+  pub const fn has_name(&self) -> bool {
+    self.has_name
+  }
+
+  /// Returns `true` if the object field value has a colon.
+  #[inline]
+  pub const fn has_colon(&self) -> bool {
+    self.has_colon
+  }
+
+  /// Returns `true` if the object field value has a value.
+  #[inline]
+  pub const fn has_value(&self) -> bool {
+    self.has_value
+  }
+}
+
+#[derive(Debug, Copy, Clone, IsVariant)]
+pub enum Unclosed {
+  List,
+  Object,
+}
+
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
   Lexer(LexerErrors<Char, StateError>),
   InvalidEnumValue(&'a str),
-  UnclosedList,
+  Unclosed(Unclosed),
   UnexpectedToken(UnexpectedToken<T, TK>),
+  UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
+  UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
   /// An end of input was found.
   EndOfInput,
   Other(Cow<'static, str>),
@@ -83,7 +145,7 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
     )
   }
 
-  /// Creates a missing name in variable error.
+  /// Creates an unexpected end in variable value error.
   #[inline]
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
     Self::new(
@@ -95,10 +157,47 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
     )
   }
 
+  /// Creates an unexpected object field value shape error.
+  #[inline]
+  pub const fn unexpected_object_field_value_shape(
+    has_name: bool,
+    has_colon: bool,
+    has_value: bool,
+    span: Span,
+  ) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape::new(
+        has_name, has_colon, has_value,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in object field value error.
+  #[inline]
+  pub const fn unexpected_end_of_object_field_value(
+    hint: ObjectFieldValueHint,
+    span: Span,
+  ) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
+        Cow::Borrowed("object field value"),
+        hint,
+      )),
+    )
+  }
+
   /// Creates an unclosed list error.
   #[inline]
   pub const fn unclosed_list(span: Span) -> Self {
-    Self::new(span, ErrorData::UnclosedList)
+    Self::new(span, ErrorData::Unclosed(Unclosed::List))
+  }
+
+  /// Creates an unclosed object error.
+  #[inline]
+  pub const fn unclosed_object(span: Span) -> Self {
+    Self::new(span, ErrorData::Unclosed(Unclosed::Object))
   }
 
   /// Creates an error from a lexer error.

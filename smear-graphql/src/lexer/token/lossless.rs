@@ -109,12 +109,12 @@ fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
 pub enum TokenKind {
   Ampersand,
   At,
-  BraceClose,
-  BraceOpen,
-  BracketClose,
-  BracketOpen,
-  ParenClose,
-  ParenOpen,
+  RBrace,
+  LBrace,
+  RBracket,
+  LBracket,
+  RParen,
+  LParen,
   Bang,
   Colon,
   Comma,
@@ -123,11 +123,8 @@ pub enum TokenKind {
   Float,
   Identifier,
   Int,
-  NewLine,
-  CarriageReturnNewLine,
-  CarriageReturn,
-  Space,
-  Tab,
+  LineTerminator,
+  Whitespace,
   BOM,
   Pipe,
   Spread,
@@ -162,15 +159,15 @@ pub enum Token<'a> {
 
   /// Comma `,` token
   #[token("}", decrease_recursion_depth)]
-  BraceClose,
+  RBrace,
 
   /// Bracket `]` token
   #[token("]", decrease_recursion_depth)]
-  BracketClose,
+  RBracket,
 
   /// Parenthesis `)` token
   #[token(")", decrease_recursion_depth)]
-  ParenClose,
+  RParen,
 
   /// Dot `.` token
   #[token(":", tt_hook)]
@@ -190,15 +187,15 @@ pub enum Token<'a> {
 
   /// Left curly brace `{` token
   #[token("{", increase_recursion_depth_and_token)]
-  BraceOpen,
+  LBrace,
 
   /// Left square bracket `[` token
   #[token("[", increase_recursion_depth_and_token)]
-  BracketOpen,
+  LBracket,
 
   /// Left parenthesis `(` token
   #[token("(", increase_recursion_depth_and_token)]
-  ParenOpen,
+  LParen,
 
   /// Pipe `|` token
   #[token("|", tt_hook)]
@@ -288,12 +285,12 @@ impl<'a> logosky::Token<'a> for Token<'a> {
     match self {
       Self::Ampersand => TokenKind::Ampersand,
       Self::At => TokenKind::At,
-      Self::BraceClose => TokenKind::BraceClose,
-      Self::BraceOpen => TokenKind::BraceOpen,
-      Self::BracketClose => TokenKind::BracketClose,
-      Self::BracketOpen => TokenKind::BracketOpen,
-      Self::ParenClose => TokenKind::ParenClose,
-      Self::ParenOpen => TokenKind::ParenOpen,
+      Self::RBrace => TokenKind::RBrace,
+      Self::LBrace => TokenKind::LBrace,
+      Self::RBracket => TokenKind::RBracket,
+      Self::LBracket => TokenKind::LBracket,
+      Self::RParen => TokenKind::RParen,
+      Self::LParen => TokenKind::LParen,
       Self::Bang => TokenKind::Bang,
       Self::Colon => TokenKind::Colon,
       Self::Comma => TokenKind::Comma,
@@ -302,11 +299,10 @@ impl<'a> logosky::Token<'a> for Token<'a> {
       Self::Float(_) => TokenKind::Float,
       Self::Identifier(_) => TokenKind::Identifier,
       Self::Int(_) => TokenKind::Int,
-      Self::NewLine => TokenKind::NewLine,
-      Self::CarriageReturnNewLine => TokenKind::CarriageReturnNewLine,
-      Self::CarriageReturn => TokenKind::CarriageReturn,
-      Self::Space => TokenKind::Space,
-      Self::Tab => TokenKind::Tab,
+      Self::NewLine | Self::CarriageReturnNewLine | Self::CarriageReturn => {
+        TokenKind::LineTerminator
+      }
+      Self::Space | Self::Tab => TokenKind::Whitespace,
       Self::BOM => TokenKind::BOM,
       Self::Pipe => TokenKind::Pipe,
       Self::Spread => TokenKind::Spread,
