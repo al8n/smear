@@ -9,14 +9,16 @@ mod list;
 mod name;
 mod null;
 mod object;
-mod punctuator;
 mod string;
 mod variable;
+mod argument;
 
 pub mod ast {
   pub use super::{
+    argument::*,
     boolean_value::BooleanValue, enum_value::EnumValue, float::FloatValue, int::IntValue,
-    list::List, name::Name, null::NullValue, object::Object, punctuator::*, string::StringValue,
+    list::List, name::Name, null::NullValue, object::Object, string::StringValue,
     variable::Variable,
   };
+  pub use smear_parser::lang::punctuator::*;
 }

@@ -1,54 +1,100 @@
-use logosky::utils::{Span, human_display::DisplayHuman, syntax_tree_display::DisplaySyntaxTree};
-
+/// Defines the punctuators.
+/// 
+/// # Examples
+/// ```rust
+/// use smear_parser::punctuator;
+/// 
+/// punctuator! {
+///   (LAngle, "L_ANGLE", "<"),
+///   (RAngle, "R_ANGLE", ">"),
+/// }
+/// ```
+#[macro_export]
 macro_rules! punctuator {
   ($(($name:ident, $syntax_tree_display: literal, $punct:literal)),+$(,)?) => {
     paste::paste! {
       $(
-        #[doc = $name " punctuator"]
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[doc = "The `" $punct "` punctuator"]
+        #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
         pub struct $name {
-          span: Span,
+          span: $crate::__private::logosky::utils::Span,
         }
 
         impl $name {
           /// Creates a new punctuator.
           #[inline(always)]
-          pub const fn new(span: Span) -> Self {
+          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
             Self { span }
           }
 
-          /// Returns the span of the punctuator.
-          #[inline(always)]
-          pub const fn span(&self) -> &Span {
+          #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
+          #[inline]
+          pub const fn raw() -> &'static ::core::primitive::str {
+            $punct
+          }
+
+          #[doc = "Returns the span of the `" $punct "` punctuator."]
+          #[inline]
+          pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
             &self.span
           }
         }
 
-        impl core::fmt::Display for $name {
+        impl ::core::convert::AsRef<$crate::__private::logosky::utils::Span> for $name {
+          #[inline]
+          fn as_ref(&self) -> &$crate::__private::logosky::utils::Span {
+            self.span()
+          }
+        }
+
+       impl $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+          #[inline]
+          fn into_span(self) -> $crate::__private::logosky::utils::Span {
+            self.span
+          }
+        }
+
+        impl $crate::__private::IntoComponents for $name {
+          type Components = $crate::__private::logosky::utils::Span;
+
+          #[inline]
+          fn into_components(self) -> Self::Components {
+            <Self as $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
+          }
+        }
+
+        impl ::core::fmt::Display for $name {
           #[inline(always)]
-          fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             write!(f, $punct)
           }
         }
 
-        impl DisplayHuman for $name {
+        impl $crate::__private::logosky::utils::human_display::DisplayHuman for $name {
           #[inline]
-          fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            core::fmt::Display::fmt(self, f)
+          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl DisplaySyntaxTree for $name {
+        impl $crate::__private::logosky::utils::sdl_display::DisplaySDL for $name {
+          #[inline]
+          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            ::core::fmt::Display::fmt(self, f)
+          }
+        }
+
+        impl $crate::__private::logosky::utils::syntax_tree_display::DisplaySyntaxTree for $name {
           #[inline]
           fn fmt(
             &self,
-            level: usize,
-            indent: usize,
-            f: &mut core::fmt::Formatter<'_>,
-          ) -> core::fmt::Result {
+            level: ::core::primitive::usize,
+            indent: ::core::primitive::usize,
+            f: &mut ::core::fmt::Formatter<'_>,
+          ) -> ::core::fmt::Result {
             let padding = level * indent;
-            write!(f, "{:indent$}", "", indent = padding)?;
-            writeln!(f, concat!("- ", $syntax_tree_display, "@{}..{}"), self.span().start(), self.span().end())
+            ::core::write!(f, "{:indent$}", "", indent = padding)?;
+            ::core::writeln!(f, ::core::concat!("- ", $syntax_tree_display, "@{}..{}"), self.span().start(), self.span().end())
           }
         }
       )*

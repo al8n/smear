@@ -1,25 +1,24 @@
 use chumsky::{Parser, extra::ParserExtra};
 use logosky::Parseable;
+use smear_parser::lang::punctuator::Dollar;
 
 use crate::{
   error::{Error, VariableValueHint},
-  parser::{name::Name, punctuator::Dollar, variable::Variable},
+  parser::{name::Name, variable::Variable},
 };
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>> for Variable<&'a str> {
-  type Error = FastTokenErrors<'a>;
-
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for Variable<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
   {
-    <Dollar as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser()
+    <Dollar as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
       .or_not()
-      .then(<Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser().or_not())
+      .then(<Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
       .try_map_with(|(dollar, name), exa| {
         let span = exa.span();
         let slice = exa.slice();

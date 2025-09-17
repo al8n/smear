@@ -2,28 +2,26 @@ use chumsky::{IterParser as _, Parser, extra::ParserExtra};
 use logosky::Parseable;
 
 use crate::{
-  error::{Error, Errors},
+  error::Error,
   parser::ast::{LBracket, List, RBracket},
 };
 
 use super::{padded::Padded, *};
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for List<Padded<V, &'a str>>
+impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for List<Padded<V, &'a str>>
 where
   V: Parseable<
       'a,
       LosslessTokenStream<'a>,
       Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
+      LosslessTokenErrors<'a>,
     > + 'a,
 {
-  type Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>;
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
   {
     list_parser(V::parser())
   }
@@ -37,9 +35,9 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBracket as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
+  <LBracket as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
     .then(padded::padded_parser(value_parser).repeated().collect())
-    .then(<RBracket as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser().or_not())
+    .then(<RBracket as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(List::new(span, l, r, values)),
       None => Err(Error::unclosed_list(span).into()),

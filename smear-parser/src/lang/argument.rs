@@ -1,5 +1,8 @@
-use logosky::utils::Span;
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use chumsky::{Parser, extra::ParserExtra};
 use smear_utils::{IntoComponents, IntoSpan};
+
+use crate::lang::punctuator::Colon;
 
 /// A single named argument in a GraphQL operation or directive.
 ///
@@ -15,28 +18,28 @@ use smear_utils::{IntoComponents, IntoSpan};
 ///
 /// Spec: [Argument](https://spec.graphql.org/draft/#Argument)
 #[derive(Debug, Clone, Copy)]
-pub struct Argument<Name, Colon, Value> {
+pub struct Argument<Name, Value> {
   span: Span,
   name: Name,
   colon: Colon,
   value: Value,
 }
 
-impl<Name, Colon, Value> AsRef<Span> for Argument<Name, Colon, Value> {
+impl<Name, Value> AsRef<Span> for Argument<Name, Value> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Colon, Value> IntoSpan<Span> for Argument<Name, Colon, Value> {
+impl<Name, Value> IntoSpan<Span> for Argument<Name, Value> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Colon, Value> IntoComponents for Argument<Name, Colon, Value> {
+impl<Name, Value> IntoComponents for Argument<Name, Value> {
   type Components = (Span, Name, Colon, Value);
 
   #[inline]
@@ -45,7 +48,7 @@ impl<Name, Colon, Value> IntoComponents for Argument<Name, Colon, Value> {
   }
 }
 
-impl<Name, Colon, Value> Argument<Name, Colon, Value> {
+impl<Name, Value> Argument<Name, Value> {
   /// Returns the source span of the entire argument.
   ///
   /// This span covers from the first character of the argument name through
@@ -85,37 +88,34 @@ impl<Name, Colon, Value> Argument<Name, Colon, Value> {
   pub const fn value(&self) -> &Value {
     &self.value
   }
+}
 
-  // /// Creates a parser for GraphQL arguments with a custom value parser.
-  // ///
-  // /// This parser handles the complete argument syntax including the argument
-  // /// name, colon separator, and argument value. It manages whitespace around
-  // /// the colon according to GraphQL's flexible whitespace rules.
-  // ///
-  // /// ## Notes
-  // ///
-  // /// This parser does not handle surrounding [ignored tokens].
-  // /// The calling parser is responsible for handling any necessary
-  // /// whitespace skipping or comment processing around the argument.
-  // ///
-  // /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  // pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
-  // where
-  //   I: Source<'src>,
-  //   I::Token: Char + 'src,
-  //   I::Slice: Slice<Token = I::Token>,
-  //   E: ParserExtra<'src, I>,
-  //   Span: crate::source::FromMapExtra<'src, I, E>,
-  //   P: Parser<'src, I, Value, E> + Clone,
-  // {
-  //   Name::parser()
-  //     .then(Colon::parser().padded_by(ignored()))
-  //     .then(value)
-  //     .map_with(|((name, colon), value), sp| Self {
-  //       span: Span::from_map_extra(sp),
-  //       name,
-  //       colon,
-  //       value,
-  //     })
-  // }
+impl<'a, Name, Value, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Name: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
+  Value: Parseable<'a, I, T, Error>,
+  Error: 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    <Name as Parseable<'a, I, T, Error>>::parser()
+      .then(<Colon as Parseable<'a, I, T, Error>>::parser())
+      .then(<Value as Parseable<'a, I, T, Error>>::parser())
+      .map_with(|((name, colon), value), exa| {
+        let span = exa.span();
+        Self {
+          span,
+          name,
+          colon,
+          value,
+        }
+      })
+  }
 }

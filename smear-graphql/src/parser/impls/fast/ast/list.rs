@@ -8,17 +8,16 @@ use crate::{
 
 use super::*;
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>> for List<V>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for List<V>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, Error = FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
 {
-  type Error = FastTokenErrors<'a>;
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
   {
     list_parser(V::parser())
   }
@@ -32,9 +31,9 @@ where
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser()
+  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
     .then(value_parser.repeated().collect())
-    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser().or_not())
+    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(List::new(span, l, r, values)),
       None => Err(Error::unclosed_list(span).into()),

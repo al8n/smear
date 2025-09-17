@@ -8,14 +8,12 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>> for StringValue<&'a str> {
-  type Error = FastTokenErrors<'a>;
-
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for StringValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => Ok(match tok {

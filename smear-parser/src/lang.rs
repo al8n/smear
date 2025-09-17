@@ -27,3 +27,11 @@ pub mod keywords;
 
 /// Punctuation tokens.
 pub mod punctuator;
+
+mod arguments2;
+
+/// a
+pub mod v2 {
+  pub use super::argument::Argument;
+  pub use super::arguments2::*;
+}

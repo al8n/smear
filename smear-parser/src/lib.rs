@@ -149,6 +149,7 @@ pub mod source {
 #[doc(hidden)]
 pub mod __private {
   pub use chumsky;
+  pub use logosky;
 
   pub use super::{parse, source::*};
 }

@@ -123,33 +123,29 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>> for ObjectField<V, &'a str>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for ObjectField<V, &'a str>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, Error = FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
 {
-  type Error = FastTokenErrors<'a>;
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
   {
     object_field_parser(V::parser())
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>> for Object<ObjectField<V, &'a str>>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for Object<ObjectField<V, &'a str>>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, Error = FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
 {
-  type Error = FastTokenErrors<'a>;
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
   {
     object_parser(V::parser())
   }
@@ -163,8 +159,8 @@ where
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser()
-    .then(<Colon as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser())
+  <Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
+    .then(<Colon as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser())
     .then(value_parser)
     .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
 }
@@ -177,13 +173,13 @@ where
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser()
+  <LBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
     .then(
       object_field_parser::<V, VP, E>(value_parser)
         .repeated()
         .collect(),
     )
-    .then(<RBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>>>::parser().or_not())
+    .then(<RBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(Object::new(span, l, values, r)),
       None => Err(Error::unclosed_object(span).into()),

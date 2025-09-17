@@ -3,7 +3,7 @@ use logosky::Parseable;
 use smear_parser::source::{IntoComponents, IntoSpan};
 
 use crate::{
-  error::{Error, Errors},
+  error::Error,
   parser::{
     ast::{Colon, LBrace, Name, Object, RBrace},
     lossless::LosslessTokenErrors,
@@ -46,9 +46,9 @@ use super::{padded::Padded, *};
 #[derive(Debug, Clone)]
 pub struct ObjectField<InputValue, S> {
   span: Span,
-  name: Name<S>,
-  colon: Padded<Colon, S>,
-  value: InputValue,
+  name: PaddedRight<Name<S>, S>,
+  colon: Colon,
+  value: PaddedLeft<InputValue, S>,
 }
 
 impl<InputValue, S> AsRef<Span> for ObjectField<InputValue, S> {
@@ -66,7 +66,7 @@ impl<InputValue, S> IntoSpan<Span> for ObjectField<InputValue, S> {
 }
 
 impl<InputValue, S> IntoComponents for ObjectField<InputValue, S> {
-  type Components = (Span, Name<S>, Padded<Colon, S>, InputValue);
+  type Components = (Span, PaddedRight<Name<S>, S>, Colon, PaddedLeft<InputValue, S>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -78,9 +78,9 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   #[inline]
   pub(crate) const fn new(
     span: Span,
-    name: Name<S>,
-    colon: Padded<Colon, S>,
-    value: InputValue,
+    name: PaddedRight<Name<S>, S>,
+    colon: Colon,
+    value: PaddedLeft<InputValue, S>,
   ) -> Self {
     Self {
       span,
@@ -106,7 +106,7 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   /// name from its value, including its exact source position. Useful
   /// for syntax highlighting and precise error reporting.
   #[inline]
-  pub const fn colon(&self) -> &Padded<Colon, S> {
+  pub const fn colon(&self) -> &Colon {
     &self.colon
   }
 
@@ -116,7 +116,7 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   /// within the object. The name follows standard GraphQL identifier rules
   /// and cannot be a reserved keyword.
   #[inline]
-  pub const fn name(&self) -> &Name<S> {
+  pub const fn name(&self) -> &PaddedRight<Name<S>, S> {
     &self.name
   }
 
@@ -126,51 +126,48 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   /// can be any valid GraphQL input value type including scalars, enums,
   /// lists, nested objects, or null.
   #[inline]
-  pub const fn value(&self) -> &InputValue {
+  pub const fn value(&self) -> &PaddedLeft<InputValue, S> {
     &self.value
   }
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>> for ObjectField<V, &'a str>
+impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for ObjectField<V, &'a str>
 where
   V: Parseable<
       'a,
       LosslessTokenStream<'a>,
       Token<'a>,
-      Error = Errors<'a, Token<'a>, TokenKind, char, LimitExceeded>,
-    >,
+      LosslessTokenErrors<'a>,
+    > + 'a,
 {
-  type Error = LosslessTokenErrors<'a>;
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
   {
-    <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
-      .then(<Padded<Colon, &'a str> as Parseable<
+    <PaddedRight<Name<&'a str>, &'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+      .then(<Colon as Parseable<
         'a,
         LosslessTokenStream<'a>,
         Token<'a>,
+        LosslessTokenErrors<'a>,
       >>::parser())
-      .then(V::parser())
+      .then(padded_left_parser(V::parser()))
       .map_with(|((name, colon), value), exa| Self::new(exa.span(), name, colon, value))
   }
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>>
+impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>
   for Object<Padded<ObjectField<V, &'a str>, &'a str>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> + 'a,
 {
-  type Error = LosslessTokenErrors<'a>;
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = Self::Error> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
   {
     object_parser(V::parser())
   }
@@ -184,13 +181,14 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
-    .then(<Padded<Colon, &'a str> as Parseable<
+  <PaddedRight<Name<&'a str>, &'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+    .then(<Colon as Parseable<
       'a,
       LosslessTokenStream<'a>,
       Token<'a>,
+      LosslessTokenErrors<'a>,
     >>::parser())
-    .then(value_parser)
+    .then(padded_left_parser(value_parser))
     .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
 }
 
@@ -202,13 +200,13 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser()
+  <LBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
     .then(
       padded::padded_parser(object_field_parser::<V, VP, E>(value_parser))
         .repeated()
         .collect(),
     )
-    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>>>::parser().or_not())
+    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(Object::new(span, l, values, r)),
       None => Err(Error::unclosed_object(span).into()),
