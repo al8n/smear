@@ -21,12 +21,12 @@ mod tests {
     let input = r#"argName: 123"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.name().source(), "argName");
-    assert_eq!(parsed.name().span(), Span::new(0, 7));
+    assert_eq!(parsed.name().span(), &Span::new(0, 7));
     assert_eq!(parsed.colon().span(), &Span::new(7, 8));
     match parsed.value() {
       InputValue::Int(int_val) => {
         assert_eq!(*int_val.source(), "123");
-        assert_eq!(int_val.span(), Span::new(9, 12));
+        assert_eq!(int_val.span(), &Span::new(9, 12));
       }
       _ => panic!("Expected IntValue"),
     }
@@ -38,12 +38,12 @@ mod tests {
     let input = r#"argName: 123"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.name().source(), "argName");
-    assert_eq!(parsed.name().span(), Span::new(0, 7));
+    assert_eq!(parsed.name().span(), &Span::new(0, 7));
     assert_eq!(parsed.colon().span(), &Span::new(7, 8));
     match parsed.value() {
       ConstInputValue::Int(int_val) => {
         assert_eq!(*int_val.source(), "123");
-        assert_eq!(int_val.span(), Span::new(9, 12)); // Note: ConstInputValue should have the same span as InputValue
+        assert_eq!(int_val.span(), &Span::new(9, 12)); // Note: ConstInputValue should have the same span as InputValue
       }
       _ => panic!("Expected IntValue"),
     }

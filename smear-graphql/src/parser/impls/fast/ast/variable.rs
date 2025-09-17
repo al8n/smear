@@ -4,7 +4,7 @@ use smear_parser::lang::punctuator::Dollar;
 
 use crate::{
   error::{Error, VariableValueHint},
-  parser::{name::Name, variable::Variable},
+  parser::{ast::Name, variable::Variable},
 };
 
 use super::*;

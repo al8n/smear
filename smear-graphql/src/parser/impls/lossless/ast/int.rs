@@ -34,6 +34,6 @@ mod tests {
     let input = r#"42"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "42");
-    assert_eq!(parsed.span(), Span::new(0, 2));
+    assert_eq!(parsed.span(), &Span::new(0, 2));
   }
 }

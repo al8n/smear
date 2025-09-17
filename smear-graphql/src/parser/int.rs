@@ -45,8 +45,8 @@ impl<S> IntValue<S> {
 
   /// Returns the span of the name.
   #[inline]
-  pub const fn span(&self) -> Span {
-    self.span
+  pub const fn span(&self) -> &Span {
+    &self.span
   }
 
   /// Returns the source of the int.

@@ -45,7 +45,7 @@ impl<S> EnumValue<S> {
 
   /// Returns the span of the name.
   #[inline]
-  pub const fn span(&self) -> Span {
+  pub const fn span(&self) -> &Span {
     self.0.span()
   }
 

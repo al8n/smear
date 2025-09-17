@@ -40,6 +40,6 @@ mod tests {
     let input = r#"foo"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), Span::new(0, 3));
+    assert_eq!(parsed.span(), &Span::new(0, 3));
   }
 }

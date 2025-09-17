@@ -1,4 +1,4 @@
-use logosky::utils::{Span, tracker::LimitExceeded};
+use logosky::utils::Span;
 
 use crate::lexer::token::lossless::{Token, TokenKind};
 

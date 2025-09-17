@@ -1,7 +1,7 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
 
-use crate::{error::Error, parser::name::Name};
+use crate::{error::Error, parser::ast::Name};
 
 use super::*;
 
@@ -34,6 +34,6 @@ mod tests {
     let input = r#"foo"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), Span::new(0, 3));
+    assert_eq!(parsed.span(), &Span::new(0, 3));
   }
 }

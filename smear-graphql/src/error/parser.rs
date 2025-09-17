@@ -115,6 +115,7 @@ pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
   InvalidEnumValue(&'a str),
   InvalidBooleanValue(&'a str),
   InvalidNullValue(&'a str),
+  InvalidFragmentName(&'a str),
   Unclosed(Unclosed),
   UnexpectedToken(UnexpectedToken<T, TK>),
   UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
@@ -206,6 +207,12 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
   #[inline]
   pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
     Self::new(span, ErrorData::Lexer(err))
+  }
+
+  /// Creates an invalid fragment name error.
+  #[inline]
+  pub const fn invalid_fragment_name(value: &'a str, span: Span) -> Self {
+    Self::new(span, ErrorData::InvalidFragmentName(value))
   }
 
   /// Creates an invalid enum value error.
