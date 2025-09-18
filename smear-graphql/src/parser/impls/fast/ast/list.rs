@@ -12,7 +12,6 @@ impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'
 where
   V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
-
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where

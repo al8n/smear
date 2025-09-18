@@ -31,7 +31,9 @@ impl LineTerminator {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for LineTerminator {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for LineTerminator
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -39,18 +41,21 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::NewLine => Ok(LineTerminator::new(LineTerminatorHint::NewLine, span)),
-        Token::CarriageReturn => Ok(LineTerminator::new(
-          LineTerminatorHint::CarriageReturn,
-          span,
-        )),
-        Token::CarriageReturnNewLine => Ok(LineTerminator::new(
-          LineTerminatorHint::CarriageReturnNewLine,
-          span,
-        )),
-        tok => Err(Error::unexpected_token(tok, TokenKind::LineTerminator, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::NewLine => Ok(LineTerminator::new(LineTerminatorHint::NewLine, span)),
+          Token::CarriageReturn => Ok(LineTerminator::new(
+            LineTerminatorHint::CarriageReturn,
+            span,
+          )),
+          Token::CarriageReturnNewLine => Ok(LineTerminator::new(
+            LineTerminatorHint::CarriageReturnNewLine,
+            span,
+          )),
+          tok => Err(Error::unexpected_token(tok, TokenKind::LineTerminator, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }
@@ -71,7 +76,9 @@ impl Bom {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Bom {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Bom
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -79,10 +86,13 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::BOM => Ok(Bom::new(span)),
-        tok => Err(Error::unexpected_token(tok, TokenKind::BOM, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::BOM => Ok(Bom::new(span)),
+          tok => Err(Error::unexpected_token(tok, TokenKind::BOM, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }
@@ -111,7 +121,9 @@ impl Whitespace {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Whitespace {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Whitespace
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -119,11 +131,14 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Space => Ok(Whitespace::new(WhiteSpaceHint::Space, span)),
-        Token::Tab => Ok(Whitespace::new(WhiteSpaceHint::Tab, span)),
-        tok => Err(Error::unexpected_token(tok, TokenKind::Whitespace, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        Ok(match tok {
+          Token::Space => Whitespace::new(WhiteSpaceHint::Space, span),
+          Token::Tab => Whitespace::new(WhiteSpaceHint::Tab, span),
+          tok => return Err(Error::unexpected_token(tok, TokenKind::Whitespace, span).into()),
+        })
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }
@@ -152,7 +167,9 @@ impl<S> Comment<S> {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Comment<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Comment<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -160,10 +177,13 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Comment(content) => Ok(Comment::new(span, content)),
-        tok => Err(Error::unexpected_token(tok, TokenKind::Comment, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::Comment(content) => Ok(Comment::new(span, content)),
+          tok => Err(Error::unexpected_token(tok, TokenKind::Comment, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }
@@ -190,7 +210,9 @@ impl<S> Ignored<S> {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Ignored<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Ignored<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -198,25 +220,28 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => Ok(match tok {
-        Token::Space => Self::Whitespace(Whitespace::new(WhiteSpaceHint::Space, span)),
-        Token::Tab => Self::Whitespace(Whitespace::new(WhiteSpaceHint::Tab, span)),
-        Token::NewLine => {
-          Self::LineTerminator(LineTerminator::new(LineTerminatorHint::NewLine, span))
-        }
-        Token::CarriageReturn => Self::LineTerminator(LineTerminator::new(
-          LineTerminatorHint::CarriageReturn,
-          span,
-        )),
-        Token::CarriageReturnNewLine => Self::LineTerminator(LineTerminator::new(
-          LineTerminatorHint::CarriageReturnNewLine,
-          span,
-        )),
-        Token::BOM => Self::ByteOrderMark(Bom::new(span)),
-        Token::Comment(content) => Self::Comment(Comment::new(span, content)),
-        Token::Comma => Self::Comma(Comma::new(span)),
-        tok => return Err(Error::unexpected_token(tok, TokenKind::Whitespace, span).into()),
-      }),
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        Ok(match tok {
+          Token::Space => Self::Whitespace(Whitespace::new(WhiteSpaceHint::Space, span)),
+          Token::Tab => Self::Whitespace(Whitespace::new(WhiteSpaceHint::Tab, span)),
+          Token::NewLine => {
+            Self::LineTerminator(LineTerminator::new(LineTerminatorHint::NewLine, span))
+          }
+          Token::CarriageReturn => Self::LineTerminator(LineTerminator::new(
+            LineTerminatorHint::CarriageReturn,
+            span,
+          )),
+          Token::CarriageReturnNewLine => Self::LineTerminator(LineTerminator::new(
+            LineTerminatorHint::CarriageReturnNewLine,
+            span,
+          )),
+          Token::BOM => Self::ByteOrderMark(Bom::new(span)),
+          Token::Comment(content) => Self::Comment(Comment::new(span, content)),
+          Token::Comma => Self::Comma(Comma::new(span)),
+          tok => return Err(Error::unexpected_token(tok, TokenKind::Whitespace, span).into()),
+        })
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }
@@ -290,7 +315,8 @@ impl<T, S> PaddedRight<T, S> {
   }
 }
 
-impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for PaddedRight<T, &'a str>
+impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for PaddedRight<T, &'a str>
 where
   T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
@@ -343,7 +369,8 @@ impl<T, S> Padded<T, S> {
   }
 }
 
-impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Padded<T, &'a str>
+impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Padded<T, &'a str>
 where
   T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
@@ -365,21 +392,31 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
+  <Ignored<&'a str> as Parseable<
+    'a,
+    LosslessTokenStream<'a>,
+    Token<'a>,
+    LosslessTokenErrors<'a, &'a str>,
+  >>::parser()
+  .repeated()
+  .collect()
+  .then(value_parser)
+  .then(
+    <Ignored<&'a str> as Parseable<
+      'a,
+      LosslessTokenStream<'a>,
+      Token<'a>,
+      LosslessTokenErrors<'a, &'a str>,
+    >>::parser()
     .repeated()
-    .collect()
-    .then(value_parser)
-    .then(
-      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
-        .repeated()
-        .collect(),
-    )
-    .map_with(|((left_ignored, value), right_ignored), exa| Padded {
-      span: exa.span(),
-      left_ignored,
-      value,
-      right_ignored,
-    })
+    .collect(),
+  )
+  .map_with(|((left_ignored, value), right_ignored), exa| Padded {
+    span: exa.span(),
+    left_ignored,
+    value,
+    right_ignored,
+  })
 }
 
 pub fn padded_left_parser<'a, V, VP, E>(
@@ -390,15 +427,20 @@ where
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
-    .repeated()
-    .collect()
-    .then(value_parser)
-    .map_with(|(ignored, value), exa| PaddedLeft {
-      span: exa.span(),
-      ignored,
-      value,
-    })
+  <Ignored<&'a str> as Parseable<
+    'a,
+    LosslessTokenStream<'a>,
+    Token<'a>,
+    LosslessTokenErrors<'a, &'a str>,
+  >>::parser()
+  .repeated()
+  .collect()
+  .then(value_parser)
+  .map_with(|(ignored, value), exa| PaddedLeft {
+    span: exa.span(),
+    ignored,
+    value,
+  })
 }
 
 pub fn padded_right_parser<'a, V, VP, E>(
@@ -411,9 +453,14 @@ where
 {
   value_parser
     .then(
-      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
-        .repeated()
-        .collect(),
+      <Ignored<&'a str> as Parseable<
+        'a,
+        LosslessTokenStream<'a>,
+        Token<'a>,
+        LosslessTokenErrors<'a, &'a str>,
+      >>::parser()
+      .repeated()
+      .collect(),
     )
     .map_with(|(value, ignored), exa| PaddedRight {
       span: exa.span(),

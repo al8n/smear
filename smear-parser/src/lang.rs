@@ -30,20 +30,17 @@ pub mod punctuator;
 
 mod arguments2;
 mod directives2;
+mod field2;
 mod fragment2;
+mod input_value2;
 mod keywords2;
 mod name2;
 mod selection_set2;
-mod field2;
 
 /// a
 pub mod v2 {
-  pub use super::name2::Name;
-  pub use super::argument::Argument;
-  pub use super::arguments2::*;
-  pub use super::directives2::*;
-  pub use super::field2::*;
-  pub use super::fragment2::*;
-  pub use super::keywords2::*;
-  pub use super::selection_set2::*;
+  pub use super::{
+    argument::Argument, arguments2::*, directives2::*, field2::*, fragment2::*, input_value2::*,
+    keywords2::*, name2::Name, selection_set2::*,
+  };
 }

@@ -1,16 +1,20 @@
-use crate::parser::{ast, fast::{ConstInputValue, InputValue}};
+use crate::parser::{
+  ast,
+  fast::{ConstInputValue, InputValue},
+};
 use smear_parser::lang::v2;
 
 pub type Argument<S> = v2::Argument<ast::Name<S>, InputValue<S>>;
 pub type Arguments<S, Container = Vec<Argument<S>>> = v2::Arguments<Argument<S>, Container>;
 
 pub type ConstArgument<S> = v2::Argument<ast::Name<S>, ConstInputValue<S>>;
-pub type ConstArguments<S, Container = Vec<ConstArgument<S>>> = v2::Arguments<ConstArgument<S>, Container>;
+pub type ConstArguments<S, Container = Vec<ConstArgument<S>>> =
+  v2::Arguments<ConstArgument<S>, Container>;
 
 #[cfg(test)]
 mod tests {
-  use logosky::{utils::Span, Parseable};
   use chumsky::Parser;
+  use logosky::{Parseable, utils::Span};
 
   use crate::parser::fast::{FastParserExtra, FastTokenStream};
 

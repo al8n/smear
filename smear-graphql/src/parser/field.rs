@@ -1,9 +1,15 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Tokenizer, Source, Token, utils::Span};
-use smear_parser::{lang::{punctuator::{LBrace, RBrace, Spread}, v2::{self, FragmentSpread, On}}, source::{IntoComponents, IntoSpan}};
 use derive_more::{From, Into};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use smear_parser::{
+  lang::{
+    punctuator::{LBrace, RBrace, Spread},
+    v2::{self, FragmentSpread, On},
+  },
+  source::{IntoComponents, IntoSpan},
+};
 
-use crate::{parser::ast::SelectionSet};
+use crate::parser::ast::SelectionSet;
 
 use super::ast::Selection;
 
@@ -60,13 +66,15 @@ use super::ast::Selection;
 /// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
 #[derive(Debug, Clone, From, Into)]
 #[allow(clippy::type_complexity)]
-pub struct Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(pub(super) v2::Field<
-  Alias,
-  Name,
-  Arguments,
-  Directives,
-  SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
->);
+pub struct Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
+  pub(super)  v2::Field<
+    Alias,
+    Name,
+    Arguments,
+    Directives,
+    SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
+  >,
+);
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsRef<Span>
   for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
@@ -104,7 +112,9 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoCompon
   }
 }
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+{
   /// Returns a reference to the span covering the entire field.
   ///
   /// The span includes the alias (if present), field name, arguments, directives,
@@ -159,12 +169,25 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> Field<Alia
   /// Scalar fields typically don't have selection sets, while object fields require them
   /// to specify which nested fields to include in the response.
   #[inline]
-  pub const fn selection_set(&self) -> Option<&SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>> {
+  pub const fn selection_set(
+    &self,
+  ) -> Option<&SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>> {
     self.0.selection_set()
   }
 }
 
-impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, I, T, Error> Parseable<'a, I, T, Error>
+impl<
+  'a,
+  Alias: 'a,
+  Name: 'a,
+  FragmentName: 'a,
+  TypeCondition: 'a,
+  Arguments: 'a,
+  Directives: 'a,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
   for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
@@ -185,24 +208,22 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     recursive(|field_parser| {
       // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
         // SelectionSet needs a `Selection` parser
-        let selection_set =
-          v2::SelectionSet::parser_with(selection.clone()).map(SelectionSet);
+        let selection_set = v2::SelectionSet::parser_with(selection.clone()).map(SelectionSet);
 
-        let spread = FragmentSpread::parser()
-          .map(|fs| Selection::FragmentSpread(fs));
+        let spread = FragmentSpread::parser().map(|fs| Selection::FragmentSpread(fs));
 
         let inline = v2::InlineFragment::parser_with(
           TypeCondition::parser(),
           Directives::parser(),
           selection_set.clone(),
         )
-          .map(|f| Selection::InlineFragment(f));
+        .map(|f| Selection::InlineFragment(f));
 
         choice((field_parser.map(Selection::Field), spread, inline))
       });
@@ -214,4 +235,3 @@ where
     })
   }
 }
-

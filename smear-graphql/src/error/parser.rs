@@ -354,7 +354,8 @@ impl<S, T, TK, Char, StateError> Extend<Error<S, T, TK, Char, StateError>>
   }
 }
 
-impl<'a, S, T, Char, StateError> LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
+impl<'a, S, T, Char, StateError>
+  LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
   for Errors<S, T, T::Kind, Char, StateError>
 where
   T: Token<'a, Error = LexerErrors<Char, StateError>>,
@@ -385,13 +386,20 @@ where
           };
 
           match expected_lexed {
-            Lexed::Token(expected_tok) => match found_lexed {
-              None => ErrorData::UnexpectedToken(UnexpectedToken::new(expected_tok.kind())),
-              Some(Lexed::Token(found_tok)) => ErrorData::UnexpectedToken(
-                UnexpectedToken::with_found(found_tok.clone(), expected_tok.kind()),
-              ),
-              Some(Lexed::Error(err)) => ErrorData::Lexer(err.clone()),
-            },
+            Lexed::Token(expected_tok) => {
+              let expected_tok = expected_tok.as_ref().into_data();
+              match found_lexed {
+                None => ErrorData::UnexpectedToken(UnexpectedToken::new(expected_tok.kind())),
+                Some(Lexed::Token(found_tok)) => {
+                  let found_tok = found_tok.as_ref().into_data();
+                  ErrorData::UnexpectedToken(UnexpectedToken::with_found(
+                    found_tok.clone(),
+                    expected_tok.kind(),
+                  ))
+                }
+                Some(Lexed::Error(err)) => ErrorData::Lexer(err.clone()),
+              }
+            }
             Lexed::Error(err) => ErrorData::Lexer(err.clone()),
           }
         }

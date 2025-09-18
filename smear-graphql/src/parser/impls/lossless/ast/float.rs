@@ -1,14 +1,13 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
 
-use crate::{
-  error::Error,
-  parser::float::FloatValue,
-};
+use crate::{error::Error, parser::float::FloatValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for FloatValue<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for FloatValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -16,10 +15,13 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Float(val) => Ok(Self::new(span, val)),
-        tok => Err(Error::unexpected_token(tok, TokenKind::Float, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::Float(val) => Ok(Self::new(span, val)),
+          tok => Err(Error::unexpected_token(tok, TokenKind::Float, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }

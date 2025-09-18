@@ -1,14 +1,13 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
 
-use crate::{
-  error::Error,
-  parser::ast::BooleanValue,
-};
+use crate::{error::Error, parser::ast::BooleanValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for BooleanValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for BooleanValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
@@ -16,14 +15,17 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Identifier(ident) => Ok(match ident {
-          "true" => BooleanValue::new(span, ident, true),
-          "false" => BooleanValue::new(span, ident, false),
-          val => return Err(Error::invalid_boolean_value(val, span).into()),
-        }),
-        tok => Err(Error::unexpected_token(tok, TokenKind::Boolean, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::Identifier(ident) => Ok(match ident {
+            "true" => BooleanValue::new(span, ident, true),
+            "false" => BooleanValue::new(span, ident, false),
+            val => return Err(Error::invalid_boolean_value(val, span).into()),
+          }),
+          tok => Err(Error::unexpected_token(tok, TokenKind::Boolean, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }

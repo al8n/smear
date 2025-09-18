@@ -1,9 +1,9 @@
 /// Defines the punctuators.
-/// 
+///
 /// # Examples
 /// ```rust
 /// use smear_parser::punctuator;
-/// 
+///
 /// punctuator! {
 ///   (LAngle, "L_ANGLE", "<"),
 ///   (RAngle, "R_ANGLE", ">"),
@@ -118,4 +118,6 @@ punctuator!(
   (RBrace, "R_BRACE", "}}"),
   (LParen, "L_PAREN", "("),
   (RParen, "R_PAREN", ")"),
+  (LAngle, "L_ANGLE", "<"),
+  (RAngle, "R_ANGLE", ">"),
 );

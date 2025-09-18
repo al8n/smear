@@ -1,5 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::{Span, human_display::DisplayHuman, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree}};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  utils::{
+    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    syntax_tree_display::DisplaySyntaxTree,
+  },
+};
 
 use crate::lang::v2::{Name, On};
 
@@ -92,7 +98,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     On::parser()
       .then(Name::parser())
@@ -227,7 +233,12 @@ where
   ) -> core::fmt::Result {
     let mut padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(f, "- FRAGMENT_NAME@{}..{}", self.span.start(), self.span.end())?;
+    writeln!(
+      f,
+      "- FRAGMENT_NAME@{}..{}",
+      self.span.start(),
+      self.span.end()
+    )?;
     padding += indent;
     write!(f, "{:indent$}", "", indent = padding)?;
     writeln!(f, "- NAME@{}..{}", self.span.start(), self.span.end())?;
@@ -285,27 +296,21 @@ pub struct FragmentSpread<FragmentName, Directives> {
   directives: Option<Directives>,
 }
 
-impl<FragmentName, Directives> AsRef<Span>
-  for FragmentSpread<FragmentName, Directives>
-{
+impl<FragmentName, Directives> AsRef<Span> for FragmentSpread<FragmentName, Directives> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<FragmentName, Directives> IntoSpan<Span>
-  for FragmentSpread<FragmentName, Directives>
-{
+impl<FragmentName, Directives> IntoSpan<Span> for FragmentSpread<FragmentName, Directives> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<FragmentName, Directives> IntoComponents
-  for FragmentSpread<FragmentName, Directives>
-{
+impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, Directives> {
   type Components = (Span, Spread, FragmentName, Option<Directives>);
 
   #[inline]
@@ -384,7 +389,8 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
   }
 }
 
-impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error> for FragmentSpread<FragmentName, Directives>
+impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error>
+  for FragmentSpread<FragmentName, Directives>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
@@ -397,7 +403,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(FragmentName::parser(), Directives::parser())
   }
@@ -512,7 +518,9 @@ impl<TypeCondition, Directives, SelectionSet> IntoComponents
   }
 }
 
-impl<TypeCondition, Directives, SelectionSet> InlineFragment<TypeCondition, Directives, SelectionSet> {
+impl<TypeCondition, Directives, SelectionSet>
+  InlineFragment<TypeCondition, Directives, SelectionSet>
+{
   /// Returns a reference to the span covering the entire inline fragment.
   ///
   /// The span includes the ellipsis, type condition (if present), directives,
@@ -588,10 +596,7 @@ impl<TypeCondition, Directives, SelectionSet> InlineFragment<TypeCondition, Dire
     TP: Parser<'a, I, TypeCondition, E> + Clone,
   {
     Spread::parser()
-      .then(
-        type_condition_parser
-          .or_not(),
-      )
+      .then(type_condition_parser.or_not())
       .then(directives_parser.or_not())
       .then(selection_set_parser)
       .map_with(
@@ -606,7 +611,8 @@ impl<TypeCondition, Directives, SelectionSet> InlineFragment<TypeCondition, Dire
   }
 }
 
-impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<TypeCondition, Directives, SelectionSet>
+impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
+  for InlineFragment<TypeCondition, Directives, SelectionSet>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
@@ -620,7 +626,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(
       TypeCondition::parser(),

@@ -35,3 +35,12 @@ mod schema_definition;
 mod ty;
 mod union_definition;
 mod variable_definition;
+
+mod arguments_definition2;
+mod input_value_definition2;
+mod ty2;
+
+/// a
+pub mod v2 {
+  pub use super::{arguments_definition2::*, input_value_definition2::*, ty2::*};
+}

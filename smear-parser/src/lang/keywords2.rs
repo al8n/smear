@@ -1,9 +1,9 @@
 /// Defines the keyword.
-/// 
+///
 /// # Examples
 /// ```rust
 /// use smear_parser::keyword;
-/// 
+///
 /// keyword! {
 ///   (MyKeyword, "MY_KEYWORD", "my_keyword"),
 ///   (AnotherKeyword, "ANOTHER_KEYWORD", "another_keyword"),
@@ -103,6 +103,4 @@ macro_rules! keyword {
   };
 }
 
-keyword!(
-  (On, "on_KW", "on")
-);
+keyword!((On, "on_KW", "on"));

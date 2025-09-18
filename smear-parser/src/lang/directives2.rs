@@ -1,4 +1,4 @@
-use chumsky::{extra::ParserExtra, IterParser, Parser};
+use chumsky::{IterParser, Parser, extra::ParserExtra};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
 use super::{super::source::*, punctuator::At};
@@ -90,7 +90,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     At::parser()
       .then(Name::parser())
@@ -163,7 +163,8 @@ impl<Directive, Container> Directives<Directive, Container> {
   }
 }
 
-impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error> for Directives<Directive, Container>
+impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Directives<Directive, Container>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
@@ -175,7 +176,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Directive::parser()
       .repeated()

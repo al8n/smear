@@ -17,9 +17,12 @@ macro_rules! punctuator_parser {
           E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
         {
           any().try_map(|res, span: Span| match res {
-            Lexed::Token(tok) => match tok {
-              Token::$name => Ok($name::new(span)),
-              tok => Err(Error::unexpected_token(tok, TokenKind::$name, span).into()),
+            Lexed::Token(tok) => {
+              let (span, tok) = tok.into_components();
+              match tok {
+                Token::$name => Ok($name::new(span)),
+                tok => Err(Error::unexpected_token(tok, TokenKind::$name, span).into()),
+              }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
           })

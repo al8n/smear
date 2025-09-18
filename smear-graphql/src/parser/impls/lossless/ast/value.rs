@@ -23,7 +23,9 @@ pub enum InputValue<S> {
   Object(Object<Padded<ObjectField<InputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for InputValue<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for InputValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -70,7 +72,9 @@ pub enum ConstInputValue<S> {
   Object(Object<Padded<ObjectField<ConstInputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for ConstInputValue<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for ConstInputValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where

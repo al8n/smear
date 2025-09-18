@@ -8,33 +8,47 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Variable<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for Variable<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
-    <Dollar as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
-      .or_not()
-      .then(<Name<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser().or_not())
-      .try_map_with(|(dollar, name), exa| {
-        let span = exa.span();
-        let slice = exa.slice();
-        match (dollar, name) {
-          (None, None) => {
-            Err(Error::unexpected_end_of_variable_value(VariableValueHint::Dollar, span).into())
-          }
-          (Some(_), None) => {
-            Err(Error::unexpected_end_of_variable_value(VariableValueHint::Name, span).into())
-          }
-          (None, Some(name)) => Err(
-            Error::unexpected_token(Token::Identifier(name.source()), TokenKind::Dollar, span)
-              .into(),
-          ),
-          (Some(dollar), Some(name)) => Ok(Variable::new(span, slice, dollar, name)),
+    <Dollar as Parseable<
+      'a,
+      LosslessTokenStream<'a>,
+      Token<'a>,
+      LosslessTokenErrors<'a, &'a str>,
+    >>::parser()
+    .or_not()
+    .then(
+      <Name<&'a str> as Parseable<
+        'a,
+        LosslessTokenStream<'a>,
+        Token<'a>,
+        LosslessTokenErrors<'a, &'a str>,
+      >>::parser()
+      .or_not(),
+    )
+    .try_map_with(|(dollar, name), exa| {
+      let span = exa.span();
+      let slice = exa.slice();
+      match (dollar, name) {
+        (None, None) => {
+          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Dollar, span).into())
         }
-      })
+        (Some(_), None) => {
+          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Name, span).into())
+        }
+        (None, Some(name)) => Err(
+          Error::unexpected_token(Token::Identifier(name.source()), TokenKind::Dollar, span).into(),
+        ),
+        (Some(dollar), Some(name)) => Ok(Variable::new(span, slice, dollar, name)),
+      }
+    })
   }
 }
 

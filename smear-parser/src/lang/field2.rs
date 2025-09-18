@@ -1,5 +1,11 @@
 use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::{Span, human_display::DisplayHuman, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree}};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  utils::{
+    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    syntax_tree_display::DisplaySyntaxTree,
+  },
+};
 
 use super::{super::source::*, punctuator::Colon};
 
@@ -140,7 +146,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Name::parser()
       .then(Colon::parser())
@@ -256,7 +262,9 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> IntoComponents
   }
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet> Field<Alias, Name, Arguments, Directives, SelectionSet> {
+impl<Alias, Name, Arguments, Directives, SelectionSet>
+  Field<Alias, Name, Arguments, Directives, SelectionSet>
+{
   /// Returns a reference to the span covering the entire field.
   ///
   /// The span includes the alias (if present), field name, arguments, directives,
@@ -411,4 +419,3 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> Field<Alias, Name, Argume
 //     })
 //   }
 // }
-

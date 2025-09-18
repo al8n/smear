@@ -1,5 +1,5 @@
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use chumsky::{Parser, extra::ParserExtra};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::lang::punctuator::Colon;

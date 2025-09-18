@@ -1,5 +1,5 @@
+use chumsky::{IterParser, Parser, extra::ParserExtra};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use chumsky::{Parser, IterParser, extra::ParserExtra};
 use smear_utils::{IntoComponents, IntoSpan};
 
 use core::marker::PhantomData;

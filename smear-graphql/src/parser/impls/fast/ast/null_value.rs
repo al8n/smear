@@ -5,7 +5,9 @@ use crate::{error::Error, parser::null::NullValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for NullValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for NullValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
@@ -13,13 +15,16 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Identifier(name) => match name {
-          "null" => Ok(NullValue::new(span, name)),
-          val => Err(Error::invalid_null_value(val, span).into()),
-        },
-        tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::Identifier(name) => match name {
+            "null" => Ok(NullValue::new(span, name)),
+            val => Err(Error::invalid_null_value(val, span).into()),
+          },
+          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }

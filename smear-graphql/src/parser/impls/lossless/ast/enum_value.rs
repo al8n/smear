@@ -1,14 +1,13 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
 
-use crate::{
-  error::Error,
-  parser::enum_value::EnumValue,
-};
+use crate::{error::Error, parser::enum_value::EnumValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for EnumValue<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+  for EnumValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
@@ -16,13 +15,16 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => match tok {
-        Token::Identifier(name) => match name {
-          "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
-          _ => Ok(EnumValue::new(span, name)),
-        },
-        tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
-      },
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        match tok {
+          Token::Identifier(name) => match name {
+            "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
+            _ => Ok(EnumValue::new(span, name)),
+          },
+          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+        }
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }

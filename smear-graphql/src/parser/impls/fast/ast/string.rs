@@ -8,7 +8,9 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for StringValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for StringValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
@@ -16,15 +18,18 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => Ok(match tok {
-        Token::StringLiteral(raw) => {
-          StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
-        }
-        Token::BlockStringLiteral(raw) => {
-          StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
-        }
-        tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
-      }),
+      Lexed::Token(tok) => {
+        let (span, tok) = tok.into_components();
+        Ok(match tok {
+          Token::StringLiteral(raw) => {
+            StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
+          }
+          Token::BlockStringLiteral(raw) => {
+            StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
+          }
+          tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
+        })
+      }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
   }

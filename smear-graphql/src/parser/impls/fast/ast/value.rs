@@ -14,6 +14,8 @@ use logosky::Parseable;
 
 use super::{FastTokenErrors, FastTokenStream, ObjectField};
 
+pub type DefaultInputValue<S> = smear_parser::lang::v2::DefaultInputValue<ConstInputValue<S>>;
+
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -29,7 +31,9 @@ pub enum InputValue<S> {
   Object(Object<ObjectField<InputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for InputValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for InputValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
@@ -76,7 +80,9 @@ pub enum ConstInputValue<S> {
   Object(Object<ObjectField<ConstInputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for ConstInputValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for ConstInputValue<&'a str>
+{
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where

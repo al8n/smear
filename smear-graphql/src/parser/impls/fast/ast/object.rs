@@ -123,7 +123,8 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for ObjectField<V, &'a str>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for ObjectField<V, &'a str>
 where
   V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
@@ -137,7 +138,8 @@ where
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for Object<ObjectField<V, &'a str>>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+  for Object<ObjectField<V, &'a str>>
 where
   V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {

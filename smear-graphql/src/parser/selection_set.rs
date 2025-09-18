@@ -1,7 +1,12 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Tokenizer, Token, Source, utils::Span};
-use smear_parser::{lang::{punctuator::{LBrace, RBrace, Spread}, v2::{self, FragmentSpread, InlineFragment, On}}, source::IntoSpan};
-
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use smear_parser::{
+  lang::{
+    punctuator::{LBrace, RBrace, Spread},
+    v2::{self, FragmentSpread, InlineFragment, On},
+  },
+  source::IntoSpan,
+};
 
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 
@@ -19,17 +24,27 @@ pub struct SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Dir
 pub enum Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
   Field(Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>),
   FragmentSpread(FragmentSpread<FragmentName, Directives>),
-  InlineFragment(InlineFragment<TypeCondition, Directives, SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>),
+  InlineFragment(
+    InlineFragment<
+      TypeCondition,
+      Directives,
+      SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
+    >,
+  ),
 }
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsRef<Span> for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsRef<Span>
+  for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+{
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<Span> for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<Span>
+  for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+{
   #[inline]
   fn into_span(self) -> Span {
     match self {
@@ -40,7 +55,18 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<S
   }
 }
 
-impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, I, T, Error> Parseable<'a, I, T, Error>
+impl<
+  'a,
+  Alias: 'a,
+  Name: 'a,
+  FragmentName: 'a,
+  TypeCondition: 'a,
+  Arguments: 'a,
+  Directives: 'a,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
   for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
@@ -60,7 +86,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     recursive(|selection| {
       let selsetion_set =
@@ -77,20 +103,19 @@ where
         TypeCondition::parser(),
         Directives::parser(),
         selsetion_set.clone(),
-      ).map(Self::InlineFragment);
+      )
+      .map(Self::InlineFragment);
 
       let spread_p = FragmentSpread::parser().map(Self::FragmentSpread);
 
-      choice((
-        field_p.map(Self::Field),
-        spread_p,
-        inline_p,
-      ))
+      choice((field_p.map(Self::Field), spread_p, inline_p))
     })
   }
 }
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+{
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -100,4 +125,3 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> Selection<
     }
   }
 }
-

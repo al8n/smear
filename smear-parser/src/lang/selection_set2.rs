@@ -169,7 +169,9 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
   /// whitespace skipping or comment processing around the selection set.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'a, I, T, Error, E, P>(selection_parser: P) -> impl Parser<'a, I, Self, E> + Clone
+  pub fn parser_with<'a, I, T, Error, E, P>(
+    selection_parser: P,
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
     I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
@@ -181,12 +183,7 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     LBrace::parser()
-      .then(
-        selection_parser
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
+      .then(selection_parser.repeated().at_least(1).collect())
       .then(RBrace::parser())
       .map_with(|((l_brace, selections), r_brace), exa| Self {
         span: exa.span(),
@@ -198,7 +195,8 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
   }
 }
 
-impl<'a, Selection, Container, I, T, Error> Parseable<'a, I, T, Error> for SelectionSet<Selection, Container>
+impl<'a, Selection, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for SelectionSet<Selection, Container>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
@@ -217,4 +215,3 @@ where
     Self::parser_with(Selection::parser())
   }
 }
-
