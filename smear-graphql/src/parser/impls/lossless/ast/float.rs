@@ -8,12 +8,12 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for FloatValue<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for FloatValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -33,7 +33,7 @@ mod tests {
 
   #[test]
   fn test_float_parser() {
-    let parser = FloatValue::parser::<LosslessParserExtra>();
+    let parser = FloatValue::parser::<LosslessParserExtra<&str>>();
     let input = r#"1.3"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "1.3");

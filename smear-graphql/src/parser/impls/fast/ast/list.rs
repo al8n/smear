@@ -8,16 +8,16 @@ use crate::{
 
 use super::*;
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for List<V>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for List<V>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
 
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     list_parser(V::parser())
   }
@@ -27,13 +27,13 @@ pub fn list_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, FastTokenStream<'a>, List<V>, E> + Clone
 where
-  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
+  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser()
     .then(value_parser.repeated().collect())
-    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
+    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(List::new(span, l, r, values)),
       None => Err(Error::unclosed_list(span).into()),
@@ -51,7 +51,7 @@ mod tests {
 
   #[test]
   fn test_list_parser() {
-    let parser = List::<StringValue<&str>>::parser::<FastParserExtra>();
+    let parser = List::<StringValue<&str>>::parser::<FastParserExtra<&str>>();
     let input = r#"["a", "b", "c"]"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(parsed.values().len(), 3);
@@ -63,7 +63,7 @@ mod tests {
 
   #[test]
   fn test_unclosed_list_parser() {
-    let parser = List::<StringValue<&str>>::parser::<FastParserExtra>();
+    let parser = List::<StringValue<&str>>::parser::<FastParserExtra<&str>>();
     let input = r#"["a", "b", "c""#;
     let mut parsed = parser
       .parse(FastTokenStream::new(input))

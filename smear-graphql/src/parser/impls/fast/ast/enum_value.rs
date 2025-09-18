@@ -5,12 +5,12 @@ use crate::{error::Error, parser::enum_value::EnumValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for EnumValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for EnumValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -33,7 +33,7 @@ mod tests {
 
   #[test]
   fn test_enum_value_parser() {
-    let parser = EnumValue::parser::<FastParserExtra>();
+    let parser = EnumValue::parser::<FastParserExtra<&str>>();
     let input = r#"foo"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");

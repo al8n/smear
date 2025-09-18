@@ -345,6 +345,43 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
+
+  /// Creates a parser that can parse a fragment spread with custom directive parsing.
+  ///
+  /// The parser handles the complete fragment spread syntax including the ellipsis,
+  /// fragment name, and optional directives.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the fragment spread.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, FP, DP>(
+    fragment_name_parser: FP,
+    directives_parser: DP,
+  ) -> impl Parser<'a, I, Self, E> + Clone
+  where
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Error: 'a,
+    Spread: Parseable<'a, I, T, Error> + 'a,
+    DP: Parser<'a, I, Directives, E> + Clone,
+    FP: Parser<'a, I, FragmentName, E> + Clone,
+  {
+    Spread::parser()
+      .then(fragment_name_parser)
+      .then(directives_parser.or_not())
+      .map_with(|((spread, name), directives), exa| Self {
+        span: exa.span(),
+        spread,
+        name,
+        directives,
+      })
+  }
 }
 
 impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error> for FragmentSpread<FragmentName, Directives>
@@ -362,15 +399,7 @@ where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a
   {
-    Spread::parser()
-      .then(FragmentName::parser())
-      .then(Directives::parser().or_not())
-      .map_with(|((spread, name), directives), exa| Self {
-        span: exa.span(),
-        spread,
-        name,
-        directives,
-      })
+    Self::parser_with(FragmentName::parser(), Directives::parser())
   }
 }
 
@@ -529,6 +558,52 @@ impl<TypeCondition, Directives, SelectionSet> InlineFragment<TypeCondition, Dire
   pub const fn selection_set(&self) -> &SelectionSet {
     &self.selection_set
   }
+
+  /// Creates a parser that can parse an inline fragment with custom component parsers.
+  ///
+  /// The parser handles the complete inline fragment syntax including the ellipsis,
+  /// optional type condition, optional directives, and required selection set.
+  ///
+  /// ## Notes
+  ///
+  /// This parser does not handle surrounding [ignored tokens].
+  /// The calling parser is responsible for handling any necessary
+  /// whitespace skipping or comment processing around the inline fragment.
+  ///
+  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, TP, DP, SP>(
+    type_condition_parser: TP,
+    directives_parser: DP,
+    selection_set_parser: SP,
+  ) -> impl Parser<'a, I, Self, E> + Clone
+  where
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Error: 'a,
+    Spread: Parseable<'a, I, T, Error> + 'a,
+    SP: Parser<'a, I, SelectionSet, E> + Clone,
+    DP: Parser<'a, I, Directives, E> + Clone,
+    TP: Parser<'a, I, TypeCondition, E> + Clone,
+  {
+    Spread::parser()
+      .then(
+        type_condition_parser
+          .or_not(),
+      )
+      .then(directives_parser.or_not())
+      .then(selection_set_parser)
+      .map_with(
+        |(((spread, type_condition), directives), selection_set), exa| Self {
+          span: exa.span(),
+          spread,
+          type_condition,
+          directives,
+          selection_set,
+        },
+      )
+  }
 }
 
 impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<TypeCondition, Directives, SelectionSet>
@@ -547,18 +622,10 @@ where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a
   {
-    Spread::parser()
-      .then(TypeCondition::parser().or_not())
-      .then(Directives::parser().or_not())
-      .then(SelectionSet::parser())
-      .map_with(
-        |(((spread, type_condition), directives), selection_set), exa| Self {
-          span: exa.span(),
-          spread,
-          type_condition,
-          directives,
-          selection_set,
-        },
-      )
+    Self::parser_with(
+      TypeCondition::parser(),
+      Directives::parser(),
+      SelectionSet::parser(),
+    )
   }
 }

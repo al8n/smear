@@ -8,12 +8,12 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for StringValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for StringValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => Ok(match tok {
@@ -38,7 +38,7 @@ mod tests {
 
   #[test]
   fn test_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra>();
+    let parser = StringValue::parser::<FastParserExtra<&str>>();
     let input = r#""Hello, World!""#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.content(), "Hello, World!");
@@ -49,7 +49,7 @@ mod tests {
 
   #[test]
   fn test_block_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra>();
+    let parser = StringValue::parser::<FastParserExtra<&str>>();
     let input = r#""""Hello,
 World!""""#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();

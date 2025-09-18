@@ -29,12 +29,12 @@ pub enum InputValue<S> {
   Object(Object<ObjectField<InputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for InputValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for InputValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     recursive(|parser| {
       let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);
@@ -76,12 +76,12 @@ pub enum ConstInputValue<S> {
   Object(Object<ObjectField<ConstInputValue<S>, S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for ConstInputValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for ConstInputValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     recursive(|parser| {
       let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);

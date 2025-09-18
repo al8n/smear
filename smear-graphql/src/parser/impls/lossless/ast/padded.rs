@@ -31,12 +31,12 @@ impl LineTerminator {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for LineTerminator {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for LineTerminator {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -71,12 +71,12 @@ impl Bom {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Bom {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Bom {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -111,12 +111,12 @@ impl Whitespace {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Whitespace {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Whitespace {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -152,12 +152,12 @@ impl<S> Comment<S> {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Comment<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Comment<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -190,12 +190,12 @@ impl<S> Ignored<S> {
   }
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Ignored<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Ignored<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => Ok(match tok {
@@ -290,15 +290,15 @@ impl<T, S> PaddedRight<T, S> {
   }
 }
 
-impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for PaddedRight<T, &'a str>
+impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for PaddedRight<T, &'a str>
 where
-  T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> + 'a,
+  T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     padded_right_parser(T::parser())
   }
@@ -343,15 +343,15 @@ impl<T, S> Padded<T, S> {
   }
 }
 
-impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Padded<T, &'a str>
+impl<'a, T> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Padded<T, &'a str>
 where
-  T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> + 'a,
+  T: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     padded_parser(T::parser())
   }
@@ -361,16 +361,16 @@ pub fn padded_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, LosslessTokenStream<'a>, Padded<V, &'a str>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
     .repeated()
     .collect()
     .then(value_parser)
     .then(
-      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
         .repeated()
         .collect(),
     )
@@ -386,11 +386,11 @@ pub fn padded_left_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, LosslessTokenStream<'a>, PaddedLeft<V, &'a str>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+  <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
     .repeated()
     .collect()
     .then(value_parser)
@@ -405,13 +405,13 @@ pub fn padded_right_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, LosslessTokenStream<'a>, PaddedRight<V, &'a str>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
   value_parser
     .then(
-      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>>>::parser()
+      <Ignored<&'a str> as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
         .repeated()
         .collect(),
     )

@@ -1,13 +1,12 @@
 use chumsky::{extra::ParserExtra, prelude::*};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
 use super::{
   super::source::*,
-  ignored,
-  punct::{LBrace, RBrace},
+  punctuator::{LBrace, RBrace},
 };
 
 use core::marker::PhantomData;
-use std::vec::Vec;
 
 /// Represents a selection set in GraphQL syntax.
 ///
@@ -80,28 +79,28 @@ use std::vec::Vec;
 #[derive(Debug, Clone, Copy)]
 pub struct SelectionSet<Selection, Container = Vec<Selection>> {
   span: Span,
-  l_brace: LBrace<Span>,
+  l_brace: LBrace,
   selections: Container,
-  r_brace: RBrace<Span>,
+  r_brace: RBrace,
   _marker: PhantomData<Selection>,
 }
 
-impl<Selection, Span, Container> AsRef<Span> for SelectionSet<Selection, Span, Container> {
+impl<Selection, Container> AsRef<Span> for SelectionSet<Selection, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Selection, Span, Container> IntoSpan<Span> for SelectionSet<Selection, Span, Container> {
+impl<Selection, Container> IntoSpan<Span> for SelectionSet<Selection, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Selection, Span, Container> IntoComponents for SelectionSet<Selection, Span, Container> {
-  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+impl<Selection, Container> IntoComponents for SelectionSet<Selection, Container> {
+  type Components = (Span, LBrace, Container, RBrace);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -109,7 +108,7 @@ impl<Selection, Span, Container> IntoComponents for SelectionSet<Selection, Span
   }
 }
 
-impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
+impl<Selection, Container> SelectionSet<Selection, Container> {
   /// Returns a reference to the span covering the entire selection set.
   ///
   /// The span includes the opening brace, all selections, and the closing brace.
@@ -124,7 +123,7 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
   /// This provides access to the exact location and span information of the
   /// opening delimiter.
   #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
+  pub const fn l_brace(&self) -> &LBrace {
     &self.l_brace
   }
 
@@ -153,7 +152,7 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
   /// This provides access to the exact location and span information of the
   /// closing delimiter.
   #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
+  pub const fn r_brace(&self) -> &RBrace {
     &self.r_brace
   }
 
@@ -170,27 +169,27 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
   /// whitespace skipping or comment processing around the selection set.
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(selection_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  pub fn parser_with<'a, I, T, Error, E, P>(selection_parser: P) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Selection, E> + Clone,
-    Container: chumsky::container::Container<Selection>,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    LBrace: Parseable<'a, I, T, Error>,
+    RBrace: Parseable<'a, I, T, Error>,
+    P: Parser<'a, I, Selection, E> + Clone,
+    Container: chumsky::container::Container<Selection> + 'a,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     LBrace::parser()
       .then(
         selection_parser
-          .padded_by(ignored())
           .repeated()
           .at_least(1)
           .collect(),
       )
       .then(RBrace::parser())
-      .map_with(|((l_brace, selections), r_brace), sp| Self {
-        span: Span::from_map_extra(sp),
+      .map_with(|((l_brace, selections), r_brace), exa| Self {
+        span: exa.span(),
         l_brace,
         selections,
         r_brace,
@@ -198,3 +197,24 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
       })
   }
 }
+
+impl<'a, Selection, Container, I, T, Error> Parseable<'a, I, T, Error> for SelectionSet<Selection, Container>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Selection: Parseable<'a, I, T, Error>,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<Selection> + 'a,
+  Error: 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(Selection::parser())
+  }
+}
+

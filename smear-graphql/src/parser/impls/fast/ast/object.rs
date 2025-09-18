@@ -123,29 +123,29 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for ObjectField<V, &'a str>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for ObjectField<V, &'a str>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     object_field_parser(V::parser())
   }
 }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for Object<ObjectField<V, &'a str>>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for Object<ObjectField<V, &'a str>>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     object_parser(V::parser())
   }
@@ -155,12 +155,12 @@ pub fn object_field_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, FastTokenStream<'a>, ObjectField<V, &'a str>, E> + Clone
 where
-  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
-    .then(<Colon as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser())
+  <Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser()
+    .then(<Colon as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser())
     .then(value_parser)
     .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
 }
@@ -169,17 +169,17 @@ pub fn object_parser<'a, V, VP, E>(
   value_parser: VP,
 ) -> impl Parser<'a, FastTokenStream<'a>, Object<ObjectField<V, &'a str>>, E> + Clone
 where
-  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
+  <LBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser()
     .then(
       object_field_parser::<V, VP, E>(value_parser)
         .repeated()
         .collect(),
     )
-    .then(<RBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
+    .then(<RBrace as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(Object::new(span, l, values, r)),
       None => Err(Error::unclosed_object(span).into()),
@@ -197,7 +197,7 @@ mod tests {
 
   #[test]
   fn test_object_field_parser() {
-    let parser = ObjectField::<StringValue<&str>, &str>::parser::<FastParserExtra>();
+    let parser = ObjectField::<StringValue<&str>, &str>::parser::<FastParserExtra<&str>>();
     let input = r#"name: "Jane""#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.name().source(), "name");
@@ -206,7 +206,7 @@ mod tests {
 
   #[test]
   fn test_object_parser() {
-    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra>();
+    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra<&str>>();
     let input = r#"{a: "a", b: "b", c: "c"}"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(parsed.fields().len(), 3);
@@ -217,7 +217,7 @@ mod tests {
 
   #[test]
   fn test_unclosed_object_parser() {
-    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra>();
+    let parser = Object::<ObjectField<StringValue<&str>, &str>>::parser::<FastParserExtra<&str>>();
     let input = r#"{a: "a", b: "b", c: "c""#;
     let mut parsed = parser
       .parse(FastTokenStream::new(input))

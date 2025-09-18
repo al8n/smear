@@ -1,13 +1,13 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
-use smear_parser::lang::punctuator::*;
+use smear_parser::lang::v2::On;
 
 use crate::error::Error;
 
 use super::*;
 
-macro_rules! punctuator_parser {
-  ($($name:ident),+$(,)?) => {
+macro_rules! keyword_parser {
+  ($($name:ident:$kw:literal),+$(,)?) => {
     $(
       impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for $name {
         #[inline]
@@ -18,8 +18,12 @@ macro_rules! punctuator_parser {
         {
           any().try_map(|res, span: Span| match res {
             Lexed::Token(tok) => match tok {
-              Token::$name => Ok($name::new(span)),
-              tok => Err(Error::unexpected_token(tok, TokenKind::$name, span).into()),
+              Token::Identifier(name) => if name.eq($kw) {
+                Ok($name::new(span))
+              } else {
+                Err(Error::unexpected_keyword(name, $kw, span).into())
+              },
+              tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
           })
@@ -29,17 +33,6 @@ macro_rules! punctuator_parser {
   };
 }
 
-punctuator_parser! {
-  At,
-  Ampersand,
-  Bang,
-  Colon,
-  Dollar,
-  LBrace,
-  RBrace,
-  LBracket,
-  RBracket,
-  LParen,
-  RParen,
-  Spread,
+keyword_parser! {
+  On:"on",
 }

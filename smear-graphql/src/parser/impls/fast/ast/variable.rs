@@ -9,16 +9,16 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for Variable<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for Variable<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
-    <Dollar as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser()
+    <Dollar as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser()
       .or_not()
-      .then(<Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>>>::parser().or_not())
+      .then(<Name<&'a str> as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser().or_not())
       .try_map_with(|(dollar, name), exa| {
         let span = exa.span();
         let slice = exa.slice();
@@ -47,7 +47,7 @@ mod tests {
 
   #[test]
   fn test_variable_parser() {
-    let parser = Variable::parser::<FastParserExtra>();
+    let parser = Variable::parser::<FastParserExtra<&str>>();
     let input = r#"$foo"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.slice(), "$foo");

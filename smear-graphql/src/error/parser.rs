@@ -107,17 +107,47 @@ pub enum Unclosed {
   Object,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnexpectedKeyword<S> {
+  found: S,
+  expected: &'static str,
+}
+
+impl<S> UnexpectedKeyword<S> {
+  /// Creates a new unexpected keyword error.
+  #[inline]
+  pub const fn new(found: S, expected_kw: &'static str) -> Self {
+    Self {
+      found,
+      expected: expected_kw,
+    }
+  }
+
+  /// Returns the found keyword.
+  #[inline]
+  pub const fn found(&self) -> &S {
+    &self.found
+  }
+
+  /// Returns the name of the expected keyword.
+  #[inline]
+  pub const fn expected(&self) -> &'static str {
+    self.expected
+  }
+}
+
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
+pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   Lexer(LexerErrors<Char, StateError>),
-  InvalidEnumValue(&'a str),
-  InvalidBooleanValue(&'a str),
-  InvalidNullValue(&'a str),
-  InvalidFragmentName(&'a str),
+  InvalidEnumValue(S),
+  InvalidBooleanValue(S),
+  InvalidNullValue(S),
+  InvalidFragmentName(S),
   Unclosed(Unclosed),
   UnexpectedToken(UnexpectedToken<T, TK>),
+  UnexpectedKeyword(UnexpectedKeyword<S>),
   UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
@@ -127,15 +157,15 @@ pub enum ErrorData<'a, T, TK, Char = char, StateError = ()> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Error<'a, T, TK, Char = char, StateError = ()> {
+pub struct Error<S, T, TK, Char = char, StateError = ()> {
   span: Span,
-  data: ErrorData<'a, T, TK, Char, StateError>,
+  data: ErrorData<S, T, TK, Char, StateError>,
 }
 
-impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
+impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
   /// Creates a new error.
   #[inline]
-  pub const fn new(span: Span, data: ErrorData<'a, T, TK, Char, StateError>) -> Self {
+  pub const fn new(span: Span, data: ErrorData<S, T, TK, Char, StateError>) -> Self {
     Self { span, data }
   }
 
@@ -157,6 +187,15 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
         Cow::Borrowed("variable value"),
         hint,
       )),
+    )
+  }
+
+  /// Creates an unexpected keyword error.
+  #[inline]
+  pub const fn unexpected_keyword(found: S, expected_kw: &'static str, span: Span) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(found, expected_kw)),
     )
   }
 
@@ -211,25 +250,25 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
 
   /// Creates an invalid fragment name error.
   #[inline]
-  pub const fn invalid_fragment_name(value: &'a str, span: Span) -> Self {
+  pub const fn invalid_fragment_name(value: S, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidFragmentName(value))
   }
 
   /// Creates an invalid enum value error.
   #[inline]
-  pub const fn invalid_enum_value(value: &'a str, span: Span) -> Self {
+  pub const fn invalid_enum_value(value: S, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidEnumValue(value))
   }
 
   /// Creates an invalid boolean value error.
   #[inline]
-  pub const fn invalid_boolean_value(value: &'a str, span: Span) -> Self {
+  pub const fn invalid_boolean_value(value: S, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidBooleanValue(value))
   }
 
   /// Creates an invalid null value error.
   #[inline]
-  pub const fn invalid_null_value(value: &'a str, span: Span) -> Self {
+  pub const fn invalid_null_value(value: S, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidNullValue(value))
   }
 
@@ -241,54 +280,54 @@ impl<'a, T, TK, Char, StateError> Error<'a, T, TK, Char, StateError> {
 
   /// Returns the data of the error.
   #[inline]
-  pub const fn data(&self) -> &ErrorData<'a, T, TK, Char, StateError> {
+  pub const fn data(&self) -> &ErrorData<S, T, TK, Char, StateError> {
     &self.data
   }
 
   /// Returns a mutable reference to the data of the error.
   #[inline]
-  pub const fn data_mut(&mut self) -> &mut ErrorData<'a, T, TK, Char, StateError> {
+  pub const fn data_mut(&mut self) -> &mut ErrorData<S, T, TK, Char, StateError> {
     &mut self.data
   }
 
   /// Consumes the error and returns its data.
   #[inline]
-  pub fn into_data(self) -> ErrorData<'a, T, TK, Char, StateError> {
+  pub fn into_data(self) -> ErrorData<S, T, TK, Char, StateError> {
     self.data
   }
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<'a, T, TK, Char = char, StateError = ()> =
-  smallvec::SmallVec<[Error<'a, T, TK, Char, StateError>; 1]>;
+type DefaultErrorsContainer<S, T, TK, Char = char, StateError = ()> =
+  smallvec::SmallVec<[Error<S, T, TK, Char, StateError>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<'a, T, TK, Char = char, StateError = ()> =
-  std::vec::Vec<Error<'a, T, TK, Char, StateError>>;
+type DefaultErrorsContainer<S, T, TK, Char = char, StateError = ()> =
+  std::vec::Vec<Error<S, T, TK, Char, StateError>>;
 
 /// A container for storing multiple lexer errors.
 #[derive(Debug, Clone, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct Errors<'a, T, TK, Char = char, StateError = ()>(
-  DefaultErrorsContainer<'a, T, TK, Char, StateError>,
+pub struct Errors<S, T, TK, Char = char, StateError = ()>(
+  DefaultErrorsContainer<S, T, TK, Char, StateError>,
 );
 
-impl<'a, T, TK, Char, StateError> Default for Errors<'a, T, TK, Char, StateError> {
+impl<S, T, TK, Char, StateError> Default for Errors<S, T, TK, Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }
 }
 
-impl<'a, T, TK, Char, StateError> From<Error<'a, T, TK, Char, StateError>>
-  for Errors<'a, T, TK, Char, StateError>
+impl<S, T, TK, Char, StateError> From<Error<S, T, TK, Char, StateError>>
+  for Errors<S, T, TK, Char, StateError>
 {
   #[inline(always)]
-  fn from(error: Error<'a, T, TK, Char, StateError>) -> Self {
+  fn from(error: Error<S, T, TK, Char, StateError>) -> Self {
     Self(core::iter::once(error).collect())
   }
 }
 
-impl<'a, T, TK, Char, StateError> Errors<'a, T, TK, Char, StateError> {
+impl<S, T, TK, Char, StateError> Errors<S, T, TK, Char, StateError> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
@@ -296,9 +335,9 @@ impl<'a, T, TK, Char, StateError> Errors<'a, T, TK, Char, StateError> {
   }
 }
 
-impl<'a, T, TK, Char, StateError> IntoIterator for Errors<'a, T, TK, Char, StateError> {
-  type Item = Error<'a, T, TK, Char, StateError>;
-  type IntoIter = <DefaultErrorsContainer<'a, T, TK, Char, StateError> as IntoIterator>::IntoIter;
+impl<S, T, TK, Char, StateError> IntoIterator for Errors<S, T, TK, Char, StateError> {
+  type Item = Error<S, T, TK, Char, StateError>;
+  type IntoIter = <DefaultErrorsContainer<S, T, TK, Char, StateError> as IntoIterator>::IntoIter;
 
   #[inline(always)]
   fn into_iter(self) -> Self::IntoIter {
@@ -306,17 +345,17 @@ impl<'a, T, TK, Char, StateError> IntoIterator for Errors<'a, T, TK, Char, State
   }
 }
 
-impl<'a, T, TK, Char, StateError> Extend<Error<'a, T, TK, Char, StateError>>
-  for Errors<'a, T, TK, Char, StateError>
+impl<S, T, TK, Char, StateError> Extend<Error<S, T, TK, Char, StateError>>
+  for Errors<S, T, TK, Char, StateError>
 {
   #[inline(always)]
-  fn extend<I: IntoIterator<Item = Error<'a, T, TK, Char, StateError>>>(&mut self, iter: I) {
+  fn extend<I: IntoIterator<Item = Error<S, T, TK, Char, StateError>>>(&mut self, iter: I) {
     self.0.extend(iter);
   }
 }
 
-impl<'a, T, Char, StateError> LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
-  for Errors<'a, T, T::Kind, Char, StateError>
+impl<'a, S, T, Char, StateError> LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
+  for Errors<S, T, T::Kind, Char, StateError>
 where
   T: Token<'a, Error = LexerErrors<Char, StateError>>,
   T::Extras: Copy,
@@ -386,8 +425,8 @@ where
   }
 }
 
-impl<'a, T, Char, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
-  for Errors<'a, T, T::Kind, Char, StateError>
+impl<'a, S, T, Char, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
+  for Errors<S, T, T::Kind, Char, StateError>
 where
   T: Token<'a, Error = LexerErrors<Char, StateError>>,
   T::Extras: Copy,

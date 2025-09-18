@@ -2,22 +2,22 @@ use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
 use smear_parser::lang::v2::{self, FragmentName, Name};
 
-use crate::{error::Error, parser::ast};
+use crate::error::Error;
 
 use super::*;
 
 pub type TypeCondition<S> = v2::TypeCondition<Name<S>>;
-pub type FragmentSpread<S, Container = Vec<Directive<S>>> = ast::FragmentSpread<Directives<S, Container>, S>;
-// pub type InlineFragment<S, Container = Vec<Directive<S>>> = v2::InlineFragment<TypeCondition<S>, Directives<S, Container>, S>;
 
+pub type FragmentSpread<S, ArgumentContainer = Vec<Argument<S>>, Container = Vec<Directive<S, ArgumentContainer>>> = v2::FragmentSpread<FragmentName<S>, Directives<S, ArgumentContainer, Container>>;
 
+pub type InlineFragment<S, ArgumentContainer = Vec<Argument<S>>, DirectiveContainer = Vec<Directive<S, ArgumentContainer>>> = v2::InlineFragment<TypeCondition<S>, Directives<S, ArgumentContainer, DirectiveContainer>, SelectionSet<S, ArgumentContainer, DirectiveContainer>>;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for FragmentName<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for FragmentName<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -41,11 +41,20 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_name_parser() {
-    let parser = FragmentName::parser::<FastParserExtra>();
+  fn test_fragment_name_parser() {
+    let parser = FragmentName::parser::<FastParserExtra<&str>>();
     let input = r#"foo"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");
     assert_eq!(parsed.span(), &Span::new(0, 3));
+  }
+
+  #[test]
+  fn test_type_condition_parser() {
+    let parser = TypeCondition::parser::<FastParserExtra<&str>>();
+    let input = r#"on foo"#;
+    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
+    assert_eq!(*parsed.name().source(), "foo");
+    assert_eq!(parsed.span(), &Span::new(0, 6));
   }
 }

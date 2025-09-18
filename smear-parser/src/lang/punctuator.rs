@@ -94,7 +94,7 @@ macro_rules! punctuator {
           ) -> ::core::fmt::Result {
             let padding = level * indent;
             ::core::write!(f, "{:indent$}", "", indent = padding)?;
-            ::core::writeln!(f, ::core::concat!("- ", $syntax_tree_display, "@{}..{}"), self.span().start(), self.span().end())
+            ::core::writeln!(f, ::core::concat!("- ", $syntax_tree_display, "@{}..{} \"", $punct, "\""), self.span().start(), self.span().end())
           }
         }
       )*

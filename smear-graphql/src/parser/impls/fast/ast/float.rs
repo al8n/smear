@@ -5,12 +5,12 @@ use crate::{error::Error, parser::float::FloatValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a>> for FloatValue<&'a str> {
+impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for FloatValue<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -30,7 +30,7 @@ mod tests {
 
   #[test]
   fn test_float_parser() {
-    let parser = FloatValue::parser::<FastParserExtra>();
+    let parser = FloatValue::parser::<FastParserExtra<&str>>();
     let input = r#"1.3"#;
     let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "1.3");

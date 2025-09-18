@@ -10,15 +10,15 @@ mod null;
 mod object;
 mod string;
 mod variable;
-mod argument;
-mod directives;
 mod fragment;
+mod field;
+mod selection_set;
 
 pub mod ast {
   pub use super::{
-    argument::*,
-    directives::*,
     fragment::*,
+    selection_set::*,
+    field::*,
     boolean_value::BooleanValue, enum_value::EnumValue, float::FloatValue, int::IntValue,
     list::List, null::NullValue, object::Object, string::StringValue,
     variable::Variable,

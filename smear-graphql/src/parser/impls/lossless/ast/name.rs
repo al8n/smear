@@ -5,12 +5,12 @@ use crate::{error::Error, parser::ast::Name};
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a>> for Name<&'a str> {
+impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for Name<&'a str> {
   #[inline]
   fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a>> + 'a,
+    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => match tok {
@@ -30,7 +30,7 @@ mod tests {
 
   #[test]
   fn test_name_parser() {
-    let parser = Name::parser::<LosslessParserExtra>();
+    let parser = Name::parser::<LosslessParserExtra<&str>>();
     let input = r#"foo"#;
     let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");
