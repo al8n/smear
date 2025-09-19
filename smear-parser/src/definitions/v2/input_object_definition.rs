@@ -299,7 +299,7 @@ where
 /// ## Grammar
 ///
 /// ```text
-/// InputObjectTypeDefinition : Description? input Name Directives? InputFieldsDefinition?
+/// InputObjectTypeDefinition : input Name Directives? InputFieldsDefinition?
 /// ```
 ///
 /// Spec: [Input Object Type Definition](https://spec.graphql.org/draft/#sec-Input-Object-Type-Definition)

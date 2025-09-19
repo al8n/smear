@@ -66,7 +66,7 @@ use crate::lang::punctuator::{Colon, LBrace, RBrace};
 /// ## Grammar
 ///
 /// ```text
-/// FieldDefinition : Description? Name ArgumentsDefinition? : Type Directives?
+/// FieldDefinition : Name ArgumentsDefinition? : Type Directives?
 /// ```
 ///
 /// Spec: [Field Definition](https://spec.graphql.org/draft/#sec-Field-Definition)

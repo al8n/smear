@@ -11,10 +11,16 @@
 /// ```
 #[macro_export]
 macro_rules! keyword {
-  ($(($name:ident, $syntax_tree_display: literal, $kw:literal)),+$(,)?) => {
+  ($(
+    $(#[$meta:meta])*
+    (
+      $name:ident, $syntax_tree_display: literal, $kw:literal
+    )
+  ),+$(,)?) => {
     paste::paste! {
       $(
         #[doc = "The `" $kw "` keyword"]
+        $(#[$meta])*
         #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
         pub struct $name {
           span: $crate::__private::logosky::utils::Span,

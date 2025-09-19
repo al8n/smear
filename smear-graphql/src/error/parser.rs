@@ -272,6 +272,16 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     Self::new(span, ErrorData::InvalidNullValue(value))
   }
 
+  /// Creates an unknown directive location error.
+  #[inline]
+  pub const fn unknown_directive_location(value: S, span: Span) -> Self {
+    // Self::new(
+    //   span,
+    //   ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(value, "known directive location")),
+    // )
+    todo!()
+  }
+
   /// Returns the span of the error.
   #[inline]
   pub const fn span(&self) -> Span {

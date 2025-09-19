@@ -298,7 +298,7 @@ where
 /// ## Grammar
 ///
 /// ```text
-/// FragmentDefinition : Description? fragment FragmentName TypeCondition Directives? SelectionSet
+/// FragmentDefinition : fragment FragmentName TypeCondition Directives? SelectionSet
 /// ```
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)

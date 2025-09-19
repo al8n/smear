@@ -4,11 +4,6 @@ use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::lang::punctuator::Colon;
 
-// use crate::{
-//   lang::{Name, StringValue, punct::Colon},
-//   source::*,
-// };
-
 /// Represents a GraphQL input value definition.
 ///
 /// An input value definition specifies a parameter that can be provided to a field,
@@ -103,14 +98,13 @@ use crate::lang::punctuator::Colon;
 /// ## Grammar
 ///
 /// ```text
-/// InputValueDefinition : Description? Name : Type DefaultValue? Directives?
+/// InputValueDefinition : Name : Type DefaultValue? Directives?
 /// ```
 ///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputValueDefinition<Description, Name, Type, DefaultValue, Directives> {
+pub struct InputValueDefinition<Name, Type, DefaultValue, Directives> {
   span: Span,
-  description: Option<Description>,
   name: Name,
   colon: Colon,
   ty: Type,
@@ -118,16 +112,16 @@ pub struct InputValueDefinition<Description, Name, Type, DefaultValue, Directive
   directives: Option<Directives>,
 }
 
-impl<Description, Name, Type, DefaultValue, Directives> AsRef<Span>
-  for InputValueDefinition<Description, Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives> AsRef<Span>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Description, Name, Type, DefaultValue, Directives> IntoSpan<Span>
-  for InputValueDefinition<Description, Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives> IntoSpan<Span>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -135,12 +129,11 @@ impl<Description, Name, Type, DefaultValue, Directives> IntoSpan<Span>
   }
 }
 
-impl<Description, Name, Type, DefaultValue, Directives> IntoComponents
-  for InputValueDefinition<Description, Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives> IntoComponents
+  for InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
   type Components = (
     Span,
-    Option<Description>,
     Name,
     Colon,
     Type,
@@ -152,7 +145,6 @@ impl<Description, Name, Type, DefaultValue, Directives> IntoComponents
   fn into_components(self) -> Self::Components {
     (
       self.span,
-      self.description,
       self.name,
       self.colon,
       self.ty,
@@ -162,8 +154,8 @@ impl<Description, Name, Type, DefaultValue, Directives> IntoComponents
   }
 }
 
-impl<Description, Name, Type, DefaultValue, Directives>
-  InputValueDefinition<Description, Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives>
+  InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
   /// Returns a reference to the span covering the entire input value definition.
   ///
@@ -172,16 +164,6 @@ impl<Description, Name, Type, DefaultValue, Directives>
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns a reference to the optional description of the input value definition.
-  ///
-  /// The description provides documentation for the input value and appears before
-  /// the value name. It can be either a single-line string or a block string, and
-  /// helps developers understand the purpose and usage of the parameter.
-  #[inline]
-  pub const fn description(&self) -> Option<&Description> {
-    self.description.as_ref()
   }
 
   /// Returns a reference to the input value name.
@@ -249,8 +231,7 @@ impl<Description, Name, Type, DefaultValue, Directives>
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
-  pub fn parser_with<'a, I, T, Error, E, DEP, NP, TP, VP, DP>(
-    description_parser: DEP,
+  pub fn parser_with<'a, I, T, Error, E, NP, TP, VP, DP>(
     name_parser: NP,
     type_parser: TP,
     default_const_value_parser: VP,
@@ -262,23 +243,19 @@ impl<Description, Name, Type, DefaultValue, Directives>
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Colon: Parseable<'a, I, T, Error> + 'a,
-    DEP: Parser<'a, I, Description, E> + Clone,
     NP: Parser<'a, I, Name, E> + Clone,
     TP: Parser<'a, I, Type, E> + Clone,
     DP: Parser<'a, I, Directives, E> + Clone,
     VP: Parser<'a, I, DefaultValue, E> + Clone,
   {
-    description_parser
-      .or_not()
-      .then(name_parser)
+    name_parser
       .then(Colon::parser())
       .then(type_parser)
       .then(default_const_value_parser.or_not())
       .then(const_directives_parser.or_not())
       .map_with(
-        |(((((description, name), colon), ty), default_value), directives), exa| Self {
+        |((((name, colon), ty), default_value), directives), exa| Self {
           span: exa.span(),
-          description,
           name,
           colon,
           ty,
@@ -289,13 +266,12 @@ impl<Description, Name, Type, DefaultValue, Directives>
   }
 }
 
-impl<'a, Description, Name, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for InputValueDefinition<Description, Name, Type, DefaultValue, Directives>
+impl<'a, Name, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Error: 'a,
-  Description: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
   DefaultValue: Parseable<'a, I, T, Error>,
@@ -309,7 +285,6 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(
-      Description::parser(),
       Name::parser(),
       Type::parser(),
       DefaultValue::parser(),

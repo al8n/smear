@@ -1,5 +1,7 @@
 mod arguments_definition;
 mod described;
+mod directives_definition;
+mod enum_definition;
 mod fields_definition;
 mod fragment_definition;
 mod input_fields_definition;
@@ -10,9 +12,13 @@ mod object_definition;
 mod scalar_definition;
 mod ty;
 mod union_definition;
+mod variable_definition;
+mod schema_definition;
 
 pub use arguments_definition::*;
 pub use described::*;
+pub use directives_definition::*;
+pub use enum_definition::*;
 pub use fields_definition::*;
 pub use fragment_definition::*;
 pub use input_fields_definition::*;
@@ -23,3 +29,5 @@ pub use object_definition::*;
 pub use scalar_definition::*;
 pub use ty::*;
 pub use union_definition::*;
+pub use variable_definition::*;
+pub use schema_definition::*;

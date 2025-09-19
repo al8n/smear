@@ -11,6 +11,7 @@ use crate::{
 
 use super::{FastTokenErrors, FastTokenStream};
 
+pub use directive_locations::*;
 pub use fragment::*;
 pub use implement_interfaces::*;
 pub use list::*;
@@ -19,6 +20,7 @@ pub use union_member_types::*;
 pub use value::*;
 
 mod boolean_value;
+mod directive_locations;
 mod enum_value;
 mod float;
 mod fragment;
@@ -109,22 +111,42 @@ pub type ArgumentsDefinition<
   InputValueContainer,
 >;
 
-pub type InputValueDefinition<
+pub type VariableDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
-> = definitions::v2::InputValueDefinition<
-  StringValue<S>,
+  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,  
+> = definitions::v2::VariableDefinition<
   Name<S>,
-  definitions::v2::RcType<Name<S>>,
+  RcType<Name<S>>,
   DefaultInputValue<S>,
   Directives<S, ArgumentContainer, DirectiveContainer>,
 >;
 
-pub type InputFieldsDefinition<
+pub type VariablesDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
   DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  VariableContainer = Vec<VariableDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::VariablesDefinition<
+  VariableDefinition<S, ArgumentContainer, DirectiveContainer>,
+  VariableContainer,
+>;
+
+pub type InputValueDefinition<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+> = Described<definitions::v2::InputValueDefinition<
+  Name<S>,
+  RcType<Name<S>>,
+  DefaultInputValue<S>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+>, StringValue<S>>;
+
+pub type InputFieldsDefinition<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InputFieldsDefinition<
   InputValueDefinition<S, ArgumentContainer, DirectiveContainer>,
@@ -134,14 +156,14 @@ pub type InputFieldsDefinition<
 pub type FieldDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = Described<
   definitions::v2::FieldDefinition<
     Name<S>,
     ArgumentsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
     RcType<Name<S>>,
-    Directives<S, ArgumentContainer, DirectiveContainer>,
+    ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   >,
   StringValue<S>,
 >;
@@ -149,7 +171,7 @@ pub type FieldDefinition<
 pub type FieldsDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
   FieldContainer = Vec<
     FieldDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
@@ -162,7 +184,7 @@ pub type FieldsDefinition<
 pub type InputObjectTypeDefinitionContent<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InputObjectTypeDefinitionContent<
   Name<S>,
@@ -173,7 +195,7 @@ pub type InputObjectTypeDefinitionContent<
 pub type InputObjectTypeDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InputObjectTypeDefinition<
   Name<S>,
@@ -184,7 +206,7 @@ pub type InputObjectTypeDefinition<
 pub type InputObjectTypeExtensionContent<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InputObjectTypeExtensionContent<
   Name<S>,
@@ -195,7 +217,7 @@ pub type InputObjectTypeExtensionContent<
 pub type InputObjectTypeExtension<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InputObjectTypeExtension<
   Name<S>,
@@ -228,7 +250,7 @@ pub type FragmentDefinition<
 pub type ScalarTypeDefinitionContent<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::ScalarTypeDefinitionContent<
   Name<S>,
   ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
@@ -237,7 +259,7 @@ pub type ScalarTypeDefinitionContent<
 pub type ScalarTypeDefinition<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::ScalarTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
@@ -246,7 +268,7 @@ pub type ScalarTypeDefinition<
 pub type ScalarTypeExtensionContent<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::ScalarTypeExtensionContent<
   Name<S>,
   ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
@@ -255,7 +277,7 @@ pub type ScalarTypeExtensionContent<
 pub type ScalarTypeExtension<
   S,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::ScalarTypeExtension<
   Name<S>,
   ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
@@ -265,12 +287,12 @@ pub type ObjectTypeDefinitionContent<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::ObjectTypeDefinitionContent<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -278,12 +300,12 @@ pub type ObjectTypeDefinition<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::ObjectTypeDefinition<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -291,12 +313,12 @@ pub type ObjectTypeExtensionContent<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::ObjectTypeExtensionContent<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -317,12 +339,12 @@ pub type InterfaceTypeDefinitionContent<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InterfaceTypeDefinitionContent<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -330,12 +352,12 @@ pub type InterfaceTypeDefinition<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InterfaceTypeDefinition<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -343,12 +365,12 @@ pub type InterfaceTypeExtensionContent<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InterfaceTypeExtensionContent<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -356,12 +378,12 @@ pub type InterfaceTypeExtension<
   S,
   ImplementInterfacesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
   InputValueContainer = Vec<InputValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
 > = definitions::v2::InterfaceTypeExtension<
   Name<S>,
   ImplementInterfaces<S, ImplementInterfacesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
   FieldsDefinition<S, ArgumentContainer, DirectiveContainer, InputValueContainer>,
 >;
 
@@ -369,42 +391,99 @@ pub type UnionTypeDefinitionContent<
   S,
   UnionMemberTypesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::UnionTypeDefinitionContent<
   Name<S>,
   UnionMemberTypes<S, UnionMemberTypesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
 >;
 
 pub type UnionTypeDefinition<
   S,
   UnionMemberTypesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::UnionTypeDefinition<
   Name<S>,
   UnionMemberTypes<S, UnionMemberTypesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
 >;
 
 pub type UnionTypeExtensionContent<
   S,
   UnionMemberTypesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::UnionTypeExtensionContent<
   Name<S>,
   UnionMemberTypes<S, UnionMemberTypesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
 >;
 
 pub type UnionTypeExtension<
   S,
   UnionMemberTypesContainer = Vec<Name<S>>,
   ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
 > = definitions::v2::UnionTypeExtension<
   Name<S>,
   UnionMemberTypes<S, UnionMemberTypesContainer>,
-  Directives<S, ArgumentContainer, DirectiveContainer>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+>;
+
+pub type EnumValueDefinition<S, ArgumentContainer = Vec<Argument<S>>, DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>> =
+  Described<definitions::v2::EnumValueDefinition<Name<S>, ConstDirectives<S, ArgumentContainer, DirectiveContainer>>, StringValue<S>>;
+
+pub type EnumValuesDefinition<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+  EnumValueContainer = Vec<EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::EnumValuesDefinition<
+  EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>,
+  EnumValueContainer,
+>;
+
+pub type EnumTypeDefinitionContent<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+  EnumValueContainer = Vec<EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::EnumTypeDefinitionContent<
+  Name<S>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+  EnumValuesDefinition<S, ArgumentContainer, DirectiveContainer, EnumValueContainer>,
+>;
+
+pub type EnumTypeDefinition<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+  EnumValueContainer = Vec<EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::EnumTypeDefinition<
+  Name<S>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+  EnumValuesDefinition<S, ArgumentContainer, DirectiveContainer, EnumValueContainer>,
+>;
+
+pub type EnumTypeExtensionContent<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+  EnumValueContainer = Vec<EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::EnumTypeExtensionContent<
+  Name<S>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+  EnumValuesDefinition<S, ArgumentContainer, DirectiveContainer, EnumValueContainer>,
+>;
+
+pub type EnumTypeExtension<
+  S,
+  ArgumentContainer = Vec<Argument<S>>,
+  DirectiveContainer = Vec<ConstDirective<S, ArgumentContainer>>,
+  EnumValueContainer = Vec<EnumValueDefinition<S, ArgumentContainer, DirectiveContainer>>,
+> = definitions::v2::EnumTypeExtension<
+  Name<S>,
+  ConstDirectives<S, ArgumentContainer, DirectiveContainer>,
+  EnumValuesDefinition<S, ArgumentContainer, DirectiveContainer, EnumValueContainer>,
 >;
