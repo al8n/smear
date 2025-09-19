@@ -5,9 +5,7 @@ use smear_utils::{IntoComponents, IntoSpan};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use crate::{
-  lang::punctuator::{Colon, LBrace, RBrace},
-};
+use crate::lang::punctuator::{Colon, LBrace, RBrace};
 
 /// Represents a single field definition in a GraphQL object, interface, or input type.
 ///
@@ -73,9 +71,8 @@ use crate::{
 ///
 /// Spec: [Field Definition](https://spec.graphql.org/draft/#sec-Field-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct FieldDefinition<Description, Name, Arguments, Type, Directives> {
+pub struct FieldDefinition<Name, Arguments, Type, Directives> {
   span: Span,
-  description: Option<Description>,
   name: Name,
   arguments_definition: Option<Arguments>,
   colon: Colon,
@@ -83,8 +80,8 @@ pub struct FieldDefinition<Description, Name, Arguments, Type, Directives> {
   directives: Option<Directives>,
 }
 
-impl<Description, Name, Arguments, Type, Directives> AsRef<Span>
-  for FieldDefinition<Description, Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives> AsRef<Span>
+  for FieldDefinition<Name, Arguments, Type, Directives>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -92,8 +89,8 @@ impl<Description, Name, Arguments, Type, Directives> AsRef<Span>
   }
 }
 
-impl<Description, Name, Arguments, Type, Directives> IntoSpan<Span>
-  for FieldDefinition<Description, Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives> IntoSpan<Span>
+  for FieldDefinition<Name, Arguments, Type, Directives>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -101,12 +98,11 @@ impl<Description, Name, Arguments, Type, Directives> IntoSpan<Span>
   }
 }
 
-impl<Description, Name, Arguments, Type, Directives> IntoComponents
-  for FieldDefinition<Description, Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives> IntoComponents
+  for FieldDefinition<Name, Arguments, Type, Directives>
 {
   type Components = (
     Span,
-    Option<Description>,
     Name,
     Option<Arguments>,
     Colon,
@@ -118,7 +114,6 @@ impl<Description, Name, Arguments, Type, Directives> IntoComponents
   fn into_components(self) -> Self::Components {
     (
       self.span,
-      self.description,
       self.name,
       self.arguments_definition,
       self.colon,
@@ -128,7 +123,7 @@ impl<Description, Name, Arguments, Type, Directives> IntoComponents
   }
 }
 
-impl<Description, Name, Arguments, Type, Directives> FieldDefinition<Description, Name, Arguments, Type, Directives> {
+impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, Directives> {
   /// Returns a reference to the span covering the entire field definition.
   ///
   /// The span includes the optional description, field name, optional arguments,
@@ -136,15 +131,6 @@ impl<Description, Name, Arguments, Type, Directives> FieldDefinition<Description
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns a reference to the optional description of the field definition.
-  ///
-  /// The description provides documentation for the field and appears before
-  /// the field name. It can be either a single-line string or a block string.
-  #[inline]
-  pub const fn description(&self) -> Option<&Description> {
-    self.description.as_ref()
   }
 
   /// Returns a reference to the field name.
@@ -208,8 +194,7 @@ impl<Description, Name, Arguments, Type, Directives> FieldDefinition<Description
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
-  pub fn parser_with<'a, I, T, Error, E, DEP, NP, AP, TP, DP>(
-    description_parser: DEP,
+  pub fn parser_with<'a, I, T, Error, E, NP, AP, TP, DP>(
     name_parser: NP,
     args_definition_parser: AP,
     type_parser: TP,
@@ -221,23 +206,19 @@ impl<Description, Name, Arguments, Type, Directives> FieldDefinition<Description
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Colon: Parseable<'a, I, T, Error> + 'a,
-    DEP: Parser<'a, I, Description, E> + Clone,
     NP: Parser<'a, I, Name, E> + Clone,
     AP: Parser<'a, I, Arguments, E> + Clone,
     TP: Parser<'a, I, Type, E> + Clone,
     DP: Parser<'a, I, Directives, E> + Clone,
   {
-    description_parser
-      .or_not()
-      .then(name_parser)
+    name_parser
       .then(args_definition_parser.or_not())
       .then(Colon::parser())
       .then(type_parser)
       .then(directives_parser.or_not())
       .map_with(
-        |(((((description, name), arguments_definition), colon), ty), directives), exa| Self {
+        |((((name, arguments_definition), colon), ty), directives), exa| Self {
           span: exa.span(),
-          description,
           name,
           arguments_definition,
           colon,
@@ -248,13 +229,12 @@ impl<Description, Name, Arguments, Type, Directives> FieldDefinition<Description
   }
 }
 
-impl<'a, Description, Name, Arguments, Type, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for FieldDefinition<Description, Name, Arguments, Type, Directives>
+impl<'a, Name, Arguments, Type, Directives, I, T, Error> Parseable<'a, I, T, Error>
+  for FieldDefinition<Name, Arguments, Type, Directives>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Error: 'a,
-  Description: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   Arguments: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
@@ -265,10 +245,9 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(
-      Description::parser(),
       Name::parser(),
       Arguments::parser(),
       Type::parser(),
@@ -349,27 +328,21 @@ pub struct FieldsDefinition<FieldDefinition, Container = Vec<FieldDefinition>> {
   _m: PhantomData<FieldDefinition>,
 }
 
-impl<FieldDefinition, Container> AsRef<Span>
-  for FieldsDefinition<FieldDefinition, Container>
-{
+impl<FieldDefinition, Container> AsRef<Span> for FieldsDefinition<FieldDefinition, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<FieldDefinition, Container> IntoSpan<Span>
-  for FieldsDefinition<FieldDefinition, Container>
-{
+impl<FieldDefinition, Container> IntoSpan<Span> for FieldsDefinition<FieldDefinition, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<FieldDefinition, Container> IntoComponents
-  for FieldsDefinition<FieldDefinition, Container>
-{
+impl<FieldDefinition, Container> IntoComponents for FieldsDefinition<FieldDefinition, Container> {
   type Components = (Span, LBrace, Container, RBrace);
 
   #[inline]
@@ -449,12 +422,7 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
     Container: chumsky::container::Container<FieldDefinition>,
   {
     LBrace::parser()
-      .then(
-        field_definition_parser
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
+      .then(field_definition_parser.repeated().at_least(1).collect())
       .then(RBrace::parser())
       .map_with(|((l_brace, fields), r_brace), exa| Self {
         span: exa.span(),

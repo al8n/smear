@@ -103,4 +103,21 @@ macro_rules! keyword {
   };
 }
 
-keyword!((On, "on_KW", "on"));
+keyword!(
+  (On, "on_KW", "on"),
+  (Input, "input_KW", "input"),
+  (Interface, "interface_KW", "interface"),
+  (Enum, "enum_KW", "enum"),
+  (Union, "union_KW", "union"),
+  (Scalar, "scalar_KW", "scalar"),
+  (Directive, "directive_KW", "directive"),
+  (Implements, "implements_KW", "implements"),
+  (Extend, "extend_KW", "extend"),
+  (Repeatable, "repeatable_KW", "repeatable"),
+  (Schema, "schema_KW", "schema"),
+  (Type, "type_KW", "type"),
+  (Query, "query_KW", "query"),
+  (Mutation, "mutation_KW", "mutation"),
+  (Subscription, "subscription_KW", "subscription"),
+  (Fragment, "fragment_KW", "fragment"),
+);

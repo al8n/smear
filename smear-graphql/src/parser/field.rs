@@ -4,7 +4,7 @@ use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_parser::{
   lang::{
     punctuator::{LBrace, RBrace, Spread},
-    v2::{self, FragmentSpread, On},
+    v2::{self, FragmentSpread, keyword::On},
   },
   source::{IntoComponents, IntoSpan},
 };

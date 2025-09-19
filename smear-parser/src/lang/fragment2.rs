@@ -7,7 +7,7 @@ use logosky::{
   },
 };
 
-use crate::lang::v2::{Name, On};
+use crate::lang::v2::{Name, keyword::On};
 
 use super::{super::source::*, punctuator::Spread};
 

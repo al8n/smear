@@ -76,9 +76,9 @@ pub enum Token<'a> {
   #[token("$")]
   Dollar,
 
-  /// Equals `=` token
+  /// Equal `=` token
   #[token("=")]
-  Equals,
+  Equal,
 
   /// Exclamation mark `!` token
   #[token("!")]
@@ -151,7 +151,7 @@ pub enum TokenKind {
   RParen,
   Spread,
   Colon,
-  Equals,
+  Equal,
   At,
   LBracket,
   RBracket,
@@ -187,7 +187,7 @@ impl<'a> Token<'a> {
       Self::RParen => TokenKind::RParen,
       Self::Spread => TokenKind::Spread,
       Self::Colon => TokenKind::Colon,
-      Self::Equals => TokenKind::Equals,
+      Self::Equal => TokenKind::Equal,
       Self::At => TokenKind::At,
       Self::LBracket => TokenKind::LBracket,
       Self::RBracket => TokenKind::RBracket,

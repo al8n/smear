@@ -1,0 +1,79 @@
+use chumsky::{extra::ParserExtra, prelude::*};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use smear_utils::{IntoComponents, IntoSpan};
+
+/// A node with an optional description.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Described<T, Description> {
+  span: Span,
+  description: Option<Description>,
+  node: T,
+}
+
+impl<T, Description> AsRef<Span> for Described<T, Description> {
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<T, Description> IntoSpan<Span> for Described<T, Description> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<T, Description> IntoComponents for Described<T, Description> {
+  type Components = (Span, Option<Description>, T);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.description, self.node)
+  }
+}
+
+impl<T, Description> Described<T, Description> {
+  /// Returns the span of the described node.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the description of the described node, if any.
+  #[inline]
+  pub const fn description(&self) -> Option<&Description> {
+    self.description.as_ref()
+  }
+
+  /// Returns the inner node.
+  #[inline]
+  pub const fn node(&self) -> &T {
+    &self.node
+  }
+}
+
+impl<'a, Description, Node, I, T, Error> Parseable<'a, I, T, Error> for Described<Node, Description>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Description: Parseable<'a, I, T, Error>,
+  Node: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Description::parser()
+      .or_not()
+      .then(Node::parser())
+      .map_with(|(description, node), exa| Self {
+        span: exa.span(),
+        description,
+        node,
+      })
+  }
+}

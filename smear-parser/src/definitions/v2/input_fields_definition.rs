@@ -119,8 +119,7 @@ use crate::lang::punctuator::{LBrace, RBrace};
 ///
 /// Spec: [InputFieldsDefinition](https://spec.graphql.org/draft/#InputFieldsDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputFieldsDefinition<InputValueDefinition, Container = Vec<InputValueDefinition>>
-{
+pub struct InputFieldsDefinition<InputValueDefinition, Container = Vec<InputValueDefinition>> {
   span: Span,
   l_brace: LBrace,
   values: Container,
@@ -157,9 +156,7 @@ impl<InputValueDefinition, Container> IntoComponents
   }
 }
 
-impl<InputValueDefinition, Container>
-  InputFieldsDefinition<InputValueDefinition, Container>
-{
+impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition, Container> {
   /// Returns a reference to the span covering the entire input values definition.
   ///
   /// The span includes the opening brace, all input field definitions, and the closing brace.
@@ -267,8 +264,6 @@ where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
-    Self::parser_with(
-      InputValueDefinition::parser(),
-    )
+    Self::parser_with(InputValueDefinition::parser())
   }
 }

@@ -178,7 +178,7 @@ pub enum Token<'a> {
   #[token("$", tt_hook)]
   Dollar,
 
-  /// Equals `=` token
+  /// Equal `=` token
   #[token("=", tt_hook)]
   Equal,
 

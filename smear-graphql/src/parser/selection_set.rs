@@ -3,7 +3,7 @@ use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_parser::{
   lang::{
     punctuator::{LBrace, RBrace, Spread},
-    v2::{self, FragmentSpread, InlineFragment, On},
+    v2::{self, FragmentSpread, InlineFragment, keyword::On},
   },
   source::IntoSpan,
 };
@@ -14,7 +14,8 @@ use crate::parser::ast::Field;
 
 #[derive(Debug, Clone, From, Into)]
 pub struct SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
-  pub(super) v2::SelectionSet<Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>,
+  pub(super) 
+    v2::SelectionSet<Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>,
 );
 
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]

@@ -1,13 +1,13 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
-use smear_parser::lang::v2::On;
+use smear_parser::lang::v2::keyword::{self, *};
 
 use crate::error::Error;
 
 use super::*;
 
 macro_rules! keyword_parser {
-  ($($name:ident:$kw:literal),+$(,)?) => {
+  ($($name:ty:$kw:literal),+$(,)?) => {
     $(
       impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for $name {
         #[inline]
@@ -21,7 +21,7 @@ macro_rules! keyword_parser {
               let (span, tok) = tok.into_components();
               match tok {
                 Token::Identifier(name) => if name.eq($kw) {
-                  Ok($name::new(span))
+                  Ok(<$name>::new(span))
                 } else {
                   Err(Error::unexpected_keyword(name, $kw, span).into())
                 },
@@ -38,4 +38,19 @@ macro_rules! keyword_parser {
 
 keyword_parser! {
   On:"on",
+  Fragment:"fragment",
+  Query:"query",
+  Mutation:"mutation",
+  Subscription:"subscription",
+  Type:"type",
+  Interface:"interface",
+  Union:"union",
+  Enum:"enum",
+  Input:"input",
+  Implements:"implements",
+  Extend:"extend",
+  keyword::Directive:"directive",
+  Schema:"schema",
+  Scalar:"scalar",
+  Repeatable:"repeatable",
 }

@@ -45,4 +45,6 @@ punctuator_parser! {
   LParen,
   RParen,
   Spread,
+  Pipe,
+  Equal,
 }
