@@ -1,16 +1,17 @@
-use chumsky::{IterParser as _, Parser, extra::ParserExtra};
+use chumsky::{Parser, extra::ParserExtra};
 use logosky::Parseable;
+use smear_parser::lang::minized::List;
 
-use crate::{
-  error::Error,
-  parser::ast::{LBracket, List, RBracket},
-};
+use crate::error::Error;
 
 use super::*;
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for List<V>
+impl<'a, V, Container>
+  Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
+  for List<V, Container>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>> + 'a,
+  Container: chumsky::container::Container<V> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
@@ -18,32 +19,39 @@ where
     Self: Sized,
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
-    list_parser(V::parser())
+    Self::parser_with(V::parser(), |span| Error::unclosed_list(span).into())
   }
 }
 
-pub fn list_parser<'a, V, VP, E>(
-  value_parser: VP,
-) -> impl Parser<'a, FastTokenStream<'a>, List<V>, E> + Clone
-where
-  E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, FastTokenStream<'a>, V, E> + Clone + 'a,
-  V: 'a,
-{
-  <LBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser()
-    .then(value_parser.repeated().collect())
-    .then(<RBracket as Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>>::parser().or_not())
-    .try_map(|((l, values), r), span| match r {
-      Some(r) => Ok(List::new(span, l, r, values)),
-      None => Err(Error::unclosed_list(span).into()),
-    })
-}
+// pub fn list_parser<'src, I, T, Error, V, Container, VP, E>(
+//   value_parser: VP,
+//   on_missing_rbracket: impl Fn(Span) -> Error + Clone + 'src,
+// ) -> impl Parser<'src, I, List<V, Container>, E> + Clone
+// where
+//   T: Token<'src>,
+//   I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+//   Error: 'src,
+//   E: ParserExtra<'src, I, Error = Error> + 'src,
+//   VP: Parser<'src, I, V, E> + Clone + 'src,
+//   Container: chumsky::container::Container<V>,
+//   LBracket: Parseable<'src, I, T, Error>,
+//   RBracket: Parseable<'src, I, T, Error>,
+//   V: 'src,
+// {
+//   <LBracket as Parseable<'src, I, T, Error>>::parser()
+//     .ignore_then(value_parser.repeated().collect())
+//     .then(<RBracket as Parseable<'src, I, T, Error>>::parser().or_not())
+//     .try_map(move |(values, r), span| match r {
+//       Some(_) => Ok(List::new(span, values)),
+//       None => Err(on_missing_rbracket(span)),
+//     })
+// }
 
 #[cfg(test)]
 mod tests {
   use crate::{
     error::{ErrorData, Unclosed},
-    parser::{ast::StringValue, fast::FastParserExtra},
+    parser::fast::FastParserExtra,
   };
 
   use super::*;

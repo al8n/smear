@@ -1,20 +1,16 @@
-use crate::{
-  lexer::token::fast::Token,
-  parser::{
-    ast::{
-      BooleanValue, EnumValue, FloatValue, IntValue, List, NullValue, Object, StringValue, Variable,
-    },
-    impls::fast::ast::{list_parser, object_parser},
-  },
-};
+use crate::{error::Error, lexer::token::fast::Token};
 
 use chumsky::{Parser, extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::Parseable;
+use smear_parser::lang::minized::{List, Name, Object};
 
-use super::{FastTokenErrors, FastTokenStream, ObjectField};
+use super::{
+  BooleanValue, EnumValue, FastTokenErrors, FastTokenStream, FloatValue, IntValue, NullValue,
+  StringValue, Variable,
+};
 
-pub type DefaultInputValue<S> = smear_parser::lang::v2::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S> = smear_parser::lang::minized::DefaultInputValue<ConstInputValue<S>>;
 
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -28,7 +24,7 @@ pub enum InputValue<S> {
   Enum(EnumValue<S>),
   Null(NullValue<S>),
   List(List<InputValue<S>>),
-  Object(Object<ObjectField<InputValue<S>, S>>),
+  Object(Object<Name<S>, InputValue<S>>),
 }
 
 impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
@@ -48,8 +44,12 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       let string_value_parser = StringValue::parser::<E>().map(Self::String);
       let enum_value_parser = EnumValue::parser::<E>().map(Self::Enum);
       let variable_value_parser = Variable::parser::<E>().map(Self::Variable);
-      let object_value_parser = object_parser(parser.clone()).map(Self::Object);
-      let list_value_parser = list_parser(parser).map(Self::List);
+      let object_value_parser = Object::parser_with(Name::parser(), parser.clone(), |span| {
+        Error::unclosed_object(span).into()
+      })
+      .map(Self::Object);
+      let list_value_parser =
+        List::parser_with(parser, |span| Error::unclosed_list(span).into()).map(Self::List);
 
       choice((
         boolean_value_parser,
@@ -77,7 +77,7 @@ pub enum ConstInputValue<S> {
   Enum(EnumValue<S>),
   Null(NullValue<S>),
   List(List<ConstInputValue<S>>),
-  Object(Object<ObjectField<ConstInputValue<S>, S>>),
+  Object(Object<Name<S>, ConstInputValue<S>>),
 }
 
 impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
@@ -96,8 +96,12 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       let float_value_parser = FloatValue::parser::<E>().map(Self::Float);
       let string_value_parser = StringValue::parser::<E>().map(Self::String);
       let enum_value_parser = EnumValue::parser::<E>().map(Self::Enum);
-      let object_value_parser = object_parser(parser.clone()).map(Self::Object);
-      let list_value_parser = list_parser(parser).map(Self::List);
+      let object_value_parser = Object::parser_with(Name::parser(), parser.clone(), |span| {
+        Error::unclosed_object(span).into()
+      })
+      .map(Self::Object);
+      let list_value_parser =
+        List::parser_with(parser, |span| Error::unclosed_list(span).into()).map(Self::List);
 
       choice((
         boolean_value_parser,

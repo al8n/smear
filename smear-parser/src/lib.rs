@@ -141,6 +141,9 @@ pub mod definitions;
 /// Parsing related traits
 pub mod parse;
 
+/// Error traits and types
+pub mod error;
+
 /// Source trait and implementations
 pub mod source {
   pub use smear_utils::*;

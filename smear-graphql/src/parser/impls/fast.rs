@@ -1,7 +1,7 @@
 use logosky::utils::recursion_tracker::RecursionLimitExceeded;
 
 use crate::{
-  error::{Errors, Extra},
+  error::{Error, Errors, Extra},
   lexer::token::fast::{Token, TokenKind},
 };
 
@@ -11,7 +11,13 @@ pub use ast::*;
 pub type FastTokenStream<'a> = logosky::TokenStream<'a, Token<'a>>;
 /// The parser extra type used for the fast parser implementation.
 pub type FastParserExtra<'a, S> = Extra<S, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+/// The error type used for the fast parser implementation.
+pub type FastTokenError<'a, S> = Error<S, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
 /// The errors type used for the fast parser implementation.
 pub type FastTokenErrors<'a, S> = Errors<S, Token<'a>, TokenKind, char, RecursionLimitExceeded>;
+/// The token type used for the fast parser implementation.
+pub type FastToken<'a> = Token<'a>;
 
 mod ast;
+
+mod error;

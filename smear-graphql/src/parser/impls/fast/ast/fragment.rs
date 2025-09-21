@@ -1,24 +1,24 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
-use smear_parser::lang::v2::{self, FragmentName, Name};
+use smear_parser::lang::minized::{self, FragmentName, Name};
 
 use crate::error::Error;
 
 use super::*;
 
-pub type TypeCondition<S> = v2::TypeCondition<Name<S>>;
+pub type TypeCondition<S> = minized::TypeCondition<Name<S>>;
 
 pub type FragmentSpread<
   S,
   ArgumentContainer = Vec<Argument<S>>,
   Container = Vec<Directive<S, ArgumentContainer>>,
-> = v2::FragmentSpread<FragmentName<S>, Directives<S, ArgumentContainer, Container>>;
+> = minized::FragmentSpread<FragmentName<S>, Directives<S, ArgumentContainer, Container>>;
 
 pub type InlineFragment<
   S,
   ArgumentContainer = Vec<Argument<S>>,
   DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
-> = v2::InlineFragment<
+> = minized::InlineFragment<
   TypeCondition<S>,
   Directives<S, ArgumentContainer, DirectiveContainer>,
   SelectionSet<S, ArgumentContainer, DirectiveContainer>,

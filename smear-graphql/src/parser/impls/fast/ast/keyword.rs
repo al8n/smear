@@ -1,6 +1,9 @@
 use chumsky::{Parser, extra::ParserExtra, prelude::any};
 use logosky::{Lexed, Parseable};
-use smear_parser::{lang::v2::keyword::{self, *}, definitions::v2};
+use smear_parser::{
+  definitions::minized,
+  lang::minized::keywords::{self, *},
+};
 
 use crate::error::Error;
 
@@ -49,30 +52,30 @@ keyword_parser! {
   Input:"input",
   Implements:"implements",
   Extend:"extend",
-  keyword::Directive:"directive",
+  keywords::Directive:"directive",
   Schema:"schema",
   Scalar:"scalar",
   Repeatable:"repeatable",
 }
 
 keyword_parser! {
-  v2::QueryLocation:"QUERY",
-  v2::MutationLocation:"MUTATION",
-  v2::SubscriptionLocation:"SUBSCRIPTION",
-  v2::FieldLocation:"FIELD",
-  v2::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
-  v2::FragmentSpreadLocation:"FRAGMENT_SPREAD",
-  v2::InlineFragmentLocation:"INLINE_FRAGMENT",
-  v2::VariableDefinitionLocation:"VARIABLE_DEFINITION",
-  v2::SchemaLocation:"SCHEMA",
-  v2::ScalarLocation:"SCALAR",
-  v2::ObjectLocation:"OBJECT",
-  v2::FieldDefinitionLocation:"FIELD_DEFINITION",
-  v2::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
-  v2::InterfaceLocation:"INTERFACE",
-  v2::UnionLocation:"UNION",
-  v2::EnumLocation:"ENUM",
-  v2::EnumValueLocation:"ENUM_VALUE",
-  v2::InputObjectLocation:"INPUT_OBJECT",
-  v2::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
+  minized::QueryLocation:"QUERY",
+  minized::MutationLocation:"MUTATION",
+  minized::SubscriptionLocation:"SUBSCRIPTION",
+  minized::FieldLocation:"FIELD",
+  minized::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
+  minized::FragmentSpreadLocation:"FRAGMENT_SPREAD",
+  minized::InlineFragmentLocation:"INLINE_FRAGMENT",
+  minized::VariableDefinitionLocation:"VARIABLE_DEFINITION",
+  minized::SchemaLocation:"SCHEMA",
+  minized::ScalarLocation:"SCALAR",
+  minized::ObjectLocation:"OBJECT",
+  minized::FieldDefinitionLocation:"FIELD_DEFINITION",
+  minized::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
+  minized::InterfaceLocation:"INTERFACE",
+  minized::UnionLocation:"UNION",
+  minized::EnumLocation:"ENUM",
+  minized::EnumValueLocation:"ENUM_VALUE",
+  minized::InputObjectLocation:"INPUT_OBJECT",
+  minized::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
 }

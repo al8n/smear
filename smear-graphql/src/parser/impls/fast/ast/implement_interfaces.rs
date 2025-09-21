@@ -5,7 +5,7 @@ use logosky::{
   Parseable, Source, Token, Tokenizer,
   utils::{Span, sdl_display::DisplaySDL},
 };
-use smear_parser::lang::{keywords2::Implements, punctuator::Ampersand};
+use smear_parser::lang::{minized::keywords::Implements, punctuator::Ampersand};
 
 use super::Name;
 

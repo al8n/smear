@@ -15,6 +15,8 @@ use logosky::{
 
 use crate::error::LexerErrors;
 
+pub use smear_parser::error::{ParseVariableValueError, VariableValueHint};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnexpectedToken<T, TK> {
   found: Option<T>,
@@ -39,16 +41,6 @@ impl<T, TK> UnexpectedToken<T, TK> {
   pub const fn with_found(found: T, expected: TK) -> Self {
     Self::maybe_found(Some(found), expected)
   }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
-pub enum VariableValueHint {
-  /// A [`Name`](crate::parser::ast::Name) was expected.
-  #[display("name")]
-  Name,
-  /// A [`Dollar`](crate::parser::ast::Dollar) was expected.
-  #[display("dollar")]
-  Dollar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
@@ -151,6 +143,8 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
+  UnknownDirectiveLocation(S),
+  UnknownOperationType(S),
   /// An end of input was found.
   EndOfInput,
   Other(Cow<'static, str>),
@@ -275,11 +269,13 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
   /// Creates an unknown directive location error.
   #[inline]
   pub const fn unknown_directive_location(value: S, span: Span) -> Self {
-    // Self::new(
-    //   span,
-    //   ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(value, "known directive location")),
-    // )
-    todo!()
+    Self::new(span, ErrorData::UnknownDirectiveLocation(value))
+  }
+
+  /// Creates an unknown operation type error.
+  #[inline]
+  pub const fn unknown_operation_type(value: S, span: Span) -> Self {
+    Self::new(span, ErrorData::UnknownOperationType(value))
   }
 
   /// Returns the span of the error.

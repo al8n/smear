@@ -1,4 +1,5 @@
 pub use arguments_definition::*;
+pub use described::*;
 pub use directives_definition::*;
 pub use enum_definition::*;
 pub use fields_definition::*;
@@ -18,6 +19,7 @@ pub use union_definition::*;
 pub use variable_definition::*;
 
 mod arguments_definition;
+mod described;
 mod directives_definition;
 mod enum_definition;
 mod fields_definition;
@@ -36,5 +38,5 @@ mod ty;
 mod union_definition;
 mod variable_definition;
 
-/// a
-pub mod v2;
+/// The minized generic AST for definition specifications.
+pub mod minized;
