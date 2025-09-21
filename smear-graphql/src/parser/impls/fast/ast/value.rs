@@ -5,10 +5,27 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::Parseable;
 use smear_parser::lang::minized::{List, Name, Object};
 
-use super::{
-  BooleanValue, EnumValue, FastTokenErrors, FastTokenStream, FloatValue, IntValue, NullValue,
-  StringValue, Variable,
-};
+use super::{FastToken, FastTokenErrors, FastTokenStream};
+
+use crate::lexer::token::fast::TokenKind;
+
+pub use boolean_value::*;
+pub use enum_value::*;
+pub use float::*;
+pub use int::*;
+pub use null_value::*;
+pub use string::*;
+
+mod boolean_value;
+mod enum_value;
+mod float;
+mod int;
+mod list;
+mod null_value;
+mod object;
+mod string;
+
+pub type Variable<S> = smear_parser::lang::minized::Variable<Name<S>>;
 
 pub type DefaultInputValue<S> = smear_parser::lang::minized::DefaultInputValue<ConstInputValue<S>>;
 

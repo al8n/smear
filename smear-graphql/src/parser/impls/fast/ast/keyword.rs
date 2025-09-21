@@ -12,7 +12,7 @@ use super::*;
 macro_rules! keyword_parser {
   ($($name:ty:$kw:literal),+$(,)?) => {
     $(
-      impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for $name {
+      impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>> for $name {
         #[inline]
         fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
         where
@@ -23,12 +23,12 @@ macro_rules! keyword_parser {
             Lexed::Token(tok) => {
               let (span, tok) = tok.into_components();
               match tok {
-                Token::Identifier(name) => if name.eq($kw) {
+                FastToken::Identifier(name) => if name.eq($kw) {
                   Ok(<$name>::new(span))
                 } else {
                   Err(Error::unexpected_keyword(name, $kw, span).into())
                 },
-                tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+                tok => Err(Error::unexpected_token(tok, FastTokenKind::Identifier, span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -49,7 +49,7 @@ keyword_parser! {
   Interface:"interface",
   Union:"union",
   Enum:"enum",
-  Input:"input",
+  keywords::Input:"input",
   Implements:"implements",
   Extend:"extend",
   keywords::Directive:"directive",

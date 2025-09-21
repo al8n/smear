@@ -9,7 +9,7 @@ use super::*;
 macro_rules! punctuator_parser {
   ($($name:ident),+$(,)?) => {
     $(
-      impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> for $name {
+      impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>> for $name {
         #[inline]
         fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
         where
@@ -20,8 +20,8 @@ macro_rules! punctuator_parser {
             Lexed::Token(tok) => {
               let (span, tok) = tok.into_components();
               match tok {
-                Token::$name => Ok($name::new(span)),
-                tok => Err(Error::unexpected_token(tok, TokenKind::$name, span).into()),
+                FastToken::$name => Ok($name::new(span)),
+                tok => Err(Error::unexpected_token(tok, FastTokenKind::$name, span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

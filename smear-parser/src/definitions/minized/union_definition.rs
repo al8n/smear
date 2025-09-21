@@ -693,6 +693,26 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   }
 }
 
+impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
+  for UnionTypeDefinition<Name, Directives, MemberTypes>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Union: Parseable<'a, I, T, Error> + Clone,
+  Directives: Parseable<'a, I, T, Error> + 'a,
+  MemberTypes: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error> + 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
+  }
+}
+
 /// Represents the content portion of a union type extension.
 ///
 /// Union extensions can add directives or new member types to existing unions,

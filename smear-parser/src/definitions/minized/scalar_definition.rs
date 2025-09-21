@@ -4,115 +4,6 @@ use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::lang::minized::keywords::{Extend, Scalar};
 
-/// Represents a content of scalar type definition in GraphQL schema.
-///
-/// The difference between this and [`ScalarTypeDefinition`] is that this does not include
-/// the description and `scalar` keyword. This allows
-/// for more modular parsing and composition when building up full type definitions.
-///
-/// ## Grammar
-///
-/// ```text
-/// ScalarTypeDefinitionContent : Name Directives?
-/// ```
-///
-/// Spec: [Scalar Type Definition](https://spec.graphql.org/draft/#sec-Scalar-Type-Definition)
-#[derive(Debug, Clone, Copy)]
-pub struct ScalarTypeDefinitionContent<Name, Directives> {
-  span: Span,
-  name: Name,
-  directives: Option<Directives>,
-}
-
-impl<Name, Directives> AsRef<Span> for ScalarTypeDefinitionContent<Name, Directives> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Directives> IntoSpan<Span> for ScalarTypeDefinitionContent<Name, Directives> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives> IntoComponents for ScalarTypeDefinitionContent<Name, Directives> {
-  type Components = (Span, Name, Option<Directives>);
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives)
-  }
-}
-
-impl<Name, Directives> ScalarTypeDefinitionContent<Name, Directives> {
-  /// Returns a reference to the span covering the entire scalar definition.
-  ///
-  /// The span encompasses the complete scalar definition from the optional description
-  /// through the scalar name and any directives.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns a reference to the name of the scalar definition.
-  ///
-  /// The scalar name serves as the type identifier and must be unique within
-  /// the schema's namespace. Scalar names follow GraphQL naming conventions
-  /// and become part of the schema's public API contract.
-  #[inline]
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-
-  /// Returns a reference to the optional directives applied to this scalar definition.
-  ///
-  /// Scalar-level directives provide metadata and specify behavior for the custom scalar,
-  /// particularly around validation, serialization, and processing rules. They enable
-  /// declarative specification of scalar behavior without requiring code changes.
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-
-  /// Creates a parser for scalar definitions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type definitions,
-  /// supporting optional descriptions and directives while ensuring proper whitespace
-  /// and comment handling throughout the definition.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the scalar type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP>(
-    name_parser: NP,
-    directives_parser: DP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    name_parser
-      .then(directives_parser.or_not())
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
-  }
-}
-
 /// Represents a GraphQL scalar type definition that defines custom data types with specific serialization behavior.
 ///
 /// Scalar types represent primitive leaf values in the GraphQL type system and are the fundamental
@@ -297,134 +188,7 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     Scalar::parser()
-      .ignore_then(
-        ScalarTypeDefinitionContent::<Name, Directives>::parser_with(
-          name_parser,
-          directives_parser,
-        ),
-      )
-      .map_with(|content, exa| {
-        let (_, name, directives) = content.into_components();
-        Self {
-          span: exa.span(),
-          name,
-          directives,
-        }
-      })
-  }
-}
-
-/// Represents a GraphQL scalar type extension that adds new directives to an existing scalar.
-///
-/// The difference between this and [`ScalarTypeExtension`] is that this does not include
-/// the `extend` and `scalar` keywords. This allows
-/// for more modular parsing and composition when building up full type definitions.
-///
-/// ## Type Parameters
-///
-/// * `Directives` - The type representing directives being added to the scalar (required)
-/// * `Span` - The type representing source location information
-///
-/// ## Grammar
-///
-/// ```text
-/// ScalarTypeExtensionContent : Name Directives
-/// ```
-///
-/// Note: Unlike scalar definitions, extensions require directives (they must add something).
-///
-/// Spec: [Scalar Type Extension](https://spec.graphql.org/draft/#sec-Scalar-Type-Extension)
-#[derive(Debug, Clone, Copy)]
-pub struct ScalarTypeExtensionContent<Name, Directives> {
-  span: Span,
-  name: Name,
-  directives: Directives,
-}
-
-impl<Name, Directives> AsRef<Span> for ScalarTypeExtensionContent<Name, Directives> {
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Directives> IntoSpan<Span> for ScalarTypeExtensionContent<Name, Directives> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives> IntoComponents for ScalarTypeExtensionContent<Name, Directives> {
-  type Components = (Span, Name, Directives);
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives)
-  }
-}
-
-impl<Name, Directives> ScalarTypeExtensionContent<Name, Directives> {
-  /// Returns a reference to the span covering the entire scalar extension.
-  ///
-  /// The span encompasses the complete extension from the `extend` keyword through
-  /// the scalar name and all applied directives. This comprehensive location
-  /// information enables precise error reporting, IDE integration, and source
-  /// transformation tools.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns a reference to the name of the scalar being extended.
-  ///
-  /// The scalar name identifies which existing scalar type this extension applies to.
-  /// The referenced scalar must be defined elsewhere in the schema (either in the
-  /// base schema or in previously applied extensions).
-  #[inline]
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-
-  /// Returns a reference to the directives being added to the scalar.
-  ///
-  /// Unlike scalar definitions where directives are optional, scalar extensions
-  /// require directives because the extension must add something to the existing scalar.
-  /// These directives enhance or modify the behavior of the base scalar type.
-  #[inline]
-  pub const fn directives(&self) -> &Directives {
-    &self.directives
-  }
-
-  /// Creates a parser for scalar extensions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type extensions,
-  /// which must include directives (unlike definitions where they are optional).
-  /// The parser ensures proper keyword recognition, name validation, and directive
-  /// processing while maintaining comprehensive error reporting capabilities.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the scalar type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP>(
-    name_parser: NP,
-    directives_parser: DP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    name_parser
-      .then(directives_parser)
+      .ignore_then(name_parser.then(directives_parser.or_not()))
       .map_with(|(name, directives), exa| Self {
         span: exa.span(),
         name,
@@ -434,11 +198,12 @@ impl<Name, Directives> ScalarTypeExtensionContent<Name, Directives> {
 }
 
 impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for ScalarTypeExtensionContent<Name, Directives>
+  for ScalarTypeDefinition<Name, Directives>
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Error: 'a,
+  Scalar: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
 {
@@ -448,13 +213,7 @@ where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
-    Name::parser()
-      .then(Directives::parser())
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
+    Self::parser_with(Name::parser(), Directives::parser())
   }
 }
 
@@ -620,18 +379,11 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   {
     Extend::parser()
       .then(Scalar::parser())
-      .ignore_then(ScalarTypeExtensionContent::<Name, Directives>::parser_with(
-        name_parser,
-        directives_parser,
-      ))
-      .map_with(|content, exa| {
-        let (_, name, directives) = content.into_components();
-
-        Self {
-          span: exa.span(),
-          name,
-          directives,
-        }
+      .ignore_then(name_parser.then(directives_parser))
+      .map_with(|(name, directives), exa| Self {
+        span: exa.span(),
+        name,
+        directives,
       })
   }
 }

@@ -12,7 +12,7 @@ use smear_parser::{
 
 use crate::error::Error;
 
-use super::{Token as FastToken, *};
+use super::*;
 
 impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for Location
@@ -90,7 +90,7 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
             }
             val => return Err(Error::unknown_directive_location(val, span).into()),
           }),
-          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, FastTokenKind::Identifier, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

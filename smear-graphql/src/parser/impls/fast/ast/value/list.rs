@@ -49,6 +49,8 @@ where
 
 #[cfg(test)]
 mod tests {
+  use logosky::utils::Span;
+
   use crate::{
     error::{ErrorData, Unclosed},
     parser::fast::FastParserExtra,

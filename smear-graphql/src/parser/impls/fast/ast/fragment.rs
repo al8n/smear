@@ -24,7 +24,7 @@ pub type InlineFragment<
   SelectionSet<S, ArgumentContainer, DirectiveContainer>,
 >;
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for FragmentName<&'a str>
 {
   #[inline]
@@ -37,14 +37,14 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          Token::Identifier(name) => {
+          FastToken::Identifier(name) => {
             if name.eq("on") {
               Err(Error::invalid_fragment_name(name, span).into())
             } else {
               Ok(FragmentName::new(span, name))
             }
           }
-          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, FastTokenKind::Identifier, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
