@@ -4,7 +4,6 @@ use chumsky::{container::Container as ChumskyContainer, extra::ParserExtra, prel
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_parser::{
-  boxed,
   definitions::{self, minized::Location},
   lang,
   source::IntoSpan,
@@ -613,11 +612,11 @@ where
   {
     choice((
       ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
-      boxed!(ObjectTypeDefinition::parser::<E>()).map(Self::Object),
-      boxed!(InterfaceTypeDefinition::parser::<E>()).map(Self::Interface),
+      ObjectTypeDefinition::parser::<E>().map(Self::Object),
+      InterfaceTypeDefinition::parser::<E>().map(Self::Interface),
       UnionTypeDefinition::parser::<E>().map(Self::Union),
       EnumTypeDefinition::parser::<E>().map(Self::Enum),
-      boxed!(InputObjectTypeDefinition::parser::<E>()).map(Self::InputObject),
+      InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
     ))
   }
 }
@@ -801,7 +800,7 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     choice((
-      boxed!(TypeDefinition::parser::<E>()).map(Self::Type),
+      TypeDefinition::parser::<E>().map(Self::Type),
       DirectiveDefinition::parser::<E>().map(Self::Directive),
       SchemaDefinition::parser::<E>().map(Self::Schema),
     ))
@@ -983,11 +982,11 @@ where
   {
     choice((
       ScalarTypeExtension::parser::<E>().map(Self::Scalar),
-      boxed!(ObjectTypeExtension::parser::<E>()).map(Self::Object),
-      boxed!(InterfaceTypeExtension::parser::<E>()).map(Self::Interface),
+      ObjectTypeExtension::parser::<E>().map(Self::Object),
+      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
       UnionTypeExtension::parser::<E>().map(Self::Union),
       EnumTypeExtension::parser::<E>().map(Self::Enum),
-      boxed!(InputObjectTypeExtension::parser::<E>()).map(Self::InputObject),
+      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
     ))
   }
 }
@@ -1336,7 +1335,7 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     choice((
-      boxed!(Described::parser::<E>()).map(Self::Definition),
+      Described::parser::<E>().map(Self::Definition),
       TypeSystemExtension::parser::<E>().map(Self::Extension),
     ))
   }

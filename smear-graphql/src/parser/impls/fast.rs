@@ -2,7 +2,7 @@
 
 use logosky::{Parseable, utils::recursion_tracker::RecursionLimitExceeded};
 
-use chumsky::{ParseResult, Parser, extra::ParserExtra};
+use chumsky::{ParseResult, Parser};
 
 use crate::{
   error::{Error, Errors, Extra},
@@ -61,6 +61,6 @@ mod tests {
 
   #[test]
   fn test() {
-    <TypeSystemDefinitionOrExtension<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
+    <Document<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
   }
 }

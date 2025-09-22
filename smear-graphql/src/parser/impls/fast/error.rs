@@ -1,6 +1,11 @@
 use logosky::utils::Span;
 use smear_parser::error::{
-  EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint, ObjectTypeExtensionHint, ParseVariableValueError, SchemaExtensionHint, UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint, VariableValueHint
+  EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
+  ObjectTypeExtensionHint, ParseVariableValueError, SchemaExtensionHint,
+  UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
+  UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
+  UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint,
+  VariableValueHint,
 };
 
 use super::*;

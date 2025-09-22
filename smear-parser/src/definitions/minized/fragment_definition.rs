@@ -247,15 +247,15 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
       .then(type_condition_parser)
       .then(directives_parser.or_not())
       .then(selection_set_parser)
-      .map_with(|(((name, type_condition), directives), selection_set), exa| {
-        Self {
+      .map_with(
+        |(((name, type_condition), directives), selection_set), exa| Self {
           name,
           type_condition,
           directives,
           selection_set,
           span: exa.span(),
-        }
-      })
+        },
+      )
   }
 }
 

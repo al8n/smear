@@ -617,7 +617,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
       .ignore_then(name_parser)
       .then(implement_interfaces_parser.or_not())
       .then(directives_parser.or_not())
-      .then(boxed!(fields_definition_parser.or_not()))
+      .then(fields_definition_parser.or_not())
       .map_with(|(((name, implements), directives), fields), exa| Self {
         span: exa.span(),
         name,
@@ -999,40 +999,38 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
   {
-    boxed!(
-      Extend::parser()
-        .then(Interface::parser())
-        .ignore_then(name_parser)
-        .then(implement_interfaces_parser.or_not())
-        .then(directives_parser.or_not())
-        .then(fields_definition_parser.or_not())
-    )
-    .try_map_with(|(((name, implements), directives), fields), exa| {
-      let data = match (implements, directives, fields) {
-        (implements, directives, Some(fields)) => InterfaceTypeExtensionData::Fields {
-          implements,
-          directives,
-          fields,
-        },
-        (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
-          implements,
-          directives,
-        },
-        (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
-        (None, None, None) => {
-          return Err(Error::unexpected_end_of_interface_extension(
-            exa.span(),
-            InterfaceTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition,
-          ));
-        }
-      };
+    Extend::parser()
+      .then(Interface::parser())
+      .ignore_then(name_parser)
+      .then(implement_interfaces_parser.or_not())
+      .then(directives_parser.or_not())
+      .then(fields_definition_parser.or_not())
+      .try_map_with(|(((name, implements), directives), fields), exa| {
+        let data = match (implements, directives, fields) {
+          (implements, directives, Some(fields)) => InterfaceTypeExtensionData::Fields {
+            implements,
+            directives,
+            fields,
+          },
+          (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
+            implements,
+            directives,
+          },
+          (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
+          (None, None, None) => {
+            return Err(Error::unexpected_end_of_interface_extension(
+              exa.span(),
+              InterfaceTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition,
+            ));
+          }
+        };
 
-      Ok(Self {
-        span: exa.span(),
-        name,
-        data,
+        Ok(Self {
+          span: exa.span(),
+          name,
+          data,
+        })
       })
-    })
   }
 }
 

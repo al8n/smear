@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
-use crate::{error::{UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint}, lang::minized::keywords::{Extend, Union}};
+use crate::{
+  error::{UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint},
+  lang::minized::keywords::{Extend, Union},
+};
 
 // /// Represents the first union member type, where the pipe is optional.
 // ///
@@ -554,13 +557,11 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
       .ignore_then(name_parser)
       .then(directives_parser.or_not())
       .then(member_types.or_not())
-      .map_with(|((name, directives), members), exa| {
-        Self {
-          span: exa.span(),
-          name,
-          directives,
-          members,
-        }
+      .map_with(|((name, directives), members), exa| Self {
+        span: exa.span(),
+        name,
+        directives,
+        members,
       })
   }
 }
@@ -785,7 +786,10 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
           },
           (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
           (None, None) => {
-            return Err(Error::unexpected_end_of_union_extension(exa.span(), UnionTypeExtensionHint::DirectivesOrUnionMemberTypes))
+            return Err(Error::unexpected_end_of_union_extension(
+              exa.span(),
+              UnionTypeExtensionHint::DirectivesOrUnionMemberTypes,
+            ));
           }
         };
 
