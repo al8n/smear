@@ -5,9 +5,12 @@ use smear_utils::{IntoComponents, IntoSpan};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use crate::lang::{
-  minized::keywords::{Enum, Extend},
-  punctuator::{LBrace, RBrace},
+use crate::{
+  error::{EnumTypeExtensionHint, UnexpectedEndOfEnumExtensionError},
+  lang::{
+    minized::keywords::{Enum, Extend},
+    punctuator::{LBrace, RBrace},
+  },
 };
 
 /// Represents a single enum value definition in a GraphQL enum type.
@@ -333,165 +336,6 @@ where
   }
 }
 
-/// Represents a content of enum type definition in GraphQL schema.
-///
-/// The difference between this and `EnumTypeDefinition` is that this does not include
-/// the description and the `enum` keyword. This allows
-/// for more modular parsing and composition when building up full type definitions.
-///
-/// ## Type Parameters
-///
-/// * `Directives` - The type representing directives applied to the enum type
-/// * `EnumValuesDefinition` - The type representing the enum values collection
-/// * `Span` - The type representing source location information
-///
-/// ## Grammar
-///
-/// ```text
-/// EnumTypeDefinitionContent : Name Directives? EnumValuesDefinition?
-/// ```
-///
-/// Spec: [Enum Type Definition](https://spec.graphql.org/draft/#sec-Enum-Type-Definition)
-#[derive(Debug, Clone, Copy)]
-pub struct EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition> {
-  span: Span,
-  name: Name,
-  directives: Option<Directives>,
-  enum_values: Option<EnumValuesDefinition>,
-}
-
-impl<Name, Directives, EnumValuesDefinition> AsRef<Span>
-  for EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition>
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
-  for EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition>
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition> IntoComponents
-  for EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition>
-{
-  type Components = (Span, Name, Option<Directives>, Option<EnumValuesDefinition>);
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives, self.enum_values)
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition>
-  EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition>
-{
-  /// Returns a reference to the span covering the entire enum definition.
-  ///
-  /// The span includes the optional description, enum keyword, name, optional
-  /// directives, and optional enum values definition.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns a reference to the name of the enum type.
-  ///
-  /// This is the identifier that will be used to reference this enum type
-  /// in other parts of the schema and in GraphQL operations.
-  #[inline]
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-
-  /// Returns a reference to the optional enum values definition.
-  ///
-  /// The enum values definition contains all the possible values for this enum type.
-  /// It may be absent in enum definitions that are meant to be extended later.
-  #[inline]
-  pub const fn enum_values_definition(&self) -> Option<&EnumValuesDefinition> {
-    self.enum_values.as_ref()
-  }
-
-  /// Returns a reference to the optional directives applied to this enum type.
-  ///
-  /// Directives provide metadata or specify behavior for the enum type,
-  /// such as access control, validation rules, or custom processing instructions.
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-
-  /// Creates a parser that can parse an enum definition content.
-  ///
-  /// This parser handles the full enum definition syntax including all optional
-  /// components. The parsing of enum values and directives is delegated to the
-  /// provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, P, DP>(
-    name_parser: NP,
-    directives_parser: DP,
-    enum_values_definition: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    name_parser
-      .then(directives_parser.or_not())
-      .then(enum_values_definition.or_not())
-      .map_with(|((name, directives), enum_values), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        enum_values,
-      })
-  }
-}
-
-impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for EnumTypeDefinitionContent<Name, Directives, EnumValuesDefinition>
-where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  EnumValuesDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      Directives::parser(),
-      EnumValuesDefinition::parser(),
-    )
-  }
-}
-
 /// Represents a complete enum type definition in GraphQL schema.
 ///
 /// An enum type definition specifies a type that can have one of a finite set of values.
@@ -652,19 +496,14 @@ impl<Name, Directives, EnumValuesDefinition>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     Enum::parser()
-      .ignore_then(EnumTypeDefinitionContent::parser_with(
-        name_parser,
-        directives_parser,
-        enum_values_definition_parser,
-      ))
-      .map_with(|content, exa| {
-        let (_, name, directives, enum_values) = content.into_components();
-        Self {
-          span: exa.span(),
-          name,
-          directives,
-          enum_values,
-        }
+      .ignore_then(name_parser)
+      .then(directives_parser.or_not())
+      .then(enum_values_definition_parser.or_not())
+      .map_with(|((name, directives), enum_values), exa| Self {
+        span: exa.span(),
+        name,
+        directives,
+        enum_values,
       })
   }
 }
@@ -812,171 +651,6 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(Directives::parser, EnumValuesDefinition::parser)
-  }
-}
-
-/// Represents a content of enum type extension in GraphQL schema.
-///
-/// The difference between this and `EnumTypeExtension` is that this does not include
-/// the `extend` and `enum` keywords. This allows
-/// for more modular parsing and composition when building up full type definitions.
-///
-/// ## Type Parameters
-///
-/// * `Directives` - The type representing directives applied in the extension
-/// * `EnumValuesDefinition` - The type representing the new enum values being added
-/// * `Span` - The type representing source location information
-///
-/// ## Grammar
-///
-/// ```text
-/// EnumTypeExtensionContent : Name ( Directives EnumValuesDefinition? | EnumValuesDefinition )
-/// ```
-///
-/// Spec: [Enum Type Extension](https://spec.graphql.org/draft/#sec-Enum-Type-Extension)
-#[derive(Debug, Clone, Copy)]
-pub struct EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition> {
-  span: Span,
-  name: Name,
-  data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
-}
-
-impl<Name, Directives, EnumValuesDefinition> AsRef<Span>
-  for EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition>
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
-  for EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition>
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition> IntoComponents
-  for EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition>
-{
-  type Components = (
-    Span,
-    Name,
-    EnumTypeExtensionData<Directives, EnumValuesDefinition>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
-  }
-}
-
-impl<Name, Directives, EnumValuesDefinition>
-  EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition>
-{
-  /// Returns a reference to the span covering the entire enum extension.
-  ///
-  /// The span includes the extend keyword, enum keyword, name, and all
-  /// extension content (directives and/or enum values).
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns a reference to the name of the enum type being extended.
-  ///
-  /// This must match the name of an existing enum type in the schema
-  /// for the extension to be valid.
-  #[inline]
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-
-  /// Returns the directives associated with this enum type extension, if any.
-  #[inline]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.data.directives()
-  }
-
-  /// Returns the enum values definition if this extension adds new values.
-  #[inline]
-  pub const fn enum_values_definition(&self) -> Option<&EnumValuesDefinition> {
-    self.data.enum_values_definition()
-  }
-
-  /// Returns a reference to the extension data.
-  ///
-  /// The content specifies what is being added to the enum type:
-  /// either new values (optionally with directives), or just directives.
-  #[inline]
-  pub const fn data(&self) -> &EnumTypeExtensionData<Directives, EnumValuesDefinition> {
-    &self.data
-  }
-
-  /// Creates a parser that can parse a complete enum extension.
-  ///
-  /// This parser handles the full enum extension syntax including the extend
-  /// and enum keywords, target enum name, and extension data.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP, EVP>(
-    name_parser: NP,
-    directives_parser: impl Fn() -> DP,
-    enum_values_definition: impl Fn() -> EVP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    name_parser
-      .then(EnumTypeExtensionData::parser_with(
-        directives_parser,
-        enum_values_definition,
-      ))
-      .map_with(|(name, data), exa| Self {
-        span: exa.span(),
-        name,
-        data,
-      })
-  }
-}
-
-impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for EnumTypeExtensionContent<Name, Directives, EnumValuesDefinition>
-where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  EnumValuesDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      Directives::parser,
-      EnumValuesDefinition::parser,
-    )
   }
 }
 
@@ -1137,34 +811,41 @@ impl<Name, Directives, EnumValuesDefinition>
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP, EVP>(
     name_parser: NP,
-    directives_parser: impl Fn() -> DP,
-    enum_values_definition_parser: impl Fn() -> EVP,
+    directives_parser: DP,
+    enum_values_definition_parser: EVP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
+    Error: UnexpectedEndOfEnumExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error> + 'src,
     Enum: Parseable<'src, I, T, Error> + 'src,
     NP: Parser<'src, I, Name, E> + Clone,
-    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
+    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
   {
     Extend::parser()
       .then(Enum::parser())
-      .ignore_then(EnumTypeExtensionContent::parser_with(
-        name_parser,
-        directives_parser,
-        enum_values_definition_parser,
-      ))
-      .map_with(|data, exa| {
-        let (_, name, data) = data.into_components();
-        Self {
+      .ignore_then(name_parser)
+      .then(directives_parser.or_not())
+      .then(enum_values_definition_parser.or_not())
+      .try_map_with(|((name, directives), fields), exa| {
+        let data = match (directives, fields) {
+          (Some(directives), None) => EnumTypeExtensionData::Directives(directives),
+          (directives, Some(values)) => EnumTypeExtensionData::Values { directives, values },
+          (None, None) => {
+            return Err(Error::unexpected_end_of_enum_extension(
+              exa.span(),
+              EnumTypeExtensionHint::DirectivesOrEnumValuesDefinition,
+            ));
+          }
+        };
+        Ok(Self {
           span: exa.span(),
           name,
           data,
-        }
+        })
       })
   }
 }
@@ -1174,10 +855,10 @@ impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  EnumValuesDefinition: Parseable<'a, I, T, Error>,
+  Error: UnexpectedEndOfEnumExtensionError + 'a,
+  Name: Parseable<'a, I, T, Error> + 'a,
+  Directives: Parseable<'a, I, T, Error> + 'a,
+  EnumValuesDefinition: Parseable<'a, I, T, Error> + 'a,
   Extend: Parseable<'a, I, T, Error>,
   Enum: Parseable<'a, I, T, Error>,
 {
@@ -1189,8 +870,8 @@ where
   {
     Self::parser_with(
       Name::parser(),
-      Directives::parser,
-      EnumValuesDefinition::parser,
+      Directives::parser(),
+      EnumValuesDefinition::parser(),
     )
   }
 }

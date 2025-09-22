@@ -61,6 +61,6 @@ mod tests {
 
   #[test]
   fn test() {
-    <InterfaceTypeExtension<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
+    <TypeSystemDefinitionOrExtension<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
   }
 }

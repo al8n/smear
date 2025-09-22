@@ -379,7 +379,8 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   {
     Extend::parser()
       .then(Scalar::parser())
-      .ignore_then(name_parser.then(directives_parser))
+      .ignore_then(name_parser)
+      .then(directives_parser)
       .map_with(|(name, directives), exa| Self {
         span: exa.span(),
         name,

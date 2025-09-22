@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
-use crate::lang::minized::keywords::{Extend, Input};
+use crate::{
+  error::{InputObjectTypeExtensionHint, UnexpectedEndOfInputObjectExtensionError},
+  lang::minized::keywords::{Extend, Input},
+};
 
 /// Represents a complete input object type definition in GraphQL schema.
 ///
@@ -250,11 +253,9 @@ impl<Name, Directives, FieldsDefinition>
     NP: Parser<'src, I, Name, E> + Clone,
   {
     Input::parser()
-      .ignore_then(
-        name_parser
-          .then(directives_parser.or_not())
-          .then(input_fields_definition_parser.or_not()),
-      )
+      .ignore_then(name_parser)
+      .then(directives_parser.or_not())
+      .then(input_fields_definition_parser.or_not())
       .map_with(|((name, directives), fields), exa| Self {
         span: exa.span(),
         name,
@@ -576,13 +577,13 @@ impl<Name, Directives, FieldsDefinition>
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, NP, DP, FP>(
     name_parser: NP,
-    directives_parser: impl Fn() -> DP,
-    input_fields_definition_parser: impl Fn() -> FP,
+    directives_parser: DP,
+    input_fields_definition_parser: FP,
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
     I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
+    Error: UnexpectedEndOfInputObjectExtensionError + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Extend: Parseable<'a, I, T, Error> + 'a,
     Input: Parseable<'a, I, T, Error> + 'a,
@@ -592,14 +593,25 @@ impl<Name, Directives, FieldsDefinition>
   {
     Extend::parser()
       .then(Input::parser())
-      .ignore_then(name_parser.then(InputObjectTypeExtensionData::parser_with(
-        directives_parser,
-        input_fields_definition_parser,
-      )))
-      .map_with(|(name, data), exa| Self {
-        span: exa.span(),
-        name,
-        data,
+      .ignore_then(name_parser)
+      .then(directives_parser.or_not())
+      .then(input_fields_definition_parser.or_not())
+      .try_map_with(|((name, directives), fields), exa| {
+        let data = match (directives, fields) {
+          (directives, Some(fields)) => InputObjectTypeExtensionData::Fields { directives, fields },
+          (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
+          (None, None) => {
+            return Err(Error::unexpected_end_of_input_object_extension(
+              exa.span(),
+              InputObjectTypeExtensionHint::DirectivesOrInputFieldsDefinition,
+            ));
+          }
+        };
+        Ok(Self {
+          span: exa.span(),
+          name,
+          data,
+        })
       })
   }
 }
@@ -609,7 +621,7 @@ impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Er
 where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
+  Error: UnexpectedEndOfInputObjectExtensionError + 'a,
   Name: Parseable<'a, I, T, Error> + 'a,
   Directives: Parseable<'a, I, T, Error> + 'a,
   FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
@@ -624,8 +636,8 @@ where
   {
     Self::parser_with(
       <Name as Parseable<'a, I, T, Error>>::parser(),
-      <Directives as Parseable<'a, I, T, Error>>::parser,
-      <FieldsDefinition as Parseable<'a, I, T, Error>>::parser,
+      <Directives as Parseable<'a, I, T, Error>>::parser(),
+      <FieldsDefinition as Parseable<'a, I, T, Error>>::parser(),
     )
   }
 }

@@ -3,7 +3,9 @@ use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
-  boxed, error::{ObjectTypeExtensionHint, UnexpectedEndOfObjectExtensionError}, lang::minized::keywords::{Extend, Type}
+  boxed,
+  error::{ObjectTypeExtensionHint, UnexpectedEndOfObjectExtensionError},
+  lang::minized::keywords::{Extend, Type},
 };
 
 /// Represents a GraphQL Object type definition that defines a concrete type with fields.
@@ -508,33 +510,40 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
   {
-    boxed!(Extend::parser()
-      .then(Type::parser())
-      .ignore_then(name_parser)
-      .then(implement_interfaces_parser.or_not())
-      .then(directives_parser.or_not())
-      .then(fields_definition_parser.or_not()))
-      .try_map_with(|(((name, implements), directives), fields), exa| {
-        let data = match (implements, directives, fields) {
-          (implements, directives, Some(fields)) => ObjectTypeExtensionData::Fields {
-            implements,
-            directives,
-            fields,
-          },
-          (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
-            implements,
-            directives,
-          },
-          (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
-          (None, None, None) => return Err(Error::unexpected_end_of_object_extension(exa.span(), ObjectTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition)),
-        };
+    boxed!(
+      Extend::parser()
+        .then(Type::parser())
+        .ignore_then(name_parser)
+        .then(implement_interfaces_parser.or_not())
+        .then(directives_parser.or_not())
+        .then(fields_definition_parser.or_not())
+    )
+    .try_map_with(|(((name, implements), directives), fields), exa| {
+      let data = match (implements, directives, fields) {
+        (implements, directives, Some(fields)) => ObjectTypeExtensionData::Fields {
+          implements,
+          directives,
+          fields,
+        },
+        (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
+          implements,
+          directives,
+        },
+        (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
+        (None, None, None) => {
+          return Err(Error::unexpected_end_of_object_extension(
+            exa.span(),
+            ObjectTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition,
+          ));
+        }
+      };
 
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+      Ok(Self {
+        span: exa.span(),
+        name,
+        data,
       })
+    })
   }
 }
 

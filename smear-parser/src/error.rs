@@ -106,3 +106,129 @@ pub trait UnexpectedEndOfInterfaceExtensionError {
   /// while parsing an interface type extension.
   fn unexpected_end_of_interface_extension(span: Span, hint: InterfaceTypeExtensionHint) -> Self;
 }
+
+/// Hints for the next component was expected while parsing an enum type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum EnumTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Enum values definition.
+  #[display("enum values definition")]
+  EnumValuesDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Enum keyword.
+  #[display("enum keyword")]
+  Enum,
+  /// Directives or enum values definition.
+  #[display("directives or enum values definition")]
+  DirectivesOrEnumValuesDefinition,
+}
+
+/// An error which can occur when an unexpected end of input is encountered
+/// while parsing an enum type extension.
+pub trait UnexpectedEndOfEnumExtensionError {
+  /// Creates a new error indicating that an unexpected end of input was encountered
+  /// while parsing an enum type extension.
+  fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self;
+}
+
+/// Hints for the next component was expected while parsing an input object type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum InputObjectTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Input fields definition.
+  #[display("input fields definition")]
+  InputFieldsDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Input keyword.
+  #[display("input keyword")]
+  Input,
+  /// Directives or input fields definition.
+  #[display("directives or input fields definition")]
+  DirectivesOrInputFieldsDefinition,
+}
+
+/// An error which can occur when an unexpected end of input is encountered
+/// while parsing an input object type extension.
+pub trait UnexpectedEndOfInputObjectExtensionError {
+  /// Creates a new error indicating that an unexpected end of input was encountered
+  /// while parsing an input object type extension.
+  fn unexpected_end_of_input_object_extension(
+    span: Span,
+    hint: InputObjectTypeExtensionHint,
+  ) -> Self;
+}
+
+/// Hints for the next component was expected while parsing a union type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum UnionTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Union member types.
+  #[display("union member types")]
+  UnionMemberTypes,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Union keyword.
+  #[display("union keyword")]
+  Union,
+  /// Directives or union member types.
+  #[display("directives or union member types")]
+  DirectivesOrUnionMemberTypes,
+}
+
+/// An error which can occur when an unexpected end of input is encountered
+/// while parsing a union type extension.
+pub trait UnexpectedEndOfUnionExtensionError {
+  /// Creates a new error indicating that an unexpected end of input was encountered
+  /// while parsing a union type extension.
+  fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self;
+}
+
+/// Hints for the next component was expected while parsing a schema extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum SchemaExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Root operation types definition.
+  #[display("root operation types definition")]
+  RootOperationTypesDefinition,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Schema keyword.
+  #[display("schema keyword")]
+  Schema,
+  /// Directives or root operation types definition.
+  #[display("directives or root operation types definition")]
+  DirectivesOrRootOperationTypesDefinition,
+}
+
+/// An error which can occur when an unexpected end of input is encountered
+/// while parsing a schema extension.
+pub trait UnexpectedEndOfSchemaExtensionError {
+  /// Creates a new error indicating that an unexpected end of input was encountered
+  /// while parsing a schema extension.
+  fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self
+  where
+    Self: Sized;
+}

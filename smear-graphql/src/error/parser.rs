@@ -12,7 +12,10 @@ use logosky::{
   Lexed, Token, TokenStream,
   utils::{Span, UnexpectedEnd},
 };
-use smear_parser::error::{InterfaceTypeExtensionHint, ObjectTypeExtensionHint};
+use smear_parser::error::{
+  EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
+  ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
+};
 
 use crate::error::LexerErrors;
 
@@ -148,6 +151,10 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   UnknownOperationType(S),
   UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
   UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
+  UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
+  UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
+  UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
+  UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
   /// An end of input was found.
   EndOfInput,
   Other(Cow<'static, str>),
@@ -252,6 +259,57 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
       span,
       ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
         Cow::Borrowed("interface type extension"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in enum type extension error.
+  #[inline]
+  pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfEnumExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("enum type extension"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in input object type extension error.
+  #[inline]
+  pub const fn unexpected_end_of_input_object_extension(
+    span: Span,
+    hint: InputObjectTypeExtensionHint,
+  ) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfInputObjectExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("input object type extension"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in union type extension error.
+  #[inline]
+  pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfUnionExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("union type extension"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in schema extension error.
+  #[inline]
+  pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfSchemaExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("schema extension"),
         hint,
       )),
     )

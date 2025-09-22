@@ -1318,7 +1318,7 @@ where
       RootOperationTypesContainer,
     >,
     StringValue<S>,
-  >: Parseable<'a, I, T, Error>,
+  >: Parseable<'a, I, T, Error> + 'a,
   TypeSystemExtension<
     S,
     NamesContainer,
@@ -1327,7 +1327,7 @@ where
     InputValuesContainer,
     EnumValuesContainer,
     RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error>,
+  >: Parseable<'a, I, T, Error> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -1336,7 +1336,7 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     choice((
-      Described::parser::<E>().map(Self::Definition),
+      boxed!(Described::parser::<E>()).map(Self::Definition),
       TypeSystemExtension::parser::<E>().map(Self::Extension),
     ))
   }
