@@ -204,8 +204,9 @@ impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition
     E: ParserExtra<'a, I, Error = Error> + 'a,
     LBrace: Parseable<'a, I, T, Error> + 'a,
     RBrace: Parseable<'a, I, T, Error> + 'a,
-    P: Parser<'a, I, InputValueDefinition, E> + Clone,
-    Container: chumsky::container::Container<InputValueDefinition>,
+    InputValueDefinition: 'a,
+    P: Parser<'a, I, InputValueDefinition, E> + Clone + 'a,
+    Container: chumsky::container::Container<InputValueDefinition> + 'a,
   {
     LBrace::parser()
       .ignore_then(
@@ -229,10 +230,10 @@ where
   T: Token<'a>,
   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Error: 'a,
-  InputValueDefinition: Parseable<'a, I, T, Error>,
+  InputValueDefinition: Parseable<'a, I, T, Error> + 'a,
   LBrace: Parseable<'a, I, T, Error> + 'a,
   RBrace: Parseable<'a, I, T, Error> + 'a,
-  Container: chumsky::container::Container<InputValueDefinition>,
+  Container: chumsky::container::Container<InputValueDefinition> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

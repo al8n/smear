@@ -396,8 +396,8 @@ where
   Error: 'a,
   Extend: Parseable<'a, I, T, Error>,
   Scalar: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error> + 'a,
+  Directives: Parseable<'a, I, T, Error> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

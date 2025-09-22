@@ -1,4 +1,8 @@
-use logosky::utils::recursion_tracker::RecursionLimitExceeded;
+#![allow(clippy::type_complexity)]
+
+use logosky::{Parseable, utils::recursion_tracker::RecursionLimitExceeded};
+
+use chumsky::{ParseResult, Parser, extra::ParserExtra};
 
 use crate::{
   error::{Error, Errors, Extra},
@@ -23,3 +27,40 @@ pub type FastTokenKind = TokenKind;
 mod ast;
 
 mod error;
+
+pub trait ParseStr<'a> {
+  fn parse_str<S>(input: &'a S) -> ParseResult<Self, FastTokenErrors<'a, &'a str>>
+  where
+    Self: Sized,
+    S: ?Sized + AsRef<str>;
+}
+
+impl<'a, T> ParseStr<'a> for T
+where
+  T: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>,
+{
+  #[inline]
+  fn parse_str<S>(input: &'a S) -> ParseResult<Self, FastTokenErrors<'a, &'a str>>
+  where
+    Self: Sized,
+    S: ?Sized + AsRef<str>,
+  {
+    let s = input.as_ref();
+    let parser =
+      <T as Parseable<FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>>::parser::<
+        FastParserExtra<&str>,
+      >();
+    let tokens = FastTokenStream::new(s);
+    parser.parse(tokens)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test() {
+    <InterfaceTypeExtension<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
+  }
+}

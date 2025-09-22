@@ -12,6 +12,7 @@ use logosky::{
   Lexed, Token, TokenStream,
   utils::{Span, UnexpectedEnd},
 };
+use smear_parser::error::{InterfaceTypeExtensionHint, ObjectTypeExtensionHint};
 
 use crate::error::LexerErrors;
 
@@ -145,6 +146,8 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
   UnknownDirectiveLocation(S),
   UnknownOperationType(S),
+  UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
+  UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
   /// An end of input was found.
   EndOfInput,
   Other(Cow<'static, str>),
@@ -219,6 +222,36 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
       span,
       ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
         Cow::Borrowed("object field value"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in object type extension error.
+  #[inline]
+  pub const fn unexpected_end_of_object_extension(
+    span: Span,
+    hint: ObjectTypeExtensionHint,
+  ) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfObjectExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("object type extension"),
+        hint,
+      )),
+    )
+  }
+
+  /// Creates an unexpected end in interface type extension error.
+  #[inline]
+  pub const fn unexpected_end_of_interface_extension(
+    span: Span,
+    hint: InterfaceTypeExtensionHint,
+  ) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
+        Cow::Borrowed("interface type extension"),
         hint,
       )),
     )

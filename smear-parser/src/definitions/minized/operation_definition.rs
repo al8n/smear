@@ -1,6 +1,6 @@
 use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{Source, Token, Tokenizer, utils::Span};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
@@ -243,6 +243,35 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   }
 }
 
+impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Name: Parseable<'a, I, T, Error>,
+  OperationType: Parseable<'a, I, T, Error>,
+  VariablesDefinition: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  SelectionSet: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(
+      Name::parser(),
+      OperationType::parser(),
+      VariablesDefinition::parser(),
+      Directives::parser(),
+      SelectionSet::parser(),
+    )
+  }
+}
+
 /// Represents a complete GraphQL operation definition.
 ///
 /// Operations are the entry points for GraphQL execution. They can be either
@@ -450,5 +479,34 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
       .map(Self::Named),
       selection_set_parser.map(Self::Shorthand),
     ))
+  }
+}
+
+impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Name: Parseable<'a, I, T, Error>,
+  OperationType: Parseable<'a, I, T, Error>,
+  VariablesDefinition: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  SelectionSet: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(
+      Name::parser(),
+      OperationType::parser(),
+      VariablesDefinition::parser(),
+      Directives::parser(),
+      SelectionSet::parser(),
+    )
   }
 }

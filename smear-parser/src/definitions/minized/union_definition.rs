@@ -1084,3 +1084,24 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
       })
   }
 }
+
+impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
+  for UnionTypeExtension<Name, Directives, MemberTypes>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Extend: Parseable<'a, I, T, Error> + Clone,
+  Union: Parseable<'a, I, T, Error> + Clone,
+  Directives: Parseable<'a, I, T, Error> + 'a,
+  MemberTypes: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error> + 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(Name::parser(), Directives::parser, MemberTypes::parser())
+  }
+}

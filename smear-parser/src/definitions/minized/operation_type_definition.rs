@@ -125,6 +125,26 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
   }
 }
 
+impl<'a, Name, OperationType, I, T, Error> Parseable<'a, I, T, Error>
+  for RootOperationTypeDefinition<Name, OperationType>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  Colon: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error>,
+  OperationType: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(Name::parser(), OperationType::parser())
+  }
+}
+
 /// Represents a collection of root operation type definitions enclosed in braces.
 ///
 /// This structure defines the complete set of root operation types for a GraphQL schema,
@@ -243,7 +263,7 @@ impl<RootOperationTypeDefinition, Container>
   ///
   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, P>(
-    operation_type_parser: P,
+    root_operation_type_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
@@ -256,12 +276,33 @@ impl<RootOperationTypeDefinition, Container>
     Container: chumsky::container::Container<RootOperationTypeDefinition>,
   {
     LBrace::parser()
-      .ignore_then(operation_type_parser.repeated().at_least(1).collect())
+      .ignore_then(root_operation_type_parser.repeated().at_least(1).collect())
       .then_ignore(RBrace::parser())
       .map_with(|root_operation_types, exa| Self {
         span: exa.span(),
         root_operation_types,
         _m: PhantomData,
       })
+  }
+}
+
+impl<'a, RootOperationTypeDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+where
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+  Error: 'a,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
+  RootOperationTypeDefinition: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<RootOperationTypeDefinition>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    Self::parser_with(RootOperationTypeDefinition::parser())
   }
 }
