@@ -101,7 +101,7 @@ impl<Name, Value> Argument<Name, Value> {
     V: Parser<'a, I, Value, E> + Clone,
   {
     name_parser
-      .then_ignore(<Colon as Parseable<'a, I, T, Error>>::parser())
+      .then_ignore(Colon::parser())
       .then(value_parser)
       .map_with(|(name, value), exa| {
         let span = exa.span();
@@ -112,18 +112,18 @@ impl<Name, Value> Argument<Name, Value> {
 
 impl<'a, Name, Value, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Name: Parseable<'a, I, T, Error>,
   Colon: Parseable<'a, I, T, Error>,
   Value: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Value::parser())
   }
@@ -248,27 +248,22 @@ impl<Arg, Container> Arguments<Arg, Container> {
 
 impl<'a, Arg, Container, I, T, Error> Parseable<'a, I, T, Error> for Arguments<Arg, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Arg: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<Arg>,
   LParen: Parseable<'a, I, T, Error>,
   RParen: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
-    <LParen as Parseable<'a, I, T, Error>>::parser()
-      .then(
-        <Arg as Parseable<'a, I, T, Error>>::parser()
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
+    LParen::parser()
+      .then(Arg::parser().repeated().at_least(1).collect())
       .then(RParen::parser())
       .map_with(|((l_paren, arguments), r_paren), exa| Self {
         span: exa.span(),

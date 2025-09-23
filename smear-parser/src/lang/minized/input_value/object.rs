@@ -136,6 +136,25 @@ impl<Name, InputValue> ObjectField<Name, InputValue> {
   }
 }
 
+impl<'a, Name, InputValue, I, T, Error> Parseable<'a, I, T, Error> for ObjectField<Name, InputValue>
+where
+  Name: Parseable<'a, I, T, Error>,
+  InputValue: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), InputValue::parser())
+  }
+}
+
 /// A GraphQL input object literal value.
 ///
 /// Represents a complete input object literal as defined by the GraphQL

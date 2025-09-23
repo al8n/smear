@@ -115,7 +115,7 @@ use crate::{
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
 //     NP: Parser<'src, I, Name, E> + Clone,
 //   {
 //     Pipe::parser()
@@ -237,7 +237,7 @@ use crate::{
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
 //     NP: Parser<'src, I, Name, E> + Clone,
 //   {
 //     Pipe::parser()
@@ -369,8 +369,8 @@ use crate::{
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
 //     NP: Parser<'src, I, Name, E> + Clone,
-//     Equal: Parseable<'src, I, T, Error> + 'src,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
+//     Equal: Parseable<I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
 //     Container: chumsky::container::Container<UnionMemberType<Name>>,
 //   {
 //     Equal::parser()
@@ -569,18 +569,19 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
 impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
   for UnionTypeDefinition<Name, Directives, MemberTypes>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Union: Parseable<'a, I, T, Error> + Clone,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  MemberTypes: Parseable<'a, I, T, Error> + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
+  Directives: Parseable<'a, I, T, Error>,
+  MemberTypes: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
   }
@@ -805,19 +806,21 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
 impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
   for UnionTypeExtension<Name, Directives, MemberTypes>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfUnionExtensionError + 'a,
+  Error: UnexpectedEndOfUnionExtensionError,
   Extend: Parseable<'a, I, T, Error> + Clone,
   Union: Parseable<'a, I, T, Error> + Clone,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  MemberTypes: Parseable<'a, I, T, Error> + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
+  Directives: Parseable<'a, I, T, Error>,
+  MemberTypes: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
   }

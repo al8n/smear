@@ -149,17 +149,17 @@ where
 
 impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for Alias<Name>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Name: Parseable<'a, I, T, Error>,
   Colon: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser())
   }
@@ -378,20 +378,20 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
   }
 }
 
-// impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, Container, I, T, Error> Parseable<'a, I, T, Error> for Field<Alias, Name, Arguments, Directives, SelectionSet>
+// impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, Container, I, T, Error> Parseable<I, T, Error> for Field<Alias, Name, Arguments, Directives, SelectionSet>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-//   On: Parseable<'a, I, T, Error>,
-//   Spread: Parseable<'a, I, T, Error>,
-//   LBrace: Parseable<'a, I, T, Error>,
-//   RBrace: Parseable<'a, I, T, Error>,
-//   TypeCondition: Parseable<'a, I, T, Error>,
-//   Alias: Parseable<'a, I, T, Error>,
-//   Name: Parseable<'a, I, T, Error>,
-//   FragmentName: Parseable<'a, I, T, Error>,
-//   Arguments: Parseable<'a, I, T, Error>,
-//   Directives: Parseable<'a, I, T, Error>,
+//   On: Parseable<I, T, Error>,
+//   Spread: Parseable<I, T, Error>,
+//   LBrace: Parseable<I, T, Error>,
+//   RBrace: Parseable<I, T, Error>,
+//   TypeCondition: Parseable<I, T, Error>,
+//   Alias: Parseable<I, T, Error>,
+//   Name: Parseable<I, T, Error>,
+//   FragmentName: Parseable<I, T, Error>,
+//   Arguments: Parseable<I, T, Error>,
+//   Directives: Parseable<I, T, Error>,
 //   Error: 'a,
 //   Container: chumsky::container::Container<Selection<Alias, Name, Arguments, Directives, SelectionSet>> + 'a,
 // {

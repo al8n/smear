@@ -95,7 +95,7 @@ where
   }
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for EnumValue<&'a str>
 {
   #[inline]
@@ -108,7 +108,7 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          Token::Identifier(name) => match name {
+          FastToken::Identifier(name) => match name {
             "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
             _ => Ok(EnumValue::new(span, name)),
           },

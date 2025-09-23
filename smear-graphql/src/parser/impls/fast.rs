@@ -31,25 +31,27 @@ mod error;
 pub trait ParseStr<'a> {
   fn parse_str<S>(input: &'a S) -> ParseResult<Self, FastTokenErrors<'a, &'a str>>
   where
-    Self: Sized,
+    Self: Sized + 'a,
     S: ?Sized + AsRef<str>;
 }
 
-impl<'a, T> ParseStr<'a> for T
+impl<'b, T> ParseStr<'b> for T
 where
-  T: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>,
+  T: Parseable<'b, FastTokenStream<'b>, FastToken<'b>, FastTokenErrors<'b, &'b str>>,
 {
   #[inline]
-  fn parse_str<S>(input: &'a S) -> ParseResult<Self, FastTokenErrors<'a, &'a str>>
+  fn parse_str<S>(input: &'b S) -> ParseResult<Self, FastTokenErrors<'b, &'b str>>
   where
-    Self: Sized,
+    Self: Sized + 'b,
     S: ?Sized + AsRef<str>,
   {
     let s = input.as_ref();
-    let parser =
-      <T as Parseable<FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>>::parser::<
-        FastParserExtra<&str>,
-      >();
+    let parser = <T as Parseable<
+      'b,
+      FastTokenStream<'b>,
+      FastToken<'b>,
+      FastTokenErrors<'b, &'b str>,
+    >>::parser::<FastParserExtra<&str>>();
     let tokens = FastTokenStream::new(s);
     parser.parse(tokens)
   }
@@ -61,6 +63,6 @@ mod tests {
 
   #[test]
   fn test() {
-    <Document<&str> as ParseStr<'_>>::parse_str(r#"{ field }"#).unwrap();
+    <Document<&str> as ParseStr>::parse_str(r#"{ field }"#).unwrap();
   }
 }

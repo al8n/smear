@@ -213,9 +213,6 @@ impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, D
 impl<'a, Name, Arguments, Type, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for FieldDefinition<Name, Arguments, Type, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Name: Parseable<'a, I, T, Error>,
   Arguments: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
@@ -225,8 +222,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
@@ -396,19 +396,19 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
 impl<'a, FieldDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
   for FieldsDefinition<FieldDefinition, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   FieldDefinition: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<FieldDefinition>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(FieldDefinition::parser())
   }

@@ -247,9 +247,6 @@ impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, 
   Parseable<'a, I, T, Error>
   for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Name: Parseable<'a, I, T, Error>,
   OperationType: Parseable<'a, I, T, Error>,
   VariablesDefinition: Parseable<'a, I, T, Error>,
@@ -259,8 +256,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
@@ -486,9 +486,6 @@ impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, 
   Parseable<'a, I, T, Error>
   for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Name: Parseable<'a, I, T, Error>,
   OperationType: Parseable<'a, I, T, Error>,
   VariablesDefinition: Parseable<'a, I, T, Error>,
@@ -498,8 +495,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),

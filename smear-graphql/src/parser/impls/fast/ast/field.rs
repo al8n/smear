@@ -188,9 +188,6 @@ impl<
 > Parseable<'a, I, T, Error>
   for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
-  T: Token<'a> + 'a,
-  Error: 'a,
   On: Parseable<'a, I, T, Error> + 'a,
   Spread: Parseable<'a, I, T, Error> + 'a,
   LBrace: Parseable<'a, I, T, Error> + 'a,
@@ -207,6 +204,9 @@ where
   where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
+    T: Token<'a> + 'a,
+    Error: 'a,
   {
     recursive(|field_parser| {
       // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.

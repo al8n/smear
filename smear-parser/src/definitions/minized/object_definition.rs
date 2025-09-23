@@ -3,7 +3,6 @@ use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
-  boxed,
   error::{ObjectTypeExtensionHint, UnexpectedEndOfObjectExtensionError},
   lang::minized::keywords::{Extend, Type},
 };
@@ -213,20 +212,20 @@ impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
   for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  ImplementInterfaces: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
-  T: Token<'a>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
@@ -549,20 +548,22 @@ impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
   for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfObjectExtensionError + 'a,
+  Error: UnexpectedEndOfObjectExtensionError,
   Type: Parseable<'a, I, T, Error>,
   Extend: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  ImplementInterfaces: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),

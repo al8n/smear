@@ -441,18 +441,18 @@ macro_rules! ty {
 
         impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for $name<Name>
         where
-          T: Token<'a>,
-          I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-          Error: 'a,
-          Name: Parseable<'a, I, T, Error> + 'a,
-          Bang: Parseable<'a, I, T, Error> + 'a,
-          LBracket: Parseable<'a, I, T, Error> + 'a,
-          RBracket: Parseable<'a, I, T, Error> + 'a,
+          Name: Parseable<'a, I, T, Error>,
+          Bang: Parseable<'a, I, T, Error>,
+          LBracket: Parseable<'a, I, T, Error>,
+          RBracket: Parseable<'a, I, T, Error>,
         {
           #[inline]
           fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
           where
-            Self: Sized,
+            Self: Sized + 'a,
+            T: Token<'a>,
+            I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+            Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a
           {
             Self::parser_with(Name::parser())

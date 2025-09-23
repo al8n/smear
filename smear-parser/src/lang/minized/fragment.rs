@@ -102,17 +102,17 @@ impl<Name> IntoComponents for TypeCondition<Name> {
 
 impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for TypeCondition<Name>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Name: Parseable<'a, I, T, Error>,
   On: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser())
   }
@@ -400,18 +400,18 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
 impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for FragmentSpread<FragmentName, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   FragmentName: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   Spread: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(FragmentName::parser(), Directives::parser())
   }
@@ -622,19 +622,19 @@ impl<TypeCondition, Directives, SelectionSet>
 impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
   for InlineFragment<TypeCondition, Directives, SelectionSet>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   TypeCondition: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   SelectionSet: Parseable<'a, I, T, Error>,
   Spread: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       TypeCondition::parser(),

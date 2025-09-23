@@ -36,19 +36,19 @@ impl<S, Container> UnionMemberTypes<S, Container> {
 
 impl<'a, S, Container, I, T, Error> Parseable<'a, I, T, Error> for UnionMemberTypes<S, Container>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Container: chumsky::container::Container<Name<S>>,
   Name<S>: Parseable<'a, I, T, Error>,
   Pipe: Parseable<'a, I, T, Error>,
   Equal: Parseable<'a, I, T, Error>,
-  T: Token<'a>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
   {
     Equal::parser()
       .then(Pipe::parser().or_not().ignored())

@@ -67,9 +67,6 @@ impl<
 > Parseable<'a, I, T, Error>
   for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
-  T: Token<'a> + 'a,
-  Error: 'a,
   On: Parseable<'a, I, T, Error>,
   Spread: Parseable<'a, I, T, Error>,
   LBrace: Parseable<'a, I, T, Error>,
@@ -81,10 +78,14 @@ where
   Arguments: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
 {
+  #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
+    T: Token<'a> + 'a,
+    Error: 'a,
   {
     recursive(|selection| {
       let selsetion_set = minized::SelectionSet::<Self>::parser_with(selection.clone());

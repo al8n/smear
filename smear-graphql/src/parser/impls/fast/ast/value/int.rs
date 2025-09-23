@@ -97,7 +97,7 @@ where
   }
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for IntValue<&'a str>
 {
   #[inline]
@@ -110,7 +110,7 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          Token::Int(val) => Ok(Self::new(span, val)),
+          FastToken::Int(val) => Ok(Self::new(span, val)),
           tok => Err(Error::unexpected_token(tok, TokenKind::Int, span).into()),
         }
       }

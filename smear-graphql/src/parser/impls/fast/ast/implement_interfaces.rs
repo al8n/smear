@@ -31,19 +31,19 @@ impl<S, Container> ImplementInterfaces<S, Container> {
 
 impl<'a, S, Container, I, T, Error> Parseable<'a, I, T, Error> for ImplementInterfaces<S, Container>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Container: chumsky::container::Container<Name<S>>,
   Name<S>: Parseable<'a, I, T, Error>,
   Ampersand: Parseable<'a, I, T, Error>,
   Implements: Parseable<'a, I, T, Error>,
-  T: Token<'a>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
   {
     Implements::parser()
       .then(Ampersand::parser().or_not().ignored())

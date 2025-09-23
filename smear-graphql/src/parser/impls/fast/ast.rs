@@ -578,37 +578,36 @@ impl<
     EnumValuesContainer,
   >
 where
-  S: 'a,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
-  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error> + 'a,
+  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
   ObjectTypeDefinition<
     S,
     NamesContainer,
     ArgumentsContainer,
     DirectivesContainer,
     InputValuesContainer,
-  >: Parseable<'a, I, T, Error> + 'a,
+  >: Parseable<'a, I, T, Error>,
   InterfaceTypeDefinition<
     S,
     NamesContainer,
     ArgumentsContainer,
     DirectivesContainer,
     InputValuesContainer,
-  >: Parseable<'a, I, T, Error> + 'a,
+  >: Parseable<'a, I, T, Error>,
   UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
   EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
   InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
@@ -771,10 +770,6 @@ impl<
     RootOperationTypesContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
-  S: 'static,
   TypeDefinition<
     S,
     NamesContainer,
@@ -782,7 +777,7 @@ where
     DirectivesContainer,
     InputValuesContainer,
     EnumValuesContainer,
-  >: Parseable<'a, I, T, Error> + 'a,
+  >: Parseable<'a, I, T, Error>,
   DirectiveDefinition<
     S,
     ArgumentsContainer,
@@ -796,8 +791,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       TypeDefinition::parser::<E>().map(Self::Type),
@@ -949,9 +947,6 @@ impl<
     EnumValuesContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
   ObjectTypeExtension<
     S,
@@ -968,17 +963,20 @@ where
     InputValuesContainer,
   >: Parseable<'a, I, T, Error>,
   UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
   EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
   InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>:
-    Parseable<'a, I, T, Error> + 'a,
+    Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       ScalarTypeExtension::parser::<E>().map(Self::Scalar),
@@ -1121,9 +1119,6 @@ impl<
     RootOperationTypesContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   TypeExtension<
     S,
     NamesContainer,
@@ -1138,8 +1133,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       TypeExtension::parser::<E>().map(Self::Type),
@@ -1302,9 +1300,6 @@ impl<
     RootOperationTypesContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   Described<
     TypeSystemDefinition<
       S,
@@ -1317,7 +1312,7 @@ where
       RootOperationTypesContainer,
     >,
     StringValue<S>,
-  >: Parseable<'a, I, T, Error> + 'a,
+  >: Parseable<'a, I, T, Error>,
   TypeSystemExtension<
     S,
     NamesContainer,
@@ -1326,13 +1321,16 @@ where
     InputValuesContainer,
     EnumValuesContainer,
     RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error> + 'a,
+  >: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       Described::parser::<E>().map(Self::Definition),
@@ -1396,17 +1394,17 @@ impl<S, ArgumentsContainer, DirectivesContainer>
 impl<'a, S, ArgumentsContainer, DirectivesContainer, I, T, Error> Parseable<'a, I, T, Error>
   for ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
   OperationDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       FragmentDefinition::parser::<E>().map(Self::Fragment),
@@ -1582,9 +1580,6 @@ impl<
     RootOperationTypesContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   TypeSystemDefinitionOrExtension<
     S,
     NamesContainer,
@@ -1600,8 +1595,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     choice((
       TypeSystemDefinitionOrExtension::parser::<E>().map(Self::TypeSystem),
@@ -1739,9 +1737,6 @@ impl<
     DefinitionContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   DefinitionContainer: ChumskyContainer<
     TypeSystemDefinitionOrExtension<
       S,
@@ -1768,8 +1763,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     TypeSystemDefinitionOrExtension::parser::<E>()
       .repeated()
@@ -1822,9 +1820,6 @@ impl<'a, S, ArgumentsContainer, DirectivesContainer, DefinitionContainer, I, T, 
   Parseable<'a, I, T, Error>
   for ExecutableDocument<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   DefinitionContainer:
     ChumskyContainer<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>>,
   ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
@@ -1832,8 +1827,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     ExecutableDefinition::parser::<E>()
       .repeated()
@@ -2001,9 +1999,6 @@ impl<
     DefinitionContainer,
   >
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  T: Token<'a> + 'a,
-  Error: 'a,
   DefinitionContainer: ChumskyContainer<
     Definition<
       S,
@@ -2034,8 +2029,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Definition::parser::<E>()
       .repeated()

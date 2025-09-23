@@ -100,7 +100,7 @@ where
   }
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for StringValue<&'a str>
 {
   #[inline]
@@ -113,10 +113,10 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          Token::StringLiteral(raw) => {
+          FastToken::StringLiteral(raw) => {
             StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
           }
-          Token::BlockStringLiteral(raw) => {
+          FastToken::BlockStringLiteral(raw) => {
             StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
           }
           tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),

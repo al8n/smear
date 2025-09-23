@@ -770,7 +770,7 @@ from_location!(
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
 //     P: Parser<'src, I, Location, E> + Clone,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
 //   {
 //     Pipe::parser()
 //       .or_not()
@@ -806,13 +806,13 @@ from_location!(
 //   }
 // }
 
-// impl<'a, Location, I, T, Error> Parseable<'a, I, T, Error> for LeadingDirectiveLocation<Location>
+// impl<'a, Location, I, T, Error> Parseable<I, T, Error> for LeadingDirectiveLocation<Location>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Location: Parseable<'a, I, T, Error> + 'a,
-//   Pipe: Parseable<'a, I, T, Error> + 'a,
+//   Location: Parseable<I, T, Error> + 'a,
+//   Pipe: Parseable<I, T, Error> + 'a,
 // {
 //   #[inline]
 //   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -906,7 +906,7 @@ from_location!(
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
 //     P: Parser<'src, I, Location, E> + Clone,
 //   {
 //     Pipe::parser()
@@ -942,13 +942,13 @@ from_location!(
 //   }
 // }
 
-// impl<'a, Location, I, T, Error> Parseable<'a, I, T, Error> for DirectiveLocation<Location>
+// impl<'a, Location, I, T, Error> Parseable<I, T, Error> for DirectiveLocation<Location>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Location: Parseable<'a, I, T, Error> + 'a,
-//   Pipe: Parseable<'a, I, T, Error> + 'a,
+//   Location: Parseable<I, T, Error> + 'a,
+//   Pipe: Parseable<I, T, Error> + 'a,
 // {
 //   #[inline]
 //   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -1081,9 +1081,9 @@ from_location!(
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<'src, I, T, Error> + 'src,
-//     LeadingDirectiveLocation<Location>: Parseable<'src, I, T, Error> + 'src,
-//     DirectiveLocation<Location>: Parseable<'src, I, T, Error> + 'src,
+//     Pipe: Parseable<I, T, Error> + 'src,
+//     LeadingDirectiveLocation<Location>: Parseable<I, T, Error> + 'src,
+//     DirectiveLocation<Location>: Parseable<I, T, Error> + 'src,
 //     Container: chumsky::container::Container<DirectiveLocation<Location>>,
 //     P: Parser<'src, I, Location, E> + Clone,
 //   {
@@ -1101,17 +1101,17 @@ from_location!(
 //   }
 // }
 
-// impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error>
+// impl<'a, Location, Container, I, T, Error> Parseable<I, T, Error>
 //   for DirectiveLocations<Location, Container>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Location: Parseable<'a, I, T, Error> + 'a,
+//   Location: Parseable<I, T, Error> + 'a,
 //   Container: chumsky::container::Container<DirectiveLocation<Location>>,
-//   Pipe: Parseable<'a, I, T, Error> + 'a,
-//   LeadingDirectiveLocation<Location>: Parseable<'a, I, T, Error> + 'a,
-//   DirectiveLocation<Location>: Parseable<'a, I, T, Error> + 'a,
+//   Pipe: Parseable<I, T, Error> + 'a,
+//   LeadingDirectiveLocation<Location>: Parseable<I, T, Error> + 'a,
+//   DirectiveLocation<Location>: Parseable<I, T, Error> + 'a,
 // {
 //   #[inline]
 //   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -1313,21 +1313,22 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
 impl<'a, Name, Args, Locations, I, T, Error> Parseable<'a, I, T, Error>
   for DirectiveDefinition<Name, Args, Locations>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  At: Parseable<'a, I, T, Error> + 'a,
-  Directive: Parseable<'a, I, T, Error> + 'a,
-  On: Parseable<'a, I, T, Error> + 'a,
-  Repeatable: Parseable<'a, I, T, Error> + 'a,
-  Args: Parseable<'a, I, T, Error> + 'a,
-  Locations: Parseable<'a, I, T, Error> + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
+  At: Parseable<'a, I, T, Error>,
+  Directive: Parseable<'a, I, T, Error>,
+  On: Parseable<'a, I, T, Error>,
+  Repeatable: Parseable<'a, I, T, Error>,
+  Args: Parseable<'a, I, T, Error>,
+  Locations: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Args::parser(), Locations::parser())
   }

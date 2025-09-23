@@ -257,9 +257,6 @@ impl<Variable, Type, DefaultValue, Directives>
 impl<'a, Variable, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for VariableDefinition<Variable, Type, DefaultValue, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Variable: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
   DefaultValue: Parseable<'a, I, T, Error>,
@@ -269,8 +266,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Variable::parser()
       .then_ignore(Colon::parser())
@@ -466,9 +466,6 @@ impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Cont
 impl<'a, VariableDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
   for VariablesDefinition<VariableDefinition, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Container: chumsky::container::Container<VariableDefinition>,
   VariableDefinition: Parseable<'a, I, T, Error>,
   LParen: Parseable<'a, I, T, Error>,
@@ -477,8 +474,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(VariableDefinition::parser())
   }

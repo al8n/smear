@@ -139,17 +139,18 @@ where
 
 impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for Variable<Name>
 where
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: ParseVariableValueError<Name> + 'a,
+  Error: ParseVariableValueError<Name>,
   Name: Parseable<'a, I, T, Error>,
   Dollar: Parseable<'a, I, T, Error>,
-  T: Token<'a>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Dollar::parser()
       .or_not()

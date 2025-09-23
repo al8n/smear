@@ -210,18 +210,18 @@ impl<Directives, RootOperationTypesDefinition>
 impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for SchemaDefinition<Directives, RootOperationTypesDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Directives: Parseable<'a, I, T, Error>,
   RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
-  Schema: Parseable<'a, I, T, Error> + 'a,
+  Schema: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Directives::parser(), RootOperationTypesDefinition::parser())
   }
@@ -652,19 +652,20 @@ impl<Directives, RootOperationTypesDefinition>
 impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for SchemaExtension<Directives, RootOperationTypesDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfSchemaExtensionError + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  RootOperationTypesDefinition: Parseable<'a, I, T, Error> + 'a,
-  Extend: Parseable<'a, I, T, Error> + 'a,
-  Schema: Parseable<'a, I, T, Error> + 'a,
+  Directives: Parseable<'a, I, T, Error>,
+  RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
+  Extend: Parseable<'a, I, T, Error>,
+  Schema: Parseable<'a, I, T, Error>,
+  Error: UnexpectedEndOfSchemaExtensionError,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Directives::parser(), RootOperationTypesDefinition::parser())
   }

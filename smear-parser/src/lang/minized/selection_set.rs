@@ -174,19 +174,19 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
 impl<'a, Selection, Container, I, T, Error> Parseable<'a, I, T, Error>
   for SelectionSet<Selection, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Selection: Parseable<'a, I, T, Error>,
   LBrace: Parseable<'a, I, T, Error>,
   RBrace: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<Selection> + 'a,
-  Error: 'a,
+  Container: chumsky::container::Container<Selection>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Selection::parser())
   }

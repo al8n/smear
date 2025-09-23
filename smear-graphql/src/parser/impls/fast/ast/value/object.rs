@@ -9,26 +9,26 @@ use crate::{
 
 use super::*;
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
-  for ObjectField<Name<&'a str>, V>
-where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
-  Colon: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
-  {
-    ObjectField::parser_with(Name::parser(), V::parser())
-  }
-}
+// impl<'a, V> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
+//   for ObjectField<Name<&'a str>, V>
+// where
+//   V: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>> + 'a,
+//   Colon: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>,
+// {
+//   #[inline]
+//   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
+//   where
+//     Self: Sized,
+//     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
+//   {
+//     ObjectField::parser_with(Name::parser(), V::parser())
+//   }
+// }
 
-impl<'a, V> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a, V> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for Object<Name<&'a str>, V>
 where
-  V: Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>> + 'a,
+  V: Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone

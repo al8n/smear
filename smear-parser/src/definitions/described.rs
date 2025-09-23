@@ -55,17 +55,17 @@ impl<T, Description> Described<T, Description> {
 
 impl<'a, Description, Node, I, T, Error> Parseable<'a, I, T, Error> for Described<Node, Description>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Description: Parseable<'a, I, T, Error>,
   Node: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Description::parser()
       .or_not()

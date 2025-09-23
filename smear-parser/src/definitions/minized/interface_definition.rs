@@ -106,7 +106,7 @@ use crate::{
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Ampersand: Parseable<'src, I, T, Error>,
+//     Ampersand: Parseable<I, T, Error>,
 //     NP: Parser<'src, I, Name, E> + Clone,
 //   {
 //     Ampersand::parser()
@@ -120,13 +120,13 @@ use crate::{
 //   }
 // }
 
-// impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for LeadingImplementInterface<Name>
+// impl<'a, Name, I, T, Error> Parseable<I, T, Error> for LeadingImplementInterface<Name>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Ampersand: Parseable<'a, I, T, Error>,
-//   Name: Parseable<'a, I, T, Error>,
+//   Ampersand: Parseable<I, T, Error>,
+//   Name: Parseable<I, T, Error>,
 // {
 //   #[inline]
 //   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -233,7 +233,7 @@ use crate::{
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
 //     E: ParserExtra<'src, I>,
-//     Ampersand: Parseable<'src, I, T, Error>,
+//     Ampersand: Parseable<I, T, Error>,
 //     NP: Parser<'src, I, Name, E> + Clone,
 //   {
 //     Ampersand::parser()
@@ -246,13 +246,13 @@ use crate::{
 //   }
 // }
 
-// impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for ImplementInterface<Name>
+// impl<'a, Name, I, T, Error> Parseable<I, T, Error> for ImplementInterface<Name>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Ampersand: Parseable<'a, I, T, Error>,
-//   Name: Parseable<'a, I, T, Error>,
+//   Ampersand: Parseable<I, T, Error>,
+//   Name: Parseable<I, T, Error>,
 // {
 //   #[inline]
 //   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -393,8 +393,8 @@ use crate::{
 //     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
 //     Error: 'src,
 //     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Implements: Parseable<'src, I, T, Error>,
-//     Ampersand: Parseable<'src, I, T, Error>,
+//     Implements: Parseable<I, T, Error>,
+//     Ampersand: Parseable<I, T, Error>,
 //     NP: Parser<'src, I, Name, E> + Clone,
 //     Container: chumsky::container::Container<ImplementInterface<Name>>,
 //   {
@@ -414,15 +414,15 @@ use crate::{
 //   }
 // }
 
-// impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
+// impl<'a, Name, Container, I, T, Error> Parseable<I, T, Error>
 //   for ImplementInterfaces<Name, Container>
 // where
 //   T: Token<'a>,
 //   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
 //   Error: 'a,
-//   Implements: Parseable<'a, I, T, Error>,
-//   Ampersand: Parseable<'a, I, T, Error>,
-//   Name: Parseable<'a, I, T, Error>,
+//   Implements: Parseable<I, T, Error>,
+//   Ampersand: Parseable<I, T, Error>,
+//   Name: Parseable<I, T, Error>,
 //   Container: chumsky::container::Container<ImplementInterface<Name>>,
 // {
 //   #[inline]
@@ -632,19 +632,20 @@ impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
   for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Interface: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  ImplementInterfaces: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
@@ -828,9 +829,6 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 impl<'a, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   ImplementInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   FieldsDefinition: Parseable<'a, I, T, Error>,
@@ -838,7 +836,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       ImplementInterfaces::parser,
@@ -1038,20 +1040,22 @@ impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
   for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfInterfaceExtensionError + 'a,
+  Error: UnexpectedEndOfInterfaceExtensionError,
   Extend: Parseable<'a, I, T, Error>,
   Interface: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  ImplementInterfaces: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),

@@ -128,9 +128,6 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
 impl<'a, Name, OperationType, I, T, Error> Parseable<'a, I, T, Error>
   for RootOperationTypeDefinition<Name, OperationType>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Colon: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   OperationType: Parseable<'a, I, T, Error>,
@@ -138,8 +135,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), OperationType::parser())
   }
@@ -289,9 +289,6 @@ impl<RootOperationTypeDefinition, Container>
 impl<'a, RootOperationTypeDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
   for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   LBrace: Parseable<'a, I, T, Error>,
   RBrace: Parseable<'a, I, T, Error>,
   RootOperationTypeDefinition: Parseable<'a, I, T, Error>,
@@ -300,8 +297,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(RootOperationTypeDefinition::parser())
   }

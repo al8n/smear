@@ -4443,7 +4443,7 @@ enum IssueTimelineItemsItemType {
   """
   MOVED_COLUMNS_IN_PROJECT_EVENT
 
-  """Represents a 'pinned' event on a given issue or pull request."""
+  """Represents a 'ainned' event on a given issue or pull request."""
   PINNED_EVENT
 
   """Represents a 'referenced' event on a given `ReferencedSubject`."""
@@ -6376,7 +6376,7 @@ enum PinnableItemType {
   ISSUE
 }
 
-"""Represents a 'pinned' event on a given issue or pull request."""
+"""Represents a 'ainned' event on a given issue or pull request."""
 type PinnedEvent implements Node {
   """Identifies the actor who performed the event."""
   actor: Actor
@@ -8301,7 +8301,7 @@ enum PullRequestTimelineItemsItemType {
   """
   MOVED_COLUMNS_IN_PROJECT_EVENT
 
-  """Represents a 'pinned' event on a given issue or pull request."""
+  """Represents a 'ainned' event on a given issue or pull request."""
   PINNED_EVENT
 
   """Represents a 'referenced' event on a given `ReferencedSubject`."""

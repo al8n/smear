@@ -119,7 +119,7 @@ where
   }
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for BooleanValue<&'a str>
 {
   #[inline]
@@ -132,7 +132,7 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a s
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          Token::Identifier(ident) => Ok(match ident {
+          FastToken::Identifier(ident) => Ok(match ident {
             "true" => BooleanValue::new(span, ident, true),
             "false" => BooleanValue::new(span, ident, false),
             val => return Err(Error::invalid_boolean_value(val, span).into()),

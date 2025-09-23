@@ -150,17 +150,17 @@ impl<EnumValue, Directives> EnumValueDefinition<EnumValue, Directives> {
 impl<'a, EnumValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for EnumValueDefinition<EnumValue, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   EnumValue: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(EnumValue::parser(), Directives::parser())
   }
@@ -318,9 +318,6 @@ impl<EnumValueDefinition, Container> EnumValuesDefinition<EnumValueDefinition, C
 impl<'a, EnumValueDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
   for EnumValuesDefinition<EnumValueDefinition, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   LBrace: Parseable<'a, I, T, Error>,
   RBrace: Parseable<'a, I, T, Error>,
   EnumValueDefinition: Parseable<'a, I, T, Error>,
@@ -329,8 +326,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(EnumValueDefinition::parser())
   }
@@ -511,9 +511,6 @@ impl<Name, Directives, EnumValuesDefinition>
 impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Name: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   EnumValuesDefinition: Parseable<'a, I, T, Error>,
@@ -522,8 +519,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
@@ -638,17 +638,17 @@ impl<Directives, EnumValuesDefinition> EnumTypeExtensionData<Directives, EnumVal
 impl<'a, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for EnumTypeExtensionData<Directives, EnumValuesDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Directives: Parseable<'a, I, T, Error>,
   EnumValuesDefinition: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Directives::parser, EnumValuesDefinition::parser)
   }
@@ -853,20 +853,21 @@ impl<Name, Directives, EnumValuesDefinition>
 impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfEnumExtensionError + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  EnumValuesDefinition: Parseable<'a, I, T, Error> + 'a,
+  Error: UnexpectedEndOfEnumExtensionError,
+  Name: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  EnumValuesDefinition: Parseable<'a, I, T, Error>,
   Extend: Parseable<'a, I, T, Error>,
   Enum: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),

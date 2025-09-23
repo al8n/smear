@@ -268,24 +268,24 @@ impl<Name, Directives, FieldsDefinition>
 impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
-  Input: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
+  Input: Parseable<'a, I, T, Error>,
 {
   #[inline(always)]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
-      <Name as Parseable<'a, I, T, Error>>::parser(),
-      <Directives as Parseable<'a, I, T, Error>>::parser(),
-      <FieldsDefinition as Parseable<'a, I, T, Error>>::parser(),
+      <Name as Parseable<I, T, Error>>::parser(),
+      <Directives as Parseable<I, T, Error>>::parser(),
+      <FieldsDefinition as Parseable<I, T, Error>>::parser(),
     )
   }
 }
@@ -356,61 +356,6 @@ impl<Directives, FieldsDefinition> InputObjectTypeExtensionData<Directives, Fiel
       Self::Directives(_) => None,
       Self::Fields { fields, .. } => Some(fields),
     }
-  }
-
-  /// Creates a parser that can parse input object extension data.
-  ///
-  /// This parser handles both types of input object extensions: those that add fields
-  /// (optionally with directives) and those that add only directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the extension data.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, T, Error, E, DP, FP>(
-    directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
-  {
-    choice((
-      directives_parser()
-        .or_not()
-        .then(fields_definition_parser())
-        .map(|(directives, fields)| Self::Fields { directives, fields }),
-      directives_parser().map(Self::Directives),
-    ))
-  }
-}
-
-impl<'a, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InputObjectTypeExtensionData<Directives, FieldsDefinition>
-where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline(always)]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(
-      || <Directives as Parseable<'a, I, T, Error>>::parser(),
-      || <FieldsDefinition as Parseable<'a, I, T, Error>>::parser(),
-    )
   }
 }
 
@@ -619,25 +564,26 @@ impl<Name, Directives, FieldsDefinition>
 impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
   for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: UnexpectedEndOfInputObjectExtensionError + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-  FieldsDefinition: Parseable<'a, I, T, Error> + 'a,
-  Extend: Parseable<'a, I, T, Error> + 'a,
-  Input: Parseable<'a, I, T, Error> + 'a,
+  Error: UnexpectedEndOfInputObjectExtensionError,
+  Name: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  FieldsDefinition: Parseable<'a, I, T, Error>,
+  Extend: Parseable<'a, I, T, Error>,
+  Input: Parseable<'a, I, T, Error>,
 {
   #[inline(always)]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: UnexpectedEndOfInputObjectExtensionError + 'a,
   {
     Self::parser_with(
-      <Name as Parseable<'a, I, T, Error>>::parser(),
-      <Directives as Parseable<'a, I, T, Error>>::parser(),
-      <FieldsDefinition as Parseable<'a, I, T, Error>>::parser(),
+      <Name as Parseable<I, T, Error>>::parser(),
+      <Directives as Parseable<I, T, Error>>::parser(),
+      <FieldsDefinition as Parseable<I, T, Error>>::parser(),
     )
   }
 }

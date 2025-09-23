@@ -1,8 +1,9 @@
-use crate::{error::Error, lexer::token::fast::Token};
+use crate::error::Error;
 
 use chumsky::{Parser, extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::Parseable;
+use logos::Logos;
+use logosky::{Parseable, Source, Token, Tokenizer};
 use smear_parser::lang::minized::{List, Name, Object};
 
 use super::{FastToken, FastTokenErrors, FastTokenStream};
@@ -44,7 +45,7 @@ pub enum InputValue<S> {
   Object(Object<Name<S>, InputValue<S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for InputValue<&'a str>
 {
   #[inline]
@@ -97,14 +98,21 @@ pub enum ConstInputValue<S> {
   Object(Object<Name<S>, ConstInputValue<S>>),
 }
 
-impl<'a> Parseable<'a, FastTokenStream<'a>, Token<'a>, FastTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &'a str>>
   for ConstInputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, FastTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl chumsky::Parser<'a, FastTokenStream<'a>, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
+    FastTokenStream<'a>: Tokenizer<
+        'a,
+        FastToken<'a>,
+        Slice = <<FastToken<'a> as Logos<'a>>::Source as Source>::Slice<'a>,
+      >,
+    FastToken<'a>: Token<'a>,
+    FastTokenErrors<'a, &'a str>: 'a,
   {
     recursive(|parser| {
       let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);

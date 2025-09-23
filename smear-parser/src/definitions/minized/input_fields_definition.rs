@@ -227,19 +227,19 @@ impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition
 impl<'a, InputValueDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
   for InputFieldsDefinition<InputValueDefinition, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
-  InputValueDefinition: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  Container: chumsky::container::Container<InputValueDefinition> + 'a,
+  InputValueDefinition: Parseable<'a, I, T, Error>,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<InputValueDefinition>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(InputValueDefinition::parser())
   }

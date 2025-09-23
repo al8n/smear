@@ -248,20 +248,20 @@ impl<Name, Type, DefaultValue, Directives>
 impl<'a, Name, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for InputValueDefinition<Name, Type, DefaultValue, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Name: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
   DefaultValue: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error> + 'a,
+  Colon: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       Name::parser(),

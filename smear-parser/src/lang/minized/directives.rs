@@ -103,18 +103,18 @@ impl<Name, Args> Directive<Name, Args> {
 
 impl<'a, Name, Args, I, T, Error> Parseable<'a, I, T, Error> for Directive<Name, Args>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Args: Parseable<'a, I, T, Error>,
   At: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Args::parser())
   }
@@ -182,17 +182,17 @@ impl<Directive, Container> Directives<Directive, Container> {
 impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
   for Directives<Directive, Container>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
   Directive: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<Directive>,
-  Error: 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Directive::parser()
       .repeated()

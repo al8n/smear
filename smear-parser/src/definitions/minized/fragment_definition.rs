@@ -263,9 +263,6 @@ impl<'a, FragmentName, TypeCondition, Directives, SelectionSet, I, T, Error>
   Parseable<'a, I, T, Error>
   for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Fragment: Parseable<'a, I, T, Error>,
   FragmentName: Parseable<'a, I, T, Error>,
   TypeCondition: Parseable<'a, I, T, Error>,
@@ -275,7 +272,11 @@ where
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(
       FragmentName::parser(),

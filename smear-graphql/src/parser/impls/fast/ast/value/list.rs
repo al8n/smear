@@ -34,13 +34,13 @@ where
 //   E: ParserExtra<'src, I, Error = Error> + 'src,
 //   VP: Parser<'src, I, V, E> + Clone + 'src,
 //   Container: chumsky::container::Container<V>,
-//   LBracket: Parseable<'src, I, T, Error>,
-//   RBracket: Parseable<'src, I, T, Error>,
+//   LBracket: Parseable<I, T, Error>,
+//   RBracket: Parseable<I, T, Error>,
 //   V: 'src,
 // {
-//   <LBracket as Parseable<'src, I, T, Error>>::parser()
+//   <LBracket as Parseable<I, T, Error>>::parser()
 //     .ignore_then(value_parser.repeated().collect())
-//     .then(<RBracket as Parseable<'src, I, T, Error>>::parser().or_not())
+//     .then(<RBracket as Parseable<I, T, Error>>::parser().or_not())
 //     .try_map(move |(values, r), span| match r {
 //       Some(_) => Ok(List::new(span, values)),
 //       None => Err(on_missing_rbracket(span)),

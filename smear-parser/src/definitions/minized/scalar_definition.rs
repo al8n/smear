@@ -2,7 +2,10 @@ use chumsky::{extra::ParserExtra, prelude::*};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 use smear_utils::{IntoComponents, IntoSpan};
 
-use crate::lang::minized::keywords::{Extend, Scalar};
+use crate::{
+  error::UnexpectedEndOfSchemaExtensionError,
+  lang::minized::keywords::{Extend, Scalar},
+};
 
 /// Represents a GraphQL scalar type definition that defines custom data types with specific serialization behavior.
 ///
@@ -200,18 +203,19 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
 impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for ScalarTypeDefinition<Name, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Scalar: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
+  Error: UnexpectedEndOfSchemaExtensionError,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser())
   }
@@ -392,19 +396,19 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
 impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
   for ScalarTypeExtension<Name, Directives>
 where
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-  Error: 'a,
   Extend: Parseable<'a, I, T, Error>,
   Scalar: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
+  Name: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    Self: Sized,
+    Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser())
   }
