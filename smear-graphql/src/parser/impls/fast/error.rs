@@ -1,11 +1,11 @@
 use logosky::utils::Span;
 use smear_parser::error::{
   EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-  ObjectTypeExtensionHint, ParseVariableValueError, SchemaExtensionHint,
-  UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
-  UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
-  UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint,
-  VariableValueHint,
+  ObjectTypeExtensionHint, ParseVariableValueError, SchemaExtensionHint, UnclosedListValueError,
+  UnclosedObjectValueError, UnexpectedEndOfEnumExtensionError,
+  UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError,
+  UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError,
+  UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint, VariableValueHint,
 };
 
 use super::*;
@@ -124,5 +124,33 @@ impl<'a> UnexpectedEndOfUnionExtensionError for FastTokenErrors<'a, &'a str> {
   #[inline]
   fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
     <FastTokenError<'a, &'a str> as UnexpectedEndOfUnionExtensionError>::unexpected_end_of_union_extension(span, hint).into()
+  }
+}
+
+impl<'a> UnclosedObjectValueError for FastTokenError<'a, &'a str> {
+  #[inline]
+  fn unclosed_object(span: Span) -> Self {
+    Self::unclosed_object(span)
+  }
+}
+
+impl<'a> UnclosedObjectValueError for FastTokenErrors<'a, &'a str> {
+  #[inline]
+  fn unclosed_object(span: Span) -> Self {
+    <FastTokenError<'a, &'a str> as UnclosedObjectValueError>::unclosed_object(span).into()
+  }
+}
+
+impl<'a> UnclosedListValueError for FastTokenError<'a, &'a str> {
+  #[inline]
+  fn unclosed_list(span: Span) -> Self {
+    Self::unclosed_list(span)
+  }
+}
+
+impl<'a> UnclosedListValueError for FastTokenErrors<'a, &'a str> {
+  #[inline]
+  fn unclosed_list(span: Span) -> Self {
+    <FastTokenError<'a, &'a str> as UnclosedListValueError>::unclosed_list(span).into()
   }
 }

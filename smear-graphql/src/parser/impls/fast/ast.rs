@@ -37,20 +37,34 @@ mod selection_set;
 mod union_member_types;
 mod value;
 
-pub type DefaultArgumentsContainer<S> = Vec<Argument<S>>;
-pub type DefaultDirectivesContainer<S, ArgumentsContainer> = Vec<Directive<S, ArgumentsContainer>>;
-pub type DefaultConstArgumentsContainer<S> = Vec<ConstArgument<S>>;
+/// The default container type used for collections in the AST.
+pub type DefaultVec<T> = Vec<T>;
+/// The default container type used for arguments in the AST.
+pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
+/// The default container type used for directives in the AST.
+pub type DefaultDirectivesContainer<S, ArgumentsContainer> =
+  DefaultVec<Directive<S, ArgumentsContainer>>;
+/// The default container type used for const arguments in the AST.
+pub type DefaultConstArgumentsContainer<S> = DefaultVec<ConstArgument<S>>;
+/// The default container type used for const directives in the AST.
 pub type DefaultConstDirectivesContainer<S, ConstArgumentsContainer> =
   Vec<ConstDirective<S, ConstArgumentsContainer>>;
+/// The default container type used for input values in the AST.
 pub type DefaultInputValuesContainer<S, ConstArgumentsContainer, ConstDirectivesContainer> =
   Vec<InputValueDefinition<S, ConstArgumentsContainer, ConstDirectivesContainer>>;
+/// The default container type used for enum values in the AST.
 pub type DefaultEnumValuesContainer<S, ConstArgumentsContainer, ConstDirectivesContainer> =
   Vec<EnumValueDefinition<S, ConstArgumentsContainer, ConstDirectivesContainer>>;
-pub type DefaultNamesContainer<S> = Vec<Name<S>>;
-pub type DefaultLocationsContainer = Vec<Location>;
-pub type DefaultRootOperationTypesContainer<S> = Vec<RootOperationTypeDefinition<S>>;
+/// The default container type used for names in the AST.
+pub type DefaultNamesContainer<S> = DefaultVec<Name<S>>;
+/// The default container type used for locations in the AST.
+pub type DefaultLocationsContainer = DefaultVec<Location>;
+/// The default container type used for root operation types in the AST.
+pub type DefaultRootOperationTypesContainer<S> = DefaultVec<RootOperationTypeDefinition<S>>;
+/// The default container type used for variable definitions in the AST.
 pub type DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer> =
   Vec<VariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
+/// The default container type used for fields in the AST.
 pub type DefaultFieldsContainer<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer> =
   Vec<FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>>;
 
@@ -1618,7 +1632,7 @@ pub struct TypeSystemDocument<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-  DefinitionContainer = Vec<
+  DefinitionContainer = DefaultVec<
     TypeSystemDefinitionOrExtension<
       S,
       NamesContainer,
@@ -1786,7 +1800,9 @@ pub struct ExecutableDocument<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  DefinitionContainer = Vec<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>>,
+  DefinitionContainer = DefaultVec<
+    ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  >,
 > {
   span: Span,
   definitions: DefinitionContainer,
@@ -1865,7 +1881,7 @@ pub struct Document<
   >,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-  DefinitionContainer = Vec<
+  DefinitionContainer = DefaultVec<
     Definition<
       S,
       ArgumentsContainer,

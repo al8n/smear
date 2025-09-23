@@ -2,6 +2,7 @@ use chumsky::{IterParser as _, Parser, extra::ParserExtra};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
 use crate::{
+  error::UnclosedListValueError,
   lang::punctuator::{LBracket, RBracket},
   source::{IntoComponents, IntoSpan},
 };
@@ -101,12 +102,11 @@ impl<Value, Container> List<Value, Container> {
   /// This allows for context-specific error reporting.
   pub fn parser_with<'src, I, T, Error, VP, E>(
     value_parser: VP,
-    on_missing_rbracket: impl Fn(Span) -> Error + Clone + 'src,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
+    Error: UnclosedListValueError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     VP: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
@@ -118,7 +118,7 @@ impl<Value, Container> List<Value, Container> {
       .then(RBracket::parser().or_not())
       .try_map(move |(values, r), span| match r {
         Some(_) => Ok(List::new(span, values)),
-        None => Err(on_missing_rbracket(span)),
+        None => Err(Error::unclosed_list(span)),
       })
   }
 }
@@ -143,5 +143,26 @@ impl<Value, Container> IntoComponents for List<Value, Container> {
   #[inline]
   fn into_components(self) -> Self::Components {
     (self.span, self.values)
+  }
+}
+
+impl<'a, Value, Container, I, T, Error> Parseable<'a, I, T, Error> for List<Value, Container>
+where
+  Error: UnclosedListValueError + 'a,
+  Value: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<Value>,
+  LBracket: Parseable<'a, I, T, Error>,
+  RBracket: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Value::parser())
   }
 }

@@ -2,6 +2,7 @@ use chumsky::{IterParser as _, Parser, extra::ParserExtra};
 use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
 use crate::{
+  error::UnclosedObjectValueError,
   lang::punctuator::{Colon, LBrace, RBrace},
   source::{IntoComponents, IntoSpan},
 };
@@ -323,12 +324,11 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   pub fn parser_with<'src, I, T, Error, NP, VP, E>(
     name_parser: NP,
     value_parser: VP,
-    on_missing_rbrace: impl Fn(Span) -> Error + Clone + 'src,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
+    Error: UnclosedObjectValueError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     NP: Parser<'src, I, Name, E> + Clone + 'src,
     VP: Parser<'src, I, InputValue, E> + Clone + 'src,
@@ -346,7 +346,31 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
       .then(RBrace::parser().or_not())
       .try_map(move |(values, r), span| match r {
         Some(_) => Ok(Self::new(span, values)),
-        None => Err(on_missing_rbrace(span)),
+        None => Err(Error::unclosed_object(span)),
       })
+  }
+}
+
+impl<'a, Name, InputValue, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Object<Name, InputValue, Container>
+where
+  Name: Parseable<'a, I, T, Error>,
+  InputValue: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
+  Error: UnclosedObjectValueError,
+  Colon: Parseable<'a, I, T, Error>,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), InputValue::parser())
   }
 }
