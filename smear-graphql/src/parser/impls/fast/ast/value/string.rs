@@ -39,6 +39,16 @@ where
 
 impl<S> StringValue<S> {
   #[inline(always)]
+  pub(crate) const fn inline(span: Span, raw: S, content: S) -> Self {
+    Self::new(span, raw, content, Kind::Inline)
+  }
+
+  #[inline(always)]
+  pub(crate) const fn block(span: Span, raw: S, content: S) -> Self {
+    Self::new(span, raw, content, Kind::Block)
+  }
+
+  #[inline(always)]
   const fn new(span: Span, raw: S, content: S, kind: Kind) -> Self {
     Self {
       span,

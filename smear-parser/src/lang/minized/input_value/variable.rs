@@ -60,8 +60,10 @@ use crate::{
 /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Variable<Name> {
-  span: Span,
-  name: Name,
+  /// The span of the entire variable, including the `$` and the name.
+  pub span: Span,
+  /// The name of the variable without the `$` prefix.
+  pub name: Name,
 }
 
 impl<Name> AsRef<Span> for Variable<Name> {
@@ -91,6 +93,12 @@ where
 }
 
 impl<Name> Variable<Name> {
+  /// Creates a new variable from the given span and name.
+  #[inline(always)]
+  pub const fn new(span: Span, name: Name) -> Self {
+    Self { span, name }
+  }
+
   /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
