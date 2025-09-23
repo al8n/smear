@@ -1745,3 +1745,31 @@ where
     "Should match"
   );
 }
+
+pub(super) fn test_escape_triple_quote_block_string<'a, Token, StateError>()
+where
+  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
+  Token::Extras: Default,
+  StateError: core::fmt::Debug,
+{
+  let mut lexer = Token::test_lexer(
+    r#""""
+
+      block string uses \"""
+
+""""#,
+  );
+  let token = lexer.next().unwrap().expect("Should lex successfully");
+  let block_string = token.block_string_literal();
+  assert_eq!(
+    block_string,
+    Some(
+      r#""""
+
+      block string uses \"""
+
+""""#
+    ),
+    "Should match"
+  );
+}

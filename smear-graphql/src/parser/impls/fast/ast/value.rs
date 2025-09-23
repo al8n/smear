@@ -70,6 +70,8 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
         List::parser_with(parser, |span| Error::unclosed_list(span).into()).map(Self::List);
 
       choice((
+        list_value_parser,
+        object_value_parser,
         boolean_value_parser,
         null_value_parser,
         enum_value_parser,
@@ -77,8 +79,6 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
         string_value_parser,
         float_value_parser,
         int_value_parser,
-        list_value_parser,
-        object_value_parser,
       ))
     })
   }
@@ -129,14 +129,14 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
         List::parser_with(parser, |span| Error::unclosed_list(span).into()).map(Self::List);
 
       choice((
+        object_value_parser,
+        list_value_parser,
         boolean_value_parser,
         null_value_parser,
         enum_value_parser,
         string_value_parser,
         float_value_parser,
         int_value_parser,
-        list_value_parser,
-        object_value_parser,
       ))
     })
   }

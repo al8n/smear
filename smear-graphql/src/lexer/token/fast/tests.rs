@@ -146,6 +146,11 @@ fn test_block_string_literal() {
 }
 
 #[test]
+fn test_escape_triple_quote_block_string() {
+  tests::test_escape_triple_quote_block_string::<Token<'_>, RecursionLimitExceeded>();
+}
+
+#[test]
 fn test_bom_lexing() {
   let input = "\u{feff}";
 

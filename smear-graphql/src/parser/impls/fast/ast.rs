@@ -146,7 +146,7 @@ pub type VariableDefinition<
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 > = definitions::minized::VariableDefinition<
-  Name<S>,
+  Variable<S>,
   RcType<Name<S>>,
   DefaultInputValue<S>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,

@@ -307,9 +307,13 @@ enum BlockStringToken {
   /// terminator
   #[token("\"\"\"")]
   TripleQuote,
-  /// Runs of any characters except the double quote; includes newlines and C0 controls.
-  #[regex(r#"[^"]+"#)]
+  /// Runs of any characters except the double quote **and backslash**;
+  /// includes newlines and C0 controls.
+  #[regex(r#"[^"\\]+"#)]
   Continue,
+  /// A lone backslash (not followed by `"""`) is just content.
+  #[token("\\")]
+  Backslash,
   /// A single quote that is **not** part of `"""` (content)
   #[token("\"")]
   Quote,
@@ -332,7 +336,10 @@ where
         return Ok(lexer.slice());
       }
       Ok(
-        BlockStringToken::EscapedTripleQuote | BlockStringToken::Continue | BlockStringToken::Quote,
+        BlockStringToken::EscapedTripleQuote
+        | BlockStringToken::Continue
+        | BlockStringToken::Backslash
+        | BlockStringToken::Quote,
       ) => {}
       Err(mut e) => {
         e.bump(lexer_span.end);
