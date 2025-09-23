@@ -7,12 +7,13 @@ homepage.workspace = true
 license.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "smallvec"]
 alloc = ["smear-parser/alloc"]
 std = ["smear-parser/default", "thiserror/default", "either/default"]
 
 bytes = ["dep:bytes", "smear-parser/bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "smear-parser/bstr", "logosky/bstr"]
+
 
 [dependencies]
 chumsky.workspace = true
@@ -24,6 +25,7 @@ paste.workspace = true
 smear-parser.workspace = true
 thiserror.workspace = true
 
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 
