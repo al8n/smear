@@ -1,6 +1,4 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
 use criterion::*;
-use smear_parser::parse::ParseStr;
 
 const QUERY: &str = include_str!("../tests/fixtures/queries/directive_args.graphql");
 
@@ -10,11 +8,9 @@ fn apollo_parser_parse_query(query: &str) {
 }
 
 fn smear_parser_parse_query(query: &str) {
-  use smear_graphql::cst;
+  use smear_graphql::parser::fast::{ExecutableDocument, ParseStr};
 
-  let _operation =
-    cst::ExecutableDocument::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
-      .unwrap();
+  let _operation = ExecutableDocument::<&str>::parse_str(query).unwrap();
 }
 
 fn graphql_parser_parse_query(query: &str) {

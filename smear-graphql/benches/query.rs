@@ -1,6 +1,4 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
 use criterion::*;
-use smear_parser::parse::ParseStr;
 
 const QUERY: &str = "query ExampleQuery($topProductsFirst: Int) {\n  me { \n    id\n  }\n  topProducts(first:  $topProductsFirst) {\n    name\n    price\n    inStock\n weight\n test test test test test test test test test test test test }\n}";
 
@@ -11,12 +9,10 @@ fn apollo_parser_parse_query(query: &str) {
   let _tree = parser.parse();
 }
 
-fn smear_parser_parse_query(query: &str) {
-  use smear_graphql::cst;
+fn smear_parser_parse_query(schema: &str) {
+  use smear_graphql::parser::fast::{ExecutableDocument, ParseStr};
 
-  let _operation =
-    cst::ExecutableDocument::<SimpleSpan>::parse_str_padded::<extra::Err<Simple<char>>>(query)
-      .unwrap();
+  let _document = ExecutableDocument::<&str>::parse_str(schema).unwrap();
 }
 
 fn graphql_parser_parse_query(query: &str) {

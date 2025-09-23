@@ -8,11 +8,9 @@ fn apollo_parser_parse_schema(schema: &str) {
 }
 
 fn smear_parser_parse_schema(schema: &str) {
-  use chumsky::{Parser as _, error::Simple, extra, span::SimpleSpan};
-  use smear_graphql::{cst, parse::Parsable};
+  use smear_graphql::parser::fast::{ParseStr, TypeSystemDocument};
 
-  let parser = cst::TypeSystemDocument::<SimpleSpan>::parser::<&str, extra::Err<Simple<char>>>();
-  let _document = parser.parse(schema);
+  let _document = TypeSystemDocument::<&str>::parse_str(schema).unwrap();
 }
 
 fn graphql_parser_parse_schema(schema: &str) {
