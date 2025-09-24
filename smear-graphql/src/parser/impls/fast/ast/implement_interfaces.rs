@@ -5,14 +5,13 @@ use logosky::{
   Parseable, Source, Token, Tokenizer,
   utils::{Span, sdl_display::DisplaySDL},
 };
-use smear_parser::lang::{minized::keywords::Implements, punctuator::Ampersand};
+use smear_parser::lang::punctuator::Ampersand;
 
 use super::Name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImplementInterfaces<S, Container = Vec<Name<S>>> {
   span: Span,
-  implements: Implements,
   interfaces: Container,
   _m: PhantomData<S>,
 }
@@ -34,7 +33,6 @@ where
   Container: chumsky::container::Container<Name<S>>,
   Name<S>: Parseable<'a, I, T, Error>,
   Ampersand: Parseable<'a, I, T, Error>,
-  Implements: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -45,18 +43,15 @@ where
     Error: 'a,
     T: Token<'a>,
   {
-    Implements::parser()
-      .then(Ampersand::parser().or_not().ignored())
-      .then(
-        Name::<S>::parser()
-          .separated_by(Ampersand::parser())
-          .collect(),
-      )
-      .map_with(|((implements, _), names), exa| {
+    Name::<S>::parser()
+      .separated_by(Ampersand::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|names, exa| {
         let span = exa.span();
         Self {
           span,
-          implements,
           interfaces: names,
           _m: PhantomData,
         }
@@ -71,7 +66,6 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "implements")?;
     let interfaces = self.interfaces().as_ref();
 
     for (i, interface) in interfaces.iter().enumerate() {
@@ -86,7 +80,6 @@ where
 
   #[inline]
   fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "implements")?;
     let interfaces = self.interfaces().as_ref();
 
     for interface in interfaces.iter() {
@@ -97,7 +90,6 @@ where
 
   #[inline]
   fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    writeln!(f, "implements")?;
     let interfaces = self.interfaces().as_ref();
     for interface in interfaces.iter() {
       writeln!(f, "\t& {}", interface.display())?;
@@ -105,4 +97,3 @@ where
     Ok(())
   }
 }
-

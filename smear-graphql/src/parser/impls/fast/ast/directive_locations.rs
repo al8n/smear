@@ -37,6 +37,9 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
             "SUBSCRIPTION" => Self::Executable(ExecutableDirectiveLocation::Subscription(
               minized::SubscriptionLocation::new(span),
             )),
+            "FIELD_DEFINITION" => Self::TypeSystem(TypeSystemDirectiveLocation::FieldDefinition(
+              minized::FieldDefinitionLocation::new(span),
+            )),
             "FIELD" => Self::Executable(ExecutableDirectiveLocation::Field(
               minized::FieldLocation::new(span),
             )),
@@ -51,6 +54,11 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
             "INLINE_FRAGMENT" => Self::Executable(ExecutableDirectiveLocation::InlineFragment(
               minized::InlineFragmentLocation::new(span),
             )),
+            "VARIABLE_DEFINITION" => {
+              Self::Executable(ExecutableDirectiveLocation::VariableDefinition(
+                minized::VariableDefinitionLocation::new(span),
+              ))
+            }
             "SCHEMA" => Self::TypeSystem(TypeSystemDirectiveLocation::Schema(
               minized::SchemaLocation::new(span),
             )),
@@ -60,9 +68,7 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
             "OBJECT" => Self::TypeSystem(TypeSystemDirectiveLocation::Object(
               minized::ObjectLocation::new(span),
             )),
-            "FIELD_DEFINITION" => Self::TypeSystem(TypeSystemDirectiveLocation::FieldDefinition(
-              minized::FieldDefinitionLocation::new(span),
-            )),
+
             "ARGUMENT_DEFINITION" => {
               Self::TypeSystem(TypeSystemDirectiveLocation::ArgumentDefinition(
                 minized::ArgumentDefinitionLocation::new(span),
@@ -74,11 +80,11 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
             "UNION" => Self::TypeSystem(TypeSystemDirectiveLocation::Union(
               minized::UnionLocation::new(span),
             )),
-            "ENUM" => Self::TypeSystem(TypeSystemDirectiveLocation::Enum(
-              minized::EnumLocation::new(span),
-            )),
             "ENUM_VALUE" => Self::TypeSystem(TypeSystemDirectiveLocation::EnumValue(
               minized::EnumValueLocation::new(span),
+            )),
+            "ENUM" => Self::TypeSystem(TypeSystemDirectiveLocation::Enum(
+              minized::EnumLocation::new(span),
             )),
             "INPUT_OBJECT" => Self::TypeSystem(TypeSystemDirectiveLocation::InputObject(
               minized::InputObjectLocation::new(span),
@@ -128,11 +134,12 @@ where
     Self: Sized,
     E: ParserExtra<'a, FastTokenStream<'a>, Error = FastTokenErrors<'a, &'a str>> + 'a,
   {
-    Pipe::parser()
-      .or_not()
-      .ignored()
-      .then(Location::parser().separated_by(Pipe::parser()).collect())
-      .map_with(|(_, locations), exa| {
+    Location::parser()
+      .separated_by(Pipe::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|locations, exa| {
         let span = exa.span();
         Self { span, locations }
       })
@@ -152,7 +159,7 @@ where
         write!(f, " {}", location.display())?;
         continue;
       }
-      write!(f, " & {}", location.display())?;
+      write!(f, " | {}", location.display())?;
     }
     Ok(())
   }
@@ -162,7 +169,7 @@ where
     let locations = self.locations().as_ref();
 
     for location in locations.iter() {
-      write!(f, "&{}", location.display())?;
+      write!(f, "|{}", location.display())?;
     }
     Ok(())
   }

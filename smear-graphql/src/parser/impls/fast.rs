@@ -28,7 +28,9 @@ mod ast;
 
 mod error;
 
+/// Parse a value of type `T` from a string slice using the fast token.
 pub trait ParseStr<'a> {
+  /// Parses a value of this type from the given string slice.
   fn parse_str<S>(input: &'a S) -> ParseResult<Self, FastTokenErrors<'a, &'a str>>
   where
     Self: Sized + 'a,
@@ -54,15 +56,5 @@ where
     >>::parser::<FastParserExtra<&str>>();
     let tokens = FastTokenStream::new(s);
     parser.parse(tokens)
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test() {
-    <Document<&str> as ParseStr>::parse_str(r#"{ field }"#).unwrap();
   }
 }

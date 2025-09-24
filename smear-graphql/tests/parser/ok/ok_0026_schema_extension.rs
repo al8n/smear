@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{SchemaExtension, ExecutableDocument, ParseStr};
+use smear_graphql::parser::fast::{SchemaExtension, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0026_schema_extension.graphql");
 
@@ -26,7 +26,7 @@ fn schema_extension() {
   let operation_types = operation_types.root_operation_type_definitions();
   assert_eq!(operation_types.len(), 1);
   let operation_type = operation_types.first().unwrap();
-  assert_eq!(operation_type.operation_type().span().source(), &"query");
+  assert_eq!(operation_type.operation_type().as_str(), "query");
   assert_eq!(
     operation_type.name().slice(),
     "MyExtendedQueryType"

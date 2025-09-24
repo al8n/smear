@@ -5,14 +5,13 @@ use logosky::{
   Parseable, Source, Token, Tokenizer,
   utils::{Span, sdl_display::DisplaySDL},
 };
-use smear_parser::lang::punctuator::{Equal, Pipe};
+use smear_parser::lang::punctuator::Pipe;
 
 use super::Name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnionMemberTypes<S, Container = Vec<Name<S>>> {
   span: Span,
-  eq: Equal,
   members: Container,
   _m: PhantomData<S>,
 }
@@ -21,11 +20,6 @@ impl<S, Container> UnionMemberTypes<S, Container> {
   #[inline]
   pub const fn span(&self) -> Span {
     self.span
-  }
-
-  #[inline]
-  pub const fn eq(&self) -> &Equal {
-    &self.eq
   }
 
   #[inline]
@@ -39,7 +33,6 @@ where
   Container: chumsky::container::Container<Name<S>>,
   Name<S>: Parseable<'a, I, T, Error>,
   Pipe: Parseable<'a, I, T, Error>,
-  Equal: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -50,15 +43,16 @@ where
     Error: 'a,
     T: Token<'a>,
   {
-    Equal::parser()
-      .then(Pipe::parser().or_not().ignored())
-      .then(Name::<S>::parser().separated_by(Pipe::parser()).collect())
-      .map_with(|((eq, _), names), exa| {
+    Name::<S>::parser()
+      .separated_by(Pipe::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|members, exa| {
         let span = exa.span();
         Self {
           span,
-          eq,
-          members: names,
+          members,
           _m: PhantomData,
         }
       })
@@ -72,7 +66,6 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "=")?;
     let members = self.members().as_ref();
 
     for (i, member) in members.iter().enumerate() {
@@ -87,7 +80,6 @@ where
 
   #[inline]
   fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "=")?;
     let members = self.members().as_ref();
 
     for member in members.iter() {
@@ -98,7 +90,6 @@ where
 
   #[inline]
   fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    writeln!(f, "=")?;
     let members = self.members().as_ref();
     for member in members.iter() {
       writeln!(f, "\t| {}", member.display())?;

@@ -60,7 +60,10 @@ impl<S> FloatValue<S> {
 
   /// Returns the slice of the float.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.value
   }
 

@@ -1,6 +1,6 @@
 use smear_graphql::parser::fast::{DescribedInterfaceTypeDefinition, ParseStr};
 
-const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
+const ALL: &str = include_str!("../../fixtures/parser/ok/0016_interface_definition.graphql");
 
 #[test]
 fn interface_object_definition() {

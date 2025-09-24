@@ -23,6 +23,7 @@ fn parse_schemas() {
           let _ = doc.definitions();
         }
         Err(e) => {
+          println!("Source: {}", &content);
           panic!("Failed to parse {}: {:?}", path.display(), e);
         }
       }

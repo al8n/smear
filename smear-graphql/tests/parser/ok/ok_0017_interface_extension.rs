@@ -1,6 +1,6 @@
 use smear_graphql::parser::fast::{InterfaceTypeExtension, ParseStr};
 
-const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
+const ALL: &str = include_str!("../../fixtures/parser/ok/0017_interface_extension.graphql");
 
 #[test]
 fn interface_object_extension() {

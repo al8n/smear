@@ -51,4 +51,3 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
     })
   }
 }
-

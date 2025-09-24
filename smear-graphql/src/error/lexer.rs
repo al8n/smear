@@ -5,10 +5,7 @@ use std::borrow::Cow;
 use derive_more::{
   AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
 };
-use logosky::utils::{
-  Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
-  recursion_tracker::RecursionLimitExceeded,
-};
+use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
 /// The hint about what is expected for the next character
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
@@ -642,8 +639,6 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   UnexpectedEndOfInput,
   /// Unterminated spread operator.
   UnterminatedSpreadOperator,
-  /// Reached maximum recursion depth.
-  RecursionLimitExceeded(RecursionLimitExceeded),
   /// The lexer state related error.
   #[from(skip)]
   State(StateError),

@@ -172,11 +172,7 @@ fn test_recursion_limit() {
     match result {
       Ok(_) => {}
       Err(mut errors) => {
-        let err = errors
-          .pop()
-          .unwrap()
-          .into_data()
-          .unwrap_recursion_limit_exceeded();
+        let err = errors.pop().unwrap().into_data().unwrap_state();
         assert_eq!(err.depth(), depth);
         assert_eq!(err.limitation(), depth - 1);
         return;

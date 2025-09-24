@@ -4,390 +4,11 @@ use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
   error::{UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint},
-  lang::minized::keywords::{Extend, Union},
+  lang::{
+    minized::keywords::{Extend, Union},
+    punctuator::Equal,
+  },
 };
-
-// /// Represents the first union member type, where the pipe is optional.
-// ///
-// /// In GraphQL's union member syntax, the first member type can optionally
-// /// be preceded by a pipe (`|`), but subsequent members must have pipes.
-// /// This distinction mirrors the interface implementation pattern and exists
-// /// for backwards compatibility and visual consistency.
-// ///
-// /// ## Syntax Variations
-// /// ```text
-// /// # Both syntaxes are valid for the first member:
-// /// union SearchResult = Post           # No pipe
-// /// union SearchResult = | Post         # With pipe
-// ///
-// /// # Multiple members - first can be with or without pipe:
-// /// union SearchResult = Post | User    # First without |
-// /// union SearchResult = | Post | User  # First with |
-// /// ```
-// ///
-// /// The optional pipe design allows for consistent syntax when adding/removing
-// /// union members while maintaining backwards compatibility with existing schemas.
-// ///
-// /// ## Grammar
-// /// ```text
-// /// LeadingUnionMemberType:
-// ///   |? Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct LeadingUnionMemberType<Name> {
-//   span: Span,
-//   pipe: Option<Pipe>,
-//   name: Name,
-// }
-
-// impl<Name> AsRef<Span> for LeadingUnionMemberType<Name> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name> IntoSpan<Span> for LeadingUnionMemberType<Name> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name> IntoComponents for LeadingUnionMemberType<Name> {
-//   type Components = (Span, Option<Pipe>, Name);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.pipe, self.name)
-//   }
-// }
-
-// impl<Name> LeadingUnionMemberType<Name> {
-//   /// Returns a reference to the span covering the leading union member type.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-
-//   /// Returns a reference to the optional pipe token.
-//   ///
-//   /// The pipe is optional for the first union member, allowing both
-//   /// `Post` and `| Post` syntax variations.
-//   #[inline]
-//   pub const fn pipe(&self) -> Option<&Pipe> {
-//     self.pipe.as_ref()
-//   }
-
-//   /// Returns a reference to the union member type name.
-//   ///
-//   /// This must be the name of an Object type defined elsewhere in the schema.
-//   /// Union members can only be concrete Object types, not interfaces,
-//   /// unions, or scalar types.
-//   #[inline]
-//   pub const fn name(&self) -> &Name {
-//     &self.name
-//   }
-
-//   /// Creates a parser for the first union member in a union definition.
-//   ///
-//   /// This parser handles the optional pipe syntax specific to the leading
-//   /// union member, accepting both `Name` and `| Name` patterns.
-//   ///
-//   /// ## Example Parsed Input
-//   /// ```text
-//   /// Post           # Without pipe
-//   /// | Post         # With pipe
-//   /// ```
-//   ///
-//   /// ## Notes
-//   ///
-//   /// This parser does not handle surrounding [ignored tokens].
-//   /// The calling parser is responsible for handling any necessary
-//   /// whitespace skipping or comment processing around the leading union member.
-//   ///
-//   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<I, T, Error> + 'src,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//   {
-//     Pipe::parser()
-//       .or_not()
-//       .then(name_parser)
-//       .map_with(|(pipe, name), exa| Self {
-//         span: exa.span(),
-//         pipe,
-//         name,
-//       })
-//   }
-// }
-
-// /// Represents a subsequent union member type, where the pipe is required.
-// ///
-// /// After the first union member, all subsequent members must be preceded by
-// /// a pipe (`|`) to clearly separate them and maintain unambiguous parsing.
-// ///
-// /// ## Why Pipes are Required
-// ///
-// /// The pipe requirement for subsequent union members serves several purposes:
-// /// 1. **Visual Clarity**: Makes union alternatives easy to distinguish
-// /// 2. **Parsing Disambiguation**: Eliminates ambiguity in complex union definitions
-// /// 3. **Type Theory Alignment**: Mirrors disjunctive union notation (`A | B | C`)
-// /// 4. **Consistency**: Provides uniform syntax across union definitions
-// ///
-// /// ## Examples
-// /// ```text
-// /// # Multiple union members - all after first require pipes:
-// /// union SearchResult = Post | User | Comment {
-// ///   # Post is leading (| optional)
-// ///   # User is subsequent (| required)
-// ///   # Comment is subsequent (| required)
-// /// }
-// /// ```
-// ///
-// /// ## Grammar
-// /// ```text
-// /// UnionMemberType:
-// ///   | Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct UnionMemberType<Name> {
-//   span: Span,
-//   pipe: Pipe,
-//   name: Name,
-// }
-
-// impl<Name> AsRef<Span> for UnionMemberType<Name> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name> IntoSpan<Span> for UnionMemberType<Name> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name> IntoComponents for UnionMemberType<Name> {
-//   type Components = (Span, Pipe, Name);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.pipe, self.name)
-//   }
-// }
-
-// impl<Name> UnionMemberType<Name> {
-//   /// Returns a reference to the span covering this union member type.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-
-//   /// Returns a reference to the required pipe token.
-//   ///
-//   /// Unlike `LeadingUnionMemberType`, the pipe is always required for
-//   /// subsequent union members in a union definition.
-//   #[inline]
-//   pub const fn pipe(&self) -> &Pipe {
-//     &self.pipe
-//   }
-
-//   /// Returns a reference to the union member type name.
-//   ///
-//   /// This must be the name of an Object type defined elsewhere in the schema.
-//   #[inline]
-//   pub const fn name(&self) -> &Name {
-//     &self.name
-//   }
-
-//   /// Creates a parser for subsequent union members in a union definition.
-//   ///
-//   /// This parser requires a pipe followed by the member type name,
-//   /// enforcing the mandatory pipe syntax for non-leading union members.
-//   ///
-//   /// ## Example Parsed Input
-//   /// ```text
-//   /// | User         # Required pipe
-//   /// | Comment      # Required pipe
-//   /// ```
-//   ///
-//   /// ## Notes
-//   ///
-//   /// This parser does not handle surrounding [ignored tokens].
-//   /// The calling parser is responsible for handling any necessary
-//   /// whitespace skipping or comment processing around the union member type.
-//   ///
-//   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Pipe: Parseable<I, T, Error> + 'src,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//   {
-//     Pipe::parser()
-//       .then(name_parser)
-//       .map_with(|(pipe, name), exa| Self {
-//         span: exa.span(),
-//         pipe,
-//         name,
-//       })
-//   }
-// }
-
-// /// Represents a complete union member types list with proper pipe handling.
-// ///
-// /// This structure correctly parses GraphQL's union member syntax, which follows
-// /// specific rules about when pipes are required vs optional. The distinction
-// /// between leading and subsequent members ensures correct parsing of union
-// /// type definitions with multiple alternatives.
-// ///
-// /// ## Pipe Rules for Union Members
-// ///
-// /// GraphQL uses a specific pipe syntax for union member types:
-// /// - **First Member**: Pipe is optional (`Post` or `| Post`)
-// /// - **Subsequent Members**: Pipe is required (`| User | Comment`)
-// ///
-// /// ## Examples
-// /// ```text
-// /// # All valid syntax variations:
-// /// union Result = Post
-// /// union Result = | Post
-// /// union Result = Post | User
-// /// union Result = | Post | User
-// /// union Result = Post | User | Comment | Product
-// /// ```
-// ///
-// /// ## Grammar
-// /// ```text
-// /// UnionMemberTypes:
-// ///   = LeadingUnionMemberType UnionMemberType*
-// ///
-// /// LeadingUnionMemberType:
-// ///   |? Name
-// ///
-// /// UnionMemberType:
-// ///   | Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct UnionMemberTypes<Name, Container = Vec<UnionMemberType<Name>>> {
-//   span: Span,
-//   eq: Equal,
-//   leading: LeadingUnionMemberType<Name>,
-//   remaining: Container,
-// }
-
-// impl<Name, Container> AsRef<Span> for UnionMemberTypes<Name, Container> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name, Container> IntoSpan<Span> for UnionMemberTypes<Name, Container> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name, Container> IntoComponents for UnionMemberTypes<Name, Container> {
-//   type Components = (Span, Equal, LeadingUnionMemberType<Name>, Container);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.eq, self.leading, self.remaining)
-//   }
-// }
-
-// impl<Name, Container> UnionMemberTypes<Name, Container> {
-//   /// Returns a reference to the span covering the entire union member types definition.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-//   /// Returns a reference to the equals token that begins the union member types.
-//   ///
-//   /// The equals sign separates the union name from its member types in the syntax
-//   /// `union Name = MemberTypes`.
-//   #[inline]
-//   pub const fn eq(&self) -> &Equal {
-//     &self.eq
-//   }
-//   /// Returns a reference to the first union member type.
-//   ///
-//   /// The leading member has special parsing rules where the pipe is optional,
-//   /// unlike subsequent members where it's required.
-//   #[inline]
-//   pub const fn leading_member_type(&self) -> &LeadingUnionMemberType<Name> {
-//     &self.leading
-//   }
-
-//   /// Returns a reference to the container holding subsequent union member types.
-//   ///
-//   /// All members in this container have required pipes and represent the
-//   /// additional union alternatives beyond the first one.
-//   #[inline]
-//   pub const fn remaining_member_types(&self) -> &Container {
-//     &self.remaining
-//   }
-
-//   /// Creates a parser for complete union member type lists.
-//   ///
-//   /// This parser correctly handles the pipe rules, parsing the equals sign,
-//   /// the first member with optional pipe, followed by zero or more subsequent
-//   /// members with required pipes.
-//   ///
-//   /// ## Example Parsed Input
-//   /// ```text
-//   /// = Post
-//   /// = | Post
-//   /// = Post | User
-//   /// = | Post | User | Comment
-//   /// ```
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: impl Fn() -> NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//     Equal: Parseable<I, T, Error> + 'src,
-//     Pipe: Parseable<I, T, Error> + 'src,
-//     Container: chumsky::container::Container<UnionMemberType<Name>>,
-//   {
-//     Equal::parser()
-//       .then(LeadingUnionMemberType::parser_with(name_parser()))
-//       .then(
-//         UnionMemberType::parser_with(name_parser())
-//           .repeated()
-//           .collect(),
-//       )
-//       .map_with(|((eq, leading), remaining), exa| Self {
-//         span: exa.span(),
-//         eq,
-//         leading,
-//         remaining,
-//       })
-//   }
-// }
 
 /// Represents a GraphQL Union type definition.
 ///
@@ -549,6 +170,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Union: Parseable<'src, I, T, Error> + Clone,
+    Equal: Parseable<'src, I, T, Error> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
     NP: Parser<'src, I, Name, E> + Clone,
@@ -556,7 +178,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
     Union::parser()
       .ignore_then(name_parser)
       .then(directives_parser.or_not())
-      .then(member_types.or_not())
+      .then(Equal::parser().ignore_then(member_types).or_not())
       .map_with(|((name, directives), members), exa| Self {
         span: exa.span(),
         name,
@@ -570,6 +192,7 @@ impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
   for UnionTypeDefinition<Name, Directives, MemberTypes>
 where
   Union: Parseable<'a, I, T, Error> + Clone,
+  Equal: Parseable<'a, I, T, Error> + Clone,
   Directives: Parseable<'a, I, T, Error>,
   MemberTypes: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
@@ -770,6 +393,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error> + Clone,
     Union: Parseable<'src, I, T, Error> + Clone,
+    Equal: Parseable<'src, I, T, Error> + Clone,
     NP: Parser<'src, I, Name, E> + Clone,
     DP: Parser<'src, I, Directives, E> + Clone,
     MP: Parser<'src, I, MemberTypes, E> + Clone,
@@ -778,7 +402,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
       .then(Union::parser())
       .ignore_then(name_parser)
       .then(directives_parser.or_not())
-      .then(member_types_parser.or_not())
+      .then(Equal::parser().ignore_then(member_types_parser).or_not())
       .try_map_with(|((name, directives), members), exa| {
         let data = match (directives, members) {
           (directives, Some(members)) => UnionTypeExtensionData::Members {
@@ -809,6 +433,7 @@ where
   Error: UnexpectedEndOfUnionExtensionError,
   Extend: Parseable<'a, I, T, Error> + Clone,
   Union: Parseable<'a, I, T, Error> + Clone,
+  Equal: Parseable<'a, I, T, Error> + Clone,
   Directives: Parseable<'a, I, T, Error>,
   MemberTypes: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,

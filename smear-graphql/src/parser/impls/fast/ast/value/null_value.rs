@@ -69,7 +69,10 @@ impl<S> NullValue<S> {
 
   /// Returns the slice of the null value.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.source
   }
 }

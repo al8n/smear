@@ -204,7 +204,10 @@ impl<S> FragmentName<S> {
 
   /// Returns a reference to the underlying source value.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.value
   }
 

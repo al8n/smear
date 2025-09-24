@@ -72,7 +72,10 @@ impl<S> StringValue<S> {
 
   /// Returns the description content, without delimiters.
   #[inline]
-  pub const fn content(&self) -> S where S: Copy {
+  pub const fn content(&self) -> S
+  where
+    S: Copy,
+  {
     self.content
   }
 
@@ -142,4 +145,3 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
     })
   }
 }
-

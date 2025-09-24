@@ -57,7 +57,10 @@ impl<S> EnumValue<S> {
 
   /// Returns the slice of the enum value.
   #[inline(always)]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.0.slice()
   }
 

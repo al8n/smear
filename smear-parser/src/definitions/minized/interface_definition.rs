@@ -4,435 +4,8 @@ use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
   error::{InterfaceTypeExtensionHint, UnexpectedEndOfInterfaceExtensionError},
-  lang::minized::keywords::{Extend, Interface},
+  lang::minized::keywords::{Extend, Implements, Interface},
 };
-
-// /// Represents the first interface in an `implements` list, where the ampersand is optional.
-// ///
-// /// In GraphQL's interface implementation syntax, the first interface name can optionally
-// /// be preceded by an ampersand (`&`), but subsequent interfaces must have ampersands.
-// /// This distinction exists for backwards compatibility and readability.
-// ///
-// /// ## Syntax Variations
-// /// ```text
-// /// # Both syntaxes are valid for the first interface:
-// /// type User implements Node { ... }           # No ampersand
-// /// type User implements & Node { ... }         # With ampersand
-// ///
-// /// # Multiple interfaces - first can be with or without ampersand:
-// /// type User implements Node & Timestamped     # First without &
-// /// type User implements & Node & Timestamped   # First with &
-// /// ```
-// ///
-// /// The optional ampersand design allows for consistent syntax when adding/removing
-// /// interface implementations while maintaining backwards compatibility with existing schemas.
-// ///
-// /// ## Grammar
-// /// ```text
-// /// LeadingImplementInterface:
-// ///   &? Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct LeadingImplementInterface<Name> {
-//   span: Span,
-//   amp: Option<Ampersand>,
-//   name: Name,
-// }
-
-// impl<Name> AsRef<Span> for LeadingImplementInterface<Name> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name> IntoSpan<Span> for LeadingImplementInterface<Name> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name> IntoComponents for LeadingImplementInterface<Name> {
-//   type Components = (Span, Option<Ampersand>, Name);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.amp, self.name)
-//   }
-// }
-
-// impl<Name> LeadingImplementInterface<Name> {
-//   /// Returns a reference to the span covering the leading interface implementation.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-
-//   /// Returns a reference to the optional ampersand token.
-//   ///
-//   /// The ampersand is optional for the first interface in an implementation list,
-//   /// allowing both `implements Node` and `implements & Node` syntax.
-//   #[inline]
-//   pub const fn ampersand(&self) -> Option<&Ampersand> {
-//     self.amp.as_ref()
-//   }
-
-//   /// Returns a reference to the interface name being implemented.
-//   ///
-//   /// This must be the name of an interface type defined elsewhere in the schema.
-//   #[inline]
-//   pub const fn name(&self) -> &Name {
-//     &self.name
-//   }
-
-//   /// Creates a parser for the first interface in an implementation list.
-//   ///
-//   /// This parser handles the optional ampersand syntax specific to the leading
-//   /// interface, accepting both `Name` and `& Name` patterns.
-//   ///
-//   /// ## Notes
-//   ///
-//   /// This parser does not handle surrounding [ignored tokens].
-//   /// The calling parser is responsible for handling any necessary
-//   /// whitespace skipping or comment processing around the leading implement interface.
-//   ///
-//   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Ampersand: Parseable<I, T, Error>,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//   {
-//     Ampersand::parser()
-//       .or_not()
-//       .then(name_parser)
-//       .map_with(|(amp, name), exa| Self {
-//         span: exa.span(),
-//         amp,
-//         name,
-//       })
-//   }
-// }
-
-// impl<'a, Name, I, T, Error> Parseable<I, T, Error> for LeadingImplementInterface<Name>
-// where
-//   T: Token<'a>,
-//   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-//   Error: 'a,
-//   Ampersand: Parseable<I, T, Error>,
-//   Name: Parseable<I, T, Error>,
-// {
-//   #[inline]
-//   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-//   where
-//     E: ParserExtra<'a, I, Error = Error> + 'a,
-//   {
-//     Self::parser_with(Name::parser())
-//   }
-// }
-
-// /// Represents a subsequent interface in an `implements` list, where the ampersand is required.
-// ///
-// /// After the first interface in an implementation list, all subsequent interfaces must
-// /// be preceded by an ampersand (`&`) to clearly separate them and maintain unambiguous parsing.
-// ///
-// /// ## Examples
-// ///
-// /// ```text
-// /// # Multiple interfaces - all after first require ampersands:
-// /// type User implements Node & Timestamped & Searchable {
-// ///   # Node is leading (& optional)
-// ///   # Timestamped is subsequent (& required)
-// ///   # Searchable is subsequent (& required)
-// /// }
-// /// ```
-// ///
-// /// ## Grammar
-// ///
-// /// ```text
-// /// ImplementInterface: '&' Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct ImplementInterface<Name> {
-//   span: Span,
-//   amp: Ampersand,
-//   name: Name,
-// }
-
-// impl<Name> AsRef<Span> for ImplementInterface<Name> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name> IntoSpan<Span> for ImplementInterface<Name> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name> IntoComponents for ImplementInterface<Name> {
-//   type Components = (Span, Ampersand, Name);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.amp, self.name)
-//   }
-// }
-
-// impl<Name> ImplementInterface<Name> {
-//   /// Returns a reference to the span covering this interface implementation.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-
-//   /// Returns a reference to the required ampersand token.
-//   ///
-//   /// Unlike `LeadingImplementInterface`, the ampersand is always required for
-//   /// subsequent interfaces in an implementation list.
-//   #[inline]
-//   pub const fn ampersand(&self) -> &Ampersand {
-//     &self.amp
-//   }
-
-//   /// Returns a reference to the interface name being implemented.
-//   ///
-//   /// This must be the name of an interface type defined elsewhere in the schema.
-//   #[inline]
-//   pub const fn name(&self) -> &Name {
-//     &self.name
-//   }
-
-//   /// Creates a parser for subsequent interfaces in an implementation list.
-//   ///
-//   /// This parser requires an ampersand followed by the interface name,
-//   /// enforcing the mandatory ampersand syntax for non-leading interfaces.
-//   ///
-//   /// ## Notes
-//   ///
-//   /// This parser does not handle surrounding [ignored tokens].
-//   /// The calling parser is responsible for handling any necessary
-//   /// whitespace skipping or comment processing around the implement interface.
-//   ///
-//   /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     E: ParserExtra<'src, I>,
-//     Ampersand: Parseable<I, T, Error>,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//   {
-//     Ampersand::parser()
-//       .then(name_parser)
-//       .map_with(|(amp, name), exa| Self {
-//         span: exa.span(),
-//         amp,
-//         name,
-//       })
-//   }
-// }
-
-// impl<'a, Name, I, T, Error> Parseable<I, T, Error> for ImplementInterface<Name>
-// where
-//   T: Token<'a>,
-//   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-//   Error: 'a,
-//   Ampersand: Parseable<I, T, Error>,
-//   Name: Parseable<I, T, Error>,
-// {
-//   #[inline]
-//   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-//   where
-//     E: ParserExtra<'a, I, Error = Error> + 'a,
-//   {
-//     Self::parser_with(Name::parser())
-//   }
-// }
-
-// /// Represents a complete interface implementation list with proper ampersand handling.
-// ///
-// /// This structure correctly parses GraphQL's interface implementation syntax, which
-// /// has specific rules about when ampersands are required vs optional. The distinction
-// /// between leading and subsequent interfaces ensures correct parsing of complex
-// /// interface hierarchies.
-// ///
-// /// ## Ampersand Rules Explained
-// ///
-// /// GraphQL uses a specific ampersand syntax for interface implementations:
-// /// - **First Interface**: Ampersand is optional (`Node` or `& Node`)
-// /// - **Subsequent Interfaces**: Ampersand is required (`& Timestamped & Searchable`)
-// ///
-// /// ## Examples
-// /// ```text
-// /// # Simple single interface
-// /// type User implements Node { id: ID! }
-// ///
-// /// # Multiple interfaces with various syntax
-// /// type User implements Node & Timestamped {
-// ///   id: ID!
-// ///   createdAt: DateTime!
-// ///   updatedAt: DateTime!
-// /// }
-// ///
-// /// # Complex interface hierarchy
-// /// type AdminUser implements
-// ///   & Node
-// ///   & Timestamped
-// ///   & Auditable
-// ///   & Permissioned
-// /// {
-// ///   id: ID!
-// ///   createdAt: DateTime!
-// ///   updatedAt: DateTime!
-// ///   auditLog: [AuditEntry!]!
-// ///   permissions: [Permission!]!
-// /// }
-// /// ```
-// ///
-// /// ## Grammar
-// ///
-// /// ```text
-// /// ImplementsInterfaces:
-// ///   implements LeadingImplementInterface ImplementInterface*
-// ///
-// /// LeadingImplementInterface:
-// ///   &? Name
-// ///
-// /// ImplementInterface:
-// ///   & Name
-// /// ```
-// #[derive(Debug, Clone, Copy)]
-// pub struct ImplementInterfaces<Name, Container = Vec<ImplementInterface<Name>>> {
-//   span: Span,
-//   implements: Implements,
-//   leading: LeadingImplementInterface<Name>,
-//   remaining: Container,
-// }
-
-// impl<Name, Container> AsRef<Span> for ImplementInterfaces<Name, Container> {
-//   #[inline]
-//   fn as_ref(&self) -> &Span {
-//     self.span()
-//   }
-// }
-
-// impl<Name, Container> IntoSpan<Span> for ImplementInterfaces<Name, Container> {
-//   #[inline]
-//   fn into_span(self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl<Name, Container> IntoComponents for ImplementInterfaces<Name, Container> {
-//   type Components = (Span, Implements, LeadingImplementInterface<Name>, Container);
-
-//   #[inline]
-//   fn into_components(self) -> Self::Components {
-//     (self.span, self.implements, self.leading, self.remaining)
-//   }
-// }
-
-// impl<Name, Container> ImplementInterfaces<Name, Container> {
-//   /// Returns a reference to the span covering the entire implements clause.
-//   #[inline]
-//   pub const fn span(&self) -> &Span {
-//     &self.span
-//   }
-
-//   /// Returns a reference to the `implements` keyword token.
-//   ///
-//   /// This provides access to the exact `implements` keyword and its location,
-//   /// useful for error reporting and syntax highlighting.
-//   #[inline]
-//   pub const fn implements_keyword(&self) -> &Implements {
-//     &self.implements
-//   }
-
-//   /// Returns a reference to the first interface in the implementation list.
-//   ///
-//   /// The leading interface has special parsing rules where the ampersand is optional,
-//   /// unlike subsequent interfaces where it's required.
-//   #[inline]
-//   pub const fn leading_implement_interface(&self) -> &LeadingImplementInterface<Name> {
-//     &self.leading
-//   }
-
-//   /// Returns a reference to the container holding subsequent interfaces.
-//   ///
-//   /// All interfaces in this container have required ampersands and represent
-//   /// the additional interfaces beyond the first one.
-//   #[inline]
-//   pub const fn remaining_implement_interfaces(&self) -> &Container {
-//     &self.remaining
-//   }
-
-//   /// Creates a parser for complete interface implementation lists.
-//   ///
-//   /// This parser correctly handles the ampersand rules, parsing the first interface
-//   /// with optional ampersand, followed by zero or more subsequent interfaces
-//   /// with required ampersands.
-//   pub fn parser_with<'src, I, T, Error, E, NP>(
-//     name_parser: impl Fn() -> NP,
-//   ) -> impl Parser<'src, I, Self, E> + Clone
-//   where
-//     T: Token<'src>,
-//     I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-//     Error: 'src,
-//     E: ParserExtra<'src, I, Error = Error> + 'src,
-//     Implements: Parseable<I, T, Error>,
-//     Ampersand: Parseable<I, T, Error>,
-//     NP: Parser<'src, I, Name, E> + Clone,
-//     Container: chumsky::container::Container<ImplementInterface<Name>>,
-//   {
-//     Implements::parser()
-//       .then(LeadingImplementInterface::parser_with(name_parser()))
-//       .then(
-//         ImplementInterface::parser_with(name_parser())
-//           .repeated()
-//           .collect(),
-//       )
-//       .map_with(|((implements, leading), remaining), exa| Self {
-//         span: exa.span(),
-//         implements,
-//         leading,
-//         remaining,
-//       })
-//   }
-// }
-
-// impl<'a, Name, Container, I, T, Error> Parseable<I, T, Error>
-//   for ImplementInterfaces<Name, Container>
-// where
-//   T: Token<'a>,
-//   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-//   Error: 'a,
-//   Implements: Parseable<I, T, Error>,
-//   Ampersand: Parseable<I, T, Error>,
-//   Name: Parseable<I, T, Error>,
-//   Container: chumsky::container::Container<ImplementInterface<Name>>,
-// {
-//   #[inline]
-//   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-//   where
-//     E: ParserExtra<'a, I, Error = Error> + 'a,
-//   {
-//     Self::parser_with(Name::parser)
-//   }
-// }
 
 /// Represents a GraphQL Interface type definition that defines a contract for implementing types.
 ///
@@ -604,6 +177,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Interface: Parseable<'src, I, T, Error>,
+    Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     Directives: 'src,
     ImplementInterfaces: 'src,
@@ -615,7 +189,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   {
     Interface::parser()
       .ignore_then(name_parser)
-      .then(implement_interfaces_parser.or_not())
+      .then(
+        Implements::parser()
+          .ignore_then(implement_interfaces_parser)
+          .or_not(),
+      )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
       .map_with(|(((name, implements), directives), fields), exa| Self {
@@ -633,6 +211,7 @@ impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
   for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 where
   Interface: Parseable<'a, I, T, Error>,
+  Implements: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   ImplementInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
@@ -774,79 +353,6 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
       Self::Fields { fields, .. } => Some(fields),
       Self::Directives { .. } | Self::Implements { .. } => None,
     }
-  }
-
-  /// Creates a parser for interface extension content with proper precedence handling.
-  ///
-  /// The parser tries patterns in a specific order to resolve parsing ambiguity:
-  /// 1. **Fields Pattern**: `implements? directives? fields` (most comprehensive)
-  /// 2. **Directives Pattern**: `implements? directives` (metadata only)  
-  /// 3. **Implements Pattern**: `implements` (inheritance only)
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the interface type extension data.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, T, Error, E, IP, DP, FP>(
-    implement_interfaces_parser: impl Fn() -> IP,
-    directives_parser: impl Fn() -> DP,
-    fields_definition_parser: impl Fn() -> FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
-  {
-    choice((
-      implement_interfaces_parser()
-        .or_not()
-        .then(directives_parser().or_not())
-        .then(fields_definition_parser())
-        .map(|((implements, directives), fields)| Self::Fields {
-          implements,
-          directives,
-          fields,
-        }),
-      implement_interfaces_parser()
-        .or_not()
-        .then(directives_parser())
-        .map(|(implements, directives)| Self::Directives {
-          implements,
-          directives,
-        }),
-      implement_interfaces_parser().map(Self::Implements),
-    ))
-  }
-}
-
-impl<'a, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
-where
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      ImplementInterfaces::parser,
-      Directives::parser,
-      FieldsDefinition::parser,
-    )
   }
 }
 
@@ -992,6 +498,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error>,
     Interface: Parseable<'src, I, T, Error>,
+    Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     Directives: 'src,
     ImplementInterfaces: 'src,
@@ -1004,7 +511,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     Extend::parser()
       .then(Interface::parser())
       .ignore_then(name_parser)
-      .then(implement_interfaces_parser.or_not())
+      .then(
+        Implements::parser()
+          .ignore_then(implement_interfaces_parser)
+          .or_not(),
+      )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
       .try_map_with(|(((name, implements), directives), fields), exa| {
@@ -1043,6 +554,7 @@ where
   Error: UnexpectedEndOfInterfaceExtensionError,
   Extend: Parseable<'a, I, T, Error>,
   Interface: Parseable<'a, I, T, Error>,
+  Implements: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   ImplementInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,

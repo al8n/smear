@@ -248,12 +248,7 @@ pub type DescribedInputObjectTypeDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
-  InputObjectTypeDefinition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >,
+  InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
   StringValue<S>,
 >;
 
@@ -292,10 +287,7 @@ pub type DescribedScalarTypeDefinition<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = Described<
-  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  StringValue<S>,
->;
+> = Described<ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
 
 pub type ScalarTypeExtension<
   S,
@@ -516,7 +508,7 @@ pub type SchemaDefinition<
 
 pub type SchemaExtension<
   S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   Container = DefaultRootOperationTypesContainer<S>,
 > = definitions::minized::SchemaExtension<

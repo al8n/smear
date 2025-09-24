@@ -1,6 +1,6 @@
 use smear_graphql::parser::fast::{ScalarTypeExtension, ParseStr};
 
-const ALL: &str = include_str!("../../fixtures/parser/ok/0023_scalar_definition.graphql");
+const ALL: &str = include_str!("../../fixtures/parser/ok/0024_scalar_extension.graphql");
 
 #[test]
 fn scalar_type_extension() {

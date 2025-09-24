@@ -59,10 +59,12 @@ impl<S> IntValue<S> {
 
   /// Returns the slice of the int.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.value
   }
-
 
   /// Returns the slice of the int.
   #[inline]

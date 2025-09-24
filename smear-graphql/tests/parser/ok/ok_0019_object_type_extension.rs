@@ -1,6 +1,6 @@
 use smear_graphql::parser::fast::{ObjectTypeExtension, ParseStr};
 
-const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
+const ALL: &str = include_str!("../../fixtures/parser/ok/0019_object_type_extension.graphql");
 
 #[test]
 fn object_type_extension() {

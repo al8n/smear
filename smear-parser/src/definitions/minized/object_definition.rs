@@ -4,7 +4,7 @@ use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
   error::{ObjectTypeExtensionHint, UnexpectedEndOfObjectExtensionError},
-  lang::minized::keywords::{Extend, Type},
+  lang::minized::keywords::{Extend, Implements, Type},
 };
 
 /// Represents a GraphQL Object type definition that defines a concrete type with fields.
@@ -184,6 +184,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Type: Parseable<'src, I, T, Error>,
+    Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     Directives: 'src,
     ImplementInterfaces: 'src,
@@ -195,7 +196,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   {
     Type::parser()
       .ignore_then(name_parser)
-      .then(implement_interfaces_parser.or_not())
+      .then(
+        Implements::parser()
+          .ignore_then(implement_interfaces_parser)
+          .or_not(),
+      )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
       .map_with(|(((name, implements), directives), fields), exa| Self {
@@ -217,6 +222,7 @@ where
   Directives: Parseable<'a, I, T, Error>,
   FieldsDefinition: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
+  Implements: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -500,6 +506,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error>,
     Type: Parseable<'src, I, T, Error>,
+    Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     ImplementInterfaces: 'src,
     Directives: 'src,
@@ -512,7 +519,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     Extend::parser()
       .then(Type::parser())
       .ignore_then(name_parser)
-      .then(implement_interfaces_parser.or_not())
+      .then(
+        Implements::parser()
+          .ignore_then(implement_interfaces_parser)
+          .or_not(),
+      )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
       .try_map_with(|(((name, implements), directives), fields), exa| {
@@ -551,6 +562,7 @@ where
   Error: UnexpectedEndOfObjectExtensionError,
   Type: Parseable<'a, I, T, Error>,
   Extend: Parseable<'a, I, T, Error>,
+  Implements: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
   ImplementInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,

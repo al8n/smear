@@ -1,6 +1,6 @@
 use smear_graphql::parser::fast::{InputObjectTypeExtension, ParseStr};
 
-const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
+const ALL: &str = include_str!("../../fixtures/parser/ok/0015_input_extension.graphql");
 
 #[test]
 fn input_object_extension() {
@@ -18,6 +18,6 @@ fn input_object_extension() {
     let ty = a.ty().unwrap_name_ref();
 
     assert_eq!(ty.name().slice(), "String");
-    assert!(!ty.required());
+    assert!(!ty.required(), "Source: {ALL}");
   }
 }

@@ -65,7 +65,10 @@ impl<S> BooleanValue<S> {
 
   /// Returns the source of the boolean value.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.source
   }
 

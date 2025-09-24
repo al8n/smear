@@ -17,8 +17,16 @@ fn parse_services() {
     let path = entry.path();
     if path.extension().and_then(|s| s.to_str()) == Some("graphql") {
       let content = fs::read_to_string(&path).expect("should be able to read file");
-      let document = Document::<&str>::parse_str(&content).into_result().unwrap();
-      let _ = document.definitions();
+
+      match Document::<&str>::parse_str(&content).into_result() {
+        Ok(doc) => {
+          let _ = doc.definitions();
+        }
+        Err(e) => {
+          println!("Source: {}", &content[306..325]);
+          panic!("Failed to parse {}: {:?}", path.display(), e);
+        }
+      }
     }
   }
 }

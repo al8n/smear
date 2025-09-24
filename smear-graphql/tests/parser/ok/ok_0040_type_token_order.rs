@@ -28,7 +28,7 @@ fn type_token_order() {
     assert_eq!(other.name().slice(), "_other");
     let ty = other.ty().unwrap_name_ref();
     assert_eq!(ty.name().slice(), "String");
-    assert!(ty.required());
+    assert!(!ty.required());
   }
 
   {

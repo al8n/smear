@@ -79,7 +79,10 @@ impl<S> Name<S> {
 
   /// Returns the underlying slice value.
   #[inline]
-  pub const fn slice(&self) -> S where S: Copy {
+  pub const fn slice(&self) -> S
+  where
+    S: Copy,
+  {
     self.value
   }
 
