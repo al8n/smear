@@ -48,14 +48,6 @@ impl<Span> UintValue<Span> {
   /// This parser implements GraphQL's unsigned integer specification with
   /// strict validation of leading zero rules. It uses an alternation strategy
   /// to handle the two valid cases: zero and non-zero integers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the uint value.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,

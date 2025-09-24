@@ -151,14 +151,6 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   ///
   /// This parser handles the complete syntax for GraphQL union types, including
   /// optional descriptions, directives, and member type definitions.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the union type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
     name_parser: NP,
     directives_parser: DP,
@@ -373,14 +365,6 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   /// This parser handles the complete `extend union` syntax, managing keyword
   /// recognition, name validation, and content parsing through a structured
   /// approach that ensures robust error handling and proper whitespace management.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the operation definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
     name_parser: NP,
     directives_parser: DP,

@@ -168,14 +168,6 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
   /// This parser handles the complete syntax for GraphQL scalar type definitions,
   /// supporting optional descriptions and directives while ensuring proper whitespace
   /// and comment handling throughout the definition.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the scalar type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP>(
     name_parser: NP,
@@ -358,14 +350,6 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   /// which must include directives (unlike definitions where they are optional).
   /// The parser ensures proper keyword recognition, name validation, and directive
   /// processing while maintaining comprehensive error reporting capabilities.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the scalar type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP>(
     name_parser: NP,

@@ -93,14 +93,6 @@ impl<Span> Variable<Span> {
   /// according to GraphQL's lexical rules.
   ///
   /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the variable.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
   where
     I: Source<'src>,

@@ -382,14 +382,6 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
   ///
   /// The parser handles the complete fragment spread syntax including the ellipsis,
   /// fragment name, and optional directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the fragment spread.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, FP, DP>(
     fragment_name_parser: FP,
@@ -598,14 +590,6 @@ impl<TypeCondition, Directives, SelectionSet>
   ///
   /// The parser handles the complete inline fragment syntax including the ellipsis,
   /// optional type condition, optional directives, and required selection set.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the inline fragment.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, TP, DP, SP>(
     type_condition_parser: TP,

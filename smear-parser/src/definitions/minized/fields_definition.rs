@@ -167,14 +167,6 @@ impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, D
   /// This parser handles the full field definition syntax including all optional
   /// components. The parsing of arguments, type, and directives is delegated to
   /// the provided parser functions.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the field definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, NP, AP, TP, DP>(
     name_parser: NP,
@@ -361,14 +353,6 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
   ///
   /// This parser handles the complete fields definition syntax including the braces
   /// and ensures at least one field definition is present.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the fields definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'a, I, T, Error, E, P>(
     field_definition_parser: P,
   ) -> impl Parser<'a, I, Self, E> + Clone

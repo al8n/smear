@@ -832,14 +832,6 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   /// This parser handles the full directive definition syntax including all
   /// optional components. The parsing of arguments and locations is delegated
   /// to the provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the directive definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, AP, LP>(
     name_parser: NP,
     args_parser: AP,

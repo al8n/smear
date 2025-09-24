@@ -157,14 +157,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// This parser handles the complete syntax for GraphQL interfaces, including
   /// interface inheritance through the implements clause.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the interface type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -477,14 +469,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ///
   /// This parser handles the complete `extend interface` syntax, parsing the keywords,
   /// interface name, and delegating content parsing to the extension content parser.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the interface type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,

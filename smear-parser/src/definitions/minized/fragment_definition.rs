@@ -217,14 +217,6 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
   /// This parser handles the full fragment definition syntax including all
   /// optional and required components. The parsing of selection set and
   /// directives is delegated to the provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the fragment definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, FP, TP, DP, SP>(
     fragment_name_parser: FP,
     type_condition_parser: TP,

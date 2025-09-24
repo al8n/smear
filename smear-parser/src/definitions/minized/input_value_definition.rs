@@ -204,14 +204,6 @@ impl<Name, Type, DefaultValue, Directives>
   /// optional and required components. The parsing of type, default value, and
   /// directives is delegated to the provided parsers, allowing for flexibility
   /// in handling different contexts and validation requirements.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the input value definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, NP, TP, VP, DP>(
     name_parser: NP,

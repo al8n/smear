@@ -198,14 +198,6 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   /// This parser handles the complete syntax for named operations, including all
   /// optional components. It delegates parsing of specific components to the
   /// provided sub-parsers for maximum flexibility.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the operation definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, OP, VP, DP, SP>(
     name_parser: NP,
@@ -441,14 +433,6 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   /// Creates a parser for operation definitions.
   ///
   /// Handles both named and shorthand operation forms with proper precedence.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the input values definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, OP, VP, DP, SP>(
     name_parser: NP,

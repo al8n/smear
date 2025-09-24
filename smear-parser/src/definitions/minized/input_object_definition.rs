@@ -228,14 +228,6 @@ impl<Name, Directives, FieldsDefinition>
   /// This parser handles the full input object definition syntax including all
   /// optional components. The parsing of fields definition and directives is
   /// delegated to the provided parser functions.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the input object type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP, FP>(
     name_parser: NP,
@@ -511,14 +503,6 @@ impl<Name, Directives, FieldsDefinition>
   ///
   /// This parser handles the full input object extension syntax including the extend
   /// and input keywords, target input object name, and extension data.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the input object type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, NP, DP, FP>(
     name_parser: NP,

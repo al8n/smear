@@ -185,14 +185,6 @@ impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition
   /// This parser handles the complete input values definition syntax including the braces
   /// and ensures at least one input field definition is present. The parsing of individual
   /// input value definitions is delegated to the provided parser.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the input values definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, P>(
     input_value_definition_parser: P,

@@ -116,14 +116,6 @@ impl<EnumValue, Directives> EnumValueDefinition<EnumValue, Directives> {
   ///
   /// This parser handles the complete enum value definition syntax including optional
   /// description, required enum value name, and optional directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum value definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, EP, DP>(
     enum_value_parser: EP,
@@ -282,14 +274,6 @@ impl<EnumValueDefinition, Container> EnumValuesDefinition<EnumValueDefinition, C
   ///
   /// This parser handles the complete enum values definition syntax including the braces
   /// and ensures at least one enum value definition is present.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum values definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, P>(
     enum_value_parser: P,
@@ -471,14 +455,6 @@ impl<Name, Directives, EnumValuesDefinition>
   /// This parser handles the full enum definition syntax including all optional
   /// components. The parsing of enum values and directives is delegated to the
   /// provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, P, DP>(
     name_parser: NP,
@@ -605,14 +581,6 @@ impl<Directives, EnumValuesDefinition> EnumTypeExtensionData<Directives, EnumVal
   ///
   /// This parser handles both types of enum extensions: those that add values
   /// (optionally with directives) and those that add only directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum type extension data.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, DP, EVP>(
     directives_parser: impl Fn() -> DP,
     enum_values_parser: impl Fn() -> EVP,
@@ -800,14 +768,6 @@ impl<Name, Directives, EnumValuesDefinition>
   ///
   /// This parser handles the full enum extension syntax including the extend
   /// and enum keywords, target enum name, and extension data.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the enum type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP, EVP>(
     name_parser: NP,

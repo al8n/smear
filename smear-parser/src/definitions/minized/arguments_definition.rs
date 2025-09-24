@@ -140,14 +140,6 @@ impl<InputValueDefinition, Container> ArgumentsDefinition<InputValueDefinition, 
   /// This parser handles the complete arguments definition syntax including the parentheses
   /// and ensures at least one input value definition is present. The parsing of individual
   /// input value definitions is delegated to the provided parser.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the arguments definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, P>(
     input_value_definition_parser: P,

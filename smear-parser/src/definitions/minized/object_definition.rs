@@ -164,14 +164,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   /// This parser handles the complete syntax for GraphQL object types, including
   /// all optional components like descriptions, interface implementations,
   /// directives, and field definitions.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the object type definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -485,14 +477,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   /// This parser handles the `extend type` syntax followed by the object name
   /// and extension data. The content parsing is delegated to the
   /// `ObjectTypeExtensionData` parser for modularity.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the object type extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,

@@ -93,14 +93,6 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
   ///
   /// This parser handles the syntax `OperationType : Name` where the operation type
   /// is parsed by the provided parser and the name must be a valid GraphQL name.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the root operation type.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, NP, P>(
     name_parser: NP,
     operation_type_parser: P,
@@ -254,14 +246,6 @@ impl<RootOperationTypeDefinition, Container>
   /// This parser handles the braced block syntax containing one or more root operation
   /// type definitions. The parser ensures at least one definition is present and
   /// properly handles whitespace and comments within the block.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the root operation types definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, P>(
     root_operation_type_parser: P,
   ) -> impl Parser<'src, I, Self, E> + Clone

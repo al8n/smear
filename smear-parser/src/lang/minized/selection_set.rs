@@ -139,14 +139,6 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
   /// This parser handles the complete selection set syntax including the braces
   /// and ensures at least one selection is present. The parsing of individual
   /// selections is delegated to the provided selection parser.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the selection set.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'a, I, T, Error, E, P>(
     selection_parser: P,
   ) -> impl Parser<'a, I, Self, E> + Clone

@@ -175,14 +175,6 @@ impl<Directives, RootOperationTypesDefinition>
   /// including all optional and required components. The parsing of directives
   /// and root operation type definitions is delegated to the provided parsers,
   /// allowing for context-specific validation and processing.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the operation definition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, DP, RP>(
     directives_parser: DP,
     root_operation_types_definition_parser: RP,
@@ -600,14 +592,6 @@ impl<Directives, RootOperationTypesDefinition>
   /// supporting both directive-only and operational extensions. The parser
   /// is designed to be composable and integrate seamlessly with larger
   /// GraphQL document parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the schema extension.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'src, I, T, Error, E, DP, RP>(
     directives_parser: DP,
     root_operation_types_definition_parser: RP,

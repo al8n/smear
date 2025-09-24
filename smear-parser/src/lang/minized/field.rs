@@ -335,14 +335,6 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
   /// This parser handles the complete field syntax including optional alias, required name,
   /// and optional arguments, directives, and selection set. The parsing of each component
   /// is delegated to the provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the field.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
   pub fn parser_with<'a, I, T, Error, E, AP, DP, SP>(
     args: AP,
     directives: DP,
