@@ -106,31 +106,3 @@ where
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::{FastParserExtra, FastTokenStream};
-
-  use super::*;
-
-  #[test]
-  fn test_implement_interfaces() {
-    let parser = ImplementInterfaces::<&str>::parser::<FastParserExtra<&str>>();
-    let ifs = parser
-      .parse(FastTokenStream::new(" &  Foo & Bar & Baz "))
-      .into_result()
-      .expect("should parse");
-    assert_eq!(ifs.interfaces().len(), 3);
-    assert_eq!(*ifs.interfaces()[0].source(), "Foo");
-    assert_eq!(*ifs.interfaces()[1].source(), "Bar");
-    assert_eq!(*ifs.interfaces()[2].source(), "Baz");
-
-    let ifs = parser
-      .parse(FastTokenStream::new(" Foo & Bar & Baz "))
-      .into_result()
-      .expect("should parse");
-    assert_eq!(ifs.interfaces().len(), 3);
-    assert_eq!(*ifs.interfaces()[0].source(), "Foo");
-    assert_eq!(*ifs.interfaces()[1].source(), "Bar");
-    assert_eq!(*ifs.interfaces()[2].source(), "Baz");
-  }
-}

@@ -1,17 +1,12 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0039_variable_with_directives.graphql");
 
 #[test]
 fn variable_with_directives() {
-  let values = OperationDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
-  .unwrap()
-  .unwrap_named();
+  let values = OperationDefinition::<&str>::parse_str(ALL).unwrap().unwrap_named();
 
-  assert_eq!(values.name().unwrap().span().source(), &"getOutput");
+  assert_eq!(values.name().unwrap().slice(), "getOutput");
   let variable_definitions = values
     .variable_definitions()
     .unwrap()
@@ -23,44 +18,42 @@ fn variable_with_directives() {
   {
     let variable_definition = iter.next().unwrap();
     assert_eq!(
-      variable_definition.variable().name().span().source(),
-      &"input"
+      variable_definition.variable().name().slice(),
+      "input"
     );
     let ty = variable_definition.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Int");
+    assert_eq!(ty.name().slice(), "Int");
     let directives = variable_definition.directives().unwrap().directives();
     assert_eq!(directives.len(), 1);
     let directive = &directives[0];
-    assert_eq!(directive.name().span().source(), &"deprecated");
+    assert_eq!(directive.name().slice(), "deprecated");
   }
   {
     let variable_definition = iter.next().unwrap();
     assert_eq!(
-      variable_definition.variable().name().span().source(),
-      &"config"
+      variable_definition.variable().name().slice(),
+      "config"
     );
     let ty = variable_definition.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"String");
+    assert_eq!(ty.name().slice(), "String");
     let default_value = variable_definition.default_value().unwrap();
     assert_eq!(
       default_value
         .value()
         .unwrap_string_ref()
-        .content()
-        .span()
-        .source(),
-      &"Config"
+        .content(),
+      "Config"
     );
 
     let directives = variable_definition.directives().unwrap().directives();
     assert_eq!(directives.len(), 1);
     let directive = &directives[0];
-    assert_eq!(directive.name().span().source(), &"tag");
+    assert_eq!(directive.name().slice(), "tag");
     let arguments = directive.arguments().unwrap().arguments();
     assert_eq!(arguments.len(), 1);
     let argument = &arguments[0];
-    assert_eq!(argument.name().span().source(), &"name");
+    assert_eq!(argument.name().slice(), "name");
     let value = argument.value().unwrap_string_ref();
-    assert_eq!(value.content().span().source(), &"team-customers");
+    assert_eq!(value.content(), "team-customers");
   }
 }

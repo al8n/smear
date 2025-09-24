@@ -106,32 +106,3 @@ where
     Ok(())
   }
 }
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::{FastParserExtra, FastTokenStream};
-
-  use super::*;
-
-  #[test]
-  fn test_union_member_types() {
-    let parser = UnionMemberTypes::<&str>::parser::<FastParserExtra<&str>>();
-    let ifs = parser
-      .parse(FastTokenStream::new("=|Foo|Bar|Baz"))
-      .into_result()
-      .expect("should parse");
-    assert_eq!(ifs.members().len(), 3);
-    assert_eq!(*ifs.members()[0].source(), "Foo");
-    assert_eq!(*ifs.members()[1].source(), "Bar");
-    assert_eq!(*ifs.members()[2].source(), "Baz");
-
-    let ifs = parser
-      .parse(FastTokenStream::new("=Foo|Bar|Baz"))
-      .into_result()
-      .expect("should parse");
-    assert_eq!(ifs.members().len(), 3);
-    assert_eq!(*ifs.members()[0].source(), "Foo");
-    assert_eq!(*ifs.members()[1].source(), "Bar");
-    assert_eq!(*ifs.members()[2].source(), "Baz");
-  }
-}

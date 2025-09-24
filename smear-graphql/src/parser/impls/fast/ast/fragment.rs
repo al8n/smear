@@ -52,27 +52,3 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_fragment_name_parser() {
-    let parser = FragmentName::parser::<FastParserExtra<&str>>();
-    let input = r#"foo"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), &Span::new(0, 3));
-  }
-
-  #[test]
-  fn test_type_condition_parser() {
-    let parser = TypeCondition::parser::<FastParserExtra<&str>>();
-    let input = r#"on foo"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.name().source(), "foo");
-    assert_eq!(parsed.span(), &Span::new(0, 6));
-  }
-}

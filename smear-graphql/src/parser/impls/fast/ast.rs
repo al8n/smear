@@ -242,6 +242,21 @@ pub type InputObjectTypeDefinition<
   InputFieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
 >;
 
+pub type DescribedInputObjectTypeDefinition<
+  S,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+> = Described<
+  InputObjectTypeDefinition<
+    S,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
+  StringValue<S>,
+>;
+
 pub type InputObjectTypeExtension<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -273,6 +288,15 @@ pub type ScalarTypeDefinition<
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
+pub type DescribedScalarTypeDefinition<
+  S,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+> = Described<
+  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  StringValue<S>,
+>;
+
 pub type ScalarTypeExtension<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -293,6 +317,23 @@ pub type ObjectTypeDefinition<
   ImplementInterfaces<S, ImplementInterfacesContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+>;
+
+pub type DescribedObjectTypeDefinition<
+  S,
+  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+> = Described<
+  ObjectTypeDefinition<
+    S,
+    ImplementInterfacesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
+  StringValue<S>,
 >;
 
 pub type ObjectTypeExtension<
@@ -321,6 +362,23 @@ pub type InterfaceTypeDefinition<
   FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
 >;
 
+pub type DescribedInterfaceTypeDefinition<
+  S,
+  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+> = Described<
+  InterfaceTypeDefinition<
+    S,
+    ImplementInterfacesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
+  StringValue<S>,
+>;
+
 pub type InterfaceTypeExtension<
   S,
   ImplementInterfacesContainer = DefaultNamesContainer<S>,
@@ -343,6 +401,16 @@ pub type UnionTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   UnionMemberTypes<S, UnionMemberTypesContainer>,
+>;
+
+pub type DescribedUnionTypeDefinition<
+  S,
+  UnionMemberTypesContainer = DefaultNamesContainer<S>,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+> = Described<
+  UnionTypeDefinition<S, UnionMemberTypesContainer, ArgumentsContainer, DirectivesContainer>,
+  StringValue<S>,
 >;
 
 pub type UnionTypeExtension<
@@ -387,6 +455,16 @@ pub type EnumTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+>;
+
+pub type DescribedEnumTypeDefinition<
+  S,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+> = Described<
+  EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+  StringValue<S>,
 >;
 
 pub type EnumTypeExtension<

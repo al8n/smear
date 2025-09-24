@@ -1,15 +1,12 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0028_union_type_definition_followed_by_object_definition.graphql");
 
 #[test]
 fn union_type_definition_followed_by_object_definition() {
-  let document =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
-      .unwrap();
+  let document = Document::<&str>::parse_str(ALL).unwrap();
 
-  let definitions = document.content();
+  let definitions = document.definitions();
   assert_eq!(definitions.len(), 2);
 
   let mut iter = definitions.iter();
@@ -22,15 +19,12 @@ fn union_type_definition_followed_by_object_definition() {
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_union_ref();
-    assert_eq!(union.name().span().source(), &"SearchResult");
+    assert_eq!(union.name().slice(), "SearchResult");
     let member_types = union.member_types().unwrap();
-    let leading_member_type = member_types.leading_member_type();
-    assert_eq!(leading_member_type.name().span().source(), &"Photo");
-
-    let remaining_member_types = member_types.remaining_member_types();
-    assert_eq!(remaining_member_types.len(), 1);
-    let member_type = &remaining_member_types[0];
-    assert_eq!(member_type.name().span().source(), &"Person");
+    let members = member_types.members();
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[0].slice(), "Photo");
+    assert_eq!(members[1].slice(), "Person");
   }
 
   {
@@ -41,13 +35,13 @@ fn union_type_definition_followed_by_object_definition() {
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
-    assert_eq!(object.name().span().source(), &"Error");
+    assert_eq!(object.name().slice(), "Error");
     let fields = object.fields_definition().unwrap().field_definitions();
     assert_eq!(fields.len(), 1);
     let field = &fields[0];
-    assert_eq!(field.name().span().source(), &"code");
+    assert_eq!(field.name().slice(), "code");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Int");
-    assert_eq!(ty.bang(), None);
+    assert_eq!(ty.name().slice(), "Int");
+    assert!(!ty.required());
   }
 }

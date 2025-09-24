@@ -1,14 +1,10 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0004_selection_with_fields_aliases_arguments.graphql");
 
 #[test]
 fn selection_with_fields_aliases_arguments() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
-  .unwrap();
+  let selection_set = SelectionSet::<&str>::parse_str(ALL).unwrap();
   assert_eq!(selection_set.selections().len(), 2);
 
   let mut fields = selection_set.into_selections().into_iter();
@@ -16,7 +12,7 @@ fn selection_with_fields_aliases_arguments() {
   let fave_snack = fields.next().unwrap().unwrap_field();
   assert!(fields.next().is_none());
 
-  assert_eq!(pet.name().span().source(), &"pet");
+  assert_eq!(pet.name().slice(), "pet");
 
   {
     let spet = pet.selection_set().cloned().unwrap();
@@ -24,8 +20,8 @@ fn selection_with_fields_aliases_arguments() {
 
     let mut fields = spet.into_selections().into_iter();
     let name = fields.next().unwrap().unwrap_field();
-    assert_eq!(name.alias().unwrap().name().span().source(), &"name");
-    assert_eq!(name.name().span().source(), &"nickname");
+    assert_eq!(name.alias().unwrap().name().slice(), "name");
+    assert_eq!(name.name().slice(), "nickname");
     assert!(name.selection_set().is_none());
 
     let birthday = fields.next().unwrap().unwrap_field();
@@ -63,13 +59,13 @@ fn selection_with_fields_aliases_arguments() {
     }
   }
 
-  assert_eq!(fave_snack.name().span().source(), &"faveSnack");
+  assert_eq!(fave_snack.name().slice(), "faveSnack");
   assert!(fave_snack.selection_set().is_none());
 
   let fave_snack_args = fave_snack.arguments().expect("expect arguments");
   assert_eq!(fave_snack_args.arguments().len(), 1, "expect one argument");
 
   let arg1 = &fave_snack_args.arguments()[0];
-  assert_eq!(arg1.name().span().source(), &"quantity");
-  assert_eq!(arg1.value().unwrap_int_ref().span().source(), &"4");
+  assert_eq!(arg1.name().slice(), "quantity");
+  assert_eq!(arg1.value().unwrap_int_ref().slice(), "4");
 }

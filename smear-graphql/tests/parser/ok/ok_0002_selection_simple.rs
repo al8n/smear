@@ -1,14 +1,11 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0002_selection_simple.graphql");
 
 #[test]
 fn selection_simple() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
-  .unwrap();
+  let selection_set = SelectionSet::<&str>::parse_str(ALL).unwrap();
+
   assert_eq!(selection_set.selections().len(), 2);
 
   let mut fields = selection_set.into_selections().into_iter();
@@ -16,8 +13,8 @@ fn selection_simple() {
   let fave_snack = fields.next().unwrap().unwrap_field();
   assert!(fields.next().is_none());
 
-  assert_eq!(pet.name().span().source(), &"pet");
+  assert_eq!(pet.name().slice(), "pet");
   assert!(pet.selection_set().is_none());
-  assert_eq!(fave_snack.name().span().source(), &"faveSnack");
+  assert_eq!(fave_snack.name().slice(), "faveSnack");
   assert!(fave_snack.selection_set().is_none());
 }

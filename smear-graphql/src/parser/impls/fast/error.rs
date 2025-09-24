@@ -13,7 +13,7 @@ use super::*;
 impl<'a> ParseVariableValueError<Name<&'a str>> for FastTokenError<'a, &'a str> {
   #[inline]
   fn missing_dollar_token(name: Name<&'a str>, span: Span) -> Self {
-    Self::unexpected_token(Token::Identifier(name.source()), TokenKind::Dollar, span)
+    Self::unexpected_token(Token::Identifier(name.slice()), TokenKind::Dollar, span)
   }
 
   #[inline]

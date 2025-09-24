@@ -1,15 +1,14 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0023_scalar_definition.graphql");
 
 #[test]
 fn scalar_type_definition() {
   let definition =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
+    Document::<&str>::parse_str(ALL)
       .unwrap();
 
-  let definitions = definition.content();
+  let definitions = definition.definitions();
   assert_eq!(definitions.len(), 1);
 
   let definition = definitions
@@ -21,13 +20,13 @@ fn scalar_type_definition() {
     .unwrap_type_ref()
     .unwrap_scalar_ref();
 
-  assert_eq!(definition.name().span().source(), &"Time");
+  assert_eq!(definition.name().slice(), "Time");
   let directives = definition.directives().cloned().unwrap();
   assert_eq!(directives.directives().len(), 1);
   let mut directives = directives.directives().iter();
   {
     let deprecated = directives.next().unwrap();
-    assert_eq!(deprecated.name().span().source(), &"deprecated");
+    assert_eq!(deprecated.name().slice(), "deprecated");
     assert!(deprecated.arguments().is_none());
   }
 }

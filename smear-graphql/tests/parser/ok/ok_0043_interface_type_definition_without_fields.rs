@@ -1,32 +1,33 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0043_interface_type_definition_without_fields.graphql");
 
 #[test]
 fn interface_type_definition_without_fields() {
   let document =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<'_, char>>>(ALL)
+    Document::<&str>::parse_str(ALL)
       .unwrap();
 
-  let mut types = document.content().iter();
+  let mut types = document.definitions().iter();
 
   {
-    let interface = types
+    let described = types
       .next()
       .unwrap()
       .unwrap_type_system_ref()
-      .unwrap_definition_ref()
+      .unwrap_definition_ref();
+    
+    let interface = described
       .unwrap_type_ref()
       .unwrap_interface_ref();
 
     assert_eq!(
-      interface.name().span().source(),
-      &"AnInterfaceWithoutFields"
+      interface.name().slice(),
+      "AnInterfaceWithoutFields"
     );
     assert_eq!(
-      interface.description().unwrap().content().span().source(),
-      &"An interface with no fields"
+      described.description().unwrap().content(),
+      "An interface with no fields"
     );
     assert!(interface.fields_definition().is_none());
   }
@@ -40,16 +41,16 @@ fn interface_type_definition_without_fields() {
       .unwrap_type_ref()
       .unwrap_interface_ref();
     assert_eq!(
-      interface.name().span().source(),
-      &"AnInterfaceWithoutFields"
+      interface.name().slice(),
+      "AnInterfaceWithoutFields"
     );
     let fields = interface.fields_definition().unwrap();
     let field_definitions = fields.field_definitions();
     assert_eq!(field_definitions.len(), 1);
     let field = &field_definitions[0];
-    assert_eq!(field.name().span().source(), &"id");
+    assert_eq!(field.name().slice(), "id");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"ID");
-    assert!(ty.bang().is_some());
+    assert_eq!(ty.name().slice(), "ID");
+    assert!(ty.required());
   }
 }

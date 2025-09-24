@@ -1,14 +1,10 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SchemaDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0025_schema_definition.graphql");
 
 #[test]
 fn schema_definition() {
-  let definition = SchemaDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
-  .unwrap();
+  let definition = SchemaDefinition::<&str>::parse_str(ALL).unwrap();
 
   let operation_types = definition
     .root_operation_types_definition()
@@ -19,25 +15,25 @@ fn schema_definition() {
 
   {
     let query = operation_types.next().unwrap();
-    assert_eq!(query.operation_type().span().source(), &"query");
-    assert_eq!(query.name().span().source(), &"MyQueryRootType");
+    assert_eq!(query.operation_type().as_str(), "query");
+    assert_eq!(query.name().slice(), "MyQueryRootType");
   }
 
   {
     let mutation = operation_types.next().unwrap();
-    assert_eq!(mutation.operation_type().span().source(), &"mutation");
-    assert_eq!(mutation.name().span().source(), &"MyMutationRootType");
+    assert_eq!(mutation.operation_type().as_str(), "mutation");
+    assert_eq!(mutation.name().slice(), "MyMutationRootType");
   }
 
   {
     let subscription = operation_types.next().unwrap();
     assert_eq!(
-      subscription.operation_type().span().source(),
-      &"subscription"
+      subscription.operation_type().as_str(),
+      "subscription"
     );
     assert_eq!(
-      subscription.name().span().source(),
-      &"MySubscriptionRootType"
+      subscription.name().slice(),
+      "MySubscriptionRootType"
     );
   }
 }

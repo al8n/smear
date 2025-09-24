@@ -10,6 +10,22 @@ pub struct Described<T, Description> {
   node: T,
 }
 
+impl<T, Description> core::ops::Deref for Described<T, Description> {
+  type Target = T;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    &self.node
+  }
+}
+
+impl<T, Description> core::ops::DerefMut for Described<T, Description> {
+  #[inline]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.node
+  }
+}
+
 impl<T, Description> AsRef<Span> for Described<T, Description> {
   #[inline]
   fn as_ref(&self) -> &Span {

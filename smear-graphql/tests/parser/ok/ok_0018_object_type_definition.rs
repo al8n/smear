@@ -1,24 +1,22 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{DescribedObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0018_object_type_definition.graphql");
 
 #[test]
 fn object_type_definition() {
-  let definition = ObjectTypeDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
+  let definition = DescribedObjectTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().span().source(), &"Person");
+  assert_eq!(definition.name().slice(), "Person");
   assert_eq!(
-    definition.description().unwrap().content().span().source(),
-    &"description of type"
+    definition.description().unwrap().content(),
+    "description of type"
   );
 
   let impls = definition.implements().unwrap();
+  let ifs = impls.interfaces();
   assert_eq!(
-    impls.leading_implement_interface().name().span().source(),
-    &"Human"
+    ifs[0].slice(),
+    "Human"
   );
 
   let fields = definition.fields_definition().unwrap();
@@ -27,32 +25,32 @@ fn object_type_definition() {
 
   {
     let name = fields.next().unwrap();
-    assert_eq!(name.name().span().source(), &"name");
+    assert_eq!(name.name().slice(), "name");
     assert_eq!(
-      name.description().unwrap().content().span().source(),
-      &"\n    description of field\n    "
+      name.description().unwrap().content(),
+      "\n    description of field\n    "
     );
     let ty = name.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().span().source(), &"String");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "String");
+    assert!(!ty.required());
   }
 
   {
     let age = fields.next().unwrap();
-    assert_eq!(age.name().span().source(), &"age");
+    assert_eq!(age.name().slice(), "age");
     let ty = age.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().span().source(), &"Int");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "Int");
+    assert!(!ty.required());
   }
 
   {
     let picture = fields.next().unwrap();
-    assert_eq!(picture.name().span().source(), &"picture");
+    assert_eq!(picture.name().slice(), "picture");
     let ty = picture.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().span().source(), &"Url");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "Url");
+    assert!(!ty.required());
   }
 }

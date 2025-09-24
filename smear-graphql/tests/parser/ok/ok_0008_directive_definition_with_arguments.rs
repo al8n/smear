@@ -1,5 +1,4 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{ArgumentsDefinition, DirectiveDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0008_directive_definition_with_arguments.graphql");
 
@@ -7,26 +6,24 @@ const ARGS_INPUT: &str = r###"(isTreat: Boolean, treatKind: String)"###;
 
 #[test]
 fn arguments_definition() {
-  let args = ArgumentsDefinition::<WithSource<&str, SimpleSpan>>::parse_str::<
-    extra::Err<Simple<'_, char>>,
-  >(ARGS_INPUT)
+  let args = ArgumentsDefinition::<&str>::parse_str(ARGS_INPUT)
   .unwrap();
   let mut iter = args.input_value_definitions().iter();
 
   {
     let is_treat = iter.next().unwrap();
-    assert_eq!(is_treat.name().span().source(), &"isTreat");
+    assert_eq!(is_treat.name().slice(), "isTreat");
     let ty = is_treat.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Boolean");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "Boolean");
+    assert!(!ty.required());
   }
 
   {
     let treat_kind = iter.next().unwrap();
-    assert_eq!(treat_kind.name().span().source(), &"treatKind");
+    assert_eq!(treat_kind.name().slice(), "treatKind");
     let ty = treat_kind.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"String");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "String");
+    assert!(!ty.required());
   }
 
   assert!(iter.next().is_none());
@@ -34,25 +31,16 @@ fn arguments_definition() {
 
 #[test]
 fn directive_definition_with_arguments() {
-  let definition = DirectiveDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
-  .unwrap();
-  assert_eq!(definition.name().span().source(), &"example");
+  let definition = DirectiveDefinition::<&str>::parse_str(ALL).unwrap();
+  assert_eq!(definition.name().slice(), "example");
 
-  assert!(definition
-    .locations()
-    .leading_location()
-    .location()
+  let locations = definition.locations();
+  let locations = locations.locations();
+  assert_eq!(locations.len(), 2);
+  assert!(locations[0]
     .unwrap_executable_ref()
     .is_field());
-  assert_eq!(definition.locations().remaining_locations().len(), 1);
-  assert!(definition
-    .locations()
-    .remaining_locations()
-    .first()
-    .unwrap()
-    .location()
+  assert!(locations[1]
     .unwrap_executable_ref()
     .is_mutation());
 
@@ -61,18 +49,18 @@ fn directive_definition_with_arguments() {
 
   {
     let is_treat = iter.next().unwrap();
-    assert_eq!(is_treat.name().span().source(), &"isTreat");
+    assert_eq!(is_treat.name().slice(), "isTreat");
     let ty = is_treat.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Boolean");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "Boolean");
+    assert!(!ty.required());
   }
 
   {
     let treat_kind = iter.next().unwrap();
-    assert_eq!(treat_kind.name().span().source(), &"treatKind");
+    assert_eq!(treat_kind.name().slice(), "treatKind");
     let ty = treat_kind.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"String");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "String");
+    assert!(!ty.required());
   }
 
   assert!(iter.next().is_none());

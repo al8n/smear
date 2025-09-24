@@ -1,5 +1,4 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 use std::fs;
 
@@ -18,11 +17,8 @@ fn parse_services() {
     let path = entry.path();
     if path.extension().and_then(|s| s.to_str()) == Some("graphql") {
       let content = fs::read_to_string(&path).expect("should be able to read file");
-      let document = Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-        extra::Err<Rich<char>>,
-      >(&content)
-      .unwrap();
-      let _ = document.content();
+      let document = Document::<&str>::parse_str(&content).into_result().unwrap();
+      let _ = document.definitions();
     }
   }
 }

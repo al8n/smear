@@ -1,17 +1,14 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0035_query_with_variables.graphql");
 
 #[test]
 fn query_with_variables() {
-  let values = OperationDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
+  let values = OperationDefinition::<&str>::parse_str(ALL)
   .unwrap()
   .unwrap_named();
 
-  assert_eq!(values.name().unwrap().span().source(), &"Foo");
+  assert_eq!(values.name().unwrap().slice(), "Foo");
   let variable_definitions = values
     .variable_definitions()
     .unwrap()
@@ -19,9 +16,9 @@ fn query_with_variables() {
   assert_eq!(variable_definitions.len(), 1);
   let variable_definition = &variable_definitions[0];
   assert_eq!(
-    variable_definition.variable().name().span().source(),
-    &"bar"
+    variable_definition.variable().name().slice(),
+    "bar"
   );
   let ty = variable_definition.ty().unwrap_name_ref();
-  assert_eq!(ty.name().span().source(), &"Int");
+  assert_eq!(ty.name().slice(), "Int");
 }

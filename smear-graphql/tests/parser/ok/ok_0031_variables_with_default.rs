@@ -1,17 +1,14 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0031_variables_with_default.graphql");
 
 #[test]
 fn variables_with_default() {
-  let values = OperationDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
+  let values = OperationDefinition::<&str>::parse_str(ALL)
   .unwrap()
   .unwrap_named();
 
-  assert_eq!(values.name().unwrap().span().source(), &"getOutput");
+  assert_eq!(values.name().unwrap().slice(), "getOutput");
   let variable_definitions = values
     .variable_definitions()
     .unwrap()
@@ -22,34 +19,32 @@ fn variables_with_default() {
   {
     let variable_definition = variable_definitions.next().unwrap();
     assert_eq!(
-      variable_definition.variable().name().span().source(),
-      &"input"
+      variable_definition.variable().name().slice(),
+      "input"
     );
 
     let ty = variable_definition.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Int");
+    assert_eq!(ty.name().slice(), "Int");
 
     let default_value = variable_definition.default_value().unwrap();
-    assert_eq!(default_value.value().unwrap_int_ref().span().source(), &"5");
+    assert_eq!(default_value.value().unwrap_int_ref().slice(), "5");
   }
 
   {
     let variable_definition = variable_definitions.next().unwrap();
     assert_eq!(
-      variable_definition.variable().name().span().source(),
-      &"config"
+      variable_definition.variable().name().slice(),
+      "config"
     );
     let ty = variable_definition.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"String");
+    assert_eq!(ty.name().slice(), "String");
     let default_value = variable_definition.default_value().unwrap();
     assert_eq!(
       default_value
         .value()
         .unwrap_string_ref()
-        .content()
-        .span()
-        .source(),
-      &"Config"
+        .content(),
+      "Config"
     );
   }
 }

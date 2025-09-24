@@ -1,15 +1,13 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0038_wrapped_named_types.graphql");
 
 #[test]
 fn wrapped_named_types() {
   let document =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
-      .unwrap();
+    Document::<&str>::parse_str(ALL).unwrap();
 
-  let definitions = document.content();
+  let definitions = document.definitions();
   assert_eq!(definitions.len(), 2);
 
   let mut definitions = definitions.iter().map(|d| {
@@ -30,8 +28,8 @@ fn wrapped_named_types() {
   }
 }
 
-fn check_object_def(def: &ObjectTypeDefinition<WithSource<&str, SimpleSpan>>, name: &str) {
-  assert_eq!(def.name().span().source(), &name);
+fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
+  assert_eq!(def.name().slice(), name);
   let fields = def.fields_definition().unwrap().field_definitions();
   assert_eq!(fields.len(), 5);
 
@@ -39,56 +37,56 @@ fn check_object_def(def: &ObjectTypeDefinition<WithSource<&str, SimpleSpan>>, na
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().span().source(), &"a");
+    assert_eq!(field.name().slice(), "a");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"String");
+    assert_eq!(ty.name().slice(), "String");
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().span().source(), &"b");
+    assert_eq!(field.name().slice(), "b");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Int");
-    assert!(ty.bang().is_some());
+    assert_eq!(ty.name().slice(), "Int");
+    assert!(ty.required());
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().span().source(), &"c");
+    assert_eq!(field.name().slice(), "c");
     let ty = field.ty().unwrap_list_ref();
-    assert!(ty.bang().is_some());
+    assert!(ty.required());
     {
       let inner = ty.ty().unwrap_name_ref();
-      assert_eq!(inner.name().span().source(), &"Int");
-      assert!(inner.bang().is_some());
+      assert_eq!(inner.name().slice(), "Int");
+      assert!(inner.required());
     }
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().span().source(), &"d");
+    assert_eq!(field.name().slice(), "d");
     let ty = field.ty().unwrap_list_ref();
-    assert!(ty.bang().is_none());
+    assert!(!ty.required());
     {
       let level1 = ty.ty().unwrap_list_ref();
-      assert!(level1.bang().is_none());
+      assert!(!level1.required());
 
       {
         let level2 = level1.ty().unwrap_list_ref();
-        assert!(level2.bang().is_none());
+        assert!(!level2.required());
 
         {
           let level3 = level2.ty().unwrap_list_ref();
-          assert!(level3.bang().is_none());
+          assert!(!level3.required());
 
           {
             let level4 = level3.ty().unwrap_list_ref();
-            assert!(level4.bang().is_none());
+            assert!(!level4.required());
 
             {
               let level5 = level4.ty().unwrap_name_ref();
-              assert_eq!(level5.name().span().source(), &"Int");
-              assert!(level5.bang().is_none());
+              assert_eq!(level5.name().slice(), "Int");
+              assert!(!level5.required());
             }
           }
         }
@@ -98,29 +96,29 @@ fn check_object_def(def: &ObjectTypeDefinition<WithSource<&str, SimpleSpan>>, na
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().span().source(), &"d");
+    assert_eq!(field.name().slice(), "d");
     let ty = field.ty().unwrap_list_ref();
-    assert!(ty.bang().is_some());
+    assert!(ty.required());
     {
       let level1 = ty.ty().unwrap_list_ref();
-      assert!(level1.bang().is_some());
+      assert!(level1.required());
 
       {
         let level2 = level1.ty().unwrap_list_ref();
-        assert!(level2.bang().is_some());
+        assert!(level2.required());
 
         {
           let level3 = level2.ty().unwrap_list_ref();
-          assert!(level3.bang().is_some());
+          assert!(level3.required());
 
           {
             let level4 = level3.ty().unwrap_list_ref();
-            assert!(level4.bang().is_some());
+            assert!(level4.required());
 
             {
               let level5 = level4.ty().unwrap_name_ref();
-              assert_eq!(level5.name().span().source(), &"Int");
-              assert!(level5.bang().is_some());
+              assert_eq!(level5.name().slice(), "Int");
+              assert!(level5.required());
             }
           }
         }

@@ -7,9 +7,6 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// Standards-compliant GraphQL parser combinators.
-pub mod cst;
-
 /// Error types.
 pub mod error;
 

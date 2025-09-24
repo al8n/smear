@@ -1,15 +1,12 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{DescribedInterfaceTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
 
 #[test]
 fn interface_object_definition() {
-  let definition = InterfaceTypeDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
+  let definition = DescribedInterfaceTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().span().source(), &"ValuedEntity");
+  assert_eq!(definition.name().slice(), "ValuedEntity");
 
   let fields = definition.fields_definition().unwrap();
   assert_eq!(fields.field_definitions().len(), 1);
@@ -17,10 +14,10 @@ fn interface_object_definition() {
 
   {
     let a = fields.next().unwrap();
-    assert_eq!(a.name().span().source(), &"value");
+    assert_eq!(a.name().slice(), "value");
     let ty = a.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().span().source(), &"Int");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "Int");
+    assert!(!ty.required());
   }
 }

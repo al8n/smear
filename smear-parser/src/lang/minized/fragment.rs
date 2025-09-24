@@ -149,6 +149,16 @@ pub struct FragmentName<S> {
   value: S,
 }
 
+impl<S> PartialEq<S> for FragmentName<S>
+where
+  S: PartialEq,
+{
+  #[inline]
+  fn eq(&self, other: &S) -> bool {
+    self.slice_ref().eq(other)
+  }
+}
+
 impl<S> From<FragmentName<S>> for Name<S> {
   #[inline]
   fn from(value: FragmentName<S>) -> Self {
@@ -194,7 +204,13 @@ impl<S> FragmentName<S> {
 
   /// Returns a reference to the underlying source value.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn slice(&self) -> S where S: Copy {
+    self.value
+  }
+
+  /// Returns a reference to the underlying source value.
+  #[inline]
+  pub const fn slice_ref(&self) -> &S {
     &self.value
   }
 }
@@ -205,7 +221,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -214,7 +230,7 @@ impl<S> core::ops::Deref for FragmentName<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.slice_ref()
   }
 }
 

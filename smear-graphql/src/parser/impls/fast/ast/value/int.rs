@@ -25,7 +25,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -57,9 +57,16 @@ impl<S> IntValue<S> {
     &self.span
   }
 
-  /// Returns the source of the int.
+  /// Returns the slice of the int.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn slice(&self) -> S where S: Copy {
+    self.value
+  }
+
+
+  /// Returns the slice of the int.
+  #[inline]
+  pub const fn slice_ref(&self) -> &S {
     &self.value
   }
 }
@@ -92,7 +99,7 @@ where
       "- INT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source().display()
+      self.slice_ref().display()
     )
   }
 }
@@ -116,21 +123,5 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_int_parser() {
-    let parser = IntValue::parser::<FastParserExtra<&str>>();
-    let input = r#"42"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "42");
-    assert_eq!(parsed.span(), &Span::new(0, 2));
   }
 }

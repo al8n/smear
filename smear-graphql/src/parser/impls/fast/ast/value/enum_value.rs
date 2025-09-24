@@ -55,10 +55,16 @@ impl<S> EnumValue<S> {
     self.0.span()
   }
 
-  /// Returns the name as a string slice.
-  #[inline]
+  /// Returns the slice of the enum value.
+  #[inline(always)]
+  pub const fn slice(&self) -> S where S: Copy {
+    self.0.slice()
+  }
+
+  /// Returns a reference to the slice of the enum value.
+  #[inline(always)]
   pub const fn source(&self) -> &S {
-    self.0.source()
+    self.0.slice_ref()
   }
 }
 

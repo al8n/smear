@@ -77,9 +77,15 @@ impl<S> Name<S> {
     &self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the underlying slice value.
+  #[inline]
+  pub const fn slice(&self) -> S where S: Copy {
+    self.value
+  }
+
+  /// Returns reference of the underlying slice value.
   #[inline(always)]
-  pub const fn source(&self) -> &S {
+  pub const fn slice_ref(&self) -> &S {
     &self.value
   }
 }
@@ -113,7 +119,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -122,7 +128,7 @@ impl<S> core::ops::Deref for Name<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.slice_ref()
   }
 }
 

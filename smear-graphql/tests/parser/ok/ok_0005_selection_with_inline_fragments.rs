@@ -1,13 +1,10 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0005_selection_with_inline_fragments.graphql");
 
 #[test]
 fn selection_with_inline_fragment() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
+  let selection_set = SelectionSet::<&str>::parse_str(ALL)
   .unwrap();
   assert_eq!(selection_set.selections().len(), 3);
 
@@ -15,26 +12,26 @@ fn selection_with_inline_fragment() {
 
   {
     let animal = fields.next().unwrap().unwrap_field();
-    assert_eq!(animal.name().span().source(), &"animal");
+    assert_eq!(animal.name().slice(), "animal");
     assert!(animal.selection_set().is_none());
   }
 
   {
     let fave_snack = fields.next().unwrap().unwrap_field();
-    assert_eq!(fave_snack.name().span().source(), &"faveSnack");
+    assert_eq!(fave_snack.name().slice(), "faveSnack");
     assert!(fave_snack.selection_set().is_none());
   }
 
   {
     let pet = fields.next().unwrap().unwrap_inline_fragment();
     let tc = pet.type_condition().unwrap();
-    assert_eq!(tc.name().span().source(), &"Pet");
+    assert_eq!(tc.name().slice(), "Pet");
     let spet = pet.selection_set();
     assert_eq!(spet.selections().len(), 1);
 
     let mut fields = spet.clone().into_selections().into_iter();
     let playmates = fields.next().unwrap().unwrap_field();
-    assert_eq!(playmates.name().span().source(), &"playmates");
+    assert_eq!(playmates.name().slice(), "playmates");
 
     let splaymates = playmates.selection_set().cloned().unwrap();
     {
@@ -42,7 +39,7 @@ fn selection_with_inline_fragment() {
 
       let mut fields = splaymates.into_selections().into_iter();
       let count = fields.next().unwrap().unwrap_field();
-      assert_eq!(count.name().span().source(), &"count");
+      assert_eq!(count.name().slice(), "count");
       assert!(count.selection_set().is_none());
     }
   }

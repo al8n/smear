@@ -1,17 +1,14 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0022_operation_type_definition_with_arguments_and_directives.graphql");
 
 #[test]
 fn operation_type_definition_with_arguments_and_directives() {
-  let definition = OperationDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
+  let definition = OperationDefinition::<&str>::parse_str(ALL)
   .unwrap()
   .unwrap_named();
-  assert_eq!(definition.name().unwrap().span().source(), &"myQuery");
-  assert_eq!(definition.operation_type().span().source(), &"query");
+  assert_eq!(definition.name().unwrap().slice(), "myQuery");
+  assert_eq!(definition.operation_type().as_str(), "query");
 
   {
     let args = definition.variable_definitions().unwrap();
@@ -19,18 +16,18 @@ fn operation_type_definition_with_arguments_and_directives() {
     let mut args = args.variable_definitions().iter();
     {
       let var = args.next().unwrap();
-      assert_eq!(var.variable().name().span().source(), &"var");
+      assert_eq!(var.variable().name().slice(), "var");
       let ty = var.ty().unwrap_name_ref();
-      assert_eq!(ty.name().span().source(), &"input");
-      assert!(ty.bang().is_none());
+      assert_eq!(ty.name().slice(), "input");
+      assert!(!ty.required());
     }
 
     {
       let var_other = args.next().unwrap();
-      assert_eq!(var_other.variable().name().span().source(), &"varOther");
+      assert_eq!(var_other.variable().name().slice(), "varOther");
       let ty = var_other.ty().unwrap_name_ref();
-      assert_eq!(ty.name().span().source(), &"otherInput");
-      assert!(ty.bang().is_none());
+      assert_eq!(ty.name().slice(), "otherInput");
+      assert!(!ty.required());
     }
   }
 
@@ -41,13 +38,13 @@ fn operation_type_definition_with_arguments_and_directives() {
 
     {
       let deprecated = directives.next().unwrap();
-      assert_eq!(deprecated.name().span().source(), &"deprecated");
+      assert_eq!(deprecated.name().slice(), "deprecated");
       assert!(deprecated.arguments().is_none());
     }
 
     {
       let unused = directives.next().unwrap();
-      assert_eq!(unused.name().span().source(), &"unused");
+      assert_eq!(unused.name().slice(), "unused");
       assert!(unused.arguments().is_none());
     }
   }
@@ -59,7 +56,7 @@ fn operation_type_definition_with_arguments_and_directives() {
 
     {
       let animal = selections.next().unwrap().unwrap_field();
-      assert_eq!(animal.name().span().source(), &"animal");
+      assert_eq!(animal.name().slice(), "animal");
       assert!(animal.alias().is_none());
       assert!(animal.arguments().is_none());
       assert!(animal.directives().is_none());
@@ -68,7 +65,7 @@ fn operation_type_definition_with_arguments_and_directives() {
 
     {
       let treat = selections.next().unwrap().unwrap_field();
-      assert_eq!(treat.name().span().source(), &"treat");
+      assert_eq!(treat.name().slice(), "treat");
       assert!(treat.alias().is_none());
       assert!(treat.arguments().is_none());
       assert!(treat.directives().is_none());

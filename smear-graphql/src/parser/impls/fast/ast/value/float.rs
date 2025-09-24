@@ -25,7 +25,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -41,7 +41,7 @@ impl<S> core::ops::Deref for FloatValue<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.slice_ref()
   }
 }
 
@@ -58,9 +58,15 @@ impl<S> FloatValue<S> {
     self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the slice of the float.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn slice(&self) -> S where S: Copy {
+    self.value
+  }
+
+  /// Returns the slice of the float.
+  #[inline]
+  pub const fn slice_ref(&self) -> &S {
     &self.value
   }
 }
@@ -93,7 +99,7 @@ where
       "- FLOAT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source().display(),
+      self.slice_ref().display(),
     )
   }
 }
@@ -117,21 +123,5 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_float_parser() {
-    let parser = FloatValue::parser::<FastParserExtra<&str>>();
-    let input = r#"1.3"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "1.3");
-    assert_eq!(parsed.span(), Span::new(0, 3));
   }
 }

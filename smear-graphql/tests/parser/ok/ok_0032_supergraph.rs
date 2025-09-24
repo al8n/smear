@@ -1,14 +1,13 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0032_supergraph.graphql");
 
 #[test]
 fn supergraph() {
   let document =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<char>>>(ALL)
+    Document::<&str>::parse_str(ALL)
       .unwrap();
 
-  let definitions = document.content();
+  let definitions = document.definitions();
   assert_eq!(definitions.len(), 43);
 }

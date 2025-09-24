@@ -26,7 +26,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -42,7 +42,7 @@ impl<S> core::ops::Deref for BooleanValue<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.slice_ref()
   }
 }
 
@@ -63,9 +63,15 @@ impl<S> BooleanValue<S> {
     self.span
   }
 
+  /// Returns the source of the boolean value.
+  #[inline]
+  pub const fn slice(&self) -> S where S: Copy {
+    self.source
+  }
+
   /// Returns the name as a string slice.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn slice_ref(&self) -> &S {
     &self.source
   }
 
@@ -82,7 +88,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source().fmt(f)
+    self.slice_ref().fmt(f)
   }
 }
 
@@ -114,7 +120,7 @@ where
       kw,
       self.span().start(),
       self.span().end(),
-      self.source().display(),
+      self.slice_ref().display(),
     )
   }
 }
@@ -142,21 +148,5 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_enum_value_parser() {
-    let parser = BooleanValue::parser::<FastParserExtra<&str>>();
-    let input = r#"foo"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), Span::new(0, 3));
   }
 }

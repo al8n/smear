@@ -1,29 +1,30 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0042_object_type_definition_without_fields.graphql");
 
 #[test]
 fn object_type_definition_without_fields() {
   let document =
-    Document::<WithSource<&str, SimpleSpan>>::parse_str_padded::<extra::Err<Rich<'_, char>>>(ALL)
+    Document::<&str>::parse_str(ALL)
       .unwrap();
 
-  let mut types = document.content().iter();
+  let mut types = document.definitions().iter();
 
   {
-    let object = types
+    let described = types
       .next()
       .unwrap()
       .unwrap_type_system_ref()
-      .unwrap_definition_ref()
+      .unwrap_definition_ref();
+
+    let object = described
       .unwrap_type_ref()
       .unwrap_object_ref();
 
-    assert_eq!(object.name().span().source(), &"AnObjectTypeWithoutFields");
+    assert_eq!(object.name().slice(), "AnObjectTypeWithoutFields");
     assert_eq!(
-      object.description().unwrap().content().span().source(),
-      &"A type with no fields"
+      described.description().unwrap().content(),
+      "A type with no fields"
     );
     assert!(object.fields_definition().is_none());
   }
@@ -36,14 +37,14 @@ fn object_type_definition_without_fields() {
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
-    assert_eq!(object.name().span().source(), &"AnObjectTypeWithoutFields");
+    assert_eq!(object.name().slice(), "AnObjectTypeWithoutFields");
     let fields = object.fields_definition().unwrap();
     let field_definitions = fields.field_definitions();
     assert_eq!(field_definitions.len(), 1);
     let field = &field_definitions[0];
-    assert_eq!(field.name().span().source(), &"id");
+    assert_eq!(field.name().slice(), "id");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"ID");
-    assert!(ty.bang().is_some());
+    assert_eq!(ty.name().slice(), "ID");
+    assert!(ty.required());
   }
 }

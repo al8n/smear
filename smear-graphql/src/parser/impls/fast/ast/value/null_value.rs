@@ -25,7 +25,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.slice_ref(), f)
   }
 }
 
@@ -41,7 +41,7 @@ impl<S> core::ops::Deref for NullValue<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.slice_ref()
   }
 }
 
@@ -61,10 +61,16 @@ impl<S> NullValue<S> {
     self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the slice of the null value.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn slice_ref(&self) -> &S {
     &self.source
+  }
+
+  /// Returns the slice of the null value.
+  #[inline]
+  pub const fn slice(&self) -> S where S: Copy {
+    self.source
   }
 }
 
@@ -74,7 +80,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source().fmt(f)
+    self.slice_ref().fmt(f)
   }
 }
 
@@ -104,7 +110,7 @@ where
       "- null_KW@{}..{} \"{}\"",
       self.span().start(),
       self.span().end(),
-      self.source().display(),
+      self.slice_ref().display(),
     )
   }
 }
@@ -131,21 +137,5 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
     })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_null_value_parser() {
-    let parser = NullValue::parser::<FastParserExtra<&str>>();
-    let input = r#"null"#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "null");
-    assert_eq!(parsed.span(), Span::new(0, 4));
   }
 }

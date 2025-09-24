@@ -1,13 +1,10 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0006_selection_with_fragment_spread.graphql");
 
 #[test]
 fn selection_with_fragment_spread() {
-  let selection_set = SelectionSet::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
+  let selection_set = SelectionSet::<&str>::parse_str(ALL)
   .unwrap();
   assert_eq!(selection_set.selections().len(), 6);
 
@@ -15,68 +12,68 @@ fn selection_with_fragment_spread() {
 
   {
     let pet = fields.next().unwrap().unwrap_field();
-    assert_eq!(pet.name().span().source(), &"pet");
+    assert_eq!(pet.name().slice(), "pet");
     assert!(pet.selection_set().is_none());
   }
 
   {
     let snack_selection = fields.next().unwrap().unwrap_fragment_spread();
-    assert_eq!(snack_selection.name().span().source(), &"snackSelection");
+    assert_eq!(snack_selection.name().slice(), "snackSelection");
   }
 
   {
     let nap = fields.next().unwrap().unwrap_inline_fragment();
     let tc = nap.type_condition().unwrap();
-    assert_eq!(tc.name().span().source(), &"Nap");
+    assert_eq!(tc.name().slice(), "Nap");
     let snap = nap.selection_set();
     assert_eq!(snap.selections().len(), 2);
 
     let mut fields = snap.clone().into_selections().into_iter();
     let cozy_location = fields.next().unwrap().unwrap_field();
-    assert_eq!(cozy_location.name().span().source(), &"cozyLocation");
+    assert_eq!(cozy_location.name().slice(), "cozyLocation");
     assert!(cozy_location.selection_set().is_none());
 
     let duration_of_nap = fields.next().unwrap().unwrap_field();
-    assert_eq!(duration_of_nap.name().span().source(), &"durationOfNap");
+    assert_eq!(duration_of_nap.name().slice(), "durationOfNap");
     assert!(duration_of_nap.selection_set().is_none());
   }
 
   {
     let snack_selection = fields.next().unwrap().unwrap_fragment_spread();
-    assert_eq!(snack_selection.name().span().source(), &"snackSelection");
+    assert_eq!(snack_selection.name().slice(), "snackSelection");
     let directives = snack_selection
       .directives()
       .expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let deprecated = directives.directives().first().unwrap();
-    assert_eq!(deprecated.name().span().source(), &"deprecated");
+    assert_eq!(deprecated.name().slice(), "deprecated");
   }
 
   {
     let nap = fields.next().unwrap().unwrap_inline_fragment();
     let tc = nap.type_condition().unwrap();
-    assert_eq!(tc.name().span().source(), &"Nap");
+    assert_eq!(tc.name().slice(), "Nap");
     let snap = nap.selection_set();
     assert_eq!(snap.selections().len(), 1);
 
     let mut fields = snap.clone().into_selections().into_iter();
     let cozy_location = fields.next().unwrap().unwrap_field();
-    assert_eq!(cozy_location.name().span().source(), &"cozyLocation");
+    assert_eq!(cozy_location.name().slice(), "cozyLocation");
     assert!(cozy_location.selection_set().is_none());
 
     let directives = nap.directives().expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let provides = directives.directives().first().unwrap();
-    assert_eq!(provides.name().span().source(), &"provides");
+    assert_eq!(provides.name().slice(), "provides");
     let args = provides.arguments().expect("should have arguments");
     assert_eq!(args.arguments().len(), 1);
     let duration = args.arguments().first().unwrap();
-    assert_eq!(duration.name().span().source(), &"duration");
+    assert_eq!(duration.name().slice(), "duration");
     let value = duration.value();
     assert!(value.is_string());
     assert_eq!(
-      value.unwrap_string_ref().content().span().source(),
-      &"2 hours"
+      value.unwrap_string_ref().content(),
+      "2 hours"
     );
   }
 
@@ -86,20 +83,20 @@ fn selection_with_fragment_spread() {
     let directives = anon.directives().expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let j = directives.directives().first().unwrap();
-    assert_eq!(j.name().span().source(), &"J");
+    assert_eq!(j.name().slice(), "J");
     let args = j.arguments().expect("should have arguments");
     assert_eq!(args.arguments().len(), 1);
     let n = args.arguments().first().unwrap();
-    assert_eq!(n.name().span().source(), &"N");
+    assert_eq!(n.name().slice(), "N");
     let value = n.value();
     assert!(value.is_int());
-    assert_eq!(value.unwrap_int_ref().span().source(), &"0");
+    assert_eq!(value.unwrap_int_ref().slice(), "0");
 
     let sanon = anon.selection_set();
     assert_eq!(sanon.selections().len(), 1);
     let mut fields = sanon.clone().into_selections().into_iter();
     let a = fields.next().unwrap().unwrap_field();
-    assert_eq!(a.name().span().source(), &"a");
+    assert_eq!(a.name().slice(), "a");
     assert!(a.selection_set().is_none());
   }
 

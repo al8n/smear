@@ -1,15 +1,12 @@
-use chumsky::{error::Simple, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{DescribedInputObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.graphql");
 
 #[test]
 fn input_object_definition() {
-  let definition = InputObjectTypeDefinition::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Simple<'_, char>>,
-  >(ALL)
+  let definition = DescribedInputObjectTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().span().source(), &"ExampleInputObject");
+  assert_eq!(definition.name().slice(), "ExampleInputObject");
 
   let input_fields = definition.fields_definition().cloned().unwrap();
   assert_eq!(input_fields.input_value_definitions().len(), 2);
@@ -17,18 +14,18 @@ fn input_object_definition() {
 
   {
     let a = fields.next().unwrap();
-    assert_eq!(a.name().span().source(), &"a");
+    assert_eq!(a.name().slice(), "a");
     let ty = a.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().span().source(), &"String");
-    assert!(ty.bang().is_none());
+    assert_eq!(ty.name().slice(), "String");
+    assert!(!ty.required());
   }
 
   {
     let b = fields.next().unwrap();
-    assert_eq!(b.name().span().source(), &"b");
+    assert_eq!(b.name().slice(), "b");
     let ty = b.ty().unwrap_name_ref();
-    assert_eq!(ty.name().span().source(), &"Int");
-    assert!(ty.bang().is_some());
+    assert_eq!(ty.name().slice(), "Int");
+    assert!(ty.required());
   }
 }

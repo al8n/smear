@@ -1,26 +1,24 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{SchemaExtension, ExecutableDocument, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0026_schema_extension.graphql");
 
 #[test]
 fn schema_extension() {
-  let extension = SchemaExtension::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
-  .unwrap();
+  let extension = SchemaExtension::<&str>::parse_str(ALL).unwrap();
 
   let directives = extension.directives().unwrap();
   assert_eq!(directives.directives().len(), 2);
   let mut directives = directives.directives().iter();
+
   {
     let skip = directives.next().unwrap();
-    assert_eq!(skip.name().span().source(), &"skip");
+    assert_eq!(skip.name().slice(), "skip");
     assert!(skip.arguments().is_none());
   }
+
   {
     let example = directives.next().unwrap();
-    assert_eq!(example.name().span().source(), &"example");
+    assert_eq!(example.name().slice(), "example");
     assert!(example.arguments().is_none());
   }
 
@@ -30,7 +28,7 @@ fn schema_extension() {
   let operation_type = operation_types.first().unwrap();
   assert_eq!(operation_type.operation_type().span().source(), &"query");
   assert_eq!(
-    operation_type.name().span().source(),
-    &"MyExtendedQueryType"
+    operation_type.name().slice(),
+    "MyExtendedQueryType"
   );
 }

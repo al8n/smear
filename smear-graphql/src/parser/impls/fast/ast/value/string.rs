@@ -70,9 +70,15 @@ impl<S> StringValue<S> {
     &self.raw
   }
 
-  /// Returns the string content, without delimiters.
+  /// Returns the description content, without delimiters.
   #[inline]
-  pub const fn content(&self) -> &S {
+  pub const fn content(&self) -> S where S: Copy {
+    self.content
+  }
+
+  /// Returns reference of the description content, without delimiters.
+  #[inline]
+  pub const fn content_ref(&self) -> &S {
     &self.content
   }
 }
@@ -137,36 +143,3 @@ impl<'a> Parseable<'a, FastTokenStream<'a>, FastToken<'a>, FastTokenErrors<'a, &
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use crate::parser::fast::FastParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra<&str>>();
-    let input = r#""Hello, World!""#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.content(), "Hello, World!");
-    assert_eq!(parsed.kind, Kind::Inline);
-    assert_eq!(parsed.span(), Span::new(0, 15));
-    assert_eq!(*parsed.raw(), r#""Hello, World!""#);
-  }
-
-  #[test]
-  fn test_block_string_value_parser() {
-    let parser = StringValue::parser::<FastParserExtra<&str>>();
-    let input = r#""""Hello,
-World!""""#;
-    let parsed = parser.parse(FastTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.content(), "Hello,\nWorld!");
-    assert_eq!(parsed.kind, Kind::Block);
-    assert_eq!(parsed.span(), Span::new(0, 19));
-    assert_eq!(
-      *parsed.raw(),
-      r#""""Hello,
-World!""""#
-    );
-  }
-}

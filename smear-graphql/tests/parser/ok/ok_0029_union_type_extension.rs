@@ -1,32 +1,23 @@
-use chumsky::{error::Rich, extra, span::SimpleSpan};
-use smear_graphql::{cst::*, parse::*, WithSource};
+use smear_graphql::parser::fast::{TypeSystemDocument, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0029_union_type_extension.graphql");
 
 #[test]
 fn union_type_extension() {
-  let definition = TypeSystemDocument::<WithSource<&str, SimpleSpan>>::parse_str_padded::<
-    extra::Err<Rich<char>>,
-  >(ALL)
-  .unwrap();
-  let definitions = definition.content();
+  let definition = TypeSystemDocument::<&str>::parse_str(ALL).unwrap();
+  let definitions = definition.definitions();
   assert_eq!(definitions.len(), 2);
   let mut definitions = definitions.iter();
   {
     let definition = definitions.next().unwrap().unwrap_definition_ref();
     let definition = definition.unwrap_type_ref().unwrap_union_ref();
 
-    assert_eq!(definition.name().span().source(), &"SearchResult");
+    assert_eq!(definition.name().slice(), "SearchResult");
     let members = definition.member_types().cloned().unwrap();
-    let leading_member_type = members.leading_member_type();
-    assert_eq!(leading_member_type.name().span().source(), &"Photo");
-    let remaining_member_types = members.remaining_member_types();
-    assert_eq!(remaining_member_types.len(), 1);
-    let mut remaining_member_types = remaining_member_types.iter();
-    {
-      let member_type = remaining_member_types.next().unwrap();
-      assert_eq!(member_type.name().span().source(), &"Person");
-    }
+    let members = members.members();
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[0].slice(), "Photo");
+    assert_eq!(members[1].slice(), "Person");
   }
 
   {
@@ -37,7 +28,7 @@ fn union_type_extension() {
     let mut directives = directives.iter();
     {
       let directive = directives.next().unwrap();
-      assert_eq!(directive.name().span().source(), &"deprecated");
+      assert_eq!(directive.name().slice(), "deprecated");
     }
   }
 }
