@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{OperationDefinition, ParseStr};
+use smear_graphql::parser::ast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0037_operation_type_definition_with_inline_fragment.graphql");
 

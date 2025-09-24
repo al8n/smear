@@ -1,10 +1,13 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use chumsky::{IterParser as _, Parser, extra::ParserExtra};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
-use super::super::{
-  super::source::*,
-  Name, ignored,
-  punct::{Colon, LBrace, RBrace},
+use crate::{
+  error::UnclosedObjectValueError,
+  lang::punctuator::{Colon, LBrace, RBrace},
+  source::{IntoComponents, IntoSpan},
 };
+
+use core::marker::PhantomData;
 
 /// A single field within a GraphQL input object literal.
 ///
@@ -38,37 +41,41 @@ use super::super::{
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectField<InputValue, Span> {
+pub struct ObjectField<Name, InputValue> {
   span: Span,
-  name: Name<Span>,
-  colon: Colon<Span>,
+  name: Name,
   value: InputValue,
 }
 
-impl<InputValue, Span> AsRef<Span> for ObjectField<InputValue, Span> {
+impl<Name, InputValue> AsRef<Span> for ObjectField<Name, InputValue> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<InputValue, Span> IntoSpan<Span> for ObjectField<InputValue, Span> {
+impl<Name, InputValue> IntoSpan<Span> for ObjectField<Name, InputValue> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<InputValue, Span> IntoComponents for ObjectField<InputValue, Span> {
-  type Components = (Span, Name<Span>, Colon<Span>, InputValue);
+impl<Name, InputValue> IntoComponents for ObjectField<Name, InputValue> {
+  type Components = (Span, Name, InputValue);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.colon, self.value)
+    (self.span, self.name, self.value)
   }
 }
 
-impl<InputValue, Span> ObjectField<InputValue, Span> {
+impl<Name, InputValue> ObjectField<Name, InputValue> {
+  #[inline]
+  pub(crate) const fn new(span: Span, name: Name, value: InputValue) -> Self {
+    Self { span, name, value }
+  }
+
   /// Returns the source span of the entire field.
   ///
   /// This span covers from the first character of the field name through
@@ -79,23 +86,13 @@ impl<InputValue, Span> ObjectField<InputValue, Span> {
     &self.span
   }
 
-  /// Returns the colon separator token.
-  ///
-  /// This provides access to the `:` character that separates the field
-  /// name from its value, including its exact source position. Useful
-  /// for syntax highlighting and precise error reporting.
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    &self.colon
-  }
-
   /// Returns the field name.
   ///
   /// This provides access to the GraphQL name that identifies this field
   /// within the object. The name follows standard GraphQL identifier rules
   /// and cannot be a reserved keyword.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -109,38 +106,53 @@ impl<InputValue, Span> ObjectField<InputValue, Span> {
     &self.value
   }
 
-  /// Creates a parser for object fields with compile-time constant validation.
+  /// Creates a parser for GraphQL list literals with customizable value parsing.
   ///
-  /// This parser handles the complete object field syntax including the
-  /// field name, colon separator, and field value. It manages whitespace
-  /// and comments around each component according to GraphQL rules, and
-  /// enforces constant vs variable context requirements at compile time.
+  /// This parser handles the complete list syntax including brackets and
+  /// enforces proper structure. It uses the provided `value_parser` to parse
+  /// each individual element within the list.
   ///
-  /// ## Notes
+  /// ## Error Handling
   ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the object.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  /// If the closing bracket is missing, the parser invokes the provided
+  /// `on_missing_rbracket` function to generate a custom error message.
+  /// This allows for context-specific error reporting.
+  pub fn parser_with<'src, I, T, Error, NP, VP, E>(
+    name_parser: NP,
+    value_parser: VP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, InputValue, E> + Clone,
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    VP: Parser<'src, I, InputValue, E> + Clone + 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    Colon: Parseable<'src, I, T, Error>,
   {
-    Name::parser()
-      .then(Colon::parser().padded_by(ignored()))
-      .then(value)
-      .map_with(|((name, colon), value), sp| Self {
-        span: Span::from_map_extra(sp),
-        name,
-        colon,
-        value,
-      })
+    name_parser
+      .then_ignore(Colon::parser())
+      .then(value_parser)
+      .map_with(|(name, value), exa| Self::new(exa.span(), name, value))
+  }
+}
+
+impl<'a, Name, InputValue, I, T, Error> Parseable<'a, I, T, Error> for ObjectField<Name, InputValue>
+where
+  Name: Parseable<'a, I, T, Error>,
+  InputValue: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), InputValue::parser())
   }
 }
 
@@ -238,39 +250,47 @@ impl<InputValue, Span> ObjectField<InputValue, Span> {
 /// - **Nested inputs**: Complex input structures with multiple levels
 ///
 /// Spec: [Input Object Values](https://spec.graphql.org/draft/#sec-Input-Object-Values)
-#[derive(Debug, Clone, Copy)]
-pub struct Object<Field, Span, Container = std::vec::Vec<Field>> {
+#[derive(Debug, Clone)]
+pub struct Object<Name, Value, Container = Vec<ObjectField<Name, Value>>> {
   span: Span,
-  l_brace: LBrace<Span>,
-  r_brace: RBrace<Span>,
   fields: Container,
-  _field: core::marker::PhantomData<Field>,
+  _m: PhantomData<(Name, Value)>,
 }
 
-impl<Field, Span, Container> AsRef<Span> for Object<Field, Span, Container> {
+impl<Name, Value, Container> AsRef<Span> for Object<Name, Value, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Field, Span, Container> IntoSpan<Span> for Object<Field, Span, Container> {
+impl<Name, InputValue, Container> IntoSpan<Span> for Object<Name, InputValue, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Field, Span, Container> IntoComponents for Object<Field, Span, Container> {
-  type Components = (Span, LBrace<Span>, Container, RBrace<Span>);
+impl<Name, InputValue, Container> IntoComponents for Object<Name, InputValue, Container> {
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.l_brace, self.fields, self.r_brace)
+    (self.span, self.fields)
   }
 }
 
-impl<Field, Span, Container> Object<Field, Span, Container> {
+impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
+  /// Creates a new object literal with the given span and fields.
+  #[inline(always)]
+  pub const fn new(span: Span, fields: Container) -> Self {
+    Self {
+      span,
+      fields,
+      _m: PhantomData,
+    }
+  }
+
   /// Returns the source span of the entire object literal.
   ///
   /// This span covers from the opening brace through the closing brace,
@@ -279,16 +299,6 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns the opening brace token.
-  ///
-  /// This provides access to the `{` character that begins the object,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// brace matching, and precise error reporting at object boundaries.
-  #[inline]
-  pub const fn l_brace(&self) -> &LBrace<Span> {
-    &self.l_brace
   }
 
   /// Returns the container holding the object fields.
@@ -300,59 +310,67 @@ impl<Field, Span, Container> Object<Field, Span, Container> {
     &self.fields
   }
 
-  /// Returns the closing brace token.
+  /// Creates a parser for GraphQL object literals with customizable field parsing.
   ///
-  /// This provides access to the `}` character that ends the object,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// brace matching, and detecting incomplete objects.
-  #[inline]
-  pub const fn r_brace(&self) -> &RBrace<Span> {
-    &self.r_brace
-  }
-
-  /// Creates a parser for object literals with compile-time constant validation.
+  /// This parser handles the complete object syntax including braces and
+  /// enforces proper structure. It uses the provided `field_parser` to parse
+  /// each individual field within the object.
   ///
-  /// This is the core parsing function that accepts any value parser and
-  /// creates a complete object parser. It handles all GraphQL object syntax
-  /// including braces, field parsing, whitespace, optional commas, and empty
-  /// objects, while enforcing constant vs variable context requirements.
+  /// ## Error Handling
   ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the object value.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(field_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  /// If the closing brace is missing, the parser invokes the provided
+  /// `on_missing_rbrace` function to generate a custom error message.
+  /// This allows for context-specific error reporting.
+  pub fn parser_with<'src, I, T, Error, NP, VP, E>(
+    name_parser: NP,
+    value_parser: VP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Field, E> + Clone,
-    Container: chumsky::container::Container<Field>,
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+    Error: UnclosedObjectValueError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    VP: Parser<'src, I, InputValue, E> + Clone + 'src,
+    Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
+    Colon: Parseable<'src, I, T, Error>,
+    LBrace: Parseable<'src, I, T, Error>,
+    RBrace: Parseable<'src, I, T, Error>,
   {
     LBrace::parser()
-      .then_ignore(ignored())
-      .then(choice((
-        // Empty fast path: immediately '}'
-        RBrace::parser().map(|r| (Container::default(), r)),
-        // Non-empty: one-or-more fields; commas are in `ws`
-        field_parser
-          .padded_by(ignored())
+      .ignore_then(
+        ObjectField::parser_with(name_parser, value_parser)
           .repeated()
-          .at_least(1)
-          .collect()
-          .then(RBrace::parser()),
-      )))
-      .map_with(|(l_brace, (fields, r_brace)), sp| Self {
-        span: Span::from_map_extra(sp),
-        l_brace,
-        r_brace,
-        fields,
-        _field: core::marker::PhantomData,
+          .collect(),
+      )
+      .then(RBrace::parser().or_not())
+      .try_map(move |(values, r), span| match r {
+        Some(_) => Ok(Self::new(span, values)),
+        None => Err(Error::unclosed_object(span)),
       })
+  }
+}
+
+impl<'a, Name, InputValue, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Object<Name, InputValue, Container>
+where
+  Name: Parseable<'a, I, T, Error>,
+  InputValue: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
+  Error: UnclosedObjectValueError,
+  Colon: Parseable<'a, I, T, Error>,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), InputValue::parser())
   }
 }

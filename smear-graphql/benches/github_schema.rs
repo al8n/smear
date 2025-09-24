@@ -8,7 +8,7 @@ fn apollo_parser_parse_schema(schema: &str) {
 }
 
 fn smear_parser_parse_schema(schema: &str) {
-  use smear_graphql::parser::fast::{ParseStr, TypeSystemDocument};
+  use smear_graphql::parser::ast::{ParseStr, TypeSystemDocument};
 
   let _document = TypeSystemDocument::<&str>::parse_str(schema).unwrap();
 }

@@ -21,7 +21,7 @@ macro_rules! punctuator {
         }
 
         impl $name {
-          /// Creates a new punctuator.
+          /// Creates a new punctuator with the given span.
           #[inline(always)]
           pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
             Self { span }
@@ -33,10 +33,58 @@ macro_rules! punctuator {
             $punct
           }
 
+          #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
+          #[inline]
+          pub const fn as_str(&self) -> &'static ::core::primitive::str {
+            Self::raw()
+          }
+
           #[doc = "Returns the span of the `" $punct "` punctuator."]
           #[inline]
           pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
             &self.span
+          }
+        }
+
+        impl ::core::cmp::PartialEq<::core::primitive::str> for $name {
+          #[inline]
+          fn eq(&self, other: &::core::primitive::str) -> bool {
+            self.as_str().eq(other)
+          }
+        }
+
+        impl ::core::cmp::PartialOrd<::core::primitive::str> for $name {
+          #[inline]
+          fn partial_cmp(&self, other: &::core::primitive::str) -> ::core::option::Option<::core::cmp::Ordering> {
+            self.as_str().partial_cmp(other)
+          }
+        }
+
+        impl ::core::cmp::PartialEq<$name> for ::core::primitive::str {
+          #[inline]
+          fn eq(&self, other: &$name) -> bool {
+            self.eq(other.as_str())
+          }
+        }
+
+        impl ::core::cmp::PartialOrd<$name> for ::core::primitive::str {
+          #[inline]
+          fn partial_cmp(&self, other: &$name) -> ::core::option::Option<::core::cmp::Ordering> {
+            self.partial_cmp(other.as_str())
+          }
+        }
+
+        impl ::core::borrow::Borrow<::core::primitive::str> for $name {
+          #[inline]
+          fn borrow(&self) -> &::core::primitive::str {
+            self.as_str()
+          }
+        }
+
+        impl ::core::convert::AsRef<::core::primitive::str> for $name {
+          #[inline]
+          fn as_ref(&self) -> &::core::primitive::str {
+            self.as_str()
           }
         }
 
@@ -47,7 +95,7 @@ macro_rules! punctuator {
           }
         }
 
-       impl $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
           #[inline]
           fn into_span(self) -> $crate::__private::logosky::utils::Span {
             self.span

@@ -1,6 +1,14 @@
 use chumsky::{extra::ParserExtra, prelude::*};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  utils::{
+    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    syntax_tree_display::DisplaySyntaxTree,
+  },
+};
+use smear_utils::{IntoComponents, IntoSpan};
 
-use super::{super::source::*, Name, ignored, keywords, punct::Ellipsis};
+use crate::lang::{Name, keywords::On, punctuator::Spread};
 
 /// Represents a type condition used in GraphQL fragments.
 ///
@@ -24,13 +32,12 @@ use super::{super::source::*, Name, ignored, keywords, punct::Ellipsis};
 ///
 /// Spec: [Type Conditions](https://spec.graphql.org/draft/#sec-Type-Conditions)
 #[derive(Debug, Clone, Copy)]
-pub struct TypeCondition<Name, Span> {
+pub struct TypeCondition<Name> {
   span: Span,
-  on: keywords::On<Span>,
-  type_name: Name,
+  name: Name,
 }
 
-impl<Name, Span> TypeCondition<Name, Span> {
+impl<Name> TypeCondition<Name> {
   /// Returns a reference to the span covering the entire type condition.
   ///
   /// The span includes both the `on` keyword and the type name.
@@ -38,73 +45,76 @@ impl<Name, Span> TypeCondition<Name, Span> {
   pub const fn span(&self) -> &Span {
     &self.span
   }
-  /// Returns a reference to the `on` keyword.
-  ///
-  /// This provides access to the exact location and span information of the keyword.
-  #[inline]
-  pub const fn on_keyword(&self) -> &keywords::On<Span> {
-    &self.on
-  }
+
   /// Returns a reference to the type name that follows the `on` keyword.
   ///
   /// This identifies the specific type that the fragment condition applies to.
   #[inline]
   pub const fn name(&self) -> &Name {
-    &self.type_name
+    &self.name
   }
 
-  /// Creates a parser that can parse a type condition.
+  /// Creates a parser that can parse a type condition with a custom name parser.
   ///
-  /// The parser expects the keyword `on` followed by optional ignored tokens
-  /// and then a type name.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the type condition.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, NP>(name_parser: NP) -> impl Parser<'src, I, Self, E> + Clone
+  /// This allows for greater flexibility in how type conditions are defined and parsed.
+  /// The parser handles the complete type condition syntax including the `on` keyword
+  /// and the type name.
+  pub fn parser_with<'a, I, T, Error, E, P>(name_parser: P) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    NP: Parser<'src, I, Name, E> + Clone,
-    Span: crate::source::FromMapExtra<'src, I, E>,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    On: Parseable<'a, I, T, Error>,
+    P: Parser<'a, I, Name, E> + Clone,
   {
-    keywords::On::parser()
-      .then_ignore(ignored())
-      .then(name_parser)
-      .map_with(|(on, type_name), sp| Self {
-        span: Span::from_map_extra(sp),
-        on,
-        type_name,
+    On::parser()
+      .ignore_then(name_parser)
+      .map_with(|name, exa| Self {
+        span: exa.span(),
+        name,
       })
   }
 }
 
-impl<Name, Span> AsRef<Span> for TypeCondition<Name, Span> {
+impl<Name> AsRef<Span> for TypeCondition<Name> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Span> IntoSpan<Span> for TypeCondition<Name, Span> {
+impl<Name> IntoSpan<Span> for TypeCondition<Name> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Span> IntoComponents for TypeCondition<Name, Span> {
-  type Components = (Span, keywords::On<Span>, Name);
+impl<Name> IntoComponents for TypeCondition<Name> {
+  type Components = (Span, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.on, self.type_name)
+    (self.span, self.name)
+  }
+}
+
+impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for TypeCondition<Name>
+where
+  Name: Parseable<'a, I, T, Error>,
+  On: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser())
   }
 }
 
@@ -134,31 +144,44 @@ impl<Name, Span> IntoComponents for TypeCondition<Name, Span> {
 ///
 /// Spec: [Fragment Name](https://spec.graphql.org/draft/#FragmentName)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentName<Span>(Span);
+pub struct FragmentName<S> {
+  span: Span,
+  value: S,
+}
 
-impl<Span> From<FragmentName<Span>> for Name<Span> {
+impl<S> PartialEq<S> for FragmentName<S>
+where
+  S: PartialEq,
+{
   #[inline]
-  fn from(value: FragmentName<Span>) -> Self {
-    Self(value.into_span())
+  fn eq(&self, other: &S) -> bool {
+    self.slice_ref().eq(other)
   }
 }
 
-impl<Span> AsRef<Span> for FragmentName<Span> {
+impl<S> From<FragmentName<S>> for Name<S> {
+  #[inline]
+  fn from(value: FragmentName<S>) -> Self {
+    Self::new(value.span, value.value)
+  }
+}
+
+impl<S> AsRef<Span> for FragmentName<S> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for FragmentName<Span> {
+impl<S> IntoSpan<Span> for FragmentName<S> {
   #[inline]
   fn into_span(self) -> Span {
-    self.0
+    self.span
   }
 }
 
-impl<Span> IntoComponents for FragmentName<Span> {
-  type Components = Name<Span>;
+impl<S> IntoComponents for FragmentName<S> {
+  type Components = Name<S>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -166,37 +189,95 @@ impl<Span> IntoComponents for FragmentName<Span> {
   }
 }
 
-impl<Span> FragmentName<Span> {
+impl<S> FragmentName<S> {
+  /// Creates a new fragment name.
+  #[inline]
+  pub const fn new(span: Span, value: S) -> Self {
+    Self { span, value }
+  }
+
   /// Returns a reference to the span covering the fragment name.
   #[inline]
   pub const fn span(&self) -> &Span {
-    &self.0
+    &self.span
   }
 
-  /// Creates a parser that can parse a valid fragment name.
-  ///
-  /// The parser accepts any valid identifier except for the keyword "on",
-  /// which is reserved for type conditions in fragment syntax.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the fragment name.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  /// Returns a reference to the underlying source value.
+  #[inline]
+  pub const fn slice(&self) -> S
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
+    S: Copy,
   {
-    Name::<Span>::parser()
-      .to_slice()
-      .filter(|slice| !slice.equivalent([I::Token::o, I::Token::n].into_iter()))
-      .map_with(|_, sp| Self(Span::from_map_extra(sp)))
+    self.value
+  }
+
+  /// Returns a reference to the underlying source value.
+  #[inline]
+  pub const fn slice_ref(&self) -> &S {
+    &self.value
+  }
+}
+
+impl<S> core::fmt::Display for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayHuman::fmt(self.slice_ref(), f)
+  }
+}
+
+impl<S> core::ops::Deref for FragmentName<S> {
+  type Target = S;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.slice_ref()
+  }
+}
+
+impl<S> DisplaySDL for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
+impl<S> DisplaySyntaxTree for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
+    let mut padding = level * indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    writeln!(
+      f,
+      "- FRAGMENT_NAME@{}..{}",
+      self.span.start(),
+      self.span.end()
+    )?;
+    padding += indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    writeln!(f, "- NAME@{}..{}", self.span.start(), self.span.end())?;
+    padding += indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    write!(
+      f,
+      "- IDENT@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
+      self.value.display(),
+    )
   }
 }
 
@@ -235,43 +316,37 @@ impl<Span> FragmentName<Span> {
 ///
 /// Spec: [Fragment Spreads](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Spreads)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentSpread<FragmentName, Directives, Span> {
+pub struct FragmentSpread<FragmentName, Directives> {
   span: Span,
-  ellipsis: Ellipsis<Span>,
+  spread: Spread,
   name: FragmentName,
   directives: Option<Directives>,
 }
 
-impl<FragmentName, Directives, Span> AsRef<Span>
-  for FragmentSpread<FragmentName, Directives, Span>
-{
+impl<FragmentName, Directives> AsRef<Span> for FragmentSpread<FragmentName, Directives> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<FragmentName, Directives, Span> IntoSpan<Span>
-  for FragmentSpread<FragmentName, Directives, Span>
-{
+impl<FragmentName, Directives> IntoSpan<Span> for FragmentSpread<FragmentName, Directives> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<FragmentName, Directives, Span> IntoComponents
-  for FragmentSpread<FragmentName, Directives, Span>
-{
-  type Components = (Span, Ellipsis<Span>, FragmentName, Option<Directives>);
+impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, Directives> {
+  type Components = (Span, Spread, FragmentName, Option<Directives>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ellipsis, self.name, self.directives)
+    (self.span, self.spread, self.name, self.directives)
   }
 }
 
-impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Span> {
+impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
   /// Returns a reference to the span covering the entire fragment spread.
   ///
   /// The span includes the ellipsis (`...`), fragment name, and any directives.
@@ -287,12 +362,12 @@ impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Sp
     &self.name
   }
 
-  /// Returns a reference to the ellipsis (`...`) that starts the fragment spread.
+  /// Returns a reference to the spread (`...`) that starts the fragment spread.
   ///
   /// This provides access to the exact location and span information of the
   /// three-dot syntax that introduces fragment spreads.
-  pub const fn ellipsis(&self) -> &Ellipsis<Span> {
-    &self.ellipsis
+  pub const fn spread(&self) -> &Spread {
+    &self.spread
   }
 
   /// Returns a reference to the directives applied to this fragment spread, if any.
@@ -307,37 +382,49 @@ impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Sp
   ///
   /// The parser handles the complete fragment spread syntax including the ellipsis,
   /// fragment name, and optional directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the fragment spread.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, NP, DP>(
-    fragment_name_parser: NP,
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, FP, DP>(
+    fragment_name_parser: FP,
     directives_parser: DP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    NP: Parser<'src, I, FragmentName, E> + Clone,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Error: 'a,
+    Spread: Parseable<'a, I, T, Error> + 'a,
+    DP: Parser<'a, I, Directives, E> + Clone,
+    FP: Parser<'a, I, FragmentName, E> + Clone,
   {
-    Ellipsis::parser()
-      .then_ignore(ignored())
+    Spread::parser()
       .then(fragment_name_parser)
-      .then(ignored().ignore_then(directives_parser).or_not())
-      .map_with(|((ellipsis, name), directives), sp| Self {
-        span: Span::from_map_extra(sp),
-        ellipsis,
+      .then(directives_parser.or_not())
+      .map_with(|((spread, name), directives), exa| Self {
+        span: exa.span(),
+        spread,
         name,
         directives,
       })
+  }
+}
+
+impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error>
+  for FragmentSpread<FragmentName, Directives>
+where
+  FragmentName: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  Spread: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(FragmentName::parser(), Directives::parser())
   }
 }
 
@@ -401,16 +488,16 @@ impl<FragmentName, Directives, Span> FragmentSpread<FragmentName, Directives, Sp
 ///
 /// Spec: [Inline Fragments](https://spec.graphql.org/draft/#sec-Inline-Fragments)
 #[derive(Debug, Clone, Copy)]
-pub struct InlineFragment<Name, Directives, SelectionSet, Span> {
+pub struct InlineFragment<TypeCondition, Directives, SelectionSet> {
   span: Span,
-  ellipsis: Ellipsis<Span>,
-  type_condition: Option<TypeCondition<Name, Span>>,
+  spread: Spread,
+  type_condition: Option<TypeCondition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
 }
 
-impl<Name, Directives, SelectionSet, Span> AsRef<Span>
-  for InlineFragment<Name, Directives, SelectionSet, Span>
+impl<TypeCondition, Directives, SelectionSet> AsRef<Span>
+  for InlineFragment<TypeCondition, Directives, SelectionSet>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -418,8 +505,8 @@ impl<Name, Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Name, Directives, SelectionSet, Span> IntoSpan<Span>
-  for InlineFragment<Name, Directives, SelectionSet, Span>
+impl<TypeCondition, Directives, SelectionSet> IntoSpan<Span>
+  for InlineFragment<TypeCondition, Directives, SelectionSet>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -427,13 +514,13 @@ impl<Name, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, SelectionSet, Span> IntoComponents
-  for InlineFragment<Name, Directives, SelectionSet, Span>
+impl<TypeCondition, Directives, SelectionSet> IntoComponents
+  for InlineFragment<TypeCondition, Directives, SelectionSet>
 {
   type Components = (
     Span,
-    Ellipsis<Span>,
-    Option<TypeCondition<Name, Span>>,
+    Spread,
+    Option<TypeCondition>,
     Option<Directives>,
     SelectionSet,
   );
@@ -442,7 +529,7 @@ impl<Name, Directives, SelectionSet, Span> IntoComponents
   fn into_components(self) -> Self::Components {
     (
       self.span,
-      self.ellipsis,
+      self.spread,
       self.type_condition,
       self.directives,
       self.selection_set,
@@ -450,7 +537,9 @@ impl<Name, Directives, SelectionSet, Span> IntoComponents
   }
 }
 
-impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, SelectionSet, Span> {
+impl<TypeCondition, Directives, SelectionSet>
+  InlineFragment<TypeCondition, Directives, SelectionSet>
+{
   /// Returns a reference to the span covering the entire inline fragment.
   ///
   /// The span includes the ellipsis, type condition (if present), directives,
@@ -465,8 +554,8 @@ impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, Sele
   /// This provides access to the exact location and span information of the
   /// three-dot syntax that introduces inline fragments.
   #[inline]
-  pub const fn ellipsis(&self) -> &Ellipsis<Span> {
-    &self.ellipsis
+  pub const fn spread(&self) -> &Spread {
+    &self.spread
   }
 
   /// Returns a reference to the type condition, if present.
@@ -475,7 +564,7 @@ impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, Sele
   /// If no type condition is provided, the fragment applies to all possible types
   /// at this location.
   #[inline]
-  pub const fn type_condition(&self) -> Option<&TypeCondition<Name, Span>> {
+  pub const fn type_condition(&self) -> Option<&TypeCondition> {
     self.type_condition.as_ref()
   }
 
@@ -501,41 +590,30 @@ impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, Sele
   ///
   /// The parser handles the complete inline fragment syntax including the ellipsis,
   /// optional type condition, optional directives, and required selection set.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the inline fragment.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, NP, DP, SP>(
-    name_parser: NP,
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, TP, DP, SP>(
+    type_condition_parser: TP,
     directives_parser: DP,
     selection_set_parser: SP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    SP: Parser<'src, I, SelectionSet, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Error: 'a,
+    Spread: Parseable<'a, I, T, Error> + 'a,
+    SP: Parser<'a, I, SelectionSet, E> + Clone,
+    DP: Parser<'a, I, Directives, E> + Clone,
+    TP: Parser<'a, I, TypeCondition, E> + Clone,
   {
-    Ellipsis::parser()
-      .then(
-        ignored()
-          .ignore_then(TypeCondition::parser_with(name_parser))
-          .or_not(),
-      )
-      .then(ignored().ignore_then(directives_parser).or_not())
-      .then(ignored().ignore_then(selection_set_parser))
+    Spread::parser()
+      .then(type_condition_parser.or_not())
+      .then(directives_parser.or_not())
+      .then(selection_set_parser)
       .map_with(
-        |(((ell, type_condition), directives), selection_set), sp| Self {
-          span: Span::from_map_extra(sp),
-          ellipsis: ell,
+        |(((spread, type_condition), directives), selection_set), exa| Self {
+          span: exa.span(),
+          spread,
           type_condition,
           directives,
           selection_set,
@@ -544,117 +622,27 @@ impl<Name, Directives, SelectionSet, Span> InlineFragment<Name, Directives, Sele
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::source::WithSource;
-  use chumsky::{error::Simple, extra};
-
-  fn fragment_name_parser<'a>() -> impl Parser<
-    'a,
-    &'a str,
-    FragmentName<WithSource<&'a str, SimpleSpan>>,
-    extra::Err<Simple<'a, char>>,
-  > + Clone {
-    FragmentName::<WithSource<&str, SimpleSpan>>::parser::<&str, extra::Err<Simple<char>>>()
-  }
-
-  #[test]
-  fn accepts_regular_names() {
-    // Valid GraphQL Names that are not the exact reserved words.
-    let ok = [
-      "RED",
-      "Blue",
-      "_internal",
-      "__meta",
-      "A1",
-      "_1",
-      "trueValue",
-      "nullish",
-      "FALSE",
-      "True",
-      "Null",
-      "HTTP_200",
-      "myEnum123",
-    ];
-    for s in ok {
-      let ev = fragment_name_parser().parse(s).into_result().unwrap();
-      assert_eq!(ev.span().source(), &s, "name source mismatch for `{s}`");
-      assert_eq!(
-        ev.span().source(),
-        &s,
-        "outer span should match full input `{s}`"
-      );
-    }
-  }
-
-  #[test]
-  fn rejects_reserved_keywords_exactly() {
-    #[allow(clippy::single_element_loop)]
-    for s in ["on"] {
-      assert!(
-        fragment_name_parser().parse(s).into_result().is_err(),
-        "should reject reserved keyword `{s}`"
-      );
-    }
-  }
-
-  #[test]
-  fn case_variants_of_reserved_are_allowed() {
-    for s in ["TRUE", "False", "Null"] {
-      assert!(
-        fragment_name_parser().parse(s).into_result().is_ok(),
-        "should accept case-variant `{s}`"
-      );
-    }
-  }
-
-  #[test]
-  fn rejects_non_name_starters_and_illegal_chars() {
-    for s in [
-      "1",
-      "1a",
-      "-",
-      "my-fragment-name",
-      "my.fragment.name",
-      "my fragment name",
-      "@directive",
-      "",
-    ] {
-      assert!(
-        fragment_name_parser().parse(s).into_result().is_err(),
-        "should reject non-name `{s}`"
-      );
-    }
-  }
-
-  #[test]
-  fn requires_full_input() {
-    for s in ["FOO,", "Bar ", "trueValue!", "RED\n"] {
-      assert!(
-        fragment_name_parser().parse(s).into_result().is_err(),
-        "should reject with trailing input `{s}`"
-      );
-    }
-  }
-
-  #[test]
-  fn into_span_returns_owned_span_with_same_source() {
-    let s = "MY_FRAGMENT_NAME";
-    let ev1 = fragment_name_parser().parse(s).into_result().unwrap();
-    assert_eq!(ev1.span().source(), &s);
-
-    let ev2 = fragment_name_parser().parse(s).into_result().unwrap();
-    let owned_span = ev2.into_span();
-    assert_eq!(owned_span.source(), &s);
-  }
-
-  #[test]
-  fn labelled_error_exists_for_reserved() {
-    let errs = fragment_name_parser()
-      .parse("on")
-      .into_result()
-      .unwrap_err();
-    assert!(!errs.is_empty());
+impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
+  for InlineFragment<TypeCondition, Directives, SelectionSet>
+where
+  TypeCondition: Parseable<'a, I, T, Error>,
+  Directives: Parseable<'a, I, T, Error>,
+  SelectionSet: Parseable<'a, I, T, Error>,
+  Spread: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(
+      TypeCondition::parser(),
+      Directives::parser(),
+      SelectionSet::parser(),
+    )
   }
 }

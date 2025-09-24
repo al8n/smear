@@ -1,6 +1,18 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use core::fmt::Display;
 
-use super::super::{super::source::*, Name, ignored, punct::Dollar};
+use chumsky::{Parser, extra::ParserExtra};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  utils::{
+    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    syntax_tree_display::DisplaySyntaxTree,
+  },
+};
+
+use crate::{
+  error::{ParseVariableValueError, VariableValueHint},
+  lang::punctuator::Dollar,
+};
 
 /// A GraphQL variable reference.
 ///
@@ -46,91 +58,125 @@ use super::super::{super::source::*, Name, ignored, punct::Dollar};
 /// ```
 ///
 /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
-#[derive(Debug, Clone, Copy)]
-pub struct Variable<Span> {
-  span: Span,
-  /// The span of the dollar character
-  dollar: Dollar<Span>,
-  /// The name of the variable value
-  name: Name<Span>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Variable<Name> {
+  /// The span of the entire variable, including the `$` and the name.
+  pub span: Span,
+  /// The name of the variable without the `$` prefix.
+  pub name: Name,
 }
 
-impl<Span> Variable<Span> {
-  /// Returns the variable name identifier.
-  ///
-  /// This provides access to the GraphQL name that identifies this variable.
-  /// The name follows standard GraphQL identifier rules and is used to match
-  /// the variable with values provided during execution.
-  #[inline]
-  pub const fn name(&self) -> &Name<Span> {
-    &self.name
-  }
-
-  /// Returns the dollar prefix token.
-  ///
-  /// This provides access to the `$` character that prefixes all variable
-  /// references, including its exact source position. Useful for syntax
-  /// highlighting and precise error reporting.
-  #[inline]
-  pub const fn dollar(&self) -> &Dollar<Span> {
-    &self.dollar
-  }
-
-  /// Returns the source span of the entire variable reference.
-  ///
-  /// This span covers from the `$` character through the last character of
-  /// the variable name, providing the complete source location for error
-  /// reporting and source mapping.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Creates a parser for GraphQL variable references.
-  ///
-  /// This parser implements the complete GraphQL variable specification,
-  /// handling the dollar prefix, optional whitespace, and variable name
-  /// according to GraphQL's lexical rules.
-  ///
-  /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
-  where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-  {
-    Dollar::parser()
-      .then_ignore(ignored())
-      .then(Name::parser())
-      .map_with(|(dollar, name), sp| Self {
-        name,
-        span: Span::from_map_extra(sp),
-        dollar,
-      })
-  }
-}
-
-impl<Span> AsRef<Span> for Variable<Span> {
+impl<Name> AsRef<Span> for Variable<Name> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for Variable<Span> {
+impl<Name> core::ops::Deref for Variable<Name> {
+  type Target = Name;
+
   #[inline]
-  fn into_span(self) -> Span {
-    self.span
+  fn deref(&self) -> &Self::Target {
+    self.name()
   }
 }
 
-impl<Span> IntoComponents for Variable<Span> {
-  type Components = (Span, Dollar<Span>, Name<Span>);
-
+impl<Name> Display for Variable<Name>
+where
+  Name: DisplayHuman,
+{
   #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.dollar, self.name)
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplaySDL::fmt(self, f)
+  }
+}
+
+impl<Name> Variable<Name> {
+  /// Creates a new variable from the given span and name.
+  #[inline(always)]
+  pub const fn new(span: Span, name: Name) -> Self {
+    Self { span, name }
+  }
+
+  /// Returns the span of the name.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the name as a string slice.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+}
+
+impl<Name> DisplaySDL for Variable<Name>
+where
+  Name: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(f, "${}", self.name.display())
+  }
+}
+
+impl<Name> DisplaySyntaxTree for Variable<Name>
+where
+  Name: DisplaySyntaxTree,
+{
+  #[inline]
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
+    let padding = level * indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    writeln!(
+      f,
+      "- VARIABLE@{}..{}",
+      self.span().start(),
+      self.span().end()
+    )?;
+    <Name as DisplaySyntaxTree>::fmt(self.name(), level + 1, indent, f)
+  }
+}
+
+impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for Variable<Name>
+where
+  Error: ParseVariableValueError<Name>,
+  Name: Parseable<'a, I, T, Error>,
+  Dollar: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Dollar::parser()
+      .or_not()
+      .then(Name::parser().or_not())
+      .try_map_with(|(dollar, name), exa| {
+        let span = exa.span();
+        match (dollar, name) {
+          (None, None) => Err(Error::unexpected_end_of_variable_value(
+            VariableValueHint::Dollar,
+            span,
+          )),
+          (Some(_), None) => Err(Error::unexpected_end_of_variable_value(
+            VariableValueHint::Name,
+            span,
+          )),
+          (None, Some(name)) => Err(Error::missing_dollar_token(name, span)),
+          (Some(_), Some(name)) => Ok(Variable { span, name }),
+        }
+      })
   }
 }

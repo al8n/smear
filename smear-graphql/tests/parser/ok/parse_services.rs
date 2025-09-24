@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 use std::fs;
 

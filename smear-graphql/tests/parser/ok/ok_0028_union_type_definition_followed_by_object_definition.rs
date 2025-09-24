@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0028_union_type_definition_followed_by_object_definition.graphql");
 

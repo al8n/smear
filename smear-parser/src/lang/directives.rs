@@ -1,6 +1,7 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use chumsky::{IterParser, Parser, extra::ParserExtra};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
-use super::{super::source::*, ignored, punct::At};
+use crate::{lang::punctuator::At, source::*};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -12,49 +13,42 @@ use std::vec::Vec;
 ///
 /// Spec: [Directive](https://spec.graphql.org/draft/#Directive)
 #[derive(Debug, Clone, Copy)]
-pub struct Directive<Name, Args, Span> {
+pub struct Directive<Name, Args> {
   span: Span,
-  at: At<Span>,
   name: Name,
   arguments: Option<Args>,
 }
 
-impl<Name, Args, Span> AsRef<Span> for Directive<Name, Args, Span> {
+impl<Name, Args> AsRef<Span> for Directive<Name, Args> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Args, Span> IntoSpan<Span> for Directive<Name, Args, Span> {
+impl<Name, Args> IntoSpan<Span> for Directive<Name, Args> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Args, Span> IntoComponents for Directive<Name, Args, Span> {
-  type Components = (Span, At<Span>, Name, Option<Args>);
+impl<Name, Args> IntoComponents for Directive<Name, Args> {
+  type Components = (Span, Name, Option<Args>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.at, self.name, self.arguments)
+    (self.span, self.name, self.arguments)
   }
 }
 
-impl<Name, Args, Span> Directive<Name, Args, Span> {
+impl<Name, Args> Directive<Name, Args> {
   /// Returns a reference to the span covering the entire directive.
   ///
   /// The span includes the `@` symbol, name, and arguments (if present).
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns a reference to the `@` symbol that starts this directive.
-  #[inline]
-  pub const fn at(&self) -> &At<Span> {
-    &self.at
   }
 
   /// Returns a reference to the directive's name.
@@ -75,45 +69,54 @@ impl<Name, Args, Span> Directive<Name, Args, Span> {
     self.arguments
   }
 
-  /// Creates a parser that can parse a single directive with custom argument parsing.
+  /// Creates a parser for a directive using the provided name and arguments parsers.
   ///
-  /// The parser expects the following sequence:
-  /// 1. An `@` symbol
-  /// 2. Optional ignored content (whitespace, comments)
-  /// 3. A directive name
-  /// 4. Optional ignored content
-  /// 5. Optional arguments (parsed by the provided `args_parser`)
+  /// The `name_parser` is used to parse the directive's name, while the `args_parser`
+  /// is used to parse the optional arguments.
   ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the directive.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, NP, AP>(
+  /// The resulting parser will recognize the `@` symbol, followed by the name and optional arguments,
+  /// constructing a `Directive` instance with the parsed components.
+  pub fn parser_with<'a, I, T, Error, E, NP, AP>(
     name_parser: NP,
     args_parser: AP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    AP: Parser<'src, I, Args, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Args: Parseable<'a, I, T, Error>,
+    At: Parseable<'a, I, T, Error>,
+    NP: Parser<'a, I, Name, E> + Clone,
+    AP: Parser<'a, I, Args, E> + Clone,
   {
     At::parser()
-      .then_ignore(ignored())
-      .then(name_parser)
-      .then(ignored().ignore_then(args_parser).or_not())
-      .map_with(|((at, name), arguments), sp| Self {
-        span: Span::from_map_extra(sp),
-        at,
+      .ignore_then(name_parser)
+      .then(args_parser.or_not())
+      .map_with(|(name, arguments), exa| Self {
+        span: exa.span(),
         name,
         arguments,
       })
+  }
+}
+
+impl<'a, Name, Args, I, T, Error> Parseable<'a, I, T, Error> for Directive<Name, Args>
+where
+  Args: Parseable<'a, I, T, Error>,
+  At: Parseable<'a, I, T, Error>,
+  Name: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), Args::parser())
   }
 }
 
@@ -125,27 +128,27 @@ impl<Name, Args, Span> Directive<Name, Args, Span> {
 ///
 /// Spec: [Directives](https://spec.graphql.org/draft/#Directives)
 #[derive(Debug, Clone, Copy)]
-pub struct Directives<Directive, Span, Container = Vec<Directive>> {
+pub struct Directives<Directive, Container = Vec<Directive>> {
   span: Span,
   directives: Container,
   _directive: PhantomData<Directive>,
 }
 
-impl<Directive, Span, Container> AsRef<Span> for Directives<Directive, Span, Container> {
+impl<Directive, Container> AsRef<Span> for Directives<Directive, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Directive, Span, Container> IntoSpan<Span> for Directives<Directive, Span, Container> {
+impl<Directive, Container> IntoSpan<Span> for Directives<Directive, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Directive, Span, Container> IntoComponents for Directives<Directive, Span, Container> {
+impl<Directive, Container> IntoComponents for Directives<Directive, Container> {
   type Components = (Span, Container);
 
   #[inline]
@@ -154,7 +157,7 @@ impl<Directive, Span, Container> IntoComponents for Directives<Directive, Span, 
   }
 }
 
-impl<Directive, Span, Container> Directives<Directive, Span, Container> {
+impl<Directive, Container> Directives<Directive, Container> {
   /// Returns a reference to the span covering all directives in the collection.
   ///
   /// The span encompasses from the start of the first directive to the end of the last directive.
@@ -174,36 +177,29 @@ impl<Directive, Span, Container> Directives<Directive, Span, Container> {
   pub fn into_directives(self) -> Container {
     self.directives
   }
+}
 
-  /// Creates a parser that can parse one or more directives.
-  ///
-  /// This parser implements the `Directive+` production rule, meaning it requires
-  /// at least one directive but can parse multiple consecutive directives.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the directives.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(directive: P) -> impl Parser<'src, I, Self, E> + Clone
+impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Directives<Directive, Container>
+where
+  Directive: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<Directive>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Directive, E> + Clone,
-    Container: chumsky::container::Container<Directive>,
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
-    directive
-      .padded_by(ignored())
+    Directive::parser()
       .repeated()
       .at_least(1)
       .collect()
-      .map_with(|directives, sp| Self {
-        span: Span::from_map_extra(sp),
+      .map_with(|directives, exa| Self {
+        span: exa.span(),
         directives,
         _directive: PhantomData,
       })

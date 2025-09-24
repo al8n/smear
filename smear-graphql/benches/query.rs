@@ -10,7 +10,7 @@ fn apollo_parser_parse_query(query: &str) {
 }
 
 fn smear_parser_parse_query(schema: &str) {
-  use smear_graphql::parser::fast::{ExecutableDocument, ParseStr};
+  use smear_graphql::parser::ast::{ExecutableDocument, ParseStr};
 
   let _document = ExecutableDocument::<&str>::parse_str(schema).unwrap();
 }

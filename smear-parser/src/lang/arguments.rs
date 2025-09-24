@@ -1,13 +1,10 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-
-use super::{
-  super::source::*,
-  Name, ignored,
-  punct::{Colon, LParen, RParen},
-};
+use chumsky::{IterParser, Parser, extra::ParserExtra};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use smear_utils::{IntoComponents, IntoSpan};
 
 use core::marker::PhantomData;
-use std::vec::Vec;
+
+use crate::lang::punctuator::{Colon, LParen, RParen};
 
 /// A single named argument in a GraphQL operation or directive.
 ///
@@ -23,37 +20,36 @@ use std::vec::Vec;
 ///
 /// Spec: [Argument](https://spec.graphql.org/draft/#Argument)
 #[derive(Debug, Clone, Copy)]
-pub struct Argument<Value, Span> {
+pub struct Argument<Name, Value> {
   span: Span,
-  name: Name<Span>,
-  colon: Colon<Span>,
+  name: Name,
   value: Value,
 }
 
-impl<Value, Span> AsRef<Span> for Argument<Value, Span> {
+impl<Name, Value> AsRef<Span> for Argument<Name, Value> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Value, Span> IntoSpan<Span> for Argument<Value, Span> {
+impl<Name, Value> IntoSpan<Span> for Argument<Name, Value> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Value, Span> IntoComponents for Argument<Value, Span> {
-  type Components = (Span, Name<Span>, Colon<Span>, Value);
+impl<Name, Value> IntoComponents for Argument<Name, Value> {
+  type Components = (Span, Name, Value);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.colon, self.value)
+    (self.span, self.name, self.value)
   }
 }
 
-impl<Value, Span> Argument<Value, Span> {
+impl<Name, Value> Argument<Name, Value> {
   /// Returns the source span of the entire argument.
   ///
   /// This span covers from the first character of the argument name through
@@ -64,23 +60,13 @@ impl<Value, Span> Argument<Value, Span> {
     &self.span
   }
 
-  /// Returns the colon separator token.
-  ///
-  /// This provides access to the `:` character that separates the argument
-  /// name from its value, including its exact source position. Useful for
-  /// syntax highlighting and precise error reporting.
-  #[inline]
-  pub const fn colon(&self) -> &Colon<Span> {
-    &self.colon
-  }
-
   /// Returns the argument name identifier.
   ///
   /// This provides access to the GraphQL name that identifies this argument.
   /// The name follows standard GraphQL identifier rules and is used to match
   /// the argument with its expected parameter in the schema.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -94,37 +80,52 @@ impl<Value, Span> Argument<Value, Span> {
     &self.value
   }
 
-  /// Creates a parser for GraphQL arguments with a custom value parser.
+  /// Creates a parser for arguments with custom name and value parsers.
   ///
-  /// This parser handles the complete argument syntax including the argument
-  /// name, colon separator, and argument value. It manages whitespace around
-  /// the colon according to GraphQL's flexible whitespace rules.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the argument.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(value: P) -> impl Parser<'src, I, Self, E> + Clone
+  /// This parser handles the complete argument syntax including the name,
+  /// colon, and value. It allows for flexible parsing of both the name and
+  /// value components by accepting custom parsers for each. This enables
+  /// integration with different name and value parsing strategies as needed.
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, N, V>(
+    name_parser: N,
+    value_parser: V,
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Value, E> + Clone,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Colon: Parseable<'a, I, T, Error>,
+    N: Parser<'a, I, Name, E> + Clone,
+    V: Parser<'a, I, Value, E> + Clone,
   {
-    Name::parser()
-      .then(Colon::parser().padded_by(ignored()))
-      .then(value)
-      .map_with(|((name, colon), value), sp| Self {
-        span: Span::from_map_extra(sp),
-        name,
-        colon,
-        value,
+    name_parser
+      .then_ignore(Colon::parser())
+      .then(value_parser)
+      .map_with(|(name, value), exa| {
+        let span = exa.span();
+        Self { span, name, value }
       })
+  }
+}
+
+impl<'a, Name, Value, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value>
+where
+  Name: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
+  Value: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser(), Value::parser())
   }
 }
 
@@ -173,30 +174,30 @@ impl<Value, Span> Argument<Value, Span> {
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments)
 #[derive(Debug, Clone, Copy)]
-pub struct Arguments<Arg, Span, Container = Vec<Arg>> {
+pub struct Arguments<Arg, Container = Vec<Arg>> {
   span: Span,
-  l_paren: LParen<Span>,
+  l_paren: LParen,
   arguments: Container,
-  r_paren: RParen<Span>,
+  r_paren: RParen,
   _arg: PhantomData<Arg>,
 }
 
-impl<Arg, Span, Container> AsRef<Span> for Arguments<Arg, Span, Container> {
+impl<Arg, Container> AsRef<Span> for Arguments<Arg, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Arg, Span, Container> IntoSpan<Span> for Arguments<Arg, Span, Container> {
+impl<Arg, Container> IntoSpan<Span> for Arguments<Arg, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Arg, Span, Container> IntoComponents for Arguments<Arg, Span, Container> {
-  type Components = (Span, LParen<Span>, Container, RParen<Span>);
+impl<Arg, Container> IntoComponents for Arguments<Arg, Container> {
+  type Components = (Span, LParen, Container, RParen);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -204,7 +205,7 @@ impl<Arg, Span, Container> IntoComponents for Arguments<Arg, Span, Container> {
   }
 }
 
-impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
+impl<Arg, Container> Arguments<Arg, Container> {
   /// Returns the source span of the entire argument list.
   ///
   /// This span covers from the opening parenthesis through the closing
@@ -221,7 +222,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and precise error reporting at argument boundaries.
   #[inline]
-  pub const fn l_paren(&self) -> &LParen<Span> {
+  pub const fn l_paren(&self) -> &LParen {
     &self.l_paren
   }
 
@@ -231,7 +232,7 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and detecting incomplete argument lists.
   #[inline]
-  pub const fn r_paren(&self) -> &RParen<Span> {
+  pub const fn r_paren(&self) -> &RParen {
     &self.r_paren
   }
 
@@ -243,42 +244,29 @@ impl<Arg, Span, Container> Arguments<Arg, Span, Container> {
   pub const fn arguments(&self) -> &Container {
     &self.arguments
   }
+}
 
-  /// Creates a parser for argument lists with a custom argument parser.
-  ///
-  /// This is the core parsing function that accepts any argument parser and
-  /// creates a complete argument list parser. It handles all argument list syntax
-  /// including parentheses, argument parsing, whitespace management, and requires
-  /// at least one argument to be present.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the arguments.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(arg_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+impl<'a, Arg, Container, I, T, Error> Parseable<'a, I, T, Error> for Arguments<Arg, Container>
+where
+  Arg: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<Arg>,
+  LParen: Parseable<'a, I, T, Error>,
+  RParen: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Arg, E> + Clone,
-    Container: chumsky::container::Container<Arg>,
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
   {
     LParen::parser()
-      .then(
-        arg_parser
-          .padded_by(ignored())
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
+      .then(Arg::parser().repeated().at_least(1).collect())
       .then(RParen::parser())
-      .map_with(|((l_paren, arguments), r_paren), sp| Self {
-        span: Span::from_map_extra(sp),
+      .map_with(|((l_paren, arguments), r_paren), exa| Self {
+        span: exa.span(),
         l_paren,
         arguments,
         r_paren,

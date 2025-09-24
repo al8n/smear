@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{DescribedObjectTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{DescribedObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0018_object_type_definition.graphql");
 

@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{FragmentDefinition, ParseStr};
+use smear_graphql::parser::ast::{FragmentDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0012_fragment_definition.graphql");
 

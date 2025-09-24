@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 
 const ALL: &str = include_str!("../../fixtures/parser/err/0062_kitchen_sink_ccn.graphql");

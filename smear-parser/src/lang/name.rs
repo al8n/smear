@@ -1,6 +1,10 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use core::fmt::Display;
 
-use crate::source::*;
+use crate::source::{IntoComponents, IntoSpan};
+use logosky::utils::{
+  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  syntax_tree_display::DisplaySyntaxTree,
+};
 
 /// A GraphQL name identifier.
 ///
@@ -54,231 +58,118 @@ use crate::source::*;
 /// Such semantic validation should be performed at a higher level.
 ///
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Name<Span>(pub(crate) Span);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Name<S> {
+  span: Span,
+  value: S,
+}
 
-impl<Span> Name<Span> {
-  /// Returns the source span of the name.
+impl<S> Name<S> {
+  /// Creates a new name with the given span and value.
   ///
-  /// This provides access to the original source location and text of the name,
-  /// useful for error reporting, source mapping, syntax highlighting, and
-  /// extracting the actual string content of the name.
+  /// The span represents the location of the name in the source text,
+  /// and the value is the actual source text.
   #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.0
+  pub const fn new(span: Span, value: S) -> Self {
+    Self { span, value }
   }
 
-  /// Creates a parser for GraphQL names.
-  ///
-  /// This parser implements the complete GraphQL name specification, enforcing
-  /// the lexical rules for valid identifiers. It uses a two-part strategy:
-  /// first matching the initial character (which has stricter rules), then
-  /// matching any number of continuation characters.
-  ///
-  /// ## Parsing Strategy
-  ///
-  /// 1. **Start character**: Must be a letter (`A-Z`, `a-z`) or underscore (`_`)
-  /// 2. **Continuation characters**: Zero or more letters, digits (`0-9`), or underscores
-  ///
-  /// The parser builds the complete character sequence and validates it conforms
-  /// to GraphQL naming rules during parsing, ensuring only valid names are accepted.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// // Successful parses:
-  /// "user"         -> Name { span: "user" }
-  /// "User"         -> Name { span: "User" }
-  /// "_private"     -> Name { span: "_private" }
-  /// "field123"     -> Name { span: "field123" }
-  /// "__typename"   -> Name { span: "__typename" }
-  /// "a"            -> Name { span: "a" }
-  ///
-  /// // Parse failures:
-  /// "123field"     -> Error: cannot start with digit
-  /// "my-field"     -> Error: hyphen not allowed
-  /// "my.field"     -> Error: dot not allowed
-  /// "my field"     -> Error: space not allowed
-  /// ""             -> Error: empty string
-  /// "@directive"   -> Error: @ symbol not allowed at start
-  /// ```
-  ///
-  /// ## Character Set Details
-  ///
-  /// The parser explicitly handles the following character classes:
-  /// - **Letters**: `A-Z` (uppercase) and `a-z` (lowercase)
-  /// - **Digits**: `0-9` (only allowed after the first character)
-  /// - **Underscore**: `_` (allowed anywhere)
-  ///
-  /// ## Error Handling
-  ///
-  /// The parser will fail if:
-  /// - The input is empty
-  /// - The first character is not a letter or underscore
-  /// - Any subsequent character is not a letter, digit, or underscore
-  /// - The input contains any other characters (spaces, punctuation, etc.)
-  ///
-  /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  /// Returns the span of the name.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the underlying slice value.
+  #[inline]
+  pub const fn slice(&self) -> S
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
+    S: Copy,
   {
-    // [_A-Za-z]
-    let start = one_of([
-      I::Token::UNDERSCORE,
-      I::Token::A,
-      I::Token::B,
-      I::Token::C,
-      I::Token::D,
-      I::Token::E,
-      I::Token::F,
-      I::Token::G,
-      I::Token::H,
-      I::Token::I,
-      I::Token::J,
-      I::Token::K,
-      I::Token::L,
-      I::Token::M,
-      I::Token::N,
-      I::Token::O,
-      I::Token::P,
-      I::Token::Q,
-      I::Token::R,
-      I::Token::S,
-      I::Token::T,
-      I::Token::U,
-      I::Token::V,
-      I::Token::W,
-      I::Token::X,
-      I::Token::Y,
-      I::Token::Z,
-      I::Token::a,
-      I::Token::b,
-      I::Token::c,
-      I::Token::d,
-      I::Token::e,
-      I::Token::f,
-      I::Token::g,
-      I::Token::h,
-      I::Token::i,
-      I::Token::j,
-      I::Token::k,
-      I::Token::l,
-      I::Token::m,
-      I::Token::n,
-      I::Token::o,
-      I::Token::p,
-      I::Token::q,
-      I::Token::r,
-      I::Token::s,
-      I::Token::t,
-      I::Token::u,
-      I::Token::v,
-      I::Token::w,
-      I::Token::x,
-      I::Token::y,
-      I::Token::z,
-    ])
-    .ignored();
+    self.value
+  }
 
-    // [_0-9A-Za-z]*
-    let cont = one_of([
-      I::Token::UNDERSCORE,
-      I::Token::ZERO,
-      I::Token::ONE,
-      I::Token::TWO,
-      I::Token::THREE,
-      I::Token::FOUR,
-      I::Token::FIVE,
-      I::Token::SIX,
-      I::Token::SEVEN,
-      I::Token::EIGHT,
-      I::Token::NINE,
-      I::Token::A,
-      I::Token::B,
-      I::Token::C,
-      I::Token::D,
-      I::Token::E,
-      I::Token::F,
-      I::Token::G,
-      I::Token::H,
-      I::Token::I,
-      I::Token::J,
-      I::Token::K,
-      I::Token::L,
-      I::Token::M,
-      I::Token::N,
-      I::Token::O,
-      I::Token::P,
-      I::Token::Q,
-      I::Token::R,
-      I::Token::S,
-      I::Token::T,
-      I::Token::U,
-      I::Token::V,
-      I::Token::W,
-      I::Token::X,
-      I::Token::Y,
-      I::Token::Z,
-      I::Token::a,
-      I::Token::b,
-      I::Token::c,
-      I::Token::d,
-      I::Token::e,
-      I::Token::f,
-      I::Token::g,
-      I::Token::h,
-      I::Token::i,
-      I::Token::j,
-      I::Token::k,
-      I::Token::l,
-      I::Token::m,
-      I::Token::n,
-      I::Token::o,
-      I::Token::p,
-      I::Token::q,
-      I::Token::r,
-      I::Token::s,
-      I::Token::t,
-      I::Token::u,
-      I::Token::v,
-      I::Token::w,
-      I::Token::x,
-      I::Token::y,
-      I::Token::z,
-    ])
-    .ignored()
-    .repeated();
-
-    start
-      .then(cont)
-      .map_with(|_, sp| Name(Span::from_map_extra(sp)))
+  /// Returns reference of the underlying slice value.
+  #[inline(always)]
+  pub const fn slice_ref(&self) -> &S {
+    &self.value
   }
 }
 
-impl<Span> AsRef<Span> for Name<Span> {
+impl<S> AsRef<Span> for Name<S> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for Name<Span> {
+impl<S> IntoSpan<Span> for Name<S> {
   #[inline]
   fn into_span(self) -> Span {
-    self.0
+    self.span
   }
 }
 
-impl<Span> IntoComponents for Name<Span> {
-  type Components = Span;
+impl<S> IntoComponents for Name<S> {
+  type Components = (Span, S);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.into_span()
+    (self.span, self.value)
+  }
+}
+
+impl<S> Display for Name<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayHuman::fmt(self.slice_ref(), f)
+  }
+}
+
+impl<S> core::ops::Deref for Name<S> {
+  type Target = S;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.slice_ref()
+  }
+}
+
+impl<S> DisplaySDL for Name<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
+impl<S> DisplaySyntaxTree for Name<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
+    let mut padding = level * indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    writeln!(f, "- NAME@{}..{}", self.span.start(), self.span.end())?;
+    padding += indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    write!(
+      f,
+      "- IDENT@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
+      self.value.display(),
+    )
   }
 }

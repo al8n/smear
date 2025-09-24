@@ -1,6 +1,14 @@
 use chumsky::{extra::ParserExtra, prelude::*};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  utils::{
+    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    syntax_tree_display::DisplaySyntaxTree,
+  },
+};
+use smear_utils::{IntoComponents, IntoSpan};
 
-use super::{super::source::*, Name, ignored, punct::Colon};
+use crate::lang::punctuator::Colon;
 
 /// Represents a field alias in GraphQL syntax.
 ///
@@ -24,36 +32,35 @@ use super::{super::source::*, Name, ignored, punct::Colon};
 ///
 /// Spec: [Field Alias](https://spec.graphql.org/draft/#sec-Field-Alias)
 #[derive(Debug, Clone, Copy)]
-pub struct Alias<Span> {
+pub struct Alias<Name> {
   span: Span,
-  name: Name<Span>,
-  colon: Colon<Span>,
+  name: Name,
 }
 
-impl<Span> AsRef<Span> for Alias<Span> {
+impl<Name> AsRef<Span> for Alias<Name> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for Alias<Span> {
+impl<Name> IntoSpan<Span> for Alias<Name> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for Alias<Span> {
-  type Components = (Span, Name<Span>, Colon<Span>);
+impl<Name> IntoComponents for Alias<Name> {
+  type Components = (Span, Name);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.colon)
+    (self.span, self.name)
   }
 }
 
-impl<Span> Alias<Span> {
+impl<Name> Alias<Name> {
   /// Returns a reference to the span covering the entire alias.
   ///
   /// The span includes both the alias name and the colon separator.
@@ -62,50 +69,99 @@ impl<Span> Alias<Span> {
     &self.span
   }
 
-  /// Returns a reference to the colon separator.
-  ///
-  /// The colon separates the alias name from the field name that follows.
-  /// This provides access to the exact location and span information of the separator.
-  pub const fn colon(&self) -> &Colon<Span> {
-    &self.colon
-  }
-
   /// Returns a reference to the name part of the alias.
   ///
   /// This is the identifier that will be used as the key in the response
   /// object instead of the actual field name.
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
-  /// Creates a parser that can parse a field alias.
+  /// Creates a parser for an alias using the provided name parser.
   ///
-  /// The parser expects an identifier (name) followed by optional ignored tokens
-  /// and then a colon. This parser is typically used as part of a larger field parser.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the alias.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser<'src, I, E>() -> impl Parser<'src, I, Self, E> + Clone
+  /// The parser recognizes a name followed by a colon, constructing an `Alias`
+  /// instance with the
+  /// parsed name and the span covering the entire alias.
+  pub fn parser_with<'a, I, T, Error, E, P>(name_parser: P) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    P: Parser<'a, I, Name, E> + Clone,
+    Colon: Parseable<'a, I, T, Error>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
-    Name::<Span>::parser()
-      .then_ignore(ignored())
-      .then(Colon::parser())
-      .map_with(|(name, colon), sp| Self {
-        span: Span::from_map_extra(sp),
+    name_parser
+      .then_ignore(Colon::parser())
+      .map_with(|name, exa| Self {
+        span: exa.span(),
         name,
-        colon,
       })
+  }
+}
+
+impl<Name> core::fmt::Display for Alias<Name>
+where
+  Name: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplaySDL::fmt(self, f)
+  }
+}
+
+impl<Name> core::ops::Deref for Alias<Name> {
+  type Target = Name;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.name()
+  }
+}
+
+impl<Name> DisplaySDL for Alias<Name>
+where
+  Name: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    write!(f, "{}:", self.name.display())
+  }
+}
+
+impl<Name> DisplaySyntaxTree for Alias<Name>
+where
+  Name: DisplaySyntaxTree,
+{
+  #[inline]
+  fn fmt(
+    &self,
+    level: usize,
+    indent: usize,
+    f: &mut core::fmt::Formatter<'_>,
+  ) -> core::fmt::Result {
+    let padding = level * indent;
+    write!(f, "{:indent$}", "", indent = padding)?;
+    writeln!(f, "- ALIAS@{}..{}", self.span.start(), self.span.end())?;
+    self.name.fmt(level + 1, indent, f)
+  }
+}
+
+impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for Alias<Name>
+where
+  Name: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Name::parser())
   }
 }
 
@@ -160,18 +216,18 @@ impl<Span> Alias<Span> {
 /// ```
 ///
 /// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
-#[derive(Debug, Clone, Copy)]
-pub struct Field<Args, Directives, SelectionSet, Span> {
+#[derive(Debug, Clone)]
+pub struct Field<Alias, Name, Arguments, Directives, SelectionSet> {
   span: Span,
-  alias: Option<Alias<Span>>,
-  name: Name<Span>,
-  arguments: Option<Args>,
+  alias: Option<Alias>,
+  name: Name,
+  arguments: Option<Arguments>,
   directives: Option<Directives>,
   selection_set: Option<SelectionSet>,
 }
 
-impl<Args, Directives, SelectionSet, Span> AsRef<Span>
-  for Field<Args, Directives, SelectionSet, Span>
+impl<Alias, Name, Arguments, Directives, SelectionSet> AsRef<Span>
+  for Field<Alias, Name, Arguments, Directives, SelectionSet>
 {
   #[inline]
   fn as_ref(&self) -> &Span {
@@ -179,8 +235,8 @@ impl<Args, Directives, SelectionSet, Span> AsRef<Span>
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> IntoSpan<Span>
-  for Field<Args, Directives, SelectionSet, Span>
+impl<Alias, Name, Arguments, Directives, SelectionSet> IntoSpan<Span>
+  for Field<Alias, Name, Arguments, Directives, SelectionSet>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -188,14 +244,14 @@ impl<Args, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> IntoComponents
-  for Field<Args, Directives, SelectionSet, Span>
+impl<Alias, Name, Arguments, Directives, SelectionSet> IntoComponents
+  for Field<Alias, Name, Arguments, Directives, SelectionSet>
 {
   type Components = (
     Span,
-    Option<Alias<Span>>,
-    Name<Span>,
-    Option<Args>,
+    Option<Alias>,
+    Name,
+    Option<Arguments>,
     Option<Directives>,
     Option<SelectionSet>,
   );
@@ -213,7 +269,9 @@ impl<Args, Directives, SelectionSet, Span> IntoComponents
   }
 }
 
-impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet, Span> {
+impl<Alias, Name, Arguments, Directives, SelectionSet>
+  Field<Alias, Name, Arguments, Directives, SelectionSet>
+{
   /// Returns a reference to the span covering the entire field.
   ///
   /// The span includes the alias (if present), field name, arguments, directives,
@@ -230,7 +288,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
   /// This is useful for requesting the same field multiple times with different arguments
   /// or for providing more descriptive names.
   #[inline]
-  pub const fn alias(&self) -> Option<&Alias<Span>> {
+  pub const fn alias(&self) -> Option<&Alias> {
     self.alias.as_ref()
   }
 
@@ -240,7 +298,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
   /// If an alias is present, the alias name will be used as the key in the response,
   /// but this name determines which field is actually queried.
   #[inline]
-  pub const fn name(&self) -> &Name<Span> {
+  pub const fn name(&self) -> &Name {
     &self.name
   }
 
@@ -249,7 +307,7 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
   /// Arguments allow you to pass parameters to fields, enabling filtering,
   /// pagination, or other field-specific behavior.
   #[inline]
-  pub const fn arguments(&self) -> Option<&Args> {
+  pub const fn arguments(&self) -> Option<&Arguments> {
     self.arguments.as_ref()
   }
 
@@ -277,38 +335,31 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
   /// This parser handles the complete field syntax including optional alias, required name,
   /// and optional arguments, directives, and selection set. The parsing of each component
   /// is delegated to the provided parsers.
-  ///
-  /// ## Notes
-  ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the field.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, AP, DP, SP>(
+  pub fn parser_with<'a, I, T, Error, E, AP, DP, SP>(
     args: AP,
     directives: DP,
     selection_set: SP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
+  ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    AP: Parser<'src, I, Args, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    SP: Parser<'src, I, SelectionSet, E> + Clone,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    Error: 'a,
+    Name: Parseable<'a, I, T, Error> + 'a,
+    Alias: Parseable<'a, I, T, Error> + 'a,
+    AP: Parser<'a, I, Arguments, E> + Clone,
+    DP: Parser<'a, I, Directives, E> + Clone,
+    SP: Parser<'a, I, SelectionSet, E> + Clone,
   {
     Alias::parser()
       .or_not()
-      .then(Name::parser().padded_by(ignored()))
+      .then(Name::parser())
       .then(args.or_not())
-      .then(ignored().ignore_then(directives).or_not())
-      .then(ignored().ignore_then(selection_set).or_not())
+      .then(directives.or_not())
+      .then(selection_set.or_not())
       .map_with(
-        |((((alias, name), arguments), directives), selection_set), sp| Self {
-          span: Span::from_map_extra(sp),
+        |((((alias, name), arguments), directives), selection_set), exa| Self {
+          span: exa.span(),
           alias,
           name,
           arguments,
@@ -318,3 +369,52 @@ impl<Args, Directives, SelectionSet, Span> Field<Args, Directives, SelectionSet,
       )
   }
 }
+
+// impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, Container, I, T, Error> Parseable<I, T, Error> for Field<Alias, Name, Arguments, Directives, SelectionSet>
+// where
+//   T: Token<'a>,
+//   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+//   On: Parseable<I, T, Error>,
+//   Spread: Parseable<I, T, Error>,
+//   LBrace: Parseable<I, T, Error>,
+//   RBrace: Parseable<I, T, Error>,
+//   TypeCondition: Parseable<I, T, Error>,
+//   Alias: Parseable<I, T, Error>,
+//   Name: Parseable<I, T, Error>,
+//   FragmentName: Parseable<I, T, Error>,
+//   Arguments: Parseable<I, T, Error>,
+//   Directives: Parseable<I, T, Error>,
+//   Error: 'a,
+//   Container: chumsky::container::Container<Selection<Alias, Name, Arguments, Directives, SelectionSet>> + 'a,
+// {
+//   #[inline]
+//   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+//   where
+//     Self: Sized,
+//     E: ParserExtra<'a, I, Error = Error> + 'a
+//   {
+//     recursive(|field_parser| {
+//       // Inner fixpoint: build a `Selection` parser by using the recursive `field_parser`.
+//       let selection = recursive(|selection| {
+//         // SelectionSet needs a `Selection` parser
+//         let selection_set =
+//           SelectionSet::parser_with(selection.clone());
+
+//         let spread = FragmentSpread::parser()
+//           .map(|fs| Selection::FragmentSpread(fs));
+
+//         let inline = InlineFragment::parser_with(
+//           TypeCondition::parser(),
+//           Directives::parser(),
+//           selection_set,
+//         )
+//           .map(|f| Selection::InlineFragment(f));
+
+//         choice((field_parser.map(Selection::Field), spread, inline))
+//       });
+
+//       // Pass the selection parser to the selection set
+//       Self::parser_with(Arguments::parser(), Directives::parser(), SelectionSet::parser_with(selection))
+//     })
+//   }
+// }

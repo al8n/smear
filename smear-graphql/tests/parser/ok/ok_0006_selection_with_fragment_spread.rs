@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{SelectionSet, ParseStr};
+use smear_graphql::parser::ast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0006_selection_with_fragment_spread.graphql");
 

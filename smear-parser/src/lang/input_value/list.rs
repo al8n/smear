@@ -1,14 +1,13 @@
-use chumsky::{extra::ParserExtra, prelude::*};
+use chumsky::{IterParser as _, Parser, extra::ParserExtra};
+use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
 
 use crate::{
-  lang::{
-    ignored,
-    punct::{LBracket, RBracket},
-  },
-  source::*,
+  error::UnclosedListValueError,
+  lang::punctuator::{LBracket, RBracket},
+  source::{IntoComponents, IntoSpan},
 };
 
-use std::vec::Vec;
+use core::marker::PhantomData;
 
 /// A GraphQL list literal value.
 ///
@@ -37,13 +36,13 @@ use std::vec::Vec;
 ///
 /// - `Value`: The type of elements contained in the list
 /// - `Span`: The span type for position information
-/// - `Container`: The collection type (defaults to `Vec<Value>`, can be customized)
+/// - `Container`: The collection type (defaults to `Vec<Value, Container>`, can be customized)
 ///
 /// ## Container Flexibility
 ///
 /// The `Container` parameter allows using different collection types:
-/// - `Vec<Value>` (default): Standard dynamic array
-/// - Any type implementing `chumsky::container::Container<Value>`
+/// - `Vec<Value, Container>` (default): Standard dynamic array
+/// - Any type implementing `chumsky::container::Container<Value, Container>`
 ///
 /// ## Component Structure
 ///
@@ -54,44 +53,31 @@ use std::vec::Vec;
 /// - **Values**: The parsed elements in their container
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-#[derive(Debug, Clone, Copy)]
-pub struct List<Value, Span, Container = Vec<Value>> {
+#[derive(Debug, Clone)]
+pub struct List<Value, Container = Vec<Value>> {
   span: Span,
-  l_bracket: LBracket<Span>,
-  r_bracket: RBracket<Span>,
   values: Container,
-  _value: core::marker::PhantomData<Value>,
+  _m: PhantomData<Value>,
 }
 
-impl<Value, Span, Container> List<Value, Span, Container> {
-  /// Returns the source span of the entire list literal.
+impl<Value, Container> List<Value, Container> {
+  /// Creates a new list literal with the given span and values.
+  #[inline]
+  pub const fn new(span: Span, values: Container) -> Self {
+    Self {
+      span,
+      values,
+      _m: PhantomData,
+    }
+  }
+
+  /// Returns the span covering the entire list literal.
   ///
-  /// This span covers from the opening bracket through the closing bracket,
-  /// including all whitespace and elements within. Useful for error reporting,
-  /// source mapping, and extracting the complete list text.
+  /// This span includes the opening and closing brackets as well as all contained values.
+  /// It is useful for error reporting, syntax highlighting, and source mapping.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns the opening bracket token.
-  ///
-  /// This provides access to the `[` character that begins the list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// bracket matching, and precise error reporting at list boundaries.
-  #[inline]
-  pub const fn l_bracket(&self) -> &LBracket<Span> {
-    &self.l_bracket
-  }
-
-  /// Returns the closing bracket token.
-  ///
-  /// This provides access to the `]` character that ends the list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// bracket matching, and detecting incomplete lists.
-  #[inline]
-  pub const fn r_bracket(&self) -> &RBracket<Span> {
-    &self.r_bracket
   }
 
   /// Returns the container holding the parsed list elements.
@@ -103,72 +89,80 @@ impl<Value, Span, Container> List<Value, Span, Container> {
     &self.values
   }
 
-  /// Creates a parser for list literals with a custom value parser.
+  /// Creates a parser for GraphQL list literals with customizable value parsing.
   ///
-  /// This is the core parsing function that accepts any value parser and
-  /// creates a complete list parser. It handles all GraphQL list syntax
-  /// including whitespace, optional commas, trailing commas, and empty lists.
+  /// This parser handles the complete list syntax including brackets and
+  /// enforces proper structure. It uses the provided `value_parser` to parse
+  /// each individual element within the list.
   ///
-  /// ## Notes
+  /// ## Error Handling
   ///
-  /// This parser does not handle surrounding [ignored tokens].
-  /// The calling parser is responsible for handling any necessary
-  /// whitespace skipping or comment processing around the list.
-  ///
-  /// [ignored tokens]: https://spec.graphql.org/draft/#sec-Language.Source-Text.Ignored-Tokens
-  pub fn parser_with<'src, I, E, P>(value_parser: P) -> impl Parser<'src, I, Self, E> + Clone
+  /// If the closing bracket is missing, the parser invokes the provided
+  /// `on_missing_rbracket` function to generate a custom error message.
+  /// This allows for context-specific error reporting.
+  pub fn parser_with<'src, I, T, Error, VP, E>(
+    value_parser: VP,
+  ) -> impl Parser<'src, I, Self, E> + Clone
   where
-    I: Source<'src>,
-    I::Token: Char + 'src,
-    I::Slice: Slice<Token = I::Token>,
-    E: ParserExtra<'src, I>,
-    Span: crate::source::FromMapExtra<'src, I, E>,
-    P: Parser<'src, I, Value, E> + Clone + 'src,
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+    Error: UnclosedListValueError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    VP: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
+    LBracket: Parseable<'src, I, T, Error>,
+    RBracket: Parseable<'src, I, T, Error>,
   {
-    // '[' ws? ( ']' | elem+ ']' )
     LBracket::parser()
-      .then_ignore(ignored())
-      .then(choice((
-        // Empty fast path: immediately see ']'
-        RBracket::parser().map(|r| (Container::default(), r)),
-        // Non-empty: one-or-more elements; trailing commas handled by elem’s trailing ws
-        value_parser
-          .padded_by(ignored())
-          .repeated()
-          .at_least(1)
-          .collect::<Container>()
-          .then(RBracket::parser()),
-      )))
-      .map_with(|(l_bracket, (values, r_bracket)), sp| Self {
-        span: Span::from_map_extra(sp),
-        l_bracket,
-        r_bracket,
-        values,
-        _value: core::marker::PhantomData,
+      .ignore_then(value_parser.repeated().collect())
+      .then(RBracket::parser().or_not())
+      .try_map(move |(values, r), span| match r {
+        Some(_) => Ok(List::new(span, values)),
+        None => Err(Error::unclosed_list(span)),
       })
   }
 }
 
-impl<Value, Span, Container> AsRef<Span> for List<Value, Span, Container> {
+impl<Value, Container> AsRef<Span> for List<Value, Container> {
   #[inline]
   fn as_ref(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Value, Span, Container> IntoSpan<Span> for List<Value, Span, Container> {
+impl<Value, Container> IntoSpan<Span> for List<Value, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Value, Span, Container> IntoComponents for List<Value, Span, Container> {
-  type Components = (Span, LBracket<Span>, Container, RBracket<Span>);
+impl<Value, Container> IntoComponents for List<Value, Container> {
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.l_bracket, self.values, self.r_bracket)
+    (self.span, self.values)
+  }
+}
+
+impl<'a, Value, Container, I, T, Error> Parseable<'a, I, T, Error> for List<Value, Container>
+where
+  Error: UnclosedListValueError + 'a,
+  Value: Parseable<'a, I, T, Error>,
+  Container: chumsky::container::Container<Value>,
+  LBracket: Parseable<'a, I, T, Error>,
+  RBracket: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Self::parser_with(Value::parser())
   }
 }

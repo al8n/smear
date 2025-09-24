@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{TypeSystemDocument, ParseStr};
+use smear_graphql::parser::ast::{TypeSystemDocument, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0029_union_type_extension.graphql");
 

@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{ScalarTypeExtension, ParseStr};
+use smear_graphql::parser::ast::{ScalarTypeExtension, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0024_scalar_extension.graphql");
 

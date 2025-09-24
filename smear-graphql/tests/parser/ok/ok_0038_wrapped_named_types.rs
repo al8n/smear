@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{Document, ObjectTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{Document, ObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0038_wrapped_named_types.graphql");
 

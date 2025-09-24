@@ -1,4 +1,4 @@
-use smear_graphql::parser::fast::{EnumTypeExtension, ParseStr};
+use smear_graphql::parser::ast::{EnumTypeExtension, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0011_enum_type_extension.graphql");
 
