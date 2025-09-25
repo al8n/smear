@@ -1,13 +1,120 @@
+use core::marker::PhantomData;
+
 use logosky::{
   Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
 };
 
 use crate::{
   error::{InterfaceTypeExtensionHint, UnexpectedEndOfInterfaceExtensionError},
-  lang::keywords::{Extend, Implements, Interface},
+  lang::{
+    keywords::{Extend, Implements, Interface},
+    punctuator::Ampersand,
+  },
 };
+
+/// Represents a collection of interfaces that a GraphQL type or interface implements.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImplementInterfaces<Name, Container = Vec<Name>> {
+  span: Span,
+  interfaces: Container,
+  _m: PhantomData<Name>,
+}
+
+impl<Name, Container> ImplementInterfaces<Name, Container> {
+  /// Returns a reference to the span covering the entire implements clause.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the container holding the implemented interfaces.
+  #[inline]
+  pub const fn interfaces(&self) -> &Container {
+    &self.interfaces
+  }
+
+  /// Returns a slice of the implemented interfaces.
+  #[inline]
+  pub fn as_slice(&self) -> &[Name]
+  where
+    Container: AsRef<[Name]>,
+  {
+    self.interfaces.as_ref()
+  }
+}
+
+impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for ImplementInterfaces<Name, Container>
+where
+  Container: chumsky::container::Container<Name>,
+  Name: Parseable<'a, I, T, Error>,
+  Ampersand: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
+  {
+    Name::parser()
+      .separated_by(Ampersand::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|names, exa| {
+        let span = exa.span();
+        Self {
+          span,
+          interfaces: names,
+          _m: PhantomData,
+        }
+      })
+  }
+}
+
+impl<Name, Container> DisplaySDL for ImplementInterfaces<Name, Container>
+where
+  Container: AsRef<[Name]>,
+  Name: DisplaySDL,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let interfaces = self.interfaces().as_ref();
+
+    for (i, interface) in interfaces.iter().enumerate() {
+      if i == 0 {
+        write!(f, " {}", interface.display())?;
+        continue;
+      }
+      write!(f, " & {}", interface.display())?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let interfaces = self.interfaces().as_ref();
+
+    for interface in interfaces.iter() {
+      write!(f, "&{}", interface.display())?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let interfaces = self.interfaces().as_ref();
+    for interface in interfaces.iter() {
+      writeln!(f, "\t& {}", interface.display())?;
+    }
+    Ok(())
+  }
+}
 
 /// Represents a GraphQL Interface type definition that defines a contract for implementing types.
 ///

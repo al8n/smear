@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{Document, ParseStr};
+use smear_graphql::parser::ast::{raw::Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0043_interface_type_definition_without_fields.graphql");
 

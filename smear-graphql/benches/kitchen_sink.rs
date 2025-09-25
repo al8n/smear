@@ -8,7 +8,7 @@ fn apollo_parser_parse_query(query: &str) {
 }
 
 fn smear_parser_parse_query(query: &str) {
-  use smear_graphql::parser::ast::{ExecutableDocument, ParseStr};
+  use smear_graphql::parser::ast::{ParseStr, raw::ExecutableDocument};
 
   let _operation = ExecutableDocument::<&str>::parse_str(query).unwrap();
 }

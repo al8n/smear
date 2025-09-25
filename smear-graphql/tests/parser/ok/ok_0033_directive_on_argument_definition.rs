@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{ObjectTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{raw::ObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0033_directive_on_argument_definition.graphql");
 

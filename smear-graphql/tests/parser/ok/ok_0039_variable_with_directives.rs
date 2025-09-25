@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{OperationDefinition, ParseStr};
+use smear_graphql::parser::ast::{raw::OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0039_variable_with_directives.graphql");
 

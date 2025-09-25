@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{DescribedEnumTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{raw::DescribedEnumTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0010_enum_type_definition.graphql");
 

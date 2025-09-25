@@ -8,11 +8,9 @@ use crate::lang::punctuator::Equal;
 
 pub use list::List;
 pub use object::*;
-pub use variable::Variable;
 
 mod list;
 mod object;
-mod variable;
 
 /// A GraphQL default value assignment for input parameters.
 ///

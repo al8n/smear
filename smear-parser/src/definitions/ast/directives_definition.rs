@@ -1,7 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  chumsky::{self, extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
@@ -12,7 +12,7 @@ use crate::{
   keyword,
   lang::{
     keywords::{Directive, On, Repeatable},
-    punctuator::At,
+    punctuator::{At, Pipe},
   },
 };
 
@@ -687,6 +687,124 @@ from_location!(
     InputFieldDefinitionLocation,
   ],
 );
+
+/// Represents a collection of directive locations where a directive can be applied.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DirectiveLocations<Container = Vec<Location>> {
+  span: Span,
+  locations: Container,
+}
+
+impl<Container> AsSpan<Span> for DirectiveLocations<Container> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Container> IntoSpan<Span> for DirectiveLocations<Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Container> IntoComponents for DirectiveLocations<Container> {
+  type Components = (Span, Container);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.locations)
+  }
+}
+
+impl<Container> DirectiveLocations<Container> {
+  /// Returns a reference to the span covering the entire directive locations.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the container holding the directive locations.
+  #[inline]
+  pub const fn locations(&self) -> &Container {
+    &self.locations
+  }
+
+  /// Returns a slice of the directive locations.
+  #[inline]
+  pub fn as_slice(&self) -> &[Location]
+  where
+    Container: AsRef<[Location]>,
+  {
+    self.locations.as_ref()
+  }
+}
+
+impl<'a, Container, I, T, Error> Parseable<'a, I, T, Error> for DirectiveLocations<Container>
+where
+  Container: chumsky::container::Container<Location>,
+  Pipe: Parseable<'a, I, T, Error>,
+  Location: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    T: Token<'a>,
+    Error: 'a,
+  {
+    Location::parser()
+      .separated_by(Pipe::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|locations, exa| {
+        let span = exa.span();
+        Self { span, locations }
+      })
+  }
+}
+
+impl<Container> DisplaySDL for DirectiveLocations<Container>
+where
+  Container: AsRef<[Location]>,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let locations = self.locations().as_ref();
+
+    for (i, location) in locations.iter().enumerate() {
+      if i == 0 {
+        write!(f, " {}", DisplaySDL::display(location))?;
+        continue;
+      }
+      write!(f, " | {}", DisplaySDL::display(location))?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let locations = self.locations().as_ref();
+
+    for location in locations.iter() {
+      write!(f, "|{}", DisplaySDL::display_compact(location))?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let locations = self.locations().as_ref();
+    for location in locations.iter() {
+      writeln!(f, "\t| {}", DisplaySDL::display_pretty(location))?;
+    }
+    Ok(())
+  }
+}
 
 /// Represents a complete GraphQL directive definition.
 ///

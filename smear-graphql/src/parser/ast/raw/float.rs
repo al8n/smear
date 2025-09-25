@@ -7,19 +7,19 @@ use logosky::{
   },
 };
 
-use crate::error::Error;
+use core::fmt::Display;
+
+use crate::{error::Error, lexer::ast::TokenKind};
 
 use super::*;
 
-use core::fmt::Display;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NullValue<S> {
-  source: S,
+pub struct FloatValue<S> {
   span: Span,
+  value: S,
 }
 
-impl<S> Display for NullValue<S>
+impl<S> Display for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -29,14 +29,14 @@ where
   }
 }
 
-impl<S> AsRef<S> for NullValue<S> {
+impl<S> AsRef<S> for FloatValue<S> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S> core::ops::Deref for NullValue<S> {
+impl<S> core::ops::Deref for FloatValue<S> {
   type Target = S;
 
   #[inline]
@@ -45,14 +45,11 @@ impl<S> core::ops::Deref for NullValue<S> {
   }
 }
 
-impl<S> NullValue<S> {
-  /// Creates a new null value.
+impl<S> FloatValue<S> {
+  /// Creates a new name.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self {
-      source: value,
-      span,
-    }
+    Self { span, value }
   }
 
   /// Returns the span of the name.
@@ -61,33 +58,33 @@ impl<S> NullValue<S> {
     self.span
   }
 
-  /// Returns the slice of the null value.
-  #[inline]
-  pub const fn slice_ref(&self) -> &S {
-    &self.source
-  }
-
-  /// Returns the slice of the null value.
+  /// Returns the slice of the float.
   #[inline]
   pub const fn slice(&self) -> S
   where
     S: Copy,
   {
-    self.source
+    self.value
+  }
+
+  /// Returns the slice of the float.
+  #[inline]
+  pub const fn slice_ref(&self) -> &S {
+    &self.value
   }
 }
 
-impl<S> DisplaySDL for NullValue<S>
+impl<S> DisplaySDL for FloatValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.slice_ref().fmt(f)
+    self.value.fmt(f)
   }
 }
 
-impl<S> DisplaySyntaxTree for NullValue<S>
+impl<S> DisplaySyntaxTree for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -98,28 +95,20 @@ where
     indent: usize,
     f: &mut core::fmt::Formatter<'_>,
   ) -> core::fmt::Result {
-    let mut padding = level * indent;
+    let padding = level * indent;
     write!(f, "{:indent$}", "", indent = padding)?;
     writeln!(
       f,
-      "- NULL_VALUE@{}..{}",
-      self.span().start(),
-      self.span().end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    write!(
-      f,
-      "- null_KW@{}..{} \"{}\"",
-      self.span().start(),
-      self.span().end(),
+      "- FLOAT@{}..{} \"{}\"",
+      self.span.start(),
+      self.span.end(),
       self.slice_ref().display(),
     )
   }
 }
 
 impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
-  for NullValue<&'a str>
+  for FloatValue<&'a str>
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
@@ -131,11 +120,8 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Identifier(name) => match name {
-            "null" => Ok(NullValue::new(span, name)),
-            val => Err(Error::invalid_null_value(val, span).into()),
-          },
-          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
+          AstToken::Float(val) => Ok(Self::new(span, val)),
+          tok => Err(Error::unexpected_token(tok, TokenKind::Float, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

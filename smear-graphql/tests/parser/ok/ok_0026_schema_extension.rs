@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{SchemaExtension, ParseStr};
+use smear_graphql::parser::ast::{raw::SchemaExtension, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0026_schema_extension.graphql");
 

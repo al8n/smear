@@ -1,16 +1,143 @@
+use core::marker::PhantomData;
+
 use logosky::{
   Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
 };
 
 use crate::{
   error::{UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint},
   lang::{
     keywords::{Extend, Union},
-    punctuator::Equal,
+    punctuator::{Equal, Pipe},
   },
 };
+
+/// Represents a collection of member types that a GraphQL union can include.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnionMemberTypes<Name, Container = Vec<Name>> {
+  span: Span,
+  members: Container,
+  _m: PhantomData<Name>,
+}
+
+impl<Name, Container> AsSpan<Span> for UnionMemberTypes<Name, Container> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Name, Container> IntoSpan<Span> for UnionMemberTypes<Name, Container> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Name, Container> IntoComponents for UnionMemberTypes<Name, Container> {
+  type Components = (Span, Container);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.members)
+  }
+}
+
+impl<Name, Container> UnionMemberTypes<Name, Container> {
+  /// Returns a reference to the span covering the entire union member types.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the container holding all member types in the union.
+  #[inline]
+  pub const fn members(&self) -> &Container {
+    &self.members
+  }
+
+  /// Returns a reference to the container holding all member types in the union.
+  #[inline]
+  pub fn members_slice(&self) -> &[Name]
+  where
+    Container: AsRef<[Name]>,
+  {
+    self.members.as_ref()
+  }
+}
+
+impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for UnionMemberTypes<Name, Container>
+where
+  Container: chumsky::container::Container<Name>,
+  Name: Parseable<'a, I, T, Error>,
+  Pipe: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
+  {
+    Name::parser()
+      .separated_by(Pipe::parser())
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .map_with(|members, exa| {
+        let span = exa.span();
+        Self {
+          span,
+          members,
+          _m: PhantomData,
+        }
+      })
+  }
+}
+
+impl<Name, Container> DisplaySDL for UnionMemberTypes<Name, Container>
+where
+  Container: AsRef<[Name]>,
+  Name: DisplaySDL,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let members = self.members().as_ref();
+
+    for (i, member) in members.iter().enumerate() {
+      if i == 0 {
+        write!(f, " {}", member.display())?;
+        continue;
+      }
+      write!(f, " | {}", member.display())?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let members = self.members().as_ref();
+
+    for member in members.iter() {
+      write!(f, "|{}", member.display_compact())?;
+    }
+    Ok(())
+  }
+
+  #[inline]
+  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let members = self.members().as_ref();
+    for member in members.iter() {
+      writeln!(f, "\t| {}", member.display_pretty())?;
+    }
+    Ok(())
+  }
+}
 
 /// Represents a GraphQL Union type definition.
 ///

@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{InputObjectTypeExtension, ParseStr};
+use smear_graphql::parser::ast::{raw::InputObjectTypeExtension, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0015_input_extension.graphql");
 

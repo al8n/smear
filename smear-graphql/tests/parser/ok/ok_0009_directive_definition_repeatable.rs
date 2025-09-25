@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{DirectiveDefinition, ParseStr};
+use smear_graphql::parser::ast::{raw::DirectiveDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0009_directive_definition_repeatable.graphql");
 

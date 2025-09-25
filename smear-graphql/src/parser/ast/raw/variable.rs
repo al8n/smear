@@ -9,7 +9,7 @@ use logosky::{
   },
 };
 
-use crate::{
+use smear_parser::{
   error::{ParseVariableValueError, VariableValueHint},
   lang::punctuator::Dollar,
 };
@@ -60,10 +60,8 @@ use crate::{
 /// Spec: [Variable Value](https://spec.graphql.org/draft/#sec-Variable-Value)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Variable<Name> {
-  /// The span of the entire variable, including the `$` and the name.
-  pub span: Span,
-  /// The name of the variable without the `$` prefix.
-  pub name: Name,
+  span: Span,
+  name: Name,
 }
 
 impl<Name> AsSpan<Span> for Variable<Name> {

@@ -7,7 +7,7 @@ use logosky::{
   },
 };
 
-use crate::error::Error;
+use crate::{error::Error, lexer::ast::TokenKind};
 
 use super::*;
 

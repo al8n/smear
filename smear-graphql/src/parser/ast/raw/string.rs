@@ -9,7 +9,7 @@ use logosky::{
 
 use core::fmt::Display;
 
-use crate::error::Error;
+use crate::{error::Error, lexer::ast::TokenKind};
 
 use super::*;
 
