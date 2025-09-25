@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::{UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint},
@@ -84,11 +86,11 @@ pub struct UnionTypeDefinition<Name, Directives, MemberTypes> {
   members: Option<MemberTypes>,
 }
 
-impl<Name, Directives, MemberTypes> AsRef<Span>
+impl<Name, Directives, MemberTypes> AsSpan<Span>
   for UnionTypeDefinition<Name, Directives, MemberTypes>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -293,11 +295,11 @@ pub struct UnionTypeExtension<Name, Directives, MemberTypes> {
   data: UnionTypeExtensionData<Directives, MemberTypes>,
 }
 
-impl<Name, Directives, MemberTypes> AsRef<Span>
+impl<Name, Directives, MemberTypes> AsSpan<Span>
   for UnionTypeExtension<Name, Directives, MemberTypes>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

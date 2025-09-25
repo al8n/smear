@@ -9,7 +9,7 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub use chumsky;
+pub use logosky::chumsky;
 
 /// Language related parsers.
 ///
@@ -24,17 +24,9 @@ pub mod definitions;
 /// Error traits and types
 pub mod error;
 
-/// Source trait and implementations
-pub mod source {
-  pub use smear_utils::*;
-}
-
 #[doc(hidden)]
 pub mod __private {
-  pub use chumsky;
-  pub use logosky;
-
-  pub use super::source::*;
+  pub use logosky::{self, chumsky};
 }
 
 /// Utility types and traits

@@ -1,6 +1,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logos::{Lexer, Logos};
-use logosky::utils::tracker::{LimitExceeded, Tracker};
+use logosky::{
+  logos::{Lexer, Logos},
+  utils::tracker::{LimitExceeded, Tracker},
+};
 
 use super::{handlers::*, string_token::*};
 
@@ -137,6 +139,7 @@ pub enum TokenKind {
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[logos(
+  crate = logosky::logos,
   extras = Tracker,
   error(LexerErrors, |lexer| match lexer.slice().chars().next() {
     Some(ch) => {

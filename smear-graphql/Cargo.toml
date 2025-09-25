@@ -16,11 +16,9 @@ bstr = ["dep:bstr", "smear-parser/bstr", "logosky/bstr"]
 
 
 [dependencies]
-chumsky.workspace = true
 derive_more.workspace = true
 either = { version = "1", default-features = false }
 logosky.workspace = true
-logos = { version = "0.15", default-features = false, features = ["export_derive"] }
 paste.workspace = true
 smear-parser.workspace = true
 thiserror.workspace = true

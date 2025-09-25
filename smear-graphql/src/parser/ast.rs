@@ -1,11 +1,8 @@
 #![allow(clippy::type_complexity)]
 
-use core::marker::PhantomData;
-
-use chumsky::{container::Container as ChumskyContainer, extra::ParserExtra, prelude::*};
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Parseable,
+  chumsky::{ParseResult, Parser},
   utils::{Span, recursion_tracker::RecursionLimitExceeded},
 };
 
@@ -15,10 +12,7 @@ use smear_parser::{
     ast::{Described, Location, OperationType, Type},
   },
   lang::{self, FragmentName, Name},
-  source::IntoSpan,
 };
-
-use chumsky::{ParseResult, Parser};
 
 use crate::{
   error::{Error, Errors, Extra},
@@ -569,8 +563,20 @@ pub type TypeDefinition<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = definitions::ast::TypeDefinition<
   ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  ObjectTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  InterfaceTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  ObjectTypeDefinition<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
+  InterfaceTypeDefinition<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
   UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
   EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
   InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
@@ -586,10 +592,21 @@ pub type TypeSystemDefinition<
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
 > = definitions::ast::TypeSystemDefinition<
-  TypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
-    EnumValuesContainer>,
-  DirectiveDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
-    LocationsContainer>,
+  TypeDefinition<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+  >,
+  DirectiveDefinition<
+    S,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    LocationsContainer,
+  >,
   SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
 >;
 
@@ -602,7 +619,13 @@ pub type TypeExtension<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = definitions::ast::TypeExtension<
   ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
-  ObjectTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  ObjectTypeExtension<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
   InterfaceTypeExtension<
     S,
     NamesContainer,
@@ -624,7 +647,14 @@ pub type TypeSystemExtension<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
 > = definitions::ast::TypeSystemExtension<
-  TypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer, EnumValuesContainer>,
+  TypeExtension<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+  >,
   SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
 >;
 
@@ -638,10 +668,28 @@ pub type TypeSystemDefinitionOrExtension<
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
 > = definitions::ast::TypeSystemDefinitionOrExtension<
-  Described<TypeSystemDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
-    EnumValuesContainer, LocationsContainer, RootOperationTypesContainer>, StringValue<S>>,
-  TypeSystemExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
-    EnumValuesContainer, RootOperationTypesContainer>,
+  Described<
+    TypeSystemDefinition<
+      S,
+      NamesContainer,
+      ArgumentsContainer,
+      DirectivesContainer,
+      InputValuesContainer,
+      EnumValuesContainer,
+      LocationsContainer,
+      RootOperationTypesContainer,
+    >,
+    StringValue<S>,
+  >,
+  TypeSystemExtension<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    RootOperationTypesContainer,
+  >,
 >;
 
 pub type ExecutableDefinition<
@@ -653,11 +701,7 @@ pub type ExecutableDefinition<
   FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum Definition<
+pub type Definition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
@@ -676,150 +720,7 @@ pub enum Definition<
   >,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> {
-  TypeSystem(
-    TypeSystemDefinitionOrExtension<
-      S,
-      NamesContainer,
-      ConstArgumentsContainer,
-      ConstDirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  ),
-  Executable(ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>),
-}
-
-impl<
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> AsRef<Span>
-  for Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> IntoSpan<Span>
-  for Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::TypeSystem(t) => t.into_span(),
-      Self::Executable(e) => e.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
->
-  Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::TypeSystem(t) => t.span(),
-      Self::Executable(e) => e.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-where
+> = definitions::ast::Definition<
   TypeSystemDefinitionOrExtension<
     S,
     NamesContainer,
@@ -829,24 +730,9 @@ where
     EnumValuesContainer,
     LocationsContainer,
     RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error>,
-  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      TypeSystemDefinitionOrExtension::parser::<E>().map(Self::TypeSystem),
-      ExecutableDefinition::parser::<E>().map(Self::Executable),
-    ))
-  }
-}
+  >,
+  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+>;
 
 pub type TypeSystemDocument<
   S,
@@ -869,16 +755,19 @@ pub type TypeSystemDocument<
       RootOperationTypesContainer,
     >,
   >,
-> = definitions::ast::Document<TypeSystemDefinitionOrExtension<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
->, DefinitionContainer>;
+> = definitions::ast::Document<
+  TypeSystemDefinitionOrExtension<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
+  >,
+  DefinitionContainer,
+>;
 
 pub type ExecutableDocument<
   S,
@@ -887,7 +776,10 @@ pub type ExecutableDocument<
   DefinitionContainer = DefaultVec<
     ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   >,
-> = definitions::ast::Document<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, DefinitionContainer>;
+> = definitions::ast::Document<
+  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  DefinitionContainer,
+>;
 
 pub type Document<
   S,
@@ -922,15 +814,18 @@ pub type Document<
       RootOperationTypesContainer,
     >,
   >,
-> = definitions::ast::Document<Definition<
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
->, DefinitionContainer>;
+> = definitions::ast::Document<
+  Definition<
+    S,
+    ArgumentsContainer,
+    DirectivesContainer,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+    NamesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
+  >,
+  DefinitionContainer,
+>;

@@ -1,22 +1,22 @@
 use core::marker::PhantomData;
 
-use chumsky::{Parser, IterParser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 /// A document consisting of a series of definitions.
 #[derive(Debug, Clone)]
 pub struct Document<Definition, Container = Vec<Definition>> {
   span: Span,
   definitions: Container,
-  _m: PhantomData<
-    Definition,
-  >,
+  _m: PhantomData<Definition>,
 }
 
-impl<Definition, Container> AsRef<Span> for Document<Definition, Container> {
+impl<Definition, Container> AsSpan<Span> for Document<Definition, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -37,15 +37,7 @@ impl<Definition, Container> IntoComponents for Document<Definition, Container> {
   }
 }
 
-impl<
-  Definition,
-  Container,
->
-  Document<
-    Definition,
-    Container,
-  >
-{
+impl<Definition, Container> Document<Definition, Container> {
   /// Returns a reference to the span covering the entire document.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -68,22 +60,10 @@ impl<
   }
 }
 
-impl<
-  'a,
-  Definition,
-  Container,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for Document<
-    Definition,
-    Container,
-  >
+impl<'a, Definition, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Document<Definition, Container>
 where
-  Container: chumsky::container::Container<
-    Definition,
-  >,
+  Container: chumsky::container::Container<Definition>,
   Definition: Parseable<'a, I, T, Error>,
 {
   #[inline]

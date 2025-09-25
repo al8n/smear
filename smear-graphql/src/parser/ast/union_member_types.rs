@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 
-use chumsky::{Parser, extra::ParserExtra, prelude::*};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
+  chumsky::{self, Parser, extra::ParserExtra, prelude::*},
   utils::{Span, sdl_display::DisplaySDL},
 };
 use smear_parser::lang::punctuator::Pipe;

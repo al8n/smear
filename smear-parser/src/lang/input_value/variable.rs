@@ -1,10 +1,10 @@
 use core::fmt::Display;
 
-use chumsky::{Parser, extra::ParserExtra};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
@@ -66,9 +66,9 @@ pub struct Variable<Name> {
   pub name: Name,
 }
 
-impl<Name> AsRef<Span> for Variable<Name> {
+impl<Name> AsSpan<Span> for Variable<Name> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

@@ -1,8 +1,10 @@
 use core::marker::PhantomData;
 
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::lang::punctuator::{Colon, LParen, RParen};
 
@@ -158,11 +160,11 @@ pub struct VariableDefinition<Variable, Type, DefaultValue, Directives> {
   default_value: Option<DefaultValue>,
 }
 
-impl<Variable, Type, DefaultValue, Directives> AsRef<Span>
+impl<Variable, Type, DefaultValue, Directives> AsSpan<Span>
   for VariableDefinition<Variable, Type, DefaultValue, Directives>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -380,11 +382,11 @@ pub struct VariablesDefinition<VariableDefinition, Container = Vec<VariableDefin
   _v: PhantomData<VariableDefinition>,
 }
 
-impl<VariableDefinition, Container> AsRef<Span>
+impl<VariableDefinition, Container> AsSpan<Span>
   for VariablesDefinition<VariableDefinition, Container>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

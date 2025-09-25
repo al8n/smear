@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -39,9 +41,9 @@ pub struct RootOperationTypeDefinition<Name, OperationType> {
   name: Name,
 }
 
-impl<Name, OperationType> AsRef<Span> for RootOperationTypeDefinition<Name, OperationType> {
+impl<Name, OperationType> AsSpan<Span> for RootOperationTypeDefinition<Name, OperationType> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -186,11 +188,11 @@ pub struct RootOperationTypesDefinition<
   _m: PhantomData<RootOperationTypeDefinition>,
 }
 
-impl<RootOperationTypeDefinition, Container> AsRef<Span>
+impl<RootOperationTypeDefinition, Container> AsSpan<Span>
   for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

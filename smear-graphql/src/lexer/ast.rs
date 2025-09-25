@@ -1,6 +1,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logos::{Lexer, Logos};
-use logosky::utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter};
+use logosky::{
+  logos::{Lexer, Logos},
+  utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+};
 
 use super::{handlers::*, string_token::*};
 
@@ -42,6 +44,7 @@ pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, AstToken<'a>>) 
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[logos(
+  crate = logosky::logos,
   extras = RecursionLimiter,
   skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
   error(LexerErrors, |lexer| match lexer.slice().chars().next() {

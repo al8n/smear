@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -61,9 +63,9 @@ pub struct EnumValueDefinition<EnumValue, Directives> {
   directives: Option<Directives>,
 }
 
-impl<EnumValue, Directives> AsRef<Span> for EnumValueDefinition<EnumValue, Directives> {
+impl<EnumValue, Directives> AsSpan<Span> for EnumValueDefinition<EnumValue, Directives> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -217,11 +219,11 @@ pub struct EnumValuesDefinition<EnumValueDefinition, Container = Vec<EnumValueDe
   _m: PhantomData<EnumValueDefinition>,
 }
 
-impl<EnumValueDefinition, Container> AsRef<Span>
+impl<EnumValueDefinition, Container> AsSpan<Span>
   for EnumValuesDefinition<EnumValueDefinition, Container>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -382,11 +384,11 @@ pub struct EnumTypeDefinition<Name, Directives, EnumValuesDefinition> {
   enum_values: Option<EnumValuesDefinition>,
 }
 
-impl<Name, Directives, EnumValuesDefinition> AsRef<Span>
+impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
   for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -689,11 +691,11 @@ pub struct EnumTypeExtension<Name, Directives, EnumValuesDefinition> {
   data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
 }
 
-impl<Name, Directives, EnumValuesDefinition> AsRef<Span>
+impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
   for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

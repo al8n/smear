@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -125,11 +127,11 @@ pub struct InputFieldsDefinition<InputValueDefinition, Container = Vec<InputValu
   _input_value_definition: PhantomData<InputValueDefinition>,
 }
 
-impl<InputValueDefinition, Container> AsRef<Span>
+impl<InputValueDefinition, Container> AsSpan<Span>
   for InputFieldsDefinition<InputValueDefinition, Container>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

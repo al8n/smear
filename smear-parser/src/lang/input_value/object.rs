@@ -1,10 +1,12 @@
-use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, IterParser as _, Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::UnclosedObjectValueError,
   lang::punctuator::{Colon, LBrace, RBrace},
-  source::{IntoComponents, IntoSpan},
 };
 
 use core::marker::PhantomData;
@@ -47,9 +49,9 @@ pub struct ObjectField<Name, InputValue> {
   value: InputValue,
 }
 
-impl<Name, InputValue> AsRef<Span> for ObjectField<Name, InputValue> {
+impl<Name, InputValue> AsSpan<Span> for ObjectField<Name, InputValue> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -257,9 +259,9 @@ pub struct Object<Name, Value, Container = Vec<ObjectField<Name, Value>>> {
   _m: PhantomData<(Name, Value)>,
 }
 
-impl<Name, Value, Container> AsRef<Span> for Object<Name, Value, Container> {
+impl<Name, Value, Container> AsSpan<Span> for Object<Name, Value, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

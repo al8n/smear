@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::lang::punctuator::{LBrace, RBrace};
 
@@ -81,9 +83,9 @@ pub struct SelectionSet<Selection, Container = Vec<Selection>> {
   _marker: PhantomData<Selection>,
 }
 
-impl<Selection, Container> AsRef<Span> for SelectionSet<Selection, Container> {
+impl<Selection, Container> AsSpan<Span> for SelectionSet<Selection, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

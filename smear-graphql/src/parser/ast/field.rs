@@ -1,13 +1,13 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::*};
 use derive_more::{From, Into};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_parser::{
-  lang::{
-    self, FragmentSpread,
-    keywords::On,
-    punctuator::{LBrace, RBrace, Spread},
-  },
-  source::{IntoComponents, IntoSpan},
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
+use smear_parser::lang::{
+  self, FragmentSpread,
+  keywords::On,
+  punctuator::{LBrace, RBrace, Spread},
 };
 
 use super::selection_set::{Selection, SelectionSet};
@@ -75,11 +75,11 @@ pub struct Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives
   >,
 );
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsRef<Span>
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Span>
   for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.0.span()
   }
 }

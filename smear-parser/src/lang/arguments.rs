@@ -1,6 +1,8 @@
-use chumsky::{IterParser, Parser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use core::marker::PhantomData;
 
@@ -26,9 +28,9 @@ pub struct Argument<Name, Value> {
   value: Value,
 }
 
-impl<Name, Value> AsRef<Span> for Argument<Name, Value> {
+impl<Name, Value> AsSpan<Span> for Argument<Name, Value> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -182,9 +184,9 @@ pub struct Arguments<Arg, Container = Vec<Arg>> {
   _arg: PhantomData<Arg>,
 }
 
-impl<Arg, Container> AsRef<Span> for Arguments<Arg, Container> {
+impl<Arg, Container> AsSpan<Span> for Arguments<Arg, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

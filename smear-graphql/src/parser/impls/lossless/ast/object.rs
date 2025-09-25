@@ -51,9 +51,9 @@ pub struct ObjectField<InputValue, S> {
   value: PaddedLeft<InputValue, S>,
 }
 
-impl<InputValue, S> AsRef<Span> for ObjectField<InputValue, S> {
+impl<InputValue, S> AsSpan<Span> for ObjectField<InputValue, S> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

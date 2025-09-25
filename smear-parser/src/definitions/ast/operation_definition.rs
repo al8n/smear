@@ -1,7 +1,9 @@
-use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
 ///
@@ -85,11 +87,11 @@ pub struct NamedOperationDefinition<
   selection_set: SelectionSet,
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsRef<Span>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsSpan<Span>
   for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -427,16 +429,16 @@ pub enum OperationDefinition<Name, OperationType, VariablesDefinition, Directive
   Shorthand(SelectionSet),
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsRef<Span>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsSpan<Span>
   for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 where
-  SelectionSet: AsRef<Span>,
+  SelectionSet: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Named(named) => named.as_ref(),
-      Self::Shorthand(selection_set) => selection_set.as_ref(),
+      Self::Named(named) => named.as_span(),
+      Self::Shorthand(selection_set) => selection_set.as_span(),
     }
   }
 }

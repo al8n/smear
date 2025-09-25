@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::{ObjectTypeExtensionHint, UnexpectedEndOfObjectExtensionError},
@@ -71,11 +73,11 @@ pub struct ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDef
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -389,11 +391,11 @@ pub struct ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefi
   data: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

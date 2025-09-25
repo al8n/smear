@@ -1,8 +1,7 @@
 use core::fmt::Display;
 
-use crate::source::{IntoComponents, IntoSpan};
 use logosky::utils::{
-  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
   syntax_tree_display::DisplaySyntaxTree,
 };
 
@@ -96,9 +95,9 @@ impl<S> Name<S> {
   }
 }
 
-impl<S> AsRef<Span> for Name<S> {
+impl<S> AsSpan<Span> for Name<S> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

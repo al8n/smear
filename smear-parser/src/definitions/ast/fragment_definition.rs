@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::lang::keywords::Fragment;
 
@@ -118,11 +120,11 @@ pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, Selection
   selection_set: SelectionSet,
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet> AsRef<Span>
+impl<FragmentName, TypeCondition, Directives, SelectionSet> AsSpan<Span>
   for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

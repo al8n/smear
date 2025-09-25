@@ -1,12 +1,11 @@
-use chumsky::{extra::ParserExtra, prelude::*};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
-use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::lang::punctuator::Colon;
 
@@ -37,9 +36,9 @@ pub struct Alias<Name> {
   name: Name,
 }
 
-impl<Name> AsRef<Span> for Alias<Name> {
+impl<Name> AsSpan<Span> for Alias<Name> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -226,11 +225,11 @@ pub struct Field<Alias, Name, Arguments, Directives, SelectionSet> {
   selection_set: Option<SelectionSet>,
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet> AsRef<Span>
+impl<Alias, Name, Arguments, Directives, SelectionSet> AsSpan<Span>
   for Field<Alias, Name, Arguments, Directives, SelectionSet>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

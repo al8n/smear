@@ -1,7 +1,9 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::choice};
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::IntoSpan;
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra, prelude::choice},
+  utils::{AsSpan, IntoSpan, Span},
+};
 
 /// Type definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
@@ -17,29 +19,17 @@ pub enum TypeDefinition<
   InputObjectTypeDefinition,
 > {
   /// A scalar type definition.
-  Scalar(
-    ScalarTypeDefinition,
-  ),
+  Scalar(ScalarTypeDefinition),
   /// An object type definition.
-  Object(
-    ObjectTypeDefinition,
-  ),
+  Object(ObjectTypeDefinition),
   /// An interface type definition.
-  Interface(
-    InterfaceTypeDefinition,
-  ),
+  Interface(InterfaceTypeDefinition),
   /// A union type definition.
-  Union(  
-    UnionTypeDefinition,
-  ),
+  Union(UnionTypeDefinition),
   /// An enum type definition.
-  Enum(
-    EnumTypeDefinition,
-  ),
+  Enum(EnumTypeDefinition),
   /// An input object type definition.
-  InputObject(
-    InputObjectTypeDefinition,
-  ),
+  InputObject(InputObjectTypeDefinition),
 }
 
 impl<
@@ -49,7 +39,7 @@ impl<
   UnionTypeDefinition,
   EnumTypeDefinition,
   InputObjectTypeDefinition,
-> AsRef<Span>
+> AsSpan<Span>
   for TypeDefinition<
     ScalarTypeDefinition,
     ObjectTypeDefinition,
@@ -59,22 +49,22 @@ impl<
     InputObjectTypeDefinition,
   >
 where
-  ScalarTypeDefinition: AsRef<Span>,
-  ObjectTypeDefinition: AsRef<Span>,
-  InterfaceTypeDefinition: AsRef<Span>,
-  UnionTypeDefinition: AsRef<Span>,
-  EnumTypeDefinition: AsRef<Span>,
-  InputObjectTypeDefinition: AsRef<Span>,
+  ScalarTypeDefinition: AsSpan<Span>,
+  ObjectTypeDefinition: AsSpan<Span>,
+  InterfaceTypeDefinition: AsSpan<Span>,
+  UnionTypeDefinition: AsSpan<Span>,
+  EnumTypeDefinition: AsSpan<Span>,
+  InputObjectTypeDefinition: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Scalar(s) => s.as_ref(),
-      Self::InputObject(i) => i.as_ref(),
-      Self::Object(o) => o.as_ref(),
-      Self::Interface(i) => i.as_ref(),
-      Self::Union(u) => u.as_ref(),
-      Self::Enum(e) => e.as_ref(),
+      Self::Scalar(s) => s.as_span(),
+      Self::InputObject(i) => i.as_span(),
+      Self::Object(o) => o.as_span(),
+      Self::Interface(i) => i.as_span(),
+      Self::Union(u) => u.as_span(),
+      Self::Enum(e) => e.as_span(),
     }
   }
 }
@@ -116,6 +106,54 @@ where
   }
 }
 
+impl<
+  'a,
+  ScalarTypeDefinition,
+  ObjectTypeDefinition,
+  InterfaceTypeDefinition,
+  UnionTypeDefinition,
+  EnumTypeDefinition,
+  InputObjectTypeDefinition,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
+  for TypeDefinition<
+    ScalarTypeDefinition,
+    ObjectTypeDefinition,
+    InterfaceTypeDefinition,
+    UnionTypeDefinition,
+    EnumTypeDefinition,
+    InputObjectTypeDefinition,
+  >
+where
+  ScalarTypeDefinition: Parseable<'a, I, T, Error>,
+  ObjectTypeDefinition: Parseable<'a, I, T, Error>,
+  InterfaceTypeDefinition: Parseable<'a, I, T, Error>,
+  UnionTypeDefinition: Parseable<'a, I, T, Error>,
+  EnumTypeDefinition: Parseable<'a, I, T, Error>,
+  InputObjectTypeDefinition: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    choice((
+      ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
+      ObjectTypeDefinition::parser::<E>().map(Self::Object),
+      InterfaceTypeDefinition::parser::<E>().map(Self::Interface),
+      UnionTypeDefinition::parser::<E>().map(Self::Union),
+      EnumTypeDefinition::parser::<E>().map(Self::Enum),
+      InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
+    ))
+  }
+}
+
 /// Type extension for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -130,29 +168,17 @@ pub enum TypeExtension<
   InputObjectTypeExtension,
 > {
   /// A scalar type extension.
-  Scalar(
-    ScalarTypeExtension,
-  ),
+  Scalar(ScalarTypeExtension),
   /// An object type extension.
-  Object(
-    ObjectTypeExtension,
-  ),
+  Object(ObjectTypeExtension),
   /// An interface type extension.
-  Interface(
-    InterfaceTypeExtension,
-  ),
+  Interface(InterfaceTypeExtension),
   /// A union type extension.
-  Union(
-    UnionTypeExtension,
-  ),
+  Union(UnionTypeExtension),
   /// An enum type extension.
-  Enum(
-    EnumTypeExtension,
-  ),
+  Enum(EnumTypeExtension),
   /// An input object type extension.
-  InputObject(
-    InputObjectTypeExtension,
-  ),
+  InputObject(InputObjectTypeExtension),
 }
 
 impl<
@@ -162,7 +188,7 @@ impl<
   UnionTypeExtension,
   EnumTypeExtension,
   InputObjectTypeExtension,
-> AsRef<Span>
+> AsSpan<Span>
   for TypeExtension<
     ScalarTypeExtension,
     ObjectTypeExtension,
@@ -172,22 +198,22 @@ impl<
     InputObjectTypeExtension,
   >
 where
-  ScalarTypeExtension: AsRef<Span>,
-  ObjectTypeExtension: AsRef<Span>,
-  InterfaceTypeExtension: AsRef<Span>,
-  UnionTypeExtension: AsRef<Span>,
-  EnumTypeExtension: AsRef<Span>,
-  InputObjectTypeExtension: AsRef<Span>,
+  ScalarTypeExtension: AsSpan<Span>,
+  ObjectTypeExtension: AsSpan<Span>,
+  InterfaceTypeExtension: AsSpan<Span>,
+  UnionTypeExtension: AsSpan<Span>,
+  EnumTypeExtension: AsSpan<Span>,
+  InputObjectTypeExtension: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Scalar(s) => s.as_ref(),
-      Self::InputObject(i) => i.as_ref(),
-      Self::Object(o) => o.as_ref(),
-      Self::Interface(i) => i.as_ref(),
-      Self::Union(u) => u.as_ref(),
-      Self::Enum(e) => e.as_ref(),
+      Self::Scalar(s) => s.as_span(),
+      Self::InputObject(i) => i.as_span(),
+      Self::Object(o) => o.as_span(),
+      Self::Interface(i) => i.as_span(),
+      Self::Union(u) => u.as_span(),
+      Self::Enum(e) => e.as_span(),
     }
   }
 }
@@ -229,63 +255,87 @@ where
   }
 }
 
+impl<
+  'a,
+  ScalarTypeExtension,
+  ObjectTypeExtension,
+  InterfaceTypeExtension,
+  UnionTypeExtension,
+  EnumTypeExtension,
+  InputObjectTypeExtension,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
+  for TypeExtension<
+    ScalarTypeExtension,
+    ObjectTypeExtension,
+    InterfaceTypeExtension,
+    UnionTypeExtension,
+    EnumTypeExtension,
+    InputObjectTypeExtension,
+  >
+where
+  ScalarTypeExtension: Parseable<'a, I, T, Error>,
+  ObjectTypeExtension: Parseable<'a, I, T, Error>,
+  InterfaceTypeExtension: Parseable<'a, I, T, Error>,
+  UnionTypeExtension: Parseable<'a, I, T, Error>,
+  EnumTypeExtension: Parseable<'a, I, T, Error>,
+  InputObjectTypeExtension: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    choice((
+      ScalarTypeExtension::parser::<E>().map(Self::Scalar),
+      ObjectTypeExtension::parser::<E>().map(Self::Object),
+      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
+      UnionTypeExtension::parser::<E>().map(Self::Union),
+      EnumTypeExtension::parser::<E>().map(Self::Enum),
+      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
+    ))
+  }
+}
+
 /// Type system definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum TypeSystemDefinition<
-  TypeDefinition,
-  DirectiveDefinition,
-  SchemaDefinition,
-> {
+pub enum TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition> {
   /// A type definition.
-  Type(
-    TypeDefinition,
-  ),
+  Type(TypeDefinition),
   /// A directive definition.
-  Directive(
-    DirectiveDefinition,
-  ),
+  Directive(DirectiveDefinition),
   /// A schema definition.
   Schema(SchemaDefinition),
 }
 
-impl<
-  TypeDefinition,
-  DirectiveDefinition,
-  SchemaDefinition,
-> AsRef<Span>
-  for TypeSystemDefinition<
-    TypeDefinition,
-    DirectiveDefinition,
-    SchemaDefinition,
-  >
+impl<TypeDefinition, DirectiveDefinition, SchemaDefinition> AsSpan<Span>
+  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
 where
-  TypeDefinition: AsRef<Span>,
-  DirectiveDefinition: AsRef<Span>,
-  SchemaDefinition: AsRef<Span>,
+  TypeDefinition: AsSpan<Span>,
+  DirectiveDefinition: AsSpan<Span>,
+  SchemaDefinition: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Type(t) => t.as_ref(),
-      Self::Directive(d) => d.as_ref(),
-      Self::Schema(s) => s.as_ref(),
+      Self::Type(t) => t.as_span(),
+      Self::Directive(d) => d.as_span(),
+      Self::Schema(s) => s.as_span(),
     }
   }
 }
 
-impl<
-  TypeDefinition,
-  DirectiveDefinition,
-  SchemaDefinition,
-> IntoSpan<Span>
-  for TypeSystemDefinition<
-    TypeDefinition,
-    DirectiveDefinition,
-    SchemaDefinition,
-  >
+impl<TypeDefinition, DirectiveDefinition, SchemaDefinition> IntoSpan<Span>
+  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
 where
   TypeDefinition: IntoSpan<Span>,
   DirectiveDefinition: IntoSpan<Span>,
@@ -301,20 +351,9 @@ where
   }
 }
 
-impl<
-  'a,
-  TypeDefinition,
-  DirectiveDefinition,
-  SchemaDefinition,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemDefinition<
-    TypeDefinition,
-    DirectiveDefinition,
-    SchemaDefinition,
-  >
+impl<'a, TypeDefinition, DirectiveDefinition, SchemaDefinition, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
 where
   TypeDefinition: Parseable<'a, I, T, Error>,
   DirectiveDefinition: Parseable<'a, I, T, Error>,
@@ -341,55 +380,36 @@ where
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeSystemExtension<
-  TypeExtension,
-  SchemaExtension,
-> {
+pub enum TypeSystemExtension<TypeExtension, SchemaExtension> {
   /// A type extension.
-  Type(
-    TypeExtension,
-  ),
+  Type(TypeExtension),
   /// A schema extension.
-  Schema(
-    SchemaExtension,
-  ),
+  Schema(SchemaExtension),
 }
 
-impl<
-  TypeExtension,
-  SchemaExtension,
-> AsRef<Span>
-  for TypeSystemExtension<
-    TypeExtension,
-    SchemaExtension,
-  >
+impl<TypeExtension, SchemaExtension> AsSpan<Span>
+  for TypeSystemExtension<TypeExtension, SchemaExtension>
 where
-  TypeExtension: AsRef<Span>,
-  SchemaExtension: AsRef<Span>,
+  TypeExtension: AsSpan<Span>,
+  SchemaExtension: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Type(t) => t.as_ref(),
-      Self::Schema(s) => s.as_ref(),
+      Self::Type(t) => t.as_span(),
+      Self::Schema(s) => s.as_span(),
     }
   }
 }
 
-impl<
-  TypeExtension,
-  SchemaExtension,
-> IntoSpan<Span>
-  for TypeSystemExtension<
-    TypeExtension,
-    SchemaExtension,
-  >
+impl<TypeExtension, SchemaExtension> IntoSpan<Span>
+  for TypeSystemExtension<TypeExtension, SchemaExtension>
 where
   TypeExtension: IntoSpan<Span>,
   SchemaExtension: IntoSpan<Span>,
 {
   #[inline]
-  fn into_span(self) -> Span {  
+  fn into_span(self) -> Span {
     match self {
       Self::Type(t) => t.into_span(),
       Self::Schema(s) => s.into_span(),
@@ -397,18 +417,8 @@ where
   }
 }
 
-impl<
-  'a,
-  TypeExtension,
-  SchemaExtension,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemExtension<
-    TypeExtension,
-    SchemaExtension,
-  >
+impl<'a, TypeExtension, SchemaExtension, I, T, Error> Parseable<'a, I, T, Error>
+  for TypeSystemExtension<TypeExtension, SchemaExtension>
 where
   TypeExtension: Parseable<'a, I, T, Error>,
   SchemaExtension: Parseable<'a, I, T, Error>,
@@ -422,10 +432,9 @@ where
     I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    choice((
-      TypeExtension::parser::<E>().map(Self::Type),
-      SchemaExtension::parser::<E>().map(Self::Schema),
-    ))
+    TypeExtension::parser::<E>()
+      .map(Self::Type)
+      .or(SchemaExtension::parser::<E>().map(Self::Schema))
   }
 }
 
@@ -433,49 +442,29 @@ where
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeSystemDefinitionOrExtension<
-  Definition,
-  Extension,
-> {
+pub enum TypeSystemDefinitionOrExtension<Definition, Extension> {
   /// A type system definition.
-  Definition(
-    Definition,
-  ),
+  Definition(Definition),
   /// A type system extension.
-  Extension(
-    Extension,
-  ),
+  Extension(Extension),
 }
 
-impl<
-  Definition,
-  Extension,
-> AsRef<Span>
-  for TypeSystemDefinitionOrExtension<
-    Definition,
-    Extension,
-  >
+impl<Definition, Extension> AsSpan<Span> for TypeSystemDefinitionOrExtension<Definition, Extension>
 where
-  Definition: AsRef<Span>,
-  Extension: AsRef<Span>,
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Definition(d) => d.as_ref(),
-      Self::Extension(e) => e.as_ref(),
+      Self::Definition(d) => d.as_span(),
+      Self::Extension(e) => e.as_span(),
     }
   }
 }
 
-impl<
-  Definition,
-  Extension,
-> IntoSpan<Span>
-  for TypeSystemDefinitionOrExtension<
-    Definition,
-    Extension,
-  >
+impl<Definition, Extension> IntoSpan<Span>
+  for TypeSystemDefinitionOrExtension<Definition, Extension>
 where
   Definition: IntoSpan<Span>,
   Extension: IntoSpan<Span>,
@@ -489,18 +478,8 @@ where
   }
 }
 
-impl<
-  'a,
-  Definition,
-  Extension,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemDefinitionOrExtension<
-    Definition,
-    Extension,
-  >
+impl<'a, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
+  for TypeSystemDefinitionOrExtension<Definition, Extension>
 where
   Definition: Parseable<'a, I, T, Error>,
   Extension: Parseable<'a, I, T, Error>,
@@ -514,10 +493,9 @@ where
     I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    choice((
-      Definition::parser::<E>().map(Self::Definition),
-      Extension::parser::<E>().map(Self::Extension),
-    ))
+    Definition::parser::<E>()
+      .map(Self::Definition)
+      .or(Extension::parser::<E>().map(Self::Extension))
   }
 }
 
@@ -525,49 +503,30 @@ where
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ExecutableDefinition<
-  OperationDefinition,
-  FragmentDefinition,
-> {
+pub enum ExecutableDefinition<OperationDefinition, FragmentDefinition> {
   /// An operation definition.
-  Operation(
-    OperationDefinition,
-  ),
+  Operation(OperationDefinition),
   /// A fragment definition.
-  Fragment(
-    FragmentDefinition,
-  ),
+  Fragment(FragmentDefinition),
 }
 
-impl<
-  OperationDefinition,
-  FragmentDefinition,
-> AsRef<Span>
-  for ExecutableDefinition<
-    OperationDefinition,
-    FragmentDefinition,
-  >
+impl<OperationDefinition, FragmentDefinition> AsSpan<Span>
+  for ExecutableDefinition<OperationDefinition, FragmentDefinition>
 where
-  OperationDefinition: AsRef<Span>,
-  FragmentDefinition: AsRef<Span>,
+  OperationDefinition: AsSpan<Span>,
+  FragmentDefinition: AsSpan<Span>,
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     match self {
-      Self::Operation(o) => o.as_ref(),
-      Self::Fragment(f) => f.as_ref(),
+      Self::Operation(o) => o.as_span(),
+      Self::Fragment(f) => f.as_span(),
     }
   }
 }
 
-impl<
-  OperationDefinition,
-  FragmentDefinition,
-> IntoSpan<Span>
-  for ExecutableDefinition<
-    OperationDefinition,
-    FragmentDefinition,
-  >
+impl<OperationDefinition, FragmentDefinition> IntoSpan<Span>
+  for ExecutableDefinition<OperationDefinition, FragmentDefinition>
 where
   OperationDefinition: IntoSpan<Span>,
   FragmentDefinition: IntoSpan<Span>,
@@ -581,18 +540,8 @@ where
   }
 }
 
-impl<
-  'a,
-  OperationDefinition,
-  FragmentDefinition,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for ExecutableDefinition<
-    OperationDefinition,
-    FragmentDefinition,
-  >
+impl<'a, OperationDefinition, FragmentDefinition, I, T, Error> Parseable<'a, I, T, Error>
+  for ExecutableDefinition<OperationDefinition, FragmentDefinition>
 where
   OperationDefinition: Parseable<'a, I, T, Error>,
   FragmentDefinition: Parseable<'a, I, T, Error>,
@@ -606,9 +555,69 @@ where
     I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    choice((
-      OperationDefinition::parser::<E>().map(Self::Operation),
-      FragmentDefinition::parser::<E>().map(Self::Fragment),
-    ))
+    OperationDefinition::parser::<E>()
+      .map(Self::Operation)
+      .or(FragmentDefinition::parser::<E>().map(Self::Fragment))
+  }
+}
+
+/// A definition of a GraphQL specification.
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum Definition<TypeSystem, Executable> {
+  /// A type system definition or extension.
+  TypeSystem(TypeSystem),
+  /// An executable definition.
+  Executable(Executable),
+}
+
+impl<TypeSystem, Executable> AsSpan<Span> for Definition<TypeSystem, Executable>
+where
+  TypeSystem: AsSpan<Span>,
+  Executable: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::TypeSystem(t) => t.as_span(),
+      Self::Executable(e) => e.as_span(),
+    }
+  }
+}
+
+impl<TypeSystem, Executable> IntoSpan<Span> for Definition<TypeSystem, Executable>
+where
+  TypeSystem: IntoSpan<Span>,
+  Executable: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::TypeSystem(t) => t.into_span(),
+      Self::Executable(e) => e.into_span(),
+    }
+  }
+}
+
+impl<'a, TypeSystem, Executable, I, T, Error> Parseable<'a, I, T, Error>
+  for Definition<TypeSystem, Executable>
+where
+  TypeSystem: Parseable<'a, I, T, Error>,
+  Executable: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    TypeSystem::parser::<E>()
+      .map(Self::TypeSystem)
+      .or(Executable::parser::<E>().map(Self::Executable))
   }
 }

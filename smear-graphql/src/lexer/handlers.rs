@@ -1,5 +1,7 @@
-use logos::{Lexer, Logos};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use logosky::{
+  logos::{Lexer, Logos},
+  utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
+};
 
 use crate::error::{self, ExponentHint, FloatError, FloatHint};
 

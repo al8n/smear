@@ -1,10 +1,12 @@
-use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, IterParser as _, Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::UnclosedListValueError,
   lang::punctuator::{LBracket, RBracket},
-  source::{IntoComponents, IntoSpan},
 };
 
 use core::marker::PhantomData;
@@ -123,9 +125,9 @@ impl<Value, Container> List<Value, Container> {
   }
 }
 
-impl<Value, Container> AsRef<Span> for List<Value, Container> {
+impl<Value, Container> AsSpan<Span> for List<Value, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

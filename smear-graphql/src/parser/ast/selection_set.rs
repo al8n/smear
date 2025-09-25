@@ -1,12 +1,12 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_parser::{
-  lang::{
-    self, FragmentSpread, InlineFragment,
-    keywords::On,
-    punctuator::{LBrace, RBrace, Spread},
-  },
-  source::IntoSpan,
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoSpan, Span},
+};
+use smear_parser::lang::{
+  self, FragmentSpread, InlineFragment,
+  keywords::On,
+  punctuator::{LBrace, RBrace, Spread},
 };
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
@@ -32,11 +32,11 @@ pub enum Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directiv
   ),
 }
 
-impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsRef<Span>
+impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Span>
   for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

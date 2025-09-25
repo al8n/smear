@@ -1,13 +1,12 @@
-use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
-use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::{
   keyword,
@@ -752,9 +751,9 @@ pub struct DirectiveDefinition<Name, Args, Locations> {
   directive_locations: Locations,
 }
 
-impl<Name, Args, Locations> AsRef<Span> for DirectiveDefinition<Name, Args, Locations> {
+impl<Name, Args, Locations> AsSpan<Span> for DirectiveDefinition<Name, Args, Locations> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

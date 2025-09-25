@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::{InputObjectTypeExtensionHint, UnexpectedEndOfInputObjectExtensionError},
@@ -154,11 +156,11 @@ pub struct InputObjectTypeDefinition<Name, Directives, FieldsDefinition> {
   fields: Option<FieldsDefinition>,
 }
 
-impl<Name, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, Directives, FieldsDefinition> AsSpan<Span>
   for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -424,11 +426,11 @@ pub struct InputObjectTypeExtension<Name, Directives, FieldsDefinition> {
   data: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
 }
 
-impl<Name, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, Directives, FieldsDefinition> AsSpan<Span>
   for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

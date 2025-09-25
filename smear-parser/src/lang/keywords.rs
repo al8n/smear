@@ -61,26 +61,26 @@ macro_rules! keyword {
           }
         }
 
-        impl ::core::convert::AsRef<$crate::__private::logosky::utils::Span> for $name {
+        impl $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name {
           #[inline]
-          fn as_ref(&self) -> &$crate::__private::logosky::utils::Span {
+          fn as_span(&self) -> &$crate::__private::logosky::utils::Span {
             self.span()
           }
         }
 
-       impl $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+       impl $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
           #[inline]
           fn into_span(self) -> $crate::__private::logosky::utils::Span {
             self.span
           }
         }
 
-        impl $crate::__private::IntoComponents for $name {
+        impl $crate::__private::logosky::utils::IntoComponents for $name {
           type Components = $crate::__private::logosky::utils::Span;
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <Self as $crate::__private::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
+            <Self as $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
           }
         }
 

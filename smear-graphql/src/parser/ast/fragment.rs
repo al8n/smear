@@ -1,5 +1,7 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable};
+use logosky::{
+  Lexed, Parseable,
+  chumsky::{Parser, extra::ParserExtra, prelude::any},
+};
 use smear_parser::lang::{self, FragmentName, Name};
 
 use crate::error::Error;
@@ -33,7 +35,7 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
     Self: Sized,
     E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
   {
-    any().try_map(|res, span: Span| match res {
+    any().try_map(|res: Lexed<'_, AstToken<'_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {

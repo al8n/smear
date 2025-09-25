@@ -8,18 +8,17 @@ license.workspace = true
 
 [features]
 default = ["std"]
-alloc = ["smear-utils/alloc"]
-std = ["chumsky/default", "smear-utils/default", "thiserror/default", "logosky/default"]
+alloc = []
+std = ["thiserror/default", "logosky/default"]
 
-bytes = ["dep:bytes", "chumsky/bytes", "smear-utils/bytes"]
+bytes = ["dep:bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "logosky/bstr"]
 
+
 [dependencies]
-chumsky.workspace = true
 derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
-smear-utils.workspace = true
 thiserror.workspace = true
 logosky.workspace = true
 

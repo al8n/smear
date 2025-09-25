@@ -1,12 +1,11 @@
-use chumsky::{extra::ParserExtra, prelude::*};
 use logosky::{
   Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
-use smear_utils::{IntoComponents, IntoSpan};
 
 use crate::lang::{Name, keywords::On, punctuator::Spread};
 
@@ -77,9 +76,9 @@ impl<Name> TypeCondition<Name> {
   }
 }
 
-impl<Name> AsRef<Span> for TypeCondition<Name> {
+impl<Name> AsSpan<Span> for TypeCondition<Name> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -166,9 +165,9 @@ impl<S> From<FragmentName<S>> for Name<S> {
   }
 }
 
-impl<S> AsRef<Span> for FragmentName<S> {
+impl<S> AsSpan<Span> for FragmentName<S> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -323,9 +322,9 @@ pub struct FragmentSpread<FragmentName, Directives> {
   directives: Option<Directives>,
 }
 
-impl<FragmentName, Directives> AsRef<Span> for FragmentSpread<FragmentName, Directives> {
+impl<FragmentName, Directives> AsSpan<Span> for FragmentSpread<FragmentName, Directives> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -496,11 +495,11 @@ pub struct InlineFragment<TypeCondition, Directives, SelectionSet> {
   selection_set: SelectionSet,
 }
 
-impl<TypeCondition, Directives, SelectionSet> AsRef<Span>
+impl<TypeCondition, Directives, SelectionSet> AsSpan<Span>
   for InlineFragment<TypeCondition, Directives, SelectionSet>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

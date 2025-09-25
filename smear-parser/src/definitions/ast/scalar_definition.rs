@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::UnexpectedEndOfSchemaExtensionError,
@@ -110,9 +112,9 @@ pub struct ScalarTypeDefinition<Name, Directives> {
   directives: Option<Directives>,
 }
 
-impl<Name, Directives> AsRef<Span> for ScalarTypeDefinition<Name, Directives> {
+impl<Name, Directives> AsSpan<Span> for ScalarTypeDefinition<Name, Directives> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -289,9 +291,9 @@ pub struct ScalarTypeExtension<Name, Directives> {
   directives: Directives,
 }
 
-impl<Name, Directives> AsRef<Span> for ScalarTypeExtension<Name, Directives> {
+impl<Name, Directives> AsSpan<Span> for ScalarTypeExtension<Name, Directives> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

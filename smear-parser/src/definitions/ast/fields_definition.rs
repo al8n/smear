@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -79,11 +81,11 @@ pub struct FieldDefinition<Name, Arguments, Type, Directives> {
   directives: Option<Directives>,
 }
 
-impl<Name, Arguments, Type, Directives> AsRef<Span>
+impl<Name, Arguments, Type, Directives> AsSpan<Span>
   for FieldDefinition<Name, Arguments, Type, Directives>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -299,9 +301,9 @@ pub struct FieldsDefinition<FieldDefinition, Container = Vec<FieldDefinition>> {
   _m: PhantomData<FieldDefinition>,
 }
 
-impl<FieldDefinition, Container> AsRef<Span> for FieldsDefinition<FieldDefinition, Container> {
+impl<FieldDefinition, Container> AsSpan<Span> for FieldsDefinition<FieldDefinition, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

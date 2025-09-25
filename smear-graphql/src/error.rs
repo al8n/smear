@@ -6,4 +6,4 @@ mod parser;
 
 /// An extra alias
 pub type Extra<S, T, TK, Char = char, StateError = ()> =
-  chumsky::extra::Err<Errors<S, T, TK, Char, StateError>>;
+  logosky::chumsky::extra::Err<Errors<S, T, TK, Char, StateError>>;

@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::{InterfaceTypeExtensionHint, UnexpectedEndOfInterfaceExtensionError},
@@ -66,11 +68,11 @@ pub struct InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, Fields
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -381,11 +383,11 @@ pub struct InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsD
   data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsRef<Span>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

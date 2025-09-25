@@ -1,7 +1,9 @@
-use chumsky::{extra::ParserExtra, prelude::*};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use std::{boxed::Box, rc::Rc, sync::Arc};
 
@@ -56,9 +58,9 @@ pub struct NamedType<Name> {
   required: bool,
 }
 
-impl<Name> AsRef<Span> for NamedType<Name> {
+impl<Name> AsSpan<Span> for NamedType<Name> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -201,9 +203,9 @@ pub struct ListType<Type> {
   required: bool,
 }
 
-impl<Type> AsRef<Span> for ListType<Type> {
+impl<Type> AsSpan<Span> for ListType<Type> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -404,9 +406,9 @@ macro_rules! ty {
           }
         }
 
-        impl<Name> AsRef<Span> for $name<Name> {
+        impl<Name> AsSpan<Span> for $name<Name> {
           #[inline]
-          fn as_ref(&self) -> &Span {
+          fn as_span(&self) -> &Span {
             match self {
               Self::Name(ty) => ty.span(),
               Self::List(ty) => ty.span(),

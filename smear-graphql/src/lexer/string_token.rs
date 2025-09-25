@@ -25,8 +25,10 @@
 * SOFTWARE.
 */
 
-use logos::{Lexer, Logos};
-use logosky::utils::{Lexeme, PositionedChar, Span};
+use logosky::{
+  logos::{Lexer, Logos},
+  utils::{Lexeme, PositionedChar, Span},
+};
 
 use crate::error::{
   InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, LineTerminatorHint, StringError,
@@ -34,7 +36,7 @@ use crate::error::{
 };
 
 #[derive(Logos, Debug)]
-#[logos(error(StringError))]
+#[logos(crate = logosky::logos, error(StringError))]
 enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -299,7 +301,7 @@ where
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(error(StringError<char>))]
+#[logos(crate = logosky::logos, error(StringError<char>))]
 enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]

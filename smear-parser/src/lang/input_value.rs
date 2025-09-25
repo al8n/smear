@@ -1,6 +1,8 @@
-use chumsky::{Parser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::lang::punctuator::Equal;
 
@@ -86,9 +88,9 @@ impl<Value> DefaultInputValue<Value> {
   }
 }
 
-impl<Value> AsRef<Span> for DefaultInputValue<Value> {
+impl<Value> AsSpan<Span> for DefaultInputValue<Value> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

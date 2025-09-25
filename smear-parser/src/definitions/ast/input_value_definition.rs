@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::lang::punctuator::Colon;
 
@@ -111,10 +113,10 @@ pub struct InputValueDefinition<Name, Type, DefaultValue, Directives> {
   directives: Option<Directives>,
 }
 
-impl<Name, Type, DefaultValue, Directives> AsRef<Span>
+impl<Name, Type, DefaultValue, Directives> AsSpan<Span>
   for InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

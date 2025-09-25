@@ -1,9 +1,8 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::{
-  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
   syntax_tree_display::DisplaySyntaxTree,
 };
-use smear_utils::IntoSpan;
 
 use crate::lang::keywords::{Mutation, Query, Subscription};
 
@@ -63,9 +62,9 @@ impl AsRef<str> for OperationType {
   }
 }
 
-impl AsRef<Span> for OperationType {
+impl AsSpan<Span> for OperationType {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

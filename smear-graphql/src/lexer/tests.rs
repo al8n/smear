@@ -1,5 +1,7 @@
-use logos::{Lexer, Logos, Source};
-use logosky::utils::Span;
+use logosky::{
+  logos::{Lexer, Logos, Source},
+  utils::Span,
+};
 
 use crate::error::{
   ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,

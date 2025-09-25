@@ -1,6 +1,8 @@
-use chumsky::{extra::ParserExtra, prelude::*};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
-use smear_utils::{IntoComponents, IntoSpan};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
 use crate::{
   error::{SchemaExtensionHint, UnexpectedEndOfSchemaExtensionError},
@@ -107,11 +109,11 @@ pub struct SchemaDefinition<Directives, RootOperationTypesDefinition> {
   operation_type_definitions: RootOperationTypesDefinition,
 }
 
-impl<Directives, RootOperationTypesDefinition> AsRef<Span>
+impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
   for SchemaDefinition<Directives, RootOperationTypesDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -521,11 +523,11 @@ pub struct SchemaExtension<Directives, RootOperationTypesDefinition> {
   content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
 }
 
-impl<Directives, RootOperationTypesDefinition> AsRef<Span>
+impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
   for SchemaExtension<Directives, RootOperationTypesDefinition>
 {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }

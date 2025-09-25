@@ -1,15 +1,15 @@
 use std::borrow::Cow;
 
-use chumsky::{
-  DefaultExpected,
-  error::{self, LabelError},
-  util::{Maybe, MaybeRef},
-};
 use derive_more::{
   AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
 };
 use logosky::{
   Lexed, Token, TokenStream,
+  chumsky::{
+    self, DefaultExpected,
+    error::{self, LabelError},
+    util::{Maybe, MaybeRef},
+  },
   utils::{Span, UnexpectedEnd},
 };
 use smear_parser::error::{

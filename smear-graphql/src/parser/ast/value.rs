@@ -1,7 +1,10 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::*, select};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logos::Logos;
-use logosky::{Lexed, Parseable, Source, Token, Tokenizer, utils::Spanned};
+use logosky::{
+  Lexed, Parseable, Source, Token, Tokenizer,
+  chumsky::{Parser, extra::ParserExtra, prelude::*, select},
+  logos::Logos,
+  utils::Spanned,
+};
 use smear_parser::lang::{List, Name, Object};
 
 use super::{AstToken, AstTokenErrors, AstTokenStream};
@@ -110,7 +113,7 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
   for ConstInputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl chumsky::Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,

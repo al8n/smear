@@ -1,7 +1,10 @@
-use chumsky::{IterParser, Parser, extra::ParserExtra};
-use logosky::{Parseable, Source, Token, Tokenizer, utils::Span};
+use logosky::{
+  Parseable, Source, Token, Tokenizer,
+  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+};
 
-use crate::{lang::punctuator::At, source::*};
+use crate::lang::punctuator::At;
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -19,9 +22,9 @@ pub struct Directive<Name, Args> {
   arguments: Option<Args>,
 }
 
-impl<Name, Args> AsRef<Span> for Directive<Name, Args> {
+impl<Name, Args> AsSpan<Span> for Directive<Name, Args> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
@@ -134,9 +137,9 @@ pub struct Directives<Directive, Container = Vec<Directive>> {
   _directive: PhantomData<Directive>,
 }
 
-impl<Directive, Container> AsRef<Span> for Directives<Directive, Container> {
+impl<Directive, Container> AsSpan<Span> for Directives<Directive, Container> {
   #[inline]
-  fn as_ref(&self) -> &Span {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
