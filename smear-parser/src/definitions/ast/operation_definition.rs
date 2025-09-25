@@ -427,6 +427,34 @@ pub enum OperationDefinition<Name, OperationType, VariablesDefinition, Directive
   Shorthand(SelectionSet),
 }
 
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsRef<Span>
+  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+where
+  SelectionSet: AsRef<Span>,
+{
+  #[inline]
+  fn as_ref(&self) -> &Span {
+    match self {
+      Self::Named(named) => named.as_ref(),
+      Self::Shorthand(selection_set) => selection_set.as_ref(),
+    }
+  }
+}
+
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoSpan<Span>
+  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+where
+  SelectionSet: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Named(named) => named.into_span(),
+      Self::Shorthand(selection_set) => selection_set.into_span(),
+    }
+  }
+}
+
 impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 {

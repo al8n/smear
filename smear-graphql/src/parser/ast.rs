@@ -560,199 +560,23 @@ pub type SchemaExtension<
   RootOperationTypesDefinition<S, Container>,
 >;
 
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeDefinition<
+pub type TypeDefinition<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> {
-  Scalar(ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>),
-  Object(
-    ObjectTypeDefinition<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-    >,
-  ),
-  Interface(
-    InterfaceTypeDefinition<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-    >,
-  ),
-  Union(UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>),
-  Enum(EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>),
-  InputObject(
-    InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  ),
-}
+> = definitions::ast::TypeDefinition<
+  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  ObjectTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  InterfaceTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
+  EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+  InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+>;
 
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-> AsRef<Span>
-  for TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-> IntoSpan<Span>
-  for TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Scalar(def) => def.into_span(),
-      Self::Object(def) => def.into_span(),
-      Self::Interface(def) => def.into_span(),
-      Self::Union(def) => def.into_span(),
-      Self::Enum(def) => def.into_span(),
-      Self::InputObject(def) => def.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
->
-  TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  /// Returns a reference to the span covering the entire type definition.
-  ///
-  /// The span includes the description (if any), the type keyword, the name, any interfaces or
-  /// directives, and the fields or values.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Scalar(def) => def.span(),
-      Self::Object(def) => def.span(),
-      Self::Interface(def) => def.span(),
-      Self::Union(def) => def.span(),
-      Self::Enum(def) => def.span(),
-      Self::InputObject(def) => def.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-where
-  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-  ObjectTypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >: Parseable<'a, I, T, Error>,
-  InterfaceTypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >: Parseable<'a, I, T, Error>,
-  UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>:
-    Parseable<'a, I, T, Error>,
-  EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>:
-    Parseable<'a, I, T, Error>,
-  InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>:
-    Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
-      ObjectTypeDefinition::parser::<E>().map(Self::Object),
-      InterfaceTypeDefinition::parser::<E>().map(Self::Interface),
-      UnionTypeDefinition::parser::<E>().map(Self::Union),
-      EnumTypeDefinition::parser::<E>().map(Self::Enum),
-      InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
-    ))
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeSystemDefinition<
+pub type TypeSystemDefinition<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -761,367 +585,37 @@ pub enum TypeSystemDefinition<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> {
-  Type(
-    TypeDefinition<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-    >,
-  ),
-  Directive(
-    DirectiveDefinition<
-      S,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      LocationsContainer,
-    >,
-  ),
-  Schema(SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>),
-}
+> = definitions::ast::TypeSystemDefinition<
+  TypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
+    EnumValuesContainer>,
+  DirectiveDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
+    LocationsContainer>,
+  SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
+>;
 
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> AsRef<Span>
-  for TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> IntoSpan<Span>
-  for TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Type(t) => t.into_span(),
-      Self::Directive(d) => d.into_span(),
-      Self::Schema(s) => s.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
->
-  TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Directive(d) => d.span(),
-      Self::Schema(s) => s.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-where
-  TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >: Parseable<'a, I, T, Error>,
-  DirectiveDefinition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >: Parseable<'a, I, T, Error>,
-  SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>:
-    Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      TypeDefinition::parser::<E>().map(Self::Type),
-      DirectiveDefinition::parser::<E>().map(Self::Directive),
-      SchemaDefinition::parser::<E>().map(Self::Schema),
-    ))
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeExtension<
+pub type TypeExtension<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> {
-  Scalar(ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>),
-  Enum(EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>),
-  Union(UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>),
-  InputObject(
-    InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  ),
-  Object(
-    ObjectTypeExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-    >,
-  ),
-  Interface(
-    InterfaceTypeExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-    >,
-  ),
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-> AsRef<Span>
-  for TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-> IntoSpan<Span>
-  for TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Scalar(s) => s.into_span(),
-      Self::Enum(e) => e.into_span(),
-      Self::Union(u) => u.into_span(),
-      Self::InputObject(i) => i.into_span(),
-      Self::Object(o) => o.into_span(),
-      Self::Interface(i) => i.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
->
-  TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Scalar(s) => s.span(),
-      Self::Enum(e) => e.span(),
-      Self::Union(u) => u.span(),
-      Self::InputObject(i) => i.span(),
-      Self::Object(o) => o.span(),
-      Self::Interface(i) => i.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >
-where
-  ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-  ObjectTypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >: Parseable<'a, I, T, Error>,
+> = definitions::ast::TypeExtension<
+  ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
+  ObjectTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
   InterfaceTypeExtension<
     S,
     NamesContainer,
     ArgumentsContainer,
     DirectivesContainer,
     InputValuesContainer,
-  >: Parseable<'a, I, T, Error>,
-  UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>:
-    Parseable<'a, I, T, Error>,
-  EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>:
-    Parseable<'a, I, T, Error>,
-  InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>:
-    Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      ScalarTypeExtension::parser::<E>().map(Self::Scalar),
-      ObjectTypeExtension::parser::<E>().map(Self::Object),
-      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
-      UnionTypeExtension::parser::<E>().map(Self::Union),
-      EnumTypeExtension::parser::<E>().map(Self::Enum),
-      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
-    ))
-  }
-}
+  >,
+  UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
+  EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+  InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+>;
 
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeSystemExtension<
+pub type TypeSystemExtension<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -1129,156 +623,12 @@ pub enum TypeSystemExtension<
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> {
-  Type(
-    TypeExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-    >,
-  ),
-  Schema(SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>),
-}
+> = definitions::ast::TypeSystemExtension<
+  TypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer, EnumValuesContainer>,
+  SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
+>;
 
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  RootOperationTypesContainer,
-> AsRef<Span>
-  for TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  RootOperationTypesContainer,
-> IntoSpan<Span>
-  for TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Type(t) => t.into_span(),
-      Self::Schema(s) => s.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  RootOperationTypesContainer,
->
-  TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Type(t) => t.span(),
-      Self::Schema(s) => s.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  RootOperationTypesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >
-where
-  TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >: Parseable<'a, I, T, Error>,
-  SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>:
-    Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      TypeExtension::parser::<E>().map(Self::Type),
-      SchemaExtension::parser::<E>().map(Self::Schema),
-    ))
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum TypeSystemDefinitionOrExtension<
+pub type TypeSystemDefinitionOrExtension<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -1287,259 +637,21 @@ pub enum TypeSystemDefinitionOrExtension<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> {
-  Definition(
-    Described<
-      TypeSystemDefinition<
-        S,
-        NamesContainer,
-        ArgumentsContainer,
-        DirectivesContainer,
-        InputValuesContainer,
-        EnumValuesContainer,
-        LocationsContainer,
-        RootOperationTypesContainer,
-      >,
-      StringValue<S>,
-    >,
-  ),
-  Extension(
-    TypeSystemExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      RootOperationTypesContainer,
-    >,
-  ),
-}
+> = definitions::ast::TypeSystemDefinitionOrExtension<
+  Described<TypeSystemDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
+    EnumValuesContainer, LocationsContainer, RootOperationTypesContainer>, StringValue<S>>,
+  TypeSystemExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer, InputValuesContainer,
+    EnumValuesContainer, RootOperationTypesContainer>,
+>;
 
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> AsRef<Span>
-  for TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-> IntoSpan<Span>
-  for TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Definition(d) => d.into_span(),
-      Self::Extension(e) => e.into_span(),
-    }
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
->
-  TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Definition(d) => d.span(),
-      Self::Extension(e) => e.span(),
-    }
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >
-where
-  Described<
-    TypeSystemDefinition<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-    StringValue<S>,
-  >: Parseable<'a, I, T, Error>,
-  TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      Described::parser::<E>().map(Self::Definition),
-      TypeSystemExtension::parser::<E>().map(Self::Extension),
-    ))
-  }
-}
-
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[non_exhaustive]
-pub enum ExecutableDefinition<
+pub type ExecutableDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> {
-  Fragment(FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>),
-  Operation(OperationDefinition<S, ArgumentsContainer, DirectivesContainer>),
-}
-
-impl<S, ArgumentsContainer, DirectivesContainer> AsRef<Span>
-  for ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<S, ArgumentsContainer, DirectivesContainer> IntoSpan<Span>
-  for ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    match self {
-      Self::Fragment(f) => f.into_span(),
-      Self::Operation(o) => match o {
-        OperationDefinition::Named(named) => named.into_span(),
-        OperationDefinition::Shorthand(short) => short.into_span(),
-      },
-    }
-  }
-}
-
-impl<S, ArgumentsContainer, DirectivesContainer>
-  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Fragment(f) => f.span(),
-      Self::Operation(o) => match o {
-        OperationDefinition::Named(named) => named.span(),
-        OperationDefinition::Shorthand(short) => short.span(),
-      },
-    }
-  }
-}
-
-impl<'a, S, ArgumentsContainer, DirectivesContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>
-where
-  FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-  OperationDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      FragmentDefinition::parser::<E>().map(Self::Fragment),
-      OperationDefinition::parser::<E>().map(Self::Operation),
-    ))
-  }
-}
+> = definitions::ast::ExecutableDefinition<
+  OperationDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
+>;
 
 #[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -1736,8 +848,7 @@ where
   }
 }
 
-#[derive(Debug, Clone)]
-pub struct TypeSystemDocument<
+pub type TypeSystemDocument<
   S,
   NamesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -1758,24 +869,7 @@ pub struct TypeSystemDocument<
       RootOperationTypesContainer,
     >,
   >,
-> {
-  span: Span,
-  definitions: DefinitionContainer,
-  _m: PhantomData<
-    TypeSystemDefinitionOrExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-}
-
-impl<
+> = definitions::ast::Document<TypeSystemDefinitionOrExtension<
   S,
   NamesContainer,
   ArgumentsContainer,
@@ -1784,199 +878,18 @@ impl<
   EnumValuesContainer,
   LocationsContainer,
   RootOperationTypesContainer,
-  DefinitionContainer,
->
-  TypeSystemDocument<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
+>, DefinitionContainer>;
 
-  #[inline]
-  pub const fn definitions(&self) -> &DefinitionContainer {
-    &self.definitions
-  }
-}
-
-impl<
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  DefinitionContainer,
-> AsRef<Span>
-  for TypeSystemDocument<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  'a,
-  S,
-  NamesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  DefinitionContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeSystemDocument<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-where
-  DefinitionContainer: ChumskyContainer<
-    TypeSystemDefinitionOrExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-  TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    TypeSystemDefinitionOrExtension::parser::<E>()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|definitions, exa| Self {
-        span: exa.span(),
-        definitions,
-        _m: PhantomData,
-      })
-  }
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutableDocument<
+pub type ExecutableDocument<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
   DefinitionContainer = DefaultVec<
     ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   >,
-> {
-  span: Span,
-  definitions: DefinitionContainer,
-  _m: PhantomData<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-}
+> = definitions::ast::Document<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, DefinitionContainer>;
 
-impl<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer>
-  ExecutableDocument<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer>
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  #[inline]
-  pub const fn definitions(&self) -> &DefinitionContainer {
-    &self.definitions
-  }
-}
-
-impl<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer> AsRef<Span>
-  for ExecutableDocument<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer>
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<'a, S, ArgumentsContainer, DirectivesContainer, DefinitionContainer, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for ExecutableDocument<S, ArgumentsContainer, DirectivesContainer, DefinitionContainer>
-where
-  DefinitionContainer:
-    ChumskyContainer<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    ExecutableDefinition::parser::<E>()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|definitions, exa| Self {
-        span: exa.span(),
-        definitions,
-        _m: PhantomData,
-      })
-  }
-}
-
-#[derive(Debug, Clone)]
-pub struct Document<
+pub type Document<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
@@ -2009,26 +922,7 @@ pub struct Document<
       RootOperationTypesContainer,
     >,
   >,
-> {
-  span: Span,
-  definitions: DefinitionContainer,
-  _m: PhantomData<
-    Definition<
-      S,
-      ArgumentsContainer,
-      DirectivesContainer,
-      ConstArgumentsContainer,
-      ConstDirectivesContainer,
-      NamesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-}
-
-impl<
+> = definitions::ast::Document<Definition<
   S,
   ArgumentsContainer,
   DirectivesContainer,
@@ -2039,140 +933,4 @@ impl<
   EnumValuesContainer,
   LocationsContainer,
   RootOperationTypesContainer,
-  DefinitionContainer,
->
-  Document<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-{
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-  #[inline]
-  pub const fn definitions(&self) -> &DefinitionContainer {
-    &self.definitions
-  }
-}
-
-impl<
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  DefinitionContainer,
-> AsRef<Span>
-  for Document<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-{
-  #[inline]
-  fn as_ref(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<
-  'a,
-  S,
-  ArgumentsContainer,
-  DirectivesContainer,
-  ConstArgumentsContainer,
-  ConstDirectivesContainer,
-  NamesContainer,
-  InputValuesContainer,
-  EnumValuesContainer,
-  LocationsContainer,
-  RootOperationTypesContainer,
-  DefinitionContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for Document<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-    DefinitionContainer,
-  >
-where
-  DefinitionContainer: ChumskyContainer<
-    Definition<
-      S,
-      ArgumentsContainer,
-      DirectivesContainer,
-      ConstArgumentsContainer,
-      ConstDirectivesContainer,
-      NamesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-  Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Definition::parser::<E>()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|definitions, exa| Self {
-        span: exa.span(),
-        definitions,
-        _m: PhantomData,
-      })
-  }
-}
+>, DefinitionContainer>;

@@ -18,7 +18,7 @@ pub type LexerErrors = error::LexerErrors<char, LimitExceeded>;
 
 #[inline(always)]
 pub(super) fn increase_recursion_depth_and_token<'a>(
-  lexer: &mut Lexer<'a, Token<'a>>,
+  lexer: &mut Lexer<'a, CstToken<'a>>,
 ) -> Result<(), LexerError> {
   lexer.extras.increase_recursion();
   lexer.extras.increase_token();
@@ -29,21 +29,21 @@ pub(super) fn increase_recursion_depth_and_token<'a>(
 }
 
 #[inline(always)]
-pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
+pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
   lexer.extras.increase_token();
 }
 
 #[inline(always)]
-pub(super) fn increase_token<'a>(lexer: &mut Lexer<'a, Token<'a>>) {
+pub(super) fn increase_token<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
   lexer.extras.increase_token();
 }
 
 #[inline(always)]
 fn tt_hook_and_then<'a, O>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, LexerError>,
+  lexer: &mut Lexer<'a, CstToken<'a>>,
+  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerError>,
 ) -> Result<O, LexerError> {
   lexer
     .extras
@@ -60,8 +60,8 @@ fn tt_hook_and_then<'a, O>(
 #[allow(clippy::result_large_err)]
 #[inline(always)]
 fn tt_hook_and_then_into_errors<'a, O>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> Result<O, LexerErrors>,
+  lexer: &mut Lexer<'a, CstToken<'a>>,
+  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerErrors>,
 ) -> Result<O, LexerErrors> {
   lexer
     .extras
@@ -77,8 +77,8 @@ fn tt_hook_and_then_into_errors<'a, O>(
 
 #[inline(always)]
 fn tt_hook_map<'a, O>(
-  lexer: &mut Lexer<'a, Token<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, Token<'a>>) -> O,
+  lexer: &mut Lexer<'a, CstToken<'a>>,
+  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> O,
 ) -> Result<O, LexerError> {
   lexer
     .extras
@@ -92,7 +92,7 @@ fn tt_hook_map<'a, O>(
 }
 
 #[inline(always)]
-fn tt_hook<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> Result<(), LexerError> {
+fn tt_hook<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) -> Result<(), LexerError> {
   lexer
     .extras
     .token()
@@ -117,16 +117,13 @@ pub enum TokenKind {
   LParen,
   Bang,
   Colon,
-  Comma,
   Dollar,
   Equal,
   Float,
   Boolean,
   Identifier,
   Int,
-  LineTerminator,
-  Whitespace,
-  BOM,
+  Whitespaces,
   Pipe,
   Spread,
   String,
@@ -149,7 +146,7 @@ pub enum TokenKind {
     None => LexerError::unexpected_eoi(lexer.span().into()),
   }.into())
 )]
-pub enum Token<'a> {
+pub enum CstToken<'a> {
   /// Ampersand `&` token
   #[token("&", tt_hook)]
   Ampersand,
@@ -212,33 +209,9 @@ pub enum Token<'a> {
   #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
   Comment(&'a str),
 
-  /// Comma `,` token
-  #[token(",", tt_hook)]
-  Comma,
-
-  /// Space token,
-  #[token(" ", tt_hook)]
-  Space,
-
-  /// Tab token
-  #[token("\t", tt_hook)]
-  Tab,
-
-  /// byte order mark (BOM) token
-  #[token("\u{FEFF}", tt_hook)]
-  BOM,
-
-  /// Carriage return + new line token
-  #[token("\r\n", tt_hook)]
-  CarriageReturnNewLine,
-
-  /// New line token
-  #[token("\n", tt_hook)]
-  NewLine,
-
-  /// Carriage return token
-  #[token("\r", tt_hook)]
-  CarriageReturn,
+  /// Whitespace token
+  #[regex("[ \t,\r\n\u{FEFF}]+")]
+  Whitespaces(&'a str),
 
   /// Float literal token
   #[regex("-?0[0-9]+(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
@@ -277,7 +250,7 @@ pub enum Token<'a> {
   BlockStringLiteral(&'a str),
 }
 
-impl<'a> logosky::Token<'a> for Token<'a> {
+impl<'a> logosky::Token<'a> for CstToken<'a> {
   type Kind = TokenKind;
   type Char = char;
 
@@ -294,45 +267,25 @@ impl<'a> logosky::Token<'a> for Token<'a> {
       Self::LParen => TokenKind::LParen,
       Self::Bang => TokenKind::Bang,
       Self::Colon => TokenKind::Colon,
-      Self::Comma => TokenKind::Comma,
       Self::Dollar => TokenKind::Dollar,
       Self::Equal => TokenKind::Equal,
       Self::Float(_) => TokenKind::Float,
       Self::Identifier(_) => TokenKind::Identifier,
       Self::Int(_) => TokenKind::Int,
-      Self::NewLine | Self::CarriageReturnNewLine | Self::CarriageReturn => {
-        TokenKind::LineTerminator
-      }
-      Self::Space | Self::Tab => TokenKind::Whitespace,
-      Self::BOM => TokenKind::BOM,
       Self::Pipe => TokenKind::Pipe,
       Self::Spread => TokenKind::Spread,
       Self::StringLiteral(_) => TokenKind::String,
       Self::BlockStringLiteral(_) => TokenKind::String,
       Self::Comment(_) => TokenKind::Comment,
+      Self::Whitespaces(_) => TokenKind::Whitespaces,
     }
   }
 }
 
-impl<'a> Token<'a> {
-  /// Returns `true` if the token belongs to a whitespace category.
-  #[inline(always)]
-  pub const fn is_whitespace(&self) -> bool {
-    matches!(self, Self::Space | Self::Tab | Self::BOM | Self::Comma)
-  }
-
-  /// Returns `true` if the token belongs to terminator category.
-  #[inline(always)]
-  pub const fn is_line_terminator(&self) -> bool {
-    matches!(
-      self,
-      Self::NewLine | Self::CarriageReturn | Self::CarriageReturnNewLine
-    )
-  }
-
+impl<'a> CstToken<'a> {
   /// Returns `true` if the token belongs to an ignored category.
   #[inline(always)]
   pub const fn is_ignored(&self) -> bool {
-    self.is_whitespace() || self.is_line_terminator() || self.is_comment()
+    self.is_whitespaces() || self.is_comment()
   }
 }

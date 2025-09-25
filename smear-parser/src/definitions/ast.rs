@@ -1,5 +1,6 @@
 mod arguments_definition;
 mod described;
+mod document;
 mod directives_definition;
 mod enum_definition;
 mod fields_definition;
@@ -15,6 +16,7 @@ mod operation_type_definition;
 mod scalar_definition;
 mod schema_definition;
 mod ty;
+mod type_system;
 mod union_definition;
 mod variable_definition;
 
@@ -37,3 +39,5 @@ pub use schema_definition::*;
 pub use ty::*;
 pub use union_definition::*;
 pub use variable_definition::*;
+pub use document::Document;
+pub use type_system::*;

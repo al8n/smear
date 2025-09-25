@@ -4,7 +4,7 @@ use super::*;
 
 use crate::lexer::tests::{self, TestToken};
 
-impl<'a> TestToken<'a> for Token<'a> {
+impl<'a> TestToken<'a> for CstToken<'a> {
   #[inline]
   fn is_ignored(&self) -> bool {
     self.is_ignored()
@@ -13,30 +13,30 @@ impl<'a> TestToken<'a> for Token<'a> {
   #[inline]
   fn inline_string_literal(&self) -> Option<&'a str> {
     match self {
-      Token::StringLiteral(s) => Some(s),
+      Self::StringLiteral(s) => Some(s),
       _ => None,
     }
   }
 
   #[inline]
   fn from_inline_string_literal(s: &'a str) -> Self {
-    Token::StringLiteral(s)
+    Self::StringLiteral(s)
   }
 
   #[inline]
   fn from_float_literal(s: &'a str) -> Self {
-    Token::Float(s)
+    Self::Float(s)
   }
 
   #[inline]
   fn from_integer_literal(s: &'a str) -> Self {
-    Token::Int(s)
+    Self::Int(s)
   }
 
   #[inline]
   fn block_string_literal(&self) -> Option<&'a str> {
     match self {
-      Token::BlockStringLiteral(s) => Some(s),
+      Self::BlockStringLiteral(s) => Some(s),
       _ => None,
     }
   }
@@ -44,107 +44,107 @@ impl<'a> TestToken<'a> for Token<'a> {
 
 #[test]
 fn test_unexpected_character() {
-  tests::test_unexpected_character::<Token<'_>, LimitExceeded>();
+  tests::test_unexpected_character::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unknown_character() {
-  tests::test_unknown_character::<Token<'_>, LimitExceeded>();
+  tests::test_unknown_character::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_number_leading_zero() {
-  tests::test_number_leading_zero::<Token<'_>, LimitExceeded>();
+  tests::test_number_leading_zero::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_int_leading_zeros_and_suffix() {
-  tests::test_int_leading_zeros_and_suffix::<Token<'_>, LimitExceeded>();
+  tests::test_int_leading_zeros_and_suffix::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_float_leading_zeros_and_other() {
-  tests::test_float_leading_zeros_and_other::<Token<'_>, LimitExceeded>();
+  tests::test_float_leading_zeros_and_other::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_invalid_number_suffix() {
-  tests::test_invalid_number_suffix::<Token<'_>, LimitExceeded>();
+  tests::test_invalid_number_suffix::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_missing_integer_part() {
-  tests::test_missing_integer_part::<Token<'_>, LimitExceeded>();
+  tests::test_missing_integer_part::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_missing_integer_part_and_invalid_suffix() {
-  tests::test_missing_integer_part_and_invalid_suffix::<Token<'_>, LimitExceeded>();
+  tests::test_missing_integer_part_and_invalid_suffix::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_float_eof() {
-  tests::test_unexpected_float_eof::<Token<'_>, LimitExceeded>();
+  tests::test_unexpected_float_eof::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_number_lexme() {
-  tests::test_unexpected_number_lexme::<Token<'_>, LimitExceeded>();
+  tests::test_unexpected_number_lexme::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_integer_ok() {
-  tests::test_integer_ok::<Token<'_>, LimitExceeded>();
+  tests::test_integer_ok::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_float_ok() {
-  tests::test_float_ok::<Token<'_>, LimitExceeded>();
+  tests::test_float_ok::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_inline_string_ok() {
-  tests::test_inline_string_ok::<Token<'_>, LimitExceeded>();
+  tests::test_inline_string_ok::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unterminated_inline_string() {
-  tests::test_unterminated_inline_string::<Token<'_>, LimitExceeded>();
+  tests::test_unterminated_inline_string::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_incomplete_unicode_and_eof() {
-  tests::test_incomplete_unicode_and_eof::<Token<'_>, LimitExceeded>();
+  tests::test_incomplete_unicode_and_eof::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_line_terminator() {
-  tests::test_unexpected_line_terminator::<Token<'_>, LimitExceeded>();
+  tests::test_unexpected_line_terminator::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_escaped() {
-  tests::test_unexpected_escaped::<Token<'_>, LimitExceeded>();
+  tests::test_unexpected_escaped::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_surrogate_pair() {
-  tests::test_surrogate_pair::<Token<'_>, LimitExceeded>();
+  tests::test_surrogate_pair::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_invalid_surrogate_pair() {
-  tests::test_invalid_surrogate_pair::<Token<'_>, LimitExceeded>();
+  tests::test_invalid_surrogate_pair::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_unterminated_block_string() {
-  tests::test_unterminated_block_string::<Token<'_>, LimitExceeded>();
+  tests::test_unterminated_block_string::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
 fn test_block_string_literal() {
-  tests::test_surrogate_pair_in_block_string::<Token<'_>, LimitExceeded>();
+  tests::test_surrogate_pair_in_block_string::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let lexer = Token::lexer_with_extras(
+  let lexer = CstToken::lexer_with_extras(
     query.as_str(),
     Tracker::with_recursion_tracker(RecursionLimiter::with_limitation(depth - 1)),
   );
@@ -183,7 +183,7 @@ fn test_token_limit() {
   let limit = 300;
   let source = "a ".repeat(limit);
 
-  let lexer = Token::lexer_with_extras(
+  let lexer = CstToken::lexer_with_extras(
     source.as_str(),
     Tracker::with_token_tracker(TokenLimiter::with_limitation(limit - 1)),
   );
