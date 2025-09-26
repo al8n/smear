@@ -1,7 +1,7 @@
 use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::{Span, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
 };
 
 use crate::{error::Error, lexer::ast::TokenKind};
@@ -20,6 +20,29 @@ impl Display for BooleanValue {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.value())
+  }
+}
+
+impl AsSpan<Span> for BooleanValue {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl IntoSpan<Span> for BooleanValue {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl IntoComponents for BooleanValue {
+  type Components = (Span, bool);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.value)
   }
 }
 
@@ -48,8 +71,8 @@ impl BooleanValue {
 
   /// Returns the span of the boolean value.
   #[inline]
-  pub const fn span(&self) -> Span {
-    self.span
+  pub const fn span(&self) -> &Span {
+    &self.span
   }
 
   /// Returns the boolean value.
@@ -63,36 +86,6 @@ impl DisplaySDL for BooleanValue {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.value())
-  }
-}
-
-impl DisplaySyntaxTree for BooleanValue {
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let mut padding = level * indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- BOOLEAN_VALUE@{}..{}",
-      self.span().start(),
-      self.span().end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    let kw = if self.value { "true_KW" } else { "false_KW" };
-    write!(
-      f,
-      "- {}@{}..{} \"{}\"",
-      kw,
-      self.span().start(),
-      self.span().end(),
-      self.value(),
-    )
   }
 }
 

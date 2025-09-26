@@ -4,7 +4,7 @@ use logosky::{
   Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   utils::{
-    AsSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
@@ -68,6 +68,22 @@ impl<Name> AsSpan<Span> for Variable<Name> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
+  }
+}
+
+impl<Name> IntoSpan<Span> for Variable<Name> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Name> IntoComponents for Variable<Name> {
+  type Components = (Span, Name);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.name)
   }
 }
 

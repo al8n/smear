@@ -2,7 +2,7 @@ use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
@@ -11,12 +11,35 @@ use core::fmt::Display;
 
 use crate::{error::Error, lexer::ast::TokenKind};
 
-use super::*;
+use super::super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FloatValue<S> {
   span: Span,
   value: S,
+}
+
+impl<S> AsSpan<Span> for FloatValue<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for FloatValue<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<S> IntoComponents for FloatValue<S> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.value)
+  }
 }
 
 impl<S> Display for FloatValue<S>
@@ -54,8 +77,8 @@ impl<S> FloatValue<S> {
 
   /// Returns the span of the name.
   #[inline]
-  pub const fn span(&self) -> Span {
-    self.span
+  pub const fn span(&self) -> &Span {
+    &self.span
   }
 
   /// Returns the slice of the float.

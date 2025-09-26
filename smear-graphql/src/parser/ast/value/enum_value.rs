@@ -2,8 +2,7 @@ use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-    syntax_tree_display::DisplaySyntaxTree,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
   },
 };
 
@@ -26,10 +25,26 @@ where
   }
 }
 
-impl<S> AsRef<S> for EnumValue<S> {
+impl<S> AsSpan<Span> for EnumValue<S> {
   #[inline]
-  fn as_ref(&self) -> &S {
-    self
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for EnumValue<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S> IntoComponents for EnumValue<S> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
   }
 }
 
@@ -78,29 +93,6 @@ where
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.source().fmt(f)
-  }
-}
-
-impl<S> DisplaySyntaxTree for EnumValue<S>
-where
-  S: DisplayHuman,
-{
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let padding = level * indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- ENUM_VALUE@{}..{}",
-      self.span().start(),
-      self.span().end()
-    )?;
-    <Name<S> as DisplaySyntaxTree>::fmt(&self.0, level + 1, indent, f)
   }
 }
 

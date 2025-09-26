@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::ExecutableDocument, ParseStr};
+use smear_graphql::parser::ast::{ExecutableDocument, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0034_query_shorthand_followed_by_fragment_definition.graphql");
 

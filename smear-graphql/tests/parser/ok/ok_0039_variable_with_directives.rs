@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::OperationDefinition, ParseStr};
+use smear_graphql::parser::ast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0039_variable_with_directives.graphql");
 
@@ -41,7 +41,7 @@ fn variable_with_directives() {
       default_value
         .value()
         .unwrap_string_ref()
-        .content(),
+        .source().trim_matches('"'),
       "Config"
     );
 
@@ -54,6 +54,6 @@ fn variable_with_directives() {
     let argument = &arguments[0];
     assert_eq!(argument.name().slice(), "name");
     let value = argument.value().unwrap_string_ref();
-    assert_eq!(value.content(), "team-customers");
+    assert_eq!(value.source().trim_matches('"'), "team-customers");
   }
 }

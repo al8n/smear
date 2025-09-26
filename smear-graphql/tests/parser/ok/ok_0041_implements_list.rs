@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0041_implements_list.graphql");
 
@@ -23,7 +23,7 @@ fn implements_list() {
 
     assert_eq!(object.name().slice(), "One");
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "Just one interface"
     );
     let impls = object.implements().unwrap();
@@ -53,7 +53,7 @@ fn implements_list() {
 
     assert_eq!(object.name().slice(), "Two");
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "Several interfaces"
     );
     let impls = object.implements().unwrap();
@@ -87,7 +87,7 @@ fn implements_list() {
 
     assert_eq!(object.name().slice(), "Three");
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "&-prefixed"
     );
     let impls = object.implements().unwrap();

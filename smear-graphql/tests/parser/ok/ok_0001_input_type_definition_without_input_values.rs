@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0001_input_type_definition_without_input_values.graphql");
 
@@ -25,7 +25,7 @@ fn input_object_type_definition_without_input_values() {
 
     assert_eq!(input.name().slice(), "AnInputWithoutInputValues");
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "An input with no input values"
     );
     assert!(input.fields_definition().is_none());

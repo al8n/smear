@@ -1,10 +1,11 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
+  Lexable,
   logos::{Lexer, Logos},
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{handlers::*, string_token::*};
+use super::{handlers::*, BlockString, InlineString};
 
 use crate::error::{self, *};
 
@@ -136,10 +137,10 @@ pub enum AstToken<'a> {
   #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   Int(&'a str),
-  #[token("\"", lex_inline_string)]
-  StringLiteral(&'a str),
-  #[token("\"\"\"", lex_block_string)]
-  BlockStringLiteral(&'a str),
+  #[token("\"", |lexer| InlineString::lex(lexer.into()))]
+  StringLiteral(InlineString<&'a str>),
+  #[token("\"\"\"", |lexer| BlockString::lex(lexer.into()))]
+  BlockStringLiteral(BlockString<&'a str>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]

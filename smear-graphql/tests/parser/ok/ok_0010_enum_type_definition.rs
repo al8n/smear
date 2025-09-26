@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::DescribedEnumTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{DescribedEnumTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0010_enum_type_definition.graphql");
 
@@ -28,7 +28,7 @@ fn enum_type_definition() {
         .description()
         .as_ref()
         .unwrap()
-        .content(),
+        .source().trim_matches('"'),
       "\n    description\n    "
     );
     assert!(north.directives().is_none());

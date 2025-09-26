@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::OperationDefinition, ParseStr};
+use smear_graphql::parser::ast::{OperationDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0031_variables_with_default.graphql");
 
@@ -43,7 +43,7 @@ fn variables_with_default() {
       default_value
         .value()
         .unwrap_string_ref()
-        .content(),
+        .source().trim_matches('"'),
       "Config"
     );
   }

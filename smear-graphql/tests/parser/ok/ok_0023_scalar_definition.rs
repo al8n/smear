@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0023_scalar_definition.graphql");
 

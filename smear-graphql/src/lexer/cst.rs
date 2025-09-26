@@ -1,10 +1,11 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
+  Lexable,
   logos::{Lexer, Logos},
   utils::tracker::{LimitExceeded, Tracker},
 };
 
-use super::{handlers::*, string_token::*};
+use super::{handlers::*, string_lexer::*};
 
 use crate::error::{self, *};
 
@@ -247,10 +248,10 @@ pub enum CstToken<'a> {
     tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
   })]
   Int(&'a str),
-  #[token("\"", |lexer| { tt_hook_and_then(lexer, lex_inline_string) })]
-  StringLiteral(&'a str),
-  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, lex_block_string) })]
-  BlockStringLiteral(&'a str),
+  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| InlineString::lex(lexer.into())) })]
+  StringLiteral(InlineString<&'a str>),
+  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| BlockString::lex(lexer.into())) })]
+  BlockStringLiteral(BlockString<&'a str>),
 }
 
 impl<'a> logosky::Token<'a> for CstToken<'a> {

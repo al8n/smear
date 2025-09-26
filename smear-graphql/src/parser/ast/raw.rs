@@ -1,13 +1,6 @@
 use super::{
-  AstToken, AstTokenErrors, AstTokenStream, BooleanValue, DefaultVec, EnumValue, FragmentName,
-  Name, NullValue, StringValue, TypeCondition, field, selection_set,
-};
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*, select},
-  logos::Logos,
-  utils::Spanned,
+  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, TypeCondition,
+  Variable, field, selection_set,
 };
 use smear_parser::{
   definitions::{
@@ -21,12 +14,6 @@ pub use smear_parser::definitions::ast::{
   DirectiveLocations, ImplementInterfaces, UnionMemberTypes,
 };
 
-pub use float::*;
-pub use int::*;
-
-mod float;
-mod int;
-
 /// The default container type used for arguments in the AST.
 pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
 /// The default container type used for directives in the AST.
@@ -38,7 +25,6 @@ pub type DefaultConstArgumentsContainer<S> = DefaultVec<ConstArgument<S>>;
 pub type DefaultConstDirectivesContainer<S, ConstArgumentsContainer> =
   Vec<ConstDirective<S, ConstArgumentsContainer>>;
 
-pub type Variable<S> = super::Variable<Name<S>>;
 pub type DefaultInputValue<S> = smear_parser::lang::DefaultInputValue<ConstInputValue<S>>;
 pub type Argument<S> = lang::Argument<Name<S>, InputValue<S>>;
 pub type Arguments<S, Container = DefaultArgumentsContainer<S>> =
@@ -798,137 +784,3 @@ pub type Document<
   >,
   DefinitionContainer,
 >;
-
-macro_rules! atom_parser {
-  () => {{
-    select! {
-      Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
-        match name {
-          "true" => Self::Boolean(BooleanValue::new(span, true)),
-          "false" => Self::Boolean(BooleanValue::new(span, false)),
-          "null" => Self::Null(NullValue::new(span, name)),
-          val => Self::Enum(EnumValue::new(span, val)),
-        }
-      },
-      Lexed::Token(Spanned { span, data: AstToken::Int(val) }) => {
-        Self::Int(IntValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::Float(val) }) => {
-        Self::Float(FloatValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::StringLiteral(raw) }) => Self::String(StringValue::inline(span, raw, raw.trim_matches('"'))),
-      Lexed::Token(Spanned { span, data: AstToken::BlockStringLiteral(raw) }) => Self::String(StringValue::block(span, raw, raw.trim_matches('"'))),
-    }
-  }};
-}
-
-pub type List<S, Container = DefaultVec<InputValue<S>>> = lang::List<InputValue<S>, Container>;
-pub type Object<S, Container = DefaultVec<InputValue<S>>> =
-  lang::Object<Name<S>, InputValue<S>, Container>;
-
-pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  lang::List<ConstInputValue<S>, Container>;
-pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
-  lang::Object<Name<S>, ConstInputValue<S>, Container>;
-
-/// GraphQL Input Value
-#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum InputValue<S> {
-  /// GraphQL Variable
-  Variable(Variable<S>),
-  /// GraphQL Boolean
-  Boolean(BooleanValue),
-  /// GraphQL String
-  String(StringValue<S>),
-  /// GraphQL Float
-  Float(FloatValue<S>),
-  /// GraphQL Int
-  Int(IntValue<S>),
-  /// GraphQL Enum
-  Enum(EnumValue<S>),
-  /// GraphQL Null
-  Null(NullValue<S>),
-  /// GraphQL List
-  List(lang::List<InputValue<S>>),
-  /// GraphQL Object
-  Object(lang::Object<Name<S>, InputValue<S>>),
-}
-
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
-  for InputValue<&'a str>
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
-  {
-    recursive(|parser| {
-      let object_value_parser =
-        lang::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = lang::List::parser_with(parser).map(Self::List);
-      choice((
-        atom_parser!(),
-        select! {
-          Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
-        }
-        .then(Name::parser::<E>())
-        .map(|(span, name)| Variable::new(span.with_end(name.span().end()), name))
-        .map(Self::Variable),
-        list_value_parser,
-        object_value_parser,
-      ))
-    })
-  }
-}
-
-/// GraphQL Const Input Value
-#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum ConstInputValue<S> {
-  /// GraphQL Boolean value
-  Boolean(BooleanValue),
-  /// GraphQL String value
-  String(StringValue<S>),
-  /// GraphQL Float value
-  Float(FloatValue<S>),
-  /// GraphQL Int value
-  Int(IntValue<S>),
-  /// GraphQL Enum value
-  Enum(EnumValue<S>),
-  /// GraphQL Null value
-  Null(NullValue<S>),
-  /// GraphQL List value
-  List(lang::List<ConstInputValue<S>>),
-  /// GraphQL Object value
-  Object(lang::Object<Name<S>, ConstInputValue<S>>),
-}
-
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
-  for ConstInputValue<&'a str>
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
-    AstTokenStream<'a>: Tokenizer<
-        'a,
-        AstToken<'a>,
-        Slice = <<AstToken<'a> as Logos<'a>>::Source as Source>::Slice<'a>,
-      >,
-    AstToken<'a>: Token<'a>,
-    AstTokenErrors<'a, &'a str>: 'a,
-  {
-    recursive(|parser| {
-      let object_value_parser =
-        lang::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = lang::List::parser_with(parser).map(Self::List);
-
-      choice((atom_parser!(), object_value_parser, list_value_parser))
-    })
-  }
-}

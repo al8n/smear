@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::SelectionSet, ParseStr};
+use smear_graphql::parser::ast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0002_selection_simple.graphql");
 

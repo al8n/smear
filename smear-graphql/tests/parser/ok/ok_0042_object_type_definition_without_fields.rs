@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0042_object_type_definition_without_fields.graphql");
 
@@ -23,7 +23,7 @@ fn object_type_definition_without_fields() {
 
     assert_eq!(object.name().slice(), "AnObjectTypeWithoutFields");
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "A type with no fields"
     );
     assert!(object.fields_definition().is_none());

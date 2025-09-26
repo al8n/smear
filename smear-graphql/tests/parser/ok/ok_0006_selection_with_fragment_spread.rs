@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::SelectionSet, ParseStr};
+use smear_graphql::parser::ast::{SelectionSet, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0006_selection_with_fragment_spread.graphql");
 
@@ -72,7 +72,7 @@ fn selection_with_fragment_spread() {
     let value = duration.value();
     assert!(value.is_string());
     assert_eq!(
-      value.unwrap_string_ref().content(),
+      value.unwrap_string_ref().source().trim_matches('"'),
       "2 hours"
     );
   }

@@ -2,8 +2,7 @@ use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{
-    Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-    syntax_tree_display::DisplaySyntaxTree,
+    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
   },
 };
 
@@ -29,10 +28,26 @@ where
   }
 }
 
-impl<S> AsRef<S> for NullValue<S> {
+impl<S> AsSpan<Span> for NullValue<S> {
   #[inline]
-  fn as_ref(&self) -> &S {
-    self
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for NullValue<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<S> IntoComponents for NullValue<S> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.source)
   }
 }
 
@@ -57,8 +72,8 @@ impl<S> NullValue<S> {
 
   /// Returns the span of the name.
   #[inline]
-  pub const fn span(&self) -> Span {
-    self.span
+  pub const fn span(&self) -> &Span {
+    &self.span
   }
 
   /// Returns the slice of the null value.
@@ -84,37 +99,6 @@ where
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.slice_ref().fmt(f)
-  }
-}
-
-impl<S> DisplaySyntaxTree for NullValue<S>
-where
-  S: DisplayHuman,
-{
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let mut padding = level * indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- NULL_VALUE@{}..{}",
-      self.span().start(),
-      self.span().end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    write!(
-      f,
-      "- null_KW@{}..{} \"{}\"",
-      self.span().start(),
-      self.span().end(),
-      self.slice_ref().display(),
-    )
   }
 }
 

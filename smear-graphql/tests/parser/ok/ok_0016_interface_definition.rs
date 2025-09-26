@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::DescribedInterfaceTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{DescribedInterfaceTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0016_interface_definition.graphql");
 

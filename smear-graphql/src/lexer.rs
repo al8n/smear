@@ -6,8 +6,10 @@ pub mod cst;
 /// and try to lex as much as possible in one pass.
 pub mod ast;
 
+pub use string_lexer::{BlockString, InlineString};
+
 mod handlers;
-mod string_token;
+mod string_lexer;
 
 #[cfg(test)]
 mod tests;

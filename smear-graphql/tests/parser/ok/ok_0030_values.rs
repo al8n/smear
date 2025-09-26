@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0030_values.graphql");
 
@@ -41,7 +41,7 @@ fn values() {
       assert_eq!(arg.name().slice(), "value");
       let value = arg.value();
       assert_eq!(
-        value.unwrap_string_ref().content(),
+        value.unwrap_string_ref().source().trim_matches('"'),
         "string"
       );
     }
@@ -54,7 +54,7 @@ fn values() {
       assert_eq!(items.len(), 2);
       {
         let first = &items[0];
-        assert_eq!(first.unwrap_string_ref().content(), "one");
+        assert_eq!(first.unwrap_string_ref().source().trim_matches('"'), "one");
       }
       {
         let second = &items[1];

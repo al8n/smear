@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::ObjectTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{ObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0040_type_token_order.graphql");
 

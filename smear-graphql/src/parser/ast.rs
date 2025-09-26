@@ -13,10 +13,10 @@ use crate::{
 
 pub use fragment::*;
 pub use name::*;
+pub use raw::*;
 pub use value::*;
 
 mod error;
-
 mod field;
 mod fragment;
 mod keyword;
@@ -24,8 +24,7 @@ mod location;
 mod name;
 mod operation_type;
 mod punctuator;
-/// Raw value
-pub mod raw;
+mod raw;
 mod selection_set;
 mod value;
 

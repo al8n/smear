@@ -11,14 +11,14 @@ impl<'a> TestToken<'a> for AstToken<'a> {
   #[inline]
   fn inline_string_literal(&self) -> Option<&'a str> {
     match self {
-      Self::StringLiteral(s) => Some(s),
+      Self::StringLiteral(s) => Some(s.as_str()),
       _ => None,
     }
   }
 
   #[inline]
   fn from_inline_string_literal(s: &'a str) -> Self {
-    Self::StringLiteral(s)
+    Self::StringLiteral(InlineString::Clean(s))
   }
 
   #[inline]
@@ -34,7 +34,7 @@ impl<'a> TestToken<'a> for AstToken<'a> {
   #[inline]
   fn block_string_literal(&self) -> Option<&'a str> {
     match self {
-      Self::BlockStringLiteral(s) => Some(s),
+      Self::BlockStringLiteral(s) => Some(s.as_str()),
       _ => None,
     }
   }

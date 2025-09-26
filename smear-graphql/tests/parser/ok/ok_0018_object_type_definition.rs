@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::DescribedObjectTypeDefinition, ParseStr};
+use smear_graphql::parser::ast::{DescribedObjectTypeDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0018_object_type_definition.graphql");
 
@@ -8,7 +8,7 @@ fn object_type_definition() {
   .unwrap();
   assert_eq!(definition.name().slice(), "Person");
   assert_eq!(
-    definition.description().unwrap().content(),
+    definition.description().unwrap().source().trim_matches('"'),
     "description of type"
   );
 
@@ -27,7 +27,7 @@ fn object_type_definition() {
     let name = fields.next().unwrap();
     assert_eq!(name.name().slice(), "name");
     assert_eq!(
-      name.description().unwrap().content(),
+      name.description().unwrap().source().trim_matches('"'),
       "\n    description of field\n    "
     );
     let ty = name.ty().unwrap_name_ref();

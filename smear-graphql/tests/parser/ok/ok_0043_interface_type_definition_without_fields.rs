@@ -1,4 +1,4 @@
-use smear_graphql::parser::ast::{raw::Document, ParseStr};
+use smear_graphql::parser::ast::{Document, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0043_interface_type_definition_without_fields.graphql");
 
@@ -26,7 +26,7 @@ fn interface_type_definition_without_fields() {
       "AnInterfaceWithoutFields"
     );
     assert_eq!(
-      described.description().unwrap().content(),
+      described.description().unwrap().source().trim_matches('"'),
       "An interface with no fields"
     );
     assert!(interface.fields_definition().is_none());

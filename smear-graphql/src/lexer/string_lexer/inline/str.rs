@@ -1,41 +1,15 @@
-/*
-* The code in this file is modified based on
-* https://github.com/facebook/relay/blob/main/compiler/crates/graphql-syntax/src/lexer.rs
-*
-* Licensed under the MIT license:
-*
-* Copyright (c) Meta Platforms, Inc. and affiliates.
-*
-* Permission is hereby granted, free of charge, to any person obtaining a copy
-* of this software and associated documentation files (the "Software"), to deal
-* in the Software without restriction, including without limitation the rights
-* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-* copies of the Software, and to permit persons to whom the Software is
-* furnished to do so, subject to the following conditions:
-*
-* The above copyright notice and this permission notice shall be included in all
-* copies or substantial portions of the Software.
-*
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-* SOFTWARE.
-*/
-
 use logosky::{
+  Lexable,
   logos::{Lexer, Logos},
   utils::{Lexeme, PositionedChar, Span},
 };
 
 use crate::error::{
-  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, StringError, StringErrors,
-  UnicodeError,
+  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, LineTerminatorHint, StringError,
+  StringErrors, UnicodeError,
 };
 
-use smear_parser::error::LineTerminatorHint;
+use super::{InlineString, super::SealedLexer};
 
 #[derive(Logos, Debug)]
 #[logos(crate = logosky::logos, error(StringError))]
@@ -253,106 +227,70 @@ fn handle_invalid_escaped_character<'a>(
   }
 }
 
-pub(super) fn lex_inline_string<'a, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, LexerError<char, Extras>>
+impl<'a, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
+  for InlineString<&'a str>
 where
   T: Logos<'a, Source = str>,
 {
-  let lexer_span = lexer.span();
-  let remainder = lexer.remainder();
-  let mut string_lexer = StringToken::lexer(remainder);
+  #[inline]
+  fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<char, StateError>>
+  where
+    Self: Sized,
+  {
+    let lexer_span = lexer.span();
+    let remainder = lexer.remainder();
+    let mut string_lexer = StringToken::lexer(remainder);
 
-  let mut errs = StringErrors::default();
+    let mut errs = StringErrors::default();
 
-  // TODO: Maybe track the properties of the string at parsing time,
-  // so we only need to unescape/split when absolutely required...
-  while let Some(string_token) = string_lexer.next() {
-    match string_token {
-      Ok(StringToken::Quote) => {
-        lexer.bump(string_lexer.span().end);
-        if !errs.is_empty() {
-          return Err(LexerError::new(lexer.span(), errs.into()));
-        }
-        return Ok(lexer.slice());
-      }
-      Ok(StringToken::LineTerminator(lt)) => {
-        let pos = lexer_span.end + string_lexer.span().start;
-        let err = match lt {
-          LineTerminatorHint::NewLine => StringError::unexpected_new_line('\n', pos),
-          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return('\r', pos),
-          LineTerminatorHint::CarriageReturnNewLine => {
-            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
+    let mut has_unicode = false;
+    let mut has_escape = false;
+
+    while let Some(string_token) = string_lexer.next() {
+      match string_token {
+        Ok(StringToken::Quote) => {
+          lexer.bump(string_lexer.span().end);
+          if !errs.is_empty() {
+            return Err(LexerError::new(lexer.span(), errs.into()));
           }
-        };
-        errs.push(err);
-      }
-      Ok(
-        StringToken::EscapedCharacter | StringToken::EscapedUnicode | StringToken::StringCharacters,
-      ) => {}
-      Err(mut e) => {
-        e.bump(lexer_span.end);
-        errs.push(e);
-      }
-    }
-  }
 
-  lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_inline_string());
-  Err(LexerError::new(lexer.span(), errs.into()))
-}
-
-#[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = logosky::logos, error(StringError<char>))]
-enum BlockStringToken {
-  /// \\"\\"\\" inside block string
-  #[token("\\\"\"\"")]
-  EscapedTripleQuote,
-  /// terminator
-  #[token("\"\"\"")]
-  TripleQuote,
-  /// Runs of any characters except the double quote **and backslash**;
-  /// includes newlines and C0 controls.
-  #[regex(r#"[^"\\]+"#)]
-  Continue,
-  /// A lone backslash (not followed by `"""`) is just content.
-  #[token("\\")]
-  Backslash,
-  /// A single quote that is **not** part of `"""` (content)
-  #[token("\"")]
-  Quote,
-}
-
-pub(super) fn lex_block_string<'a, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, LexerError<char, Extras>>
-where
-  T: Logos<'a, Source = str>,
-{
-  let remainder = lexer.remainder();
-  let lexer_span = lexer.span();
-  let mut string_lexer = BlockStringToken::lexer(remainder);
-  let mut errs = StringErrors::default();
-  while let Some(string_token) = string_lexer.next() {
-    match string_token {
-      Ok(BlockStringToken::TripleQuote) => {
-        lexer.bump(string_lexer.span().end);
-        return Ok(lexer.slice());
-      }
-      Ok(
-        BlockStringToken::EscapedTripleQuote
-        | BlockStringToken::Continue
-        | BlockStringToken::Backslash
-        | BlockStringToken::Quote,
-      ) => {}
-      Err(mut e) => {
-        e.bump(lexer_span.end);
-        errs.push(e);
+          let src = lexer.slice();
+          return Ok(match (has_escape, has_unicode) {
+            (false, false) => Self::Clean(src),
+            (true, false) => Self::SimpleEscape(src),
+            (false, true) => Self::UnicodeEscape(src),
+            (true, true) => Self::MixedEscape(src),
+          });
+        }
+        Ok(StringToken::LineTerminator(lt)) => {
+          let pos = lexer_span.end + string_lexer.span().start;
+          let err = match lt {
+            LineTerminatorHint::NewLine => StringError::unexpected_new_line('\n', pos),
+            LineTerminatorHint::CarriageReturn => {
+              StringError::unexpected_carriage_return('\r', pos)
+            }
+            LineTerminatorHint::CarriageReturnNewLine => {
+              StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
+            }
+          };
+          errs.push(err);
+        }
+        Ok(StringToken::StringCharacters) => {}
+        Ok(StringToken::EscapedUnicode) => {
+          has_unicode = true;
+        }
+        Ok(StringToken::EscapedCharacter) => {
+          has_escape = true;
+        }
+        Err(mut e) => {
+          e.bump(lexer_span.end);
+          errs.push(e);
+        }
       }
     }
-  }
 
-  lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_block_string());
-  Err(LexerError::new(lexer.span(), errs.into()))
+    lexer.bump(string_lexer.span().end);
+    errs.push(StringError::unterminated_inline_string());
+    Err(LexerError::new(lexer.span(), errs.into()))
+  }
 }
