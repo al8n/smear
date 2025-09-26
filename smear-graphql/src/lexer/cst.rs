@@ -249,9 +249,9 @@ pub enum CstToken<'a> {
   })]
   Int(&'a str),
   #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| InlineString::lex(lexer.into())) })]
-  StringLiteral(InlineString<&'a str>),
+  InlineString(InlineString<&'a str>),
   #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| BlockString::lex(lexer.into())) })]
-  BlockStringLiteral(BlockString<&'a str>),
+  BlockString(BlockString<&'a str>),
 }
 
 impl<'a> logosky::Token<'a> for CstToken<'a> {
@@ -278,8 +278,8 @@ impl<'a> logosky::Token<'a> for CstToken<'a> {
       Self::Int(_) => TokenKind::Int,
       Self::Pipe => TokenKind::Pipe,
       Self::Spread => TokenKind::Spread,
-      Self::StringLiteral(_) => TokenKind::String,
-      Self::BlockStringLiteral(_) => TokenKind::String,
+      Self::InlineString(_) => TokenKind::String,
+      Self::BlockString(_) => TokenKind::String,
       Self::Comment(_) => TokenKind::Comment,
       Self::Whitespaces(_) => TokenKind::Whitespaces,
     }

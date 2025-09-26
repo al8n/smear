@@ -1,3 +1,4 @@
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
@@ -6,7 +7,6 @@ use logosky::{
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 
 use core::fmt::{self, Display};
 
@@ -15,12 +15,6 @@ use crate::{error::Error, lexer::ast::TokenKind};
 use super::super::*;
 
 pub use crate::lexer::{BlockString, InlineString};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Kind {
-  Inline,
-  Block,
-}
 
 /// A GraphQL string literal, either inline or block.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
@@ -53,7 +47,10 @@ impl<S: DisplayHuman> DisplayHuman for LitStr<S> {
 impl<S> LitStr<S> {
   /// Returns the underlying source
   #[inline(always)]
-  pub const fn source(&self) -> S where S: Copy {
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
     match self {
       Self::Inline(s) => s.source(),
       Self::Block(s) => s.source(),
@@ -112,10 +109,7 @@ where
 impl<S> StringValue<S> {
   #[inline(always)]
   pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
-    Self {
-      span,
-      lit,
-    }
+    Self { span, lit }
   }
 
   /// Returns the span of the name.
@@ -126,7 +120,10 @@ impl<S> StringValue<S> {
 
   /// Returns the underlying source.
   #[inline(always)]
-  pub const fn source(&self) -> S where S: Copy {
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
     self.lit.source()
   }
 
@@ -183,12 +180,8 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          AstToken::StringLiteral(raw) => {
-            StringValue::new(span, raw.into())
-          }
-          AstToken::BlockStringLiteral(raw) => {
-            StringValue::new(span, raw.into())
-          }
+          AstToken::InlineString(raw) => StringValue::new(span, raw.into()),
+          AstToken::BlockString(raw) => StringValue::new(span, raw.into()),
           tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
         })
       }

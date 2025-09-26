@@ -5,7 +5,7 @@ use logosky::{
 
 use crate::error::{LexerError, StringError, StringErrors};
 
-use super::{BlockString, super::SealedLexer};
+use super::{super::SealedLexer, BlockString};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[logos(crate = logosky::logos, error(StringError<char>))]
@@ -67,8 +67,9 @@ where
             // callbacks already updated `lines.extras`
           }
 
-          // If the whole block is whitespace-only (no nonblank seen),
-          // treat those lines as both leading and trailing blanks.
+          let total_lines = lines.extras.terminators + 1;
+
+          // special case: all-blank block → trailing = leading (keeps invariants)
           if !lines.extras.saw_nonblank_any && !source.is_empty() {
             lines.extras.trailing_blank_lines = lines.extras.leading_blank_lines;
           }
@@ -91,10 +92,11 @@ where
           return Ok(BlockString::Mixed {
             source,
             has_escaped_triple_quote,
-            has_cr_terminators,
-            leading_blank_lines,
-            trailing_blank_lines,
-            common_indent,
+            has_cr_terminators: lines.extras.has_cr_terminators,
+            leading_blank_lines: lines.extras.leading_blank_lines,
+            trailing_blank_lines: lines.extras.trailing_blank_lines,
+            common_indent: lines.extras.common_indent.unwrap_or(0),
+            total_lines,
           });
         }
       }
@@ -114,23 +116,20 @@ struct BlockLineExtras {
   trailing_blank_lines: usize,
   common_indent: Option<usize>, // min indent across non-blank lines after the first
   saw_nonblank_any: bool,
-  line_no: usize,           // 0-based, increments on each terminator
   saw_body_this_line: bool, // whether we saw a LineBody since last Terminator
+  terminators: usize,       // count of seen line terminators
 }
 
-#[inline]
+#[inline(always)]
 fn is_blank_line(s: &str) -> bool {
   s.bytes().all(|b| b == b' ' || b == b'\t')
 }
 
-#[inline]
+#[inline(always)]
 fn leading_ws_indent(s: &str) -> usize {
-  let bs = s.as_bytes();
-  let mut i = 0;
-  while i < bs.len() && (bs[i] == b' ' || bs[i] == b'\t') {
-    i += 1;
-  }
-  i
+  s.bytes()
+    .take_while(|&c| c == b' ' || c == b'\t')
+    .count()
 }
 
 // ---- sub-lexer over inner block-string content ----
@@ -152,25 +151,24 @@ enum BlockLineTok {
 fn on_line_body(lex: &mut Lexer<'_, BlockLineTok>) {
   let line = lex.slice();
   let blank = is_blank_line(line);
+  let line_idx = lex.extras.terminators; // 0 for first logical line
 
   if !lex.extras.saw_nonblank_any {
     if blank {
       lex.extras.leading_blank_lines += 1;
     } else {
       lex.extras.saw_nonblank_any = true;
-      // common indent excludes the very first line (line_no == 0)
-      if lex.extras.line_no > 0 {
+      if line_idx > 0 {
         let ind = leading_ws_indent(line);
         lex.extras.common_indent = Some(lex.extras.common_indent.map_or(ind, |m| m.min(ind)));
       }
       lex.extras.trailing_blank_lines = 0;
     }
   } else if blank {
-    // becomes trailing blanks until a non-blank resets it
     lex.extras.trailing_blank_lines += 1;
   } else {
     lex.extras.trailing_blank_lines = 0;
-    if lex.extras.line_no > 0 {
+    if line_idx > 0 {
       let ind = leading_ws_indent(line);
       lex.extras.common_indent = Some(lex.extras.common_indent.map_or(ind, |m| m.min(ind)));
     }
@@ -186,8 +184,7 @@ fn on_terminator(lex: &mut Lexer<'_, BlockLineTok>) {
     lex.extras.has_cr_terminators = true;
   }
 
-  // If there was *no* body token between previous terminator and this one,
-  // it's an empty line => blank.
+  // empty line (no LineBody since last terminator) is blank
   if !lex.extras.saw_body_this_line {
     if !lex.extras.saw_nonblank_any {
       lex.extras.leading_blank_lines += 1;
@@ -196,6 +193,6 @@ fn on_terminator(lex: &mut Lexer<'_, BlockLineTok>) {
     }
   }
 
-  lex.extras.line_no += 1;
+  lex.extras.terminators += 1;
   lex.extras.saw_body_this_line = false;
 }

@@ -5,7 +5,7 @@ use logosky::{
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{handlers::*, BlockString, InlineString};
+use super::{BlockString, InlineString, handlers::*};
 
 use crate::error::{self, *};
 
@@ -138,9 +138,9 @@ pub enum AstToken<'a> {
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   Int(&'a str),
   #[token("\"", |lexer| InlineString::lex(lexer.into()))]
-  StringLiteral(InlineString<&'a str>),
+  InlineString(InlineString<&'a str>),
   #[token("\"\"\"", |lexer| BlockString::lex(lexer.into()))]
-  BlockStringLiteral(BlockString<&'a str>),
+  BlockString(BlockString<&'a str>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -186,8 +186,8 @@ impl<'a> AstToken<'a> {
       Self::Identifier(_) => TokenKind::Identifier,
       Self::Int(_) => TokenKind::Int,
       Self::Float(_) => TokenKind::Float,
-      Self::StringLiteral(_) => TokenKind::String,
-      Self::BlockStringLiteral(_) => TokenKind::BlockString,
+      Self::InlineString(_) => TokenKind::String,
+      Self::BlockString(_) => TokenKind::BlockString,
       Self::Dollar => TokenKind::Dollar,
       Self::LParen => TokenKind::LParen,
       Self::RParen => TokenKind::RParen,

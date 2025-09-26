@@ -24,13 +24,12 @@ impl<S: DisplayHuman> core::fmt::Display for InlineString<S> {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     match self {
-      Self::Clean(s)
-      | Self::SimpleEscape(s)
-      | Self::UnicodeEscape(s)
-      | Self::MixedEscape(s) => DisplayHuman::fmt(s, f),
+      Self::Clean(s) | Self::SimpleEscape(s) | Self::UnicodeEscape(s) | Self::MixedEscape(s) => {
+        DisplayHuman::fmt(s, f)
+      }
     }
   }
-} 
+}
 
 impl<'a> InlineString<&'a str> {
   /// Returns the str representation of the inline string.
@@ -55,7 +54,10 @@ impl<'a> InlineString<&'a [u8]> {
 impl<S> InlineString<S> {
   /// Returns the underlying source.
   #[inline(always)]
-  pub const fn source(self) -> S where S: Copy {
+  pub const fn source(self) -> S
+  where
+    S: Copy,
+  {
     match self {
       Self::Clean(s) | Self::SimpleEscape(s) | Self::UnicodeEscape(s) | Self::MixedEscape(s) => s,
     }

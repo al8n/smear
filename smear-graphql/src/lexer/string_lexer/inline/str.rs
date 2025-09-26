@@ -9,7 +9,7 @@ use crate::error::{
   StringErrors, UnicodeError,
 };
 
-use super::{InlineString, super::SealedLexer};
+use super::{super::SealedLexer, InlineString};
 
 #[derive(Logos, Debug)]
 #[logos(crate = logosky::logos, error(StringError))]

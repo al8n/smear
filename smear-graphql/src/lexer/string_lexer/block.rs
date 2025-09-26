@@ -26,6 +26,8 @@ pub enum BlockString<S> {
     /// The common indentation (spaces/tabs) across all non-blank lines
     /// *after the first* that should be stripped.
     common_indent: usize,
+    /// The total number of lines in the block string (including blank lines).
+    total_lines: usize,
   },
 }
 
@@ -64,7 +66,10 @@ impl<'a> BlockString<&'a [u8]> {
 impl<S> BlockString<S> {
   /// Returns the underlying source.
   #[inline(always)]
-  pub const fn source(self) -> S where S: Copy {
+  pub const fn source(self) -> S
+  where
+    S: Copy,
+  {
     match self {
       Self::Clean(s) | Self::Mixed { source: s, .. } => s,
     }
