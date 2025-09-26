@@ -11,7 +11,7 @@ use core::fmt::Display;
 
 use crate::{error::Error, lexer::ast::TokenKind};
 
-use super::*;
+use super::super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Kind {

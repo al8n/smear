@@ -1,5 +1,130 @@
-use derive_more::{Display, IsVariant};
+use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::Span;
+
+/// The hint about what is expected for the next character
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum ExponentHint {
+  /// Expect the next character to be digit.
+  #[display("digit")]
+  Digit,
+  /// Expect the next character to be a sign or a digit.
+  #[display("'+', '-' or digit")]
+  SignOrDigit,
+  /// Expect the next character to be an exponent identifier 'e' or 'E'.
+  #[display("'e' or 'E'")]
+  Identifier,
+}
+
+/// The hint about what is expected for the next character
+#[derive(
+  Copy,
+  Clone,
+  Debug,
+  Display,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+pub enum IntHint {
+  /// Expect the next character to be digit.
+  #[display("digit")]
+  Digit,
+}
+
+/// The hint about what is expected for the float
+#[derive(
+  Copy,
+  Clone,
+  Display,
+  Debug,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+pub enum FloatHint {
+  /// Expect the next character to be fractional digits.
+  #[display("fractional digits")]
+  Fractional,
+  /// Expect the next character to be an exponent part.
+  #[display("_0")]
+  Exponent(ExponentHint),
+  /// Expect the next character to be a digit.
+  #[display("digit")]
+  Digit,
+}
+
+/// An unpaired surrogate error.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
+pub enum UnpairedSurrogateHint {
+  /// An unpaired high surrogate.
+  #[display("high surrogate")]
+  High,
+  /// An unpaired low surrogate.
+  #[display("low surrogate")]
+  Low,
+}
+
+/// An unterminated string hint.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum UnterminatedHint {
+  /// A double quote character.
+  #[display("\"")]
+  Quote,
+  /// A triple quote sequence.
+  #[display(r#"""""#)]
+  TripleQuote,
+}
+
+/// A hint about what line terminator was found.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum LineTerminatorHint {
+  /// A line feed character.
+  #[display("'\\n'")]
+  NewLine,
+  /// A carriage return character.
+  #[display("'\\r'")]
+  CarriageReturn,
+  /// A carriage return followed by a line feed character.
+  #[display("'\\r\\n'")]
+  CarriageReturnNewLine,
+}
+
+/// A hint about what line terminator was found.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+pub enum WhiteSpaceHint {
+  /// A space character.
+  #[display(" ")]
+  Space,
+  /// A horizontal space character.
+  #[display("'\\t'")]
+  Tab,
+}
+
+/// A hint for what was expected in a object field value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+pub enum ObjectFieldValueHint {
+  /// A [`Colon`](crate::parser::ast::Colon) was expected.
+  #[display("colon")]
+  Colon,
+  /// A value was expected.
+  #[display("value")]
+  Value,
+  /// A [`Name`](crate::parser::ast::Name) was expected.
+  #[display("name")]
+  Name,
+}
 
 /// Hints for parsing a variable value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]

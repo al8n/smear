@@ -71,7 +71,7 @@ fn values() {
       {
         let first = &fields[0];
         assert_eq!(first.name().slice(), "key");
-        assert_eq!(first.value().unwrap_boolean_ref().slice(), "false");
+        assert!(!first.value().unwrap_boolean_ref().value());
       }
       {
         let second = &fields[1];

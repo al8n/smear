@@ -13,8 +13,10 @@ use crate::{
 
 pub use fragment::*;
 pub use name::*;
+pub use value::*;
 
 mod error;
+
 mod field;
 mod fragment;
 mod keyword;
@@ -25,6 +27,7 @@ mod punctuator;
 /// Raw value
 pub mod raw;
 mod selection_set;
+mod value;
 
 /// The token stream type used for the AST parser implementation.
 pub type AstTokenStream<'a> = logosky::TokenStream<'a, AstToken<'a>>;

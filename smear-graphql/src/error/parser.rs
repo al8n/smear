@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 
-use derive_more::{
-  AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
-};
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Token, TokenStream,
   chumsky::{
@@ -12,13 +10,14 @@ use logosky::{
   },
   utils::{Span, UnexpectedEnd},
 };
-use smear_parser::error::{
+pub use smear_parser::error::{
   EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-  ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
+  ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
 };
 
 use crate::error::LexerErrors;
 
+pub use core::num::{IntErrorKind, ParseFloatError, ParseIntError};
 pub use smear_parser::error::{ParseVariableValueError, VariableValueHint};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,19 +44,6 @@ impl<T, TK> UnexpectedToken<T, TK> {
   pub const fn with_found(found: T, expected: TK) -> Self {
     Self::maybe_found(Some(found), expected)
   }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
-pub enum ObjectFieldValueHint {
-  /// A [`Colon`](crate::parser::ast::Colon) was expected.
-  #[display("colon")]
-  Colon,
-  /// A value was expected.
-  #[display("value")]
-  Value,
-  /// A [`Name`](crate::parser::ast::Name) was expected.
-  #[display("name")]
-  Name,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -132,34 +118,68 @@ impl<S> UnexpectedKeyword<S> {
   }
 }
 
-#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+/// The data of a parser error.
+#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
+  /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
+  /// An integer value could not be parsed due to overflow.
+  #[from(skip)]
+  IntOverflow(S),
+  /// A floating point value could not be parsed due to overflow
+  #[from(skip)]
+  FloatOverflow(S),
+  /// An enum value is invalid.
+  #[from(skip)]
   InvalidEnumValue(S),
+  /// A boolean value is invalid.
+  #[from(skip)]
   InvalidBooleanValue(S),
+  /// A null value is invalid.
+  #[from(skip)]
   InvalidNullValue(S),
+  /// A fragment name is invalid.
+  #[from(skip)]
   InvalidFragmentName(S),
+  /// A list or object was not closed.
   Unclosed(Unclosed),
+  /// An unexpected token was found.
   UnexpectedToken(UnexpectedToken<T, TK>),
+  /// An unexpected keyword was found.
   UnexpectedKeyword(UnexpectedKeyword<S>),
+  /// The shape of an object field value is invalid.
   UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
+  /// An unexpected end was found in a variable value.
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
+  /// An unexpected end was found in an object field value.
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
+  /// An unknown directive location was found.
+  #[from(skip)]
   UnknownDirectiveLocation(S),
+  /// An unknown operation type was found.
+  #[from(skip)]
   UnknownOperationType(S),
+  /// An unexpected end was found in an object type extension.
   UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
+  /// An unexpected end was found in an interface type extension.
   UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
+  /// An unexpected end was found in an enum type extension.
   UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
+  /// An unexpected end was found in an input object type extension.
   UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
+  /// An unexpected end was found in a union type extension.
   UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
+  /// An unexpected end was found in a schema extension.
   UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
   /// An end of input was found.
   EndOfInput,
+  /// Some other error.
   Other(Cow<'static, str>),
 }
 
+/// A parser error.
 #[derive(Debug, Clone)]
 pub struct Error<S, T, TK, Char = char, StateError = ()> {
   span: Span,
@@ -402,7 +422,7 @@ type DefaultErrorsContainer<S, T, TK, Char = char, StateError = ()> =
 type DefaultErrorsContainer<S, T, TK, Char = char, StateError = ()> =
   std::vec::Vec<Error<S, T, TK, Char, StateError>>;
 
-/// A container for storing multiple lexer errors.
+/// A container for storing multiple parser errors.
 #[derive(Debug, Clone, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct Errors<S, T, TK, Char = char, StateError = ()>(
   DefaultErrorsContainer<S, T, TK, Char, StateError>,

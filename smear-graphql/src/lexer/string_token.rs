@@ -31,9 +31,11 @@ use logosky::{
 };
 
 use crate::error::{
-  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, LineTerminatorHint, StringError,
-  StringErrors, UnicodeError,
+  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, StringError, StringErrors,
+  UnicodeError,
 };
+
+use smear_parser::error::LineTerminatorHint;
 
 #[derive(Logos, Debug)]
 #[logos(crate = logosky::logos, error(StringError))]

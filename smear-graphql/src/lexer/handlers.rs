@@ -2,8 +2,9 @@ use logosky::{
   logos::{Lexer, Logos},
   utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
 };
+use smear_parser::error::{ExponentHint, FloatHint};
 
-use crate::error::{self, ExponentHint, FloatError, FloatHint};
+use crate::error::{self, FloatError};
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<char, Extras>;

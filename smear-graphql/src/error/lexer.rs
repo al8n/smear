@@ -1,66 +1,11 @@
-use core::fmt;
-
 use std::borrow::Cow;
 
-use derive_more::{
-  AsMut, AsRef, Deref, DerefMut, Display, From, Into, IsVariant, TryUnwrap, Unwrap,
-};
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
-/// The hint about what is expected for the next character
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum ExponentHint {
-  /// Expect the next character to be digit.
-  #[display("digit")]
-  Digit,
-  /// Expect the next character to be a sign or a digit.
-  #[display("'+', '-' or digit")]
-  SignOrDigit,
-  /// Expect the next character to be an exponent identifier 'e' or 'E'.
-  #[display("'e' or 'E'")]
-  Identifier,
-}
-
-/// The hint about what is expected for the next character
-#[derive(
-  Copy,
-  Clone,
-  Debug,
-  Display,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  From,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
-)]
-pub enum IntHint {
-  /// Expect the next character to be digit.
-  #[display("digit")]
-  Digit,
-}
-
-#[derive(
-  Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant, Unwrap, TryUnwrap,
-)]
-pub enum FloatHint {
-  Fractional,
-  Exponent(ExponentHint),
-  Digit,
-}
-
-impl fmt::Display for FloatHint {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Self::Fractional => write!(f, "fractional digits"),
-      Self::Exponent(hint) => write!(f, "{hint}"),
-      Self::Digit => write!(f, "digit"),
-    }
-  }
-}
+pub use smear_parser::error::{
+  ExponentHint, FloatHint, IntHint, LineTerminatorHint, UnpairedSurrogateHint, UnterminatedHint,
+};
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
@@ -338,17 +283,6 @@ impl<Char> InvalidUnicodeSequence<Char> {
   }
 }
 
-/// An unpaired surrogate error.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
-pub enum UnpairedSurrogateHint {
-  /// An unpaired high surrogate.
-  #[display("high surrogate")]
-  High,
-  /// An unpaired low surrogate.
-  #[display("low surrogate")]
-  Low,
-}
-
 /// An error encountered during lexing for unicode sequences.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
@@ -389,35 +323,6 @@ impl<Char> UnicodeError<Char> {
     }
     self
   }
-}
-
-/// An unterminated string hint.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum UnterminatedHint {
-  #[display("\"")]
-  Quote,
-  #[display(r#"""""#)]
-  TripleQuote,
-}
-
-/// A hint about what line terminator was found.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum LineTerminatorHint {
-  #[display("'\\n'")]
-  NewLine,
-  #[display("'\\r'")]
-  CarriageReturn,
-  #[display("'\\r\\n'")]
-  CarriageReturnNewLine,
-}
-
-/// A hint about what line terminator was found.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum WhiteSpaceHint {
-  #[display(" ")]
-  Space,
-  #[display("'\\t'")]
-  Tab,
 }
 
 /// An escaped character in a GraphQL inline string.

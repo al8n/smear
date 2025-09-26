@@ -1,6 +1,6 @@
 use super::{
-  AstToken, AstTokenErrors, AstTokenStream, BooleanValue, DefaultVec, EnumValue, FragmentName,
-  Name, NullValue, StringValue, TypeCondition, field, selection_set,
+  AstToken, AstTokenErrors, AstTokenStream, DefaultVec, FragmentName, Name, TypeCondition, field,
+  selection_set,
 };
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
@@ -21,11 +21,20 @@ pub use smear_parser::definitions::ast::{
   DirectiveLocations, ImplementInterfaces, UnionMemberTypes,
 };
 
+pub use boolean_value::*;
+pub use enum_value::*;
 pub use float::*;
 pub use int::*;
+pub use null_value::*;
+pub use string::*;
 
+mod boolean_value;
+mod enum_value;
 mod float;
 mod int;
+mod null_value;
+mod string;
+mod variable;
 
 /// The default container type used for arguments in the AST.
 pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
@@ -38,7 +47,7 @@ pub type DefaultConstArgumentsContainer<S> = DefaultVec<ConstArgument<S>>;
 pub type DefaultConstDirectivesContainer<S, ConstArgumentsContainer> =
   Vec<ConstDirective<S, ConstArgumentsContainer>>;
 
-pub type Variable<S> = super::Variable<Name<S>>;
+pub type Variable<S> = variable::Variable<Name<S>>;
 pub type DefaultInputValue<S> = smear_parser::lang::DefaultInputValue<ConstInputValue<S>>;
 pub type Argument<S> = lang::Argument<Name<S>, InputValue<S>>;
 pub type Arguments<S, Container = DefaultArgumentsContainer<S>> =
@@ -804,8 +813,8 @@ macro_rules! atom_parser {
     select! {
       Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
         match name {
-          "true" => Self::Boolean(BooleanValue::new(span, true)),
-          "false" => Self::Boolean(BooleanValue::new(span, false)),
+          "true" => Self::Boolean(BooleanValue::new(span, name, true)),
+          "false" => Self::Boolean(BooleanValue::new(span, name, false)),
           "null" => Self::Null(NullValue::new(span, name)),
           val => Self::Enum(EnumValue::new(span, val)),
         }
@@ -839,7 +848,7 @@ pub enum InputValue<S> {
   /// GraphQL Variable
   Variable(Variable<S>),
   /// GraphQL Boolean
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// GraphQL String
   String(StringValue<S>),
   /// GraphQL Float
@@ -890,7 +899,7 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
   /// GraphQL Boolean value
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// GraphQL String value
   String(StringValue<S>),
   /// GraphQL Float value
