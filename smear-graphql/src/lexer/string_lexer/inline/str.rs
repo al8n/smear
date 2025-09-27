@@ -1,6 +1,6 @@
 use logosky::{
   Lexable,
-  logos::{Lexer, Logos},
+  logos::{Lexer, Logos, Source},
   utils::{Lexeme, PositionedChar, Span},
 };
 
@@ -227,10 +227,12 @@ fn handle_invalid_escaped_character<'a>(
   }
 }
 
-impl<'a, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
-  for InlineString<&'a str>
+impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
+  for InlineString<S::Slice<'a>>
 where
-  T: Logos<'a, Source = str>,
+  T: Logos<'a, Source = S>,
+  S: Source + ?Sized + 'a,
+  S::Slice<'a>: AsRef<str>,
 {
   #[inline]
   fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<char, StateError>>
@@ -239,7 +241,7 @@ where
   {
     let lexer_span = lexer.span();
     let remainder = lexer.remainder();
-    let mut string_lexer = StringToken::lexer(remainder);
+    let mut string_lexer = StringToken::lexer(remainder.as_ref());
 
     let mut errs = StringErrors::default();
 

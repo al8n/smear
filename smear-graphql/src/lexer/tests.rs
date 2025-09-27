@@ -3,9 +3,12 @@ use logosky::{
   utils::Span,
 };
 
-use crate::error::{
-  ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,
-  UnpairedSurrogateHint, UnterminatedHint,
+use crate::{
+  error::{
+    ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,
+    UnpairedSurrogateHint, UnterminatedHint,
+  },
+  lexer::InlineString,
 };
 
 fn assert_token<'a, Token, StateError>(source: &'a str, kind: Token, length: usize)
@@ -34,7 +37,7 @@ pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy + core::fmt::Debug {
 
   fn inline_string_literal(&self) -> Option<&'a str>;
 
-  fn from_inline_string_literal(s: &'a str) -> Self;
+  fn from_inline_string_literal(s: InlineString<&'a str>) -> Self;
 
   fn from_float_literal(s: &'a str) -> Self;
 
@@ -1343,49 +1346,89 @@ where
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let input: &[(&str, Token, usize)] = &[
-    (r#""""#, Token::from_inline_string_literal(r#""""#), 2),
+    (
+      r#""""#,
+      Token::from_inline_string_literal(InlineString::Clean(r#""""#)),
+      2,
+    ),
     {
       const CASE: &str = r#""hello""#;
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""hello world""#;
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""hello✨""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \" quote""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \\ backslash""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \n new line""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \r carriage return""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \t tab""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        CASE.len(),
+      )
     },
     {
       const CASE: &str = r#""escaped \u1234 unicode\"""#;
 
-      (CASE, Token::from_inline_string_literal(CASE), CASE.len())
+      (
+        CASE,
+        Token::from_inline_string_literal(InlineString::MixedEscape(CASE)),
+        CASE.len(),
+      )
     },
   ];
 

@@ -5,7 +5,7 @@ use logosky::{
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{BlockString, InlineString, handlers::*};
+use super::{BlockString, InlineString, handlers::*, string_lexer::SealedLexer};
 
 use crate::error::{self, *};
 
@@ -137,9 +137,11 @@ pub enum AstToken<'a> {
   #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   Int(&'a str),
-  #[token("\"", |lexer| InlineString::lex(lexer.into()))]
+  #[token("\"", |lexer| InlineString::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer)))]
   InlineString(InlineString<&'a str>),
-  #[token("\"\"\"", |lexer| BlockString::lex(lexer.into()))]
+  #[token("\"\"\"", |lexer| {
+    <BlockString<&str> as Lexable<_, LexerError>>::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer))
+  })]
   BlockString(BlockString<&'a str>),
 }
 

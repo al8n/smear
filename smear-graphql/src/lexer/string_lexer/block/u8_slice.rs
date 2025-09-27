@@ -8,7 +8,7 @@ use crate::error::{LexerError, StringError, StringErrors};
 use super::{super::SealedLexer, BlockString};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = logosky::logos, error(StringError<char>))]
+#[logos(crate = logosky::logos, source = [u8], error(StringError<u8>))]
 enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
@@ -28,22 +28,22 @@ enum BlockStringToken {
   Quote,
 }
 
-impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
+impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<u8, StateError>>
   for BlockString<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
   S: Source + ?Sized + 'a,
-  S::Slice<'a>: AsRef<str>,
+  S::Slice<'a>: AsRef<[u8]>,
 {
   #[inline]
-  fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<char, StateError>>
+  fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<u8, StateError>>
   where
     Self: Sized,
   {
     let remainder = lexer.remainder();
-    let remainder_str = remainder.as_ref();
+    let remainder_bytes = remainder.as_ref();
     let lexer_span = lexer.span();
-    let mut string_lexer = BlockStringToken::lexer(remainder_str);
+    let mut string_lexer = BlockStringToken::lexer(remainder_bytes);
     let mut errs = StringErrors::default();
 
     let mut has_escaped_triple_quote = false;
@@ -62,7 +62,7 @@ where
           lexer.bump(string_lexer.span().end);
 
           // inner content (between opening and closing)
-          let content = &remainder_str[..string_lexer.span().start];
+          let content = &remainder_bytes[..string_lexer.span().start];
 
           // sub-lex the inner content to compute normalization knobs (no allocations)
           let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
@@ -124,20 +124,23 @@ struct BlockLineExtras {
 }
 
 #[inline(always)]
-fn is_blank_line(s: &str) -> bool {
-  s.bytes().all(|b| b == b' ' || b == b'\t')
+fn is_blank_line(bytes: &[u8]) -> bool {
+  bytes.iter().all(|&b| b == b' ' || b == b'\t')
 }
 
 #[inline(always)]
-fn leading_ws_indent(s: &str) -> usize {
-  s.bytes().take_while(|&c| c == b' ' || c == b'\t').count()
+fn leading_ws_indent(bytes: &[u8]) -> usize {
+  bytes
+    .iter()
+    .take_while(|&&c| c == b' ' || c == b'\t')
+    .count()
 }
 
 // ---- sub-lexer over inner block-string content ----
 #[derive(Logos, Debug)]
-#[logos(crate = logosky::logos, extras = BlockLineExtras)]
+#[logos(crate = logosky::logos, source = [u8], extras = BlockLineExtras)]
 enum BlockLineTok {
-  /// Body of a line (one or more chars, never includes a terminator).
+  /// Body of a line (one or more bytes, never includes a terminator).
   /// We process the whole line in the callback.
   #[regex(r#"[^\r\n]+"#, on_line_body)]
   LineBody,
@@ -180,7 +183,7 @@ fn on_line_body(lex: &mut Lexer<'_, BlockLineTok>) {
 
 #[inline]
 fn on_terminator(lex: &mut Lexer<'_, BlockLineTok>) {
-  let t = lex.slice().as_bytes();
+  let t = lex.slice();
   if !t.is_empty() && t[0] == b'\r' {
     lex.extras.has_cr_terminators = true;
   }

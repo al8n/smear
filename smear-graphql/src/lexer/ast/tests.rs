@@ -1,6 +1,9 @@
 use super::*;
 
-use crate::lexer::tests::{self, TestToken};
+use crate::lexer::{
+  InlineString,
+  tests::{self, TestToken},
+};
 
 impl<'a> TestToken<'a> for AstToken<'a> {
   #[inline]
@@ -17,8 +20,8 @@ impl<'a> TestToken<'a> for AstToken<'a> {
   }
 
   #[inline]
-  fn from_inline_string_literal(s: &'a str) -> Self {
-    Self::InlineString(InlineString::Clean(s))
+  fn from_inline_string_literal(s: InlineString<&'a str>) -> Self {
+    Self::InlineString(s)
   }
 
   #[inline]

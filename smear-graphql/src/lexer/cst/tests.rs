@@ -2,7 +2,10 @@ use logosky::utils::{recursion_tracker::RecursionLimiter, token_tracker::TokenLi
 
 use super::*;
 
-use crate::lexer::tests::{self, TestToken};
+use crate::lexer::{
+  InlineString,
+  tests::{self, TestToken},
+};
 
 impl<'a> TestToken<'a> for CstToken<'a> {
   #[inline]
@@ -19,8 +22,8 @@ impl<'a> TestToken<'a> for CstToken<'a> {
   }
 
   #[inline]
-  fn from_inline_string_literal(s: &'a str) -> Self {
-    Self::InlineString(InlineString::Clean(s))
+  fn from_inline_string_literal(s: InlineString<&'a str>) -> Self {
+    Self::InlineString(s)
   }
 
   #[inline]
@@ -183,12 +186,12 @@ fn test_token_limit() {
   let limit = 300;
   let source = "a ".repeat(limit);
 
-  let lexer = CstToken::lexer_with_extras(
+  let mut lexer = CstToken::lexer_with_extras(
     source.as_str(),
     Tracker::with_token_tracker(TokenLimiter::with_limitation(limit - 1)),
   );
 
-  for result in lexer {
+  for result in lexer.by_ref() {
     match result {
       Ok(_) => {}
       Err(mut errors) => {
@@ -199,5 +202,5 @@ fn test_token_limit() {
     }
   }
 
-  panic!("expected token limit exceeded error");
+  panic!("expected token limit exceeded error: {:?}", lexer.extras);
 }

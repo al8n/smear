@@ -2,6 +2,7 @@ use derive_more::IsVariant;
 use logosky::utils::human_display::DisplayHuman;
 
 mod str;
+mod u8_slice;
 
 /// A block string representation in GraphQL.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant)]

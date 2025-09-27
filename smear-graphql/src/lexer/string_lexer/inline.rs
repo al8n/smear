@@ -1,7 +1,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::human_display::DisplayHuman;
 
-mod str;
+pub(crate) mod str;
+pub(crate) mod u8_slice;
 
 /// An inline string representation in GraphQL.
 #[derive(

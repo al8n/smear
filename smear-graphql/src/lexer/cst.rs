@@ -214,7 +214,7 @@ pub enum CstToken<'a> {
   Comment(&'a str),
 
   /// Whitespace token
-  #[regex("[ \t,\r\n\u{FEFF}]+")]
+  #[regex("[ \t,\r\n\u{FEFF}]+", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
   Whitespaces(&'a str),
 
   /// Float literal token
