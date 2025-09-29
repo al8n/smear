@@ -1,4 +1,3 @@
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
@@ -14,58 +13,7 @@ use crate::{error::Error, lexer::ast::TokenKind};
 
 use super::super::*;
 
-pub use crate::lexer::{BlockString, InlineString};
-
-/// A GraphQL string literal, either inline or block.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum LitStr<S> {
-  /// An inline string literal.
-  Inline(InlineString<S>),
-  /// A block string literal.
-  Block(BlockString<S>),
-}
-
-impl<S: DisplayHuman> Display for LitStr<S> {
-  #[inline]
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Self::Inline(s) => write!(f, "{s}"),
-      Self::Block(s) => write!(f, "{s}"),
-    }
-  }
-}
-
-impl<S: DisplayHuman> DisplayHuman for LitStr<S> {
-  #[inline]
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    core::fmt::Display::fmt(self, f)
-  }
-}
-
-impl<S> LitStr<S> {
-  /// Returns the underlying source
-  #[inline(always)]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    match self {
-      Self::Inline(s) => s.source(),
-      Self::Block(s) => s.source(),
-    }
-  }
-
-  /// Returns the reference to the underlying source
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
-    match self {
-      Self::Inline(s) => s.source_ref(),
-      Self::Block(s) => s.source_ref(),
-    }
-  }
-}
+pub use crate::lexer::{LitBlockStr, LitInlineStr, LitStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StringValue<S> {
@@ -180,8 +128,8 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          AstToken::InlineString(raw) => StringValue::new(span, raw.into()),
-          AstToken::BlockString(raw) => StringValue::new(span, raw.into()),
+          AstToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
+          AstToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
           tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
         })
       }

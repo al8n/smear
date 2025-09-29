@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::lexer::{
-  InlineString,
+  LitInlineStr,
   tests::{self, TestToken},
 };
 
@@ -14,14 +14,14 @@ impl<'a> TestToken<'a> for AstToken<'a> {
   #[inline]
   fn inline_string_literal(&self) -> Option<&'a str> {
     match self {
-      Self::InlineString(s) => Some(s.as_str()),
+      Self::LitInlineStr(s) => Some(s.as_str()),
       _ => None,
     }
   }
 
   #[inline]
-  fn from_inline_string_literal(s: InlineString<&'a str>) -> Self {
-    Self::InlineString(s)
+  fn from_inline_string_literal(s: LitInlineStr<&'a str>) -> Self {
+    Self::LitInlineStr(s)
   }
 
   #[inline]
@@ -37,7 +37,7 @@ impl<'a> TestToken<'a> for AstToken<'a> {
   #[inline]
   fn block_string_literal(&self) -> Option<&'a str> {
     match self {
-      Self::BlockString(s) => Some(s.as_str()),
+      Self::LitBlockStr(s) => Some(s.as_str()),
       _ => None,
     }
   }

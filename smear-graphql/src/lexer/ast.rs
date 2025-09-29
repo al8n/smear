@@ -5,7 +5,7 @@ use logosky::{
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{BlockString, InlineString, handlers::*, string_lexer::SealedLexer};
+use super::{LitBlockStr, LitInlineStr, handlers::*, string_lexer::SealedLexer};
 
 use crate::error::{self, *};
 
@@ -137,12 +137,12 @@ pub enum AstToken<'a> {
   #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   Int(&'a str),
-  #[token("\"", |lexer| InlineString::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer)))]
-  InlineString(InlineString<&'a str>),
+  #[token("\"", |lexer| LitInlineStr::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer)))]
+  LitInlineStr(LitInlineStr<&'a str>),
   #[token("\"\"\"", |lexer| {
-    <BlockString<&str> as Lexable<_, LexerError>>::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer))
+    <LitBlockStr<&str> as Lexable<_, LexerError>>::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer))
   })]
-  BlockString(BlockString<&'a str>),
+  LitBlockStr(LitBlockStr<&'a str>),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -153,7 +153,7 @@ pub enum TokenKind {
   Boolean,
   Float,
   String,
-  BlockString,
+  LitBlockStr,
   Dollar,
   LParen,
   RParen,
@@ -188,8 +188,8 @@ impl<'a> AstToken<'a> {
       Self::Identifier(_) => TokenKind::Identifier,
       Self::Int(_) => TokenKind::Int,
       Self::Float(_) => TokenKind::Float,
-      Self::InlineString(_) => TokenKind::String,
-      Self::BlockString(_) => TokenKind::BlockString,
+      Self::LitInlineStr(_) => TokenKind::String,
+      Self::LitBlockStr(_) => TokenKind::LitBlockStr,
       Self::Dollar => TokenKind::Dollar,
       Self::LParen => TokenKind::LParen,
       Self::RParen => TokenKind::RParen,

@@ -248,10 +248,10 @@ pub enum CstToken<'a> {
     tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
   })]
   Int(&'a str),
-  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| InlineString::lex(lexer.into())) })]
-  InlineString(InlineString<&'a str>),
-  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| BlockString::lex(lexer.into())) })]
-  BlockString(BlockString<&'a str>),
+  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitInlineStr::lex(lexer.into())) })]
+  LitInlineStr(LitInlineStr<&'a str>),
+  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitBlockStr::lex(lexer.into())) })]
+  LitBlockStr(LitBlockStr<&'a str>),
 }
 
 impl<'a> logosky::Token<'a> for CstToken<'a> {
@@ -278,8 +278,8 @@ impl<'a> logosky::Token<'a> for CstToken<'a> {
       Self::Int(_) => TokenKind::Int,
       Self::Pipe => TokenKind::Pipe,
       Self::Spread => TokenKind::Spread,
-      Self::InlineString(_) => TokenKind::String,
-      Self::BlockString(_) => TokenKind::String,
+      Self::LitInlineStr(_) => TokenKind::String,
+      Self::LitBlockStr(_) => TokenKind::String,
       Self::Comment(_) => TokenKind::Comment,
       Self::Whitespaces(_) => TokenKind::Whitespaces,
     }

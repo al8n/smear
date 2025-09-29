@@ -8,7 +8,7 @@ use crate::{
     ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,
     UnpairedSurrogateHint, UnterminatedHint,
   },
-  lexer::InlineString,
+  lexer::{LitComplexInlineStr, LitInlineStr, LitPlainStr},
 };
 
 fn assert_token<'a, Token, StateError>(source: &'a str, kind: Token, length: usize)
@@ -37,7 +37,7 @@ pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy + core::fmt::Debug {
 
   fn inline_string_literal(&self) -> Option<&'a str>;
 
-  fn from_inline_string_literal(s: InlineString<&'a str>) -> Self;
+  fn from_inline_string_literal(s: LitInlineStr<&'a str>) -> Self;
 
   fn from_float_literal(s: &'a str) -> Self;
 
@@ -1348,14 +1348,14 @@ where
   let input: &[(&str, Token, usize)] = &[
     (
       r#""""#,
-      Token::from_inline_string_literal(InlineString::Clean(r#""""#)),
+      Token::from_inline_string_literal(LitPlainStr::new(r#""""#).into()),
       2,
     ),
     {
       const CASE: &str = r#""hello""#;
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
         CASE.len(),
       )
     },
@@ -1363,7 +1363,7 @@ where
       const CASE: &str = r#""hello world""#;
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
         CASE.len(),
       )
     },
@@ -1372,7 +1372,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::Clean(CASE)),
+        Token::from_inline_string_literal(LitPlainStr::new(CASE).into()),
         CASE.len(),
       )
     },
@@ -1381,7 +1381,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
         CASE.len(),
       )
     },
@@ -1390,7 +1390,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
         CASE.len(),
       )
     },
@@ -1399,7 +1399,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
         CASE.len(),
       )
     },
@@ -1408,7 +1408,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
         CASE.len(),
       )
     },
@@ -1417,7 +1417,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::SimpleEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
         CASE.len(),
       )
     },
@@ -1426,7 +1426,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(InlineString::MixedEscape(CASE)),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 4).into()),
         CASE.len(),
       )
     },
@@ -1560,7 +1560,10 @@ where
 
   let err = err.into_data().unwrap_string();
   assert_eq!(err.len(), 2, "Expected 2 errors, got {err:?}");
-  let err1 = err[0].unwrap_unicode_ref().unwrap_incomplete_ref();
+  let err1 = err[0]
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_incomplete_ref();
   assert_eq!(err1.span(), Span::from(1..6));
 
   let err2 = err[1].unwrap_unterminated_ref();
@@ -1576,7 +1579,10 @@ where
 
   let err = err.into_data().unwrap_string();
   assert_eq!(err.len(), 2, "Expected 2 errors, got {err:?}");
-  let err1 = err[0].unwrap_unicode_ref().unwrap_incomplete_ref();
+  let err1 = err[0]
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_incomplete_ref();
   assert_eq!(err1.span(), Span::from(1..3));
 
   let err2 = err[1].unwrap_unterminated_ref();
@@ -1697,12 +1703,18 @@ where
   let errs = errs.pop().unwrap().into_data().unwrap_string();
   assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
   let err1 = &errs[0];
-  let err = err1.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = err1
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
   assert_eq!(err.span(), Span::from(16..22));
 
   let err2 = &errs[1];
-  let err = err2.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = err2
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
   assert_eq!(err.span(), Span::from(22..28));
 
@@ -1712,12 +1724,18 @@ where
   let errs = errs.pop().unwrap().into_data().unwrap_string();
   assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
   let err1 = &errs[0];
-  let err = err1.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = err1
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
   assert_eq!(err.span(), Span::from(12..18));
 
   let err2 = &errs[1];
-  let err = err2.unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = err2
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
   assert_eq!(err.span(), Span::from(19..25));
 
@@ -1726,7 +1744,10 @@ where
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
   assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
-  let err = errs[0].unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = errs[0]
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
   assert_eq!(err.span(), Span::from(21..27));
 
@@ -1735,7 +1756,10 @@ where
   assert_eq!(errs.len(), 1);
   let errs = errs.pop().unwrap().into_data().unwrap_string();
   assert_eq!(errs.len(), 1, "Expected 1 error, got {errs:?}");
-  let err = errs[0].unwrap_unicode_ref().unwrap_unpaired_surrogate_ref();
+  let err = errs[0]
+    .unwrap_unicode_ref()
+    .unwrap_fixed_ref()
+    .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
   assert_eq!(err.span(), Span::from(22..28));
 }

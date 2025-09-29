@@ -1,35 +1,88 @@
-/*
-* The code in this file is modified based on
-* https://github.com/facebook/relay/blob/main/compiler/crates/graphql-syntax/src/lexer.rs
-*
-* Licensed under the MIT license:
-*
-* Copyright (c) Meta Platforms, Inc. and affiliates.
-*
-* Permission is hereby granted, free of charge, to any person obtaining a copy
-* of this software and associated documentation files (the "Software"), to deal
-* in the Software without restriction, including without limitation the rights
-* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-* copies of the Software, and to permit persons to whom the Software is
-* furnished to do so, subject to the following conditions:
-*
-* The above copyright notice and this permission notice shall be included in all
-* copies or substantial portions of the Software.
-*
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-* SOFTWARE.
-*/
-
-use derive_more::{Deref, DerefMut, From, Into};
-use logosky::logos;
+use derive_more::{Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
+use logosky::{logos, utils::human_display::DisplayHuman};
 
 pub use block::*;
 pub use inline::*;
+
+macro_rules! variant_type {
+  (
+    $(#[$meta:meta])*
+    $vis:vis struct $name:ident {
+      $(
+        $(#[$field_meta:meta])*
+        $field:ident: $ty:ty $(,)?
+      )*
+    }
+  ) => {
+    $(#[$meta])*
+    $vis struct $name<S> {
+      source: S,
+      $($field: $ty),*
+    }
+
+    impl<'a> TryFrom<$name<&'a [u8]>> for $name<&'a str> {
+      type Error = core::str::Utf8Error;
+
+      #[inline]
+      fn try_from(value: $name<&'a [u8]>) -> Result<Self, Self::Error> {
+        core::str::from_utf8(value.source())
+          .map(|s| {
+            Self::new(s, $(value.$field),*)
+          })
+      }
+    }
+
+    impl<S> $name<S> {
+      #[inline(always)]
+      pub(crate) const fn new(source: S, $($field: $ty),*) -> Self {
+        Self { source, $($field),* }
+      }
+
+      $(
+        $( #[$field_meta] )*
+        #[inline(always)]
+        pub const fn $field(&self) -> $ty {
+          self.$field
+        }
+      )*
+
+      /// Returns the source of the simple escape string.
+      #[inline(always)]
+      pub const fn source_ref(&self) -> &S {
+        &self.source
+      }
+
+      /// Returns the underlying source.
+      #[inline(always)]
+      pub const fn source(self) -> S where S: Copy {
+        self.source
+      }
+    }
+
+    impl<S: logosky::utils::human_display::DisplayHuman> core::fmt::Display for $name<S> {
+      #[inline]
+      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        logosky::utils::human_display::DisplayHuman::fmt(&self.source, f)
+      }
+    }
+
+    impl<'a> $name<&'a str> {
+      /// Returns the str representation.
+      #[inline(always)]
+      pub const fn as_str(&self) -> &'a str {
+        self.source
+      }
+    }
+
+    impl<'a> $name<&'a [u8]> {
+      /// Returns the byte slice representation.
+      #[inline(always)]
+      pub const fn as_bytes(&self) -> &'a [u8] {
+        self.source
+      }
+    }
+  }
+}
 
 macro_rules! impl_common_traits {
   ($name:ident::<&$lt:lifetime $ty:ty>::$fn:ident) => {
@@ -93,8 +146,66 @@ macro_rules! impl_common_traits {
   };
 }
 
+variant_type!(
+  /// A plain string without any escapes.
+  #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+  #[repr(transparent)]
+  pub struct LitPlainStr {}
+);
+
 mod block;
 mod inline;
+
+/// A GraphQL string literal, either inline or block.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum LitStr<S> {
+  /// An inline string literal.
+  Inline(LitInlineStr<S>),
+  /// A block string literal.
+  Block(LitBlockStr<S>),
+}
+
+impl<S: DisplayHuman> core::fmt::Display for LitStr<S> {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Inline(s) => write!(f, "{s}"),
+      Self::Block(s) => write!(f, "{s}"),
+    }
+  }
+}
+
+impl<S: DisplayHuman> DisplayHuman for LitStr<S> {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    core::fmt::Display::fmt(self, f)
+  }
+}
+
+impl<S> LitStr<S> {
+  /// Returns the underlying source
+  #[inline(always)]
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    match self {
+      Self::Inline(s) => s.source(),
+      Self::Block(s) => s.source(),
+    }
+  }
+
+  /// Returns the reference to the underlying source
+  #[inline(always)]
+  pub const fn source_ref(&self) -> &S {
+    match self {
+      Self::Inline(s) => s.source_ref(),
+      Self::Block(s) => s.source_ref(),
+    }
+  }
+}
 
 #[derive(From, Into, Deref, DerefMut)]
 pub(super) struct SealedLexer<'a, 'l, T: logos::Logos<'l>>(&'a mut logos::Lexer<'l, T>);

@@ -43,8 +43,8 @@ macro_rules! atom_parser {
       Lexed::Token(Spanned { span, data: AstToken::Float(val) }) => {
         Self::Float(FloatValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: AstToken::InlineString(raw) }) => Self::String(StringValue::new(span, raw.into())),
-      Lexed::Token(Spanned { span, data: AstToken::BlockString(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: AstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
     }
   }};
 }

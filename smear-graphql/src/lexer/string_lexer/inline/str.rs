@@ -5,21 +5,29 @@ use logosky::{
 };
 
 use crate::error::{
-  InvalidUnicodeHexDigits, InvalidUnicodeSequence, LexerError, LineTerminatorHint, StringError,
-  StringErrors, UnicodeError,
+  InvalidUnicodeHexDigits, LexerError, LineTerminatorHint, StringError, StringErrors, UnicodeError,
 };
 
-use super::{super::SealedLexer, InlineString};
+use super::{super::SealedLexer, LitComplexInlineStr, LitInlineStr, LitPlainStr};
 
 #[derive(Logos, Debug)]
-#[logos(crate = logosky::logos, error(StringError))]
+#[logos(crate = logosky::logos, extras = usize, error(StringError))]
 enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
 
-  #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_unicode_escape)]
+  #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_fixed_width_escape_unicode)]
   #[regex(r#"\\u"#, handle_invalid_escaped_unicode)]
+  #[regex(r#"\\u\{[0-9A-Fa-f]{1,6}\}"#, handle_braced_escape_unicode)]
+  #[regex(r#"\\u\{\}"#, empty_braced_unicode_escape)]
+  #[regex(
+    r#"\\u\{[0-9A-Fa-f]{7,}\}"#,
+    too_many_hex_digits_in_braced_unicode_escape
+  )]
+  #[regex(r#"\\u\{[0-9A-Fa-f]{1,6}"#, unclosed_brace_in_braced_unicode_escape)]
+  #[regex(r#"\\u\{[^0-9A-Fa-f}]"#, unclosed_brace_in_braced_unicode_escape)]
+  #[regex(r#"\\u\{"#, handle_semi_braced_escape_unicode)]
   EscapedUnicode,
 
   #[token("\"")]
@@ -65,10 +73,9 @@ fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
 }
 
 #[inline(always)]
-fn handle_unicode_escape<'a, T>(lexer: &mut Lexer<'a, T>) -> Result<(), StringError<char>>
-where
-  T: Logos<'a, Source = str>,
-{
+fn handle_fixed_width_escape_unicode<'a>(
+  lexer: &mut Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
   let hex_part = &slice[2..];
   let code_point = u32::from_str_radix(hex_part, 16).unwrap(); // Safe due to regex
@@ -81,6 +88,7 @@ where
     {
       // Valid surrogate pair
       lexer.bump(6); // consume the low surrogate
+      lexer.extras += 4; // surrogate pair is 4 bytes
       return Ok(());
     }
 
@@ -93,6 +101,8 @@ where
     return Err(UnicodeError::unpaired_low_surrogate(Lexeme::Span(lexer.span().into())).into());
   }
 
+  // Single BMP scalar
+  lexer.extras += super::utf8_len_for_scalar(code_point);
   Ok(())
 }
 
@@ -116,7 +126,10 @@ fn handle_invalid_escaped_unicode<'a>(
     let span = lexer.span();
     lexer.bump(idx);
     return Err(
-      UnicodeError::Incomplete(Lexeme::Span(Span::from(span.start..span.end + idx))).into(),
+      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(Span::from(
+        span.start..span.end + idx,
+      )))
+      .into(),
     );
   }
 
@@ -129,22 +142,22 @@ fn handle_invalid_escaped_unicode<'a>(
       let mut invalid_digits = InvalidUnicodeHexDigits::default();
 
       if !a.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*a, span.end));
+        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
       }
 
       if !b.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*b, span.end + 1));
+        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
       }
 
       if !c.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*c, span.end + 2));
+        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
       }
 
       if !d.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*d, span.end + 3));
+        invalid_digits.push_fixed(PositionedChar::with_position(*d, span.end + 3));
       }
 
-      InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
+      UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
     }
     [a, b, c] => {
       let span = lexer.span();
@@ -152,21 +165,21 @@ fn handle_invalid_escaped_unicode<'a>(
 
       let mut invalid_digits = InvalidUnicodeHexDigits::default();
       if !a.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*a, span.end));
+        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
       }
 
       if !b.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*b, span.end + 1));
+        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
       }
 
       if !c.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*c, span.end + 2));
+        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
       }
 
       if invalid_digits.is_empty() {
-        UnicodeError::Incomplete(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
       } else {
-        InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
+        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
       }
     }
     [a, b] => {
@@ -175,17 +188,17 @@ fn handle_invalid_escaped_unicode<'a>(
 
       let mut invalid_digits = InvalidUnicodeHexDigits::default();
       if !a.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*a, span.end));
+        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
       }
 
       if !b.is_ascii_hexdigit() {
-        invalid_digits.push(PositionedChar::with_position(*b, span.end + 1));
+        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
       }
 
       if invalid_digits.is_empty() {
-        UnicodeError::Incomplete(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
       } else {
-        InvalidUnicodeSequence::new(invalid_digits, lexer.span().into()).into()
+        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
       }
     }
     [a] => {
@@ -193,18 +206,89 @@ fn handle_invalid_escaped_unicode<'a>(
       lexer.bump(1);
 
       if a.is_ascii_hexdigit() {
-        UnicodeError::Incomplete(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
       } else {
-        InvalidUnicodeSequence::new(
+        UnicodeError::invalid_fixed_unicode_escape_sequence(
           PositionedChar::with_position(*a, span.end).into(),
           lexer.span().into(),
         )
-        .into()
       }
     }
-    [] => UnicodeError::Incomplete(Lexeme::Span(lexer.span().into())),
+    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into())),
     _ => unreachable!("impossible array length"),
   }))
+}
+
+#[inline(always)]
+fn handle_braced_escape_unicode<'a>(
+  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
+  // Slice looks like r#"\u{...}"#, guaranteed by the regex.
+  let s = lexer.slice();
+
+  // Hex part between the braces. ASCII-only indexing is safe here.
+  let hex = &s[3..s.len() - 1];
+
+  // Regex already ensures 1..=6 hex digits, so this can't fail.
+  let cp = u32::from_str_radix(hex, 16).expect("regex guarantees hex");
+
+  // Reject non-scalar values.
+  match () {
+    () if cp > 0x10_FFFF => {
+      Err(UnicodeError::overflow_braced_unicode_escape(lexer.span().into(), cp).into())
+    }
+    () if (0xD800..=0xDFFF).contains(&cp) => {
+      Err(UnicodeError::surrogate_braced_unicode_escape(lexer.span().into(), cp).into())
+    }
+    () => {
+      lexer.extras += super::utf8_len_for_scalar(cp);
+      Ok(())
+    }
+  }
+}
+
+#[inline(always)]
+fn handle_semi_braced_escape_unicode<'a>(
+  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
+  let remainder = lexer.remainder();
+
+  Err(match remainder.find(['}']) {
+    None => UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()).into(),
+    Some(pos) => {
+      lexer.bump(pos + 1);
+      UnicodeError::invalid_braced_unicode_escape_sequence(lexer.span().into()).into()
+    }
+  })
+}
+
+#[inline(always)]
+fn empty_braced_unicode_escape<'a>(
+  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
+  Err(StringError::Unicode(
+    UnicodeError::empty_braced_unicode_escape(lexer.span().into()),
+  ))
+}
+
+#[inline(always)]
+fn too_many_hex_digits_in_braced_unicode_escape<'a>(
+  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
+  let slice = lexer.slice();
+  let counts = slice.len() - 4; // subtract \u{}
+  Err(StringError::Unicode(
+    UnicodeError::too_many_digits_in_braced_unicode_escape(lexer.span().into(), counts),
+  ))
+}
+
+#[inline(always)]
+fn unclosed_brace_in_braced_unicode_escape<'a>(
+  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+) -> Result<(), StringError<char>> {
+  Err(StringError::Unicode(
+    UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),
+  ))
 }
 
 #[inline(always)]
@@ -228,7 +312,7 @@ fn handle_invalid_escaped_character<'a>(
 }
 
 impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
-  for InlineString<S::Slice<'a>>
+  for LitInlineStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
   S: Source + ?Sized + 'a,
@@ -245,8 +329,8 @@ where
 
     let mut errs = StringErrors::default();
 
-    let mut has_unicode = false;
-    let mut has_escape = false;
+    let mut num_escapes = 0;
+    let mut num_unicodes = 0;
 
     while let Some(string_token) = string_lexer.next() {
       match string_token {
@@ -257,11 +341,10 @@ where
           }
 
           let src = lexer.slice();
-          return Ok(match (has_escape, has_unicode) {
-            (false, false) => Self::Clean(src),
-            (true, false) => Self::SimpleEscape(src),
-            (false, true) => Self::UnicodeEscape(src),
-            (true, true) => Self::MixedEscape(src),
+          return Ok(match (num_escapes != 0, num_unicodes != 0) {
+            (false, false) => LitPlainStr::new(src).into(),
+            // +2 for the surrounding quotes
+            _ => LitComplexInlineStr::new(src, string_lexer.extras + 2).into(),
           });
         }
         Ok(StringToken::LineTerminator(lt)) => {
@@ -277,12 +360,17 @@ where
           };
           errs.push(err);
         }
-        Ok(StringToken::StringCharacters) => {}
+        Ok(StringToken::StringCharacters) => {
+          // Plain content normalizes byte-for-byte
+          string_lexer.extras += string_lexer.slice().len();
+        }
         Ok(StringToken::EscapedUnicode) => {
-          has_unicode = true;
+          num_unicodes += 1;
         }
         Ok(StringToken::EscapedCharacter) => {
-          has_escape = true;
+          num_escapes += 1;
+          // \" \\ \/ \b \f \n \r \t  → each becomes exactly 1 UTF-8 byte
+          string_lexer.extras += 1;
         }
         Err(mut e) => {
           e.bump(lexer_span.end);

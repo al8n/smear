@@ -104,7 +104,9 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
   }
 }
 
-/// A container designed for storing between 1 and 4 invalid unicode hex digits.
+/// A container designed for storing between `1..=4` invalid unicode hex digits.
+///
+/// - For fixed-width unicode escapes (\uXXXX), we allow up to 4 digits.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct InvalidUnicodeHexDigits<Char = char>(InvalidUnicodeHexDigitsRepr<Char>);
 
@@ -168,7 +170,7 @@ impl<Char> InvalidUnicodeHexDigits<Char> {
   /// # Panics
   /// - If the length is already 4.
   #[inline(always)]
-  pub(crate) fn push(&mut self, ch: PositionedChar<Char>) {
+  pub(crate) fn push_fixed(&mut self, ch: PositionedChar<Char>) {
     self.0.push(ch);
   }
 }
@@ -225,7 +227,7 @@ pub struct InvalidUnicodeSequence<Char = char> {
 impl<Char> InvalidUnicodeSequence<Char> {
   /// Create a new invalid unicode sequence error.
   #[inline(always)]
-  pub(crate) const fn new(digits: InvalidUnicodeHexDigits<Char>, span: Span) -> Self {
+  pub(crate) const fn fixed(digits: InvalidUnicodeHexDigits<Char>, span: Span) -> Self {
     Self { digits, span }
   }
 
@@ -283,18 +285,162 @@ impl<Char> InvalidUnicodeSequence<Char> {
   }
 }
 
-/// An error encountered during lexing for unicode sequences.
+/// Why a parsed value is *not* a valid Unicode scalar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InvalidUnicodeScalarKind {
+  /// In the UTF-16 surrogate range: 0xD800..=0xDFFF.
+  Surrogate,
+  /// Above the Unicode max scalar value: > 0x10_FFFF.
+  Overflow,
+}
+
+/// An invalid unicode scalar value error.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct InvalidUnicodeScalarValue {
+  value: u32,
+  span: Span,
+  kind: InvalidUnicodeScalarKind,
+}
+
+impl InvalidUnicodeScalarValue {
+  /// Create a new invalid unicode scalar value error.
+  #[inline(always)]
+  pub(crate) const fn new(value: u32, span: Span, kind: InvalidUnicodeScalarKind) -> Self {
+    Self { value, span, kind }
+  }
+
+  /// Get the invalid unicode scalar codepoint.
+  #[inline(always)]
+  pub const fn codepoint(&self) -> u32 {
+    self.value
+  }
+
+  /// Get the span of the invalid unicode scalar value.
+  #[inline(always)]
+  pub const fn span(&self) -> Span {
+    self.span
+  }
+
+  /// Get the span of the invalid unicode scalar value as a reference.
+  #[inline(always)]
+  pub const fn span_ref(&self) -> &Span {
+    &self.span
+  }
+
+  /// Get the mutable span of the invalid unicode scalar value.
+  #[inline(always)]
+  pub const fn span_mut(&mut self) -> &mut Span {
+    &mut self.span
+  }
+
+  /// Bumps the span of the invalid unicode scalar value by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump_span(n);
+    self
+  }
+
+  /// Returns the kind of invalid unicode scalar value.
+  #[inline(always)]
+  pub const fn kind(&self) -> InvalidUnicodeScalarKind {
+    self.kind
+  }
+}
+
+/// An error encountered during lexing for `\u{...}` (braced) unicode sequences.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum BracedUnicodeEscapeError {
+  /// The opening brace was not closed: `\u{1234`.
+  Unclosed(Span),
+
+  /// The braces contained **no** digits: `\u{}`.
+  Empty(Span),
+
+  /// More than 6 hex digits inside the braces.
+  TooManyDigits { span: Span, count: usize },
+
+  /// An invalid sequence of unicode in the braces.
+  InvalidSequence(Span),
+
+  /// Parsed number is not a Unicode scalar value (surrogate or > 0x10_FFFF).
+  InvalidScalar(InvalidUnicodeScalarValue),
+}
+
+impl BracedUnicodeEscapeError {
+  /// Creates an empty braced unicode escape error.
+  #[inline]
+  pub const fn empty(span: Span) -> Self {
+    Self::Empty(span)
+  }
+
+  /// Creates a too many digits in braced unicode escape error.
+  #[inline]
+  pub const fn too_many_digits(span: Span, count: usize) -> Self {
+    Self::TooManyDigits { span, count }
+  }
+
+  /// Creates an unclosed brace in braced unicode escape error.
+  #[inline]
+  pub const fn unclosed(span: Span) -> Self {
+    Self::Unclosed(span)
+  }
+
+  /// Creates an overflow error.
+  #[inline]
+  pub const fn overflow(span: Span, codepoint: u32) -> Self {
+    Self::InvalidScalar(InvalidUnicodeScalarValue::new(
+      codepoint,
+      span,
+      InvalidUnicodeScalarKind::Overflow,
+    ))
+  }
+
+  /// Creates an surrogate error.
+  #[inline]
+  pub const fn surrogate(span: Span, codepoint: u32) -> Self {
+    Self::InvalidScalar(InvalidUnicodeScalarValue::new(
+      codepoint,
+      span,
+      InvalidUnicodeScalarKind::Surrogate,
+    ))
+  }
+
+  /// Bumps the span of the error by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    match self {
+      Self::Unclosed(span) => {
+        span.bump_span(n);
+      }
+      Self::Empty(span) => {
+        span.bump_span(n);
+      }
+      Self::TooManyDigits { span, .. } => {
+        span.bump_span(n);
+      }
+      Self::InvalidSequence(span) => {
+        span.bump_span(n);
+      }
+      Self::InvalidScalar(err) => {
+        err.bump(n);
+      }
+    }
+    self
+  }
+}
+
+/// An error encountered during lexing for `\uXXXX` (fixed-width) unicode sequences.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum UnicodeError<Char = char> {
+pub enum FixedUnicodeEscapeError<Char = char> {
   #[from(skip)]
   Incomplete(Lexeme<Char>),
   InvalidSequence(InvalidUnicodeSequence<Char>),
   UnpairedSurrogate(UnexpectedLexeme<Char, UnpairedSurrogateHint>),
 }
 
-impl<Char> UnicodeError<Char> {
+impl<Char> FixedUnicodeEscapeError<Char> {
   /// Creates a unpaired high surrogate error.
   #[inline]
   pub const fn unpaired_high_surrogate(lexeme: Lexeme<Char>) -> Self {
@@ -319,6 +465,98 @@ impl<Char> UnicodeError<Char> {
       }
       Self::UnpairedSurrogate(lexeme) => {
         lexeme.bump(n);
+      }
+    }
+    self
+  }
+}
+
+/// An error encountered during lexing for unicode sequences.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum UnicodeError<Char = char> {
+  /// An error in a fixed-width unicode escape sequence (`\uXXXX`).
+  Fixed(FixedUnicodeEscapeError<Char>),
+  /// An error in a braced unicode escape sequence (`\u{...}`).
+  Braced(BracedUnicodeEscapeError),
+}
+
+impl<Char> UnicodeError<Char> {
+  /// Creates a unpaired high surrogate error.
+  #[inline]
+  pub const fn unpaired_high_surrogate(lexeme: Lexeme<Char>) -> Self {
+    Self::Fixed(FixedUnicodeEscapeError::unpaired_high_surrogate(lexeme))
+  }
+
+  /// Creates a unpaired low surrogate error.
+  #[inline]
+  pub const fn unpaired_low_surrogate(lexeme: Lexeme<Char>) -> Self {
+    Self::Fixed(FixedUnicodeEscapeError::unpaired_low_surrogate(lexeme))
+  }
+
+  /// Creates an incomplete fixed-width unicode escape error.
+  #[inline]
+  pub const fn incomplete_fixed_unicode_escape(lexeme: Lexeme<Char>) -> Self {
+    Self::Fixed(FixedUnicodeEscapeError::Incomplete(lexeme))
+  }
+
+  /// Creates an invalid fixed-width unicode escape sequence error.
+  #[inline]
+  pub const fn invalid_fixed_unicode_escape_sequence(
+    digits: InvalidUnicodeHexDigits<Char>,
+    span: Span,
+  ) -> Self {
+    Self::Fixed(FixedUnicodeEscapeError::InvalidSequence(
+      InvalidUnicodeSequence::fixed(digits, span),
+    ))
+  }
+
+  /// Creates an empty braced unicode escape error.
+  #[inline]
+  pub const fn empty_braced_unicode_escape(span: Span) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::Empty(span))
+  }
+
+  /// Creates a too many digits in braced unicode escape error.
+  #[inline]
+  pub const fn too_many_digits_in_braced_unicode_escape(span: Span, count: usize) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::TooManyDigits { span, count })
+  }
+
+  /// Creates an unclosed brace in braced unicode escape error.
+  #[inline]
+  pub const fn unclosed_braced_unicode_escape(span: Span) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::unclosed(span))
+  }
+
+  /// Creates an surrogate in braced unicode escape error.
+  #[inline]
+  pub const fn surrogate_braced_unicode_escape(span: Span, codepoint: u32) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::surrogate(span, codepoint))
+  }
+
+  /// Creates an overflow in braced unicode escape error.
+  #[inline]
+  pub const fn overflow_braced_unicode_escape(span: Span, codepoint: u32) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::overflow(span, codepoint))
+  }
+
+  /// Creates an invalid braced unicode escape sequence error.
+  #[inline]
+  pub const fn invalid_braced_unicode_escape_sequence(span: Span) -> Self {
+    Self::Braced(BracedUnicodeEscapeError::InvalidSequence(span))
+  }
+
+  /// Bumps the span or position of the error by `n`.
+  #[inline]
+  pub const fn bump(&mut self, n: usize) -> &mut Self {
+    match self {
+      Self::Fixed(err) => {
+        err.bump(n);
+      }
+      Self::Braced(err) => {
+        err.bump(n);
       }
     }
     self

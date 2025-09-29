@@ -5,11 +5,11 @@ use logosky::{
 
 use crate::error::{LexerError, StringError, StringErrors};
 
-use super::{super::SealedLexer, BlockString};
+use super::{super::SealedLexer, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[logos(crate = logosky::logos, source = [u8], error(StringError<u8>))]
-enum BlockStringToken {
+enum LitBlockStrToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
   EscapedTripleQuote,
@@ -29,7 +29,7 @@ enum BlockStringToken {
 }
 
 impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<u8, StateError>>
-  for BlockString<S::Slice<'a>>
+  for LitBlockStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
   S: Source + ?Sized + 'a,
@@ -43,21 +43,21 @@ where
     let remainder = lexer.remainder();
     let remainder_bytes = remainder.as_ref();
     let lexer_span = lexer.span();
-    let mut string_lexer = BlockStringToken::lexer(remainder_bytes);
+    let mut string_lexer = LitBlockStrToken::lexer(remainder_bytes);
     let mut errs = StringErrors::default();
 
-    let mut has_escaped_triple_quote = false;
+    let mut num_escaped_triple_quotes = 0;
     while let Some(string_token) = string_lexer.next() {
       match string_token {
         Err(mut e) => {
           e.bump(lexer_span.end);
           errs.push(e);
         }
-        Ok(BlockStringToken::EscapedTripleQuote) => {
-          has_escaped_triple_quote = true;
+        Ok(LitBlockStrToken::EscapedTripleQuote) => {
+          num_escaped_triple_quotes += 1;
         }
-        Ok(BlockStringToken::Continue | BlockStringToken::Backslash | BlockStringToken::Quote) => {}
-        Ok(BlockStringToken::TripleQuote) => {
+        Ok(LitBlockStrToken::Continue | LitBlockStrToken::Backslash | LitBlockStrToken::Quote) => {}
+        Ok(LitBlockStrToken::TripleQuote) => {
           // Outer lexer consumes up to (and including) the closing """
           lexer.bump(string_lexer.span().end);
 
@@ -82,25 +82,27 @@ where
           let trailing_blank_lines = lines.extras.trailing_blank_lines;
           let common_indent = lines.extras.common_indent.unwrap_or(0);
 
-          let is_clean = !has_escaped_triple_quote
+          let is_clean = num_escaped_triple_quotes == 0
             && !has_cr_terminators
             && leading_blank_lines == 0
             && trailing_blank_lines == 0
             && common_indent == 0;
 
           if is_clean {
-            return Ok(BlockString::Clean(lexer.slice()));
+            return Ok(LitPlainStr::new(lexer.slice()).into());
           }
 
-          return Ok(BlockString::Mixed {
-            source: lexer.slice(),
-            has_escaped_triple_quote,
-            has_cr_terminators: lines.extras.has_cr_terminators,
-            leading_blank_lines: lines.extras.leading_blank_lines,
-            trailing_blank_lines: lines.extras.trailing_blank_lines,
-            common_indent: lines.extras.common_indent.unwrap_or(0),
+          let bs = LitComplexBlockStr::new(
+            lexer.slice(),
+            num_escaped_triple_quotes,
+            has_cr_terminators,
+            leading_blank_lines,
+            trailing_blank_lines,
+            common_indent,
             total_lines,
-          });
+          );
+
+          return Ok(bs.into());
         }
       }
     }

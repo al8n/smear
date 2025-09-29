@@ -24,7 +24,7 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
           Token::StringLiteral(raw) => {
             StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
           }
-          Token::BlockStringLiteral(raw) => {
+          Token::LitBlockStrLiteral(raw) => {
             StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
           }
           tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),

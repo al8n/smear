@@ -2,13 +2,13 @@ type Query {
   "This is \"\"a test \a\d\q description"
   invalidPlainEscape: String
   "\u008"
-  incompleteUnicodeEscape: String
+  incompleteLitUnicodeEscapeInlineStr: String
   "\uF"
-  incompleteUnicodeEscape2: String
+  incompleteLitUnicodeEscapeInlineStr2: String
   "\uzzzz"
-  invalidUnicodeEscape: String
+  invalidLitUnicodeEscapeInlineStr: String
   "\u123k"
-  invalidUnicodeEscape2: String
+  invalidLitUnicodeEscapeInlineStr2: String
   "\'"
   invalidEscapeChar: String
 }
