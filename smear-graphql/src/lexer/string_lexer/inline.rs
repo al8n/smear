@@ -1,11 +1,16 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::human_display::DisplayHuman;
+use logosky::utils::{human_display::DisplayHuman, sdl_display::DisplaySDL};
 
 use super::LitPlainStr;
 use std::borrow::Cow;
 
-pub(crate) mod str;
-pub(crate) mod u8_slice;
+pub(crate) use self::{
+  str::{StringToken, lex_inline_str_from_str},
+  u8_slice::{StringToken as BytesStringToken, lex_inline_str_from_bytes},
+};
+
+mod str;
+mod u8_slice;
 
 variant_type!(
   /// A complex inline string representation in GraphQL containing one or more escapes.
@@ -16,6 +21,16 @@ variant_type!(
     required_capacity: usize,
   }
 );
+
+impl<S> DisplaySDL for LitComplexInlineStr<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.source_ref().fmt(f)
+  }
+}
 
 /// An inline string representation in GraphQL.
 #[derive(
@@ -85,9 +100,9 @@ impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
     match value {
       LitInlineStr::Plain(s) => Cow::Borrowed(s.as_str()),
       LitInlineStr::Complex(s) => {
-        // escapes format is '\' + one char, so len - num_escapes should be enough
         let mut builder = String::with_capacity(s.required_capacity());
-        normalize_str_to_string(s.as_str(), &mut builder);
+        let raw = s.as_str();
+        normalize_str_to_string(&raw[1..raw.len() - 1], &mut builder);
         Cow::Owned(builder)
       }
     }

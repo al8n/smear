@@ -248,9 +248,9 @@ pub enum CstToken<'a> {
     tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
   })]
   Int(&'a str),
-  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitInlineStr::lex(lexer.into())) })]
+  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitInlineStr::lex(SealedWrapper::from_mut(lexer))) })]
   LitInlineStr(LitInlineStr<&'a str>),
-  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitBlockStr::lex(lexer.into())) })]
+  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitBlockStr::lex(SealedWrapper::from_mut(lexer))) })]
   LitBlockStr(LitBlockStr<&'a str>),
 }
 

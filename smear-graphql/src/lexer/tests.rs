@@ -6,7 +6,7 @@ use logosky::{
 use crate::{
   error::{
     ExponentHint, FloatError, FloatHint, IntError, LexerErrorData, LexerErrors, LineTerminatorHint,
-    UnpairedSurrogateHint, UnterminatedHint,
+    LitStrDelimiterHint, UnpairedSurrogateHint,
   },
   lexer::{LitComplexInlineStr, LitInlineStr, LitPlainStr},
 };
@@ -1381,7 +1381,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 3).into()),
         CASE.len(),
       )
     },
@@ -1390,7 +1390,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 3).into()),
         CASE.len(),
       )
     },
@@ -1399,7 +1399,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 3).into()),
         CASE.len(),
       )
     },
@@ -1408,7 +1408,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 3).into()),
         CASE.len(),
       )
     },
@@ -1417,7 +1417,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 1).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 3).into()),
         CASE.len(),
       )
     },
@@ -1426,7 +1426,7 @@ where
 
       (
         CASE,
-        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 4).into()),
+        Token::from_inline_string_literal(LitComplexInlineStr::new(CASE, CASE.len() - 6).into()),
         CASE.len(),
       )
     },
@@ -1454,7 +1454,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
   assert_eq!(lexer.span(), 0..1);
 
   let mut lexer = Token::test_lexer(r#""unterminated"#);
@@ -1470,7 +1470,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
   assert_eq!(lexer.span(), 0..13);
 
   let mut lexer = Token::test_lexer(r#""escaped \" quote"#);
@@ -1484,7 +1484,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
 
   let mut lexer = Token::test_lexer(
     r#""escaped 
@@ -1525,7 +1525,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
 
   let mut lexer = Token::test_lexer(r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1542,7 +1542,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
 }
 
 pub(super) fn test_incomplete_unicode_and_eof<'a, Token, StateError>()
@@ -1567,7 +1567,7 @@ where
   assert_eq!(err1.span(), Span::from(1..6));
 
   let err2 = err[1].unwrap_unterminated_ref();
-  assert_eq!(err2.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err2.hint(), &LitStrDelimiterHint::Quote);
   assert_eq!(lexer.span(), 0..6);
 
   let mut lexer = Token::test_lexer(r#""\u"#);
@@ -1586,7 +1586,7 @@ where
   assert_eq!(err1.span(), Span::from(1..3));
 
   let err2 = err[1].unwrap_unterminated_ref();
-  assert_eq!(err2.hint(), &UnterminatedHint::Quote);
+  assert_eq!(err2.hint(), &LitStrDelimiterHint::Quote);
   assert_eq!(lexer.span(), 0..3);
 }
 
@@ -1780,7 +1780,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::TripleQuote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::TripleQuote);
   assert_eq!(lexer.span(), 0..3);
 
   let mut lexer = Token::test_lexer(r#""""\"#);
@@ -1794,7 +1794,7 @@ where
     .pop()
     .unwrap()
     .unwrap_unterminated();
-  assert_eq!(err1.hint(), &UnterminatedHint::TripleQuote);
+  assert_eq!(err1.hint(), &LitStrDelimiterHint::TripleQuote);
   assert_eq!(lexer.span(), 0..4);
 }
 

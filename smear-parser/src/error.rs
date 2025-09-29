@@ -78,13 +78,17 @@ pub enum UnpairedSurrogateHint {
 
 /// An unterminated string hint.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-pub enum UnterminatedHint {
+pub enum LitStrDelimiterHint {
   /// A double quote character.
   #[display("\"")]
   Quote,
   /// A triple quote sequence.
   #[display(r#"""""#)]
   TripleQuote,
+
+  /// A double quote character or a triple quote sequence.
+  #[display(r#"" or """"#)]
+  QuoteOrTripleQuote,
 }
 
 /// A hint about what line terminator was found.

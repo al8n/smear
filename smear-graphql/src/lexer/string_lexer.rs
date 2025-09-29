@@ -1,8 +1,13 @@
-use derive_more::{Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::{logos, utils::human_display::DisplayHuman};
+use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
+use logosky::{
+  logos::Lexer,
+  utils::{human_display::DisplayHuman, sdl_display::DisplaySDL},
+};
 
-pub use block::*;
-pub use inline::*;
+pub use block::{LitBlockStr, LitComplexBlockStr};
+pub use inline::{LitComplexInlineStr, LitInlineStr};
+
+use crate::error::{StringError, StringErrors};
 
 macro_rules! variant_type {
   (
@@ -34,6 +39,7 @@ macro_rules! variant_type {
 
     impl<S> $name<S> {
       #[inline(always)]
+      #[allow(clippy::too_many_arguments)]
       pub(crate) const fn new(source: S, $($field: $ty),*) -> Self {
         Self { source, $($field),* }
       }
@@ -153,8 +159,15 @@ variant_type!(
   pub struct LitPlainStr {}
 );
 
-mod block;
-mod inline;
+impl<S> DisplaySDL for LitPlainStr<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.source_ref().fmt(f)
+  }
+}
 
 /// A GraphQL string literal, either inline or block.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
@@ -207,5 +220,55 @@ impl<S> LitStr<S> {
   }
 }
 
-#[derive(From, Into, Deref, DerefMut)]
-pub(super) struct SealedLexer<'a, 'l, T: logos::Logos<'l>>(&'a mut logos::Lexer<'l, T>);
+#[derive(Deref, DerefMut)]
+#[repr(transparent)]
+pub(super) struct SealedWrapper<L: ?Sized>(L);
+
+impl<T> SealedWrapper<T> {
+  #[inline(always)]
+  pub const fn from_mut(t: &mut T) -> &mut Self {
+    // Safety: This is safe because SealedWrapper is repr(transparent) over T
+    unsafe { &mut *(t as *mut T as *mut Self) }
+  }
+}
+
+mod block;
+mod inline;
+
+impl<'de: 'a, 'a> TryFrom<&'de str> for super::LitStr<&'a str> {
+  type Error = StringErrors<char>;
+
+  #[inline]
+  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
+    if value.starts_with("\"\"\"") {
+      let mut lexer = Lexer::<block::BlockStringToken>::new(value);
+      lexer.bump(3);
+      block::lex_block_str_from_str(SealedWrapper::from_mut(&mut lexer)).map(Self::Block)
+    } else if value.starts_with('"') {
+      let mut lexer = Lexer::<inline::StringToken>::new(value);
+      lexer.bump(1);
+      inline::lex_inline_str_from_str(SealedWrapper::from_mut(&mut lexer)).map(Self::Inline)
+    } else {
+      Err(StringError::unopened_string(value.chars().next(), 0).into())
+    }
+  }
+}
+
+impl<'de: 'a, 'a> TryFrom<&'de [u8]> for super::LitStr<&'a [u8]> {
+  type Error = StringErrors<u8>;
+
+  #[inline]
+  fn try_from(value: &'de [u8]) -> Result<Self, Self::Error> {
+    if value.starts_with(b"\"\"\"") {
+      let mut lexer = Lexer::<block::BytesBlockStringToken>::new(value);
+      lexer.bump(3);
+      block::lex_block_str_from_bytes(SealedWrapper::from_mut(&mut lexer)).map(Self::Block)
+    } else if value.starts_with(b"\"") {
+      let mut lexer = Lexer::<inline::BytesStringToken>::new(value);
+      lexer.bump(1);
+      inline::lex_inline_str_from_bytes(SealedWrapper::from_mut(&mut lexer)).map(Self::Inline)
+    } else {
+      Err(StringError::unopened_string(value.first().copied(), 0).into())
+    }
+  }
+}

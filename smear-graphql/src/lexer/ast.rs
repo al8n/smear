@@ -5,7 +5,7 @@ use logosky::{
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{LitBlockStr, LitInlineStr, handlers::*, string_lexer::SealedLexer};
+use super::{LitBlockStr, LitInlineStr, handlers::*, string_lexer::SealedWrapper};
 
 use crate::error::{self, *};
 
@@ -137,10 +137,10 @@ pub enum AstToken<'a> {
   #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
   #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
   Int(&'a str),
-  #[token("\"", |lexer| LitInlineStr::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer)))]
+  #[token("\"", |lexer| LitInlineStr::lex(SealedWrapper::<logosky::logos::Lexer<'_, AstToken<'_>>>::from_mut(lexer)))]
   LitInlineStr(LitInlineStr<&'a str>),
   #[token("\"\"\"", |lexer| {
-    <LitBlockStr<&str> as Lexable<_, LexerError>>::lex(SealedLexer::<'_, '_, AstToken<'_>>::from(lexer))
+    <LitBlockStr<&str> as Lexable<_, LexerError>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, AstToken<'_>>>::from_mut(lexer))
   })]
   LitBlockStr(LitBlockStr<&'a str>),
 }
@@ -221,3 +221,24 @@ impl<'a> From<&AstToken<'a>> for TokenKind {
     token.kind()
   }
 }
+
+// impl<'de: 'a, 'a> TryFrom<&'de core::primitive::str> for super::LitStr<&'a core::primitive::str> {
+//   type Error = StringErrors<char>;
+
+//   #[inline]
+//   fn try_from(value: &'de core::primitive::str) -> Result<Self, Self::Error> {
+//     if value.starts_with("\"\"\"") {
+//       let mut lexer = Lexer::<super::string_lexer::block::str::BlockStringToken>::new(value);
+//       lexer.bump(3);
+//       super::string_lexer::block::str::lex(&mut SealedWrapper::from(&mut lexer))
+//         .map(Self::Block)
+//     } else if value.starts_with('"') {
+//       let mut lexer = Lexer::<super::string_lexer::inline::str::StringToken>::new(value);
+//       lexer.bump(1);
+//       super::string_lexer::inline::str::lex(&mut SealedWrapper::from(&mut lexer))
+//         .map(Self::Inline)
+//     } else {
+//       Err(StringError::unopened_string(value.chars().next(), 0).into())
+//     }
+//   }
+// }

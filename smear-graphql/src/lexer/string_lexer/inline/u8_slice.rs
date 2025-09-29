@@ -8,11 +8,11 @@ use crate::error::{
   InvalidUnicodeHexDigits, LexerError, LineTerminatorHint, StringError, StringErrors, UnicodeError,
 };
 
-use super::{super::SealedLexer, LitComplexInlineStr, LitInlineStr, LitPlainStr};
+use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainStr};
 
 #[derive(Logos, Debug)]
 #[logos(crate = logosky::logos, source = [u8], extras = usize, error(StringError<u8>))]
-enum StringToken {
+pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
@@ -319,7 +319,7 @@ fn handle_braced_escape_unicode<'a>(
   }
 }
 
-impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<u8, StateError>>
+impl<'a, S, T, StateError> Lexable<SealedWrapper<Lexer<'a, T>>, LexerError<u8, StateError>>
   for LitInlineStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
@@ -327,69 +327,78 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   #[inline]
-  fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<u8, StateError>>
+  fn lex(mut lexer: SealedWrapper<Lexer<'a, T>>) -> Result<Self, LexerError<u8, StateError>>
   where
     Self: Sized,
   {
-    let base_span = lexer.span();
-    let remainder = lexer.remainder();
-    let mut string_lexer = StringToken::lexer(remainder.as_ref());
+    lex_inline_str_from_bytes(&mut lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
+  }
+}
 
-    let mut errs = StringErrors::default();
-    let mut num_unicodes = 0;
-    let mut num_escapes = 0;
+#[inline]
+pub(crate) fn lex_inline_str_from_bytes<'a, S, T>(
+  lexer: &mut SealedWrapper<Lexer<'a, T>>,
+) -> Result<LitInlineStr<S::Slice<'a>>, StringErrors<u8>>
+where
+  T: Logos<'a, Source = S>,
+  S: Source + ?Sized + 'a,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  let base_span = lexer.span();
+  let remainder = lexer.remainder();
+  let mut string_lexer = StringToken::lexer(remainder.as_ref());
 
-    while let Some(tok) = string_lexer.next() {
-      match tok {
-        Ok(StringToken::Quote) => {
-          // Consume closing quote in the outer lexer by the inner span end
-          lexer.bump(string_lexer.span().end);
-          if !errs.is_empty() {
-            return Err(LexerError::new(lexer.span(), errs.into()));
+  let mut errs = StringErrors::default();
+  let mut num_unicodes = 0;
+  let mut num_escapes = 0;
+
+  while let Some(tok) = string_lexer.next() {
+    match tok {
+      Ok(StringToken::Quote) => {
+        // Consume closing quote in the outer lexer by the inner span end
+        lexer.bump(string_lexer.span().end);
+        if !errs.is_empty() {
+          return Err(errs);
+        }
+        let src = lexer.slice();
+        return Ok(match (num_escapes != 0, num_unicodes != 0) {
+          (false, false) => LitPlainStr::new(src).into(),
+          _ => LitComplexInlineStr::new(src, string_lexer.extras).into(),
+        });
+      }
+      Ok(StringToken::LineTerminator(lt)) => {
+        let pos = base_span.end + string_lexer.span().start;
+        let err = match lt {
+          LineTerminatorHint::NewLine => StringError::unexpected_new_line(b'\n', pos),
+          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return(b'\r', pos),
+          LineTerminatorHint::CarriageReturnNewLine => {
+            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
           }
-          let src = lexer.slice();
-          return Ok(match (num_escapes != 0, num_unicodes != 0) {
-            (false, false) => LitPlainStr::new(src).into(),
-            // +2 for the surrounding quotes
-            _ => LitComplexInlineStr::new(src, string_lexer.extras + 2).into(),
-          });
-        }
-        Ok(StringToken::LineTerminator(lt)) => {
-          let pos = base_span.end + string_lexer.span().start;
-          let err = match lt {
-            LineTerminatorHint::NewLine => StringError::unexpected_new_line(b'\n', pos),
-            LineTerminatorHint::CarriageReturn => {
-              StringError::unexpected_carriage_return(b'\r', pos)
-            }
-            LineTerminatorHint::CarriageReturnNewLine => {
-              StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
-            }
-          };
-          errs.push(err);
-        }
-        Ok(StringToken::StringCharacters) => {
-          // Plain content normalizes byte-for-byte
-          string_lexer.extras += string_lexer.slice().len();
-        }
-        Ok(StringToken::EscapedUnicode) => {
-          num_unicodes += 1;
-        }
-        Ok(StringToken::EscapedCharacter) => {
-          num_escapes += 1;
-          // \" \\ \/ \b \f \n \r \t  → each becomes exactly 1 UTF-8 byte
-          string_lexer.extras += 1;
-        }
-        Err(mut e) => {
-          // Make inner-byte-lexer relative errors absolute for the outer source
-          e.bump(base_span.end);
-          errs.push(e);
-        }
+        };
+        errs.push(err);
+      }
+      Ok(StringToken::StringCharacters) => {
+        // Plain content normalizes byte-for-byte
+        string_lexer.extras += string_lexer.slice().len();
+      }
+      Ok(StringToken::EscapedUnicode) => {
+        num_unicodes += 1;
+      }
+      Ok(StringToken::EscapedCharacter) => {
+        num_escapes += 1;
+        // \" \\ \/ \b \f \n \r \t  → each becomes exactly 1 UTF-8 byte
+        string_lexer.extras += 1;
+      }
+      Err(mut e) => {
+        // Make inner-byte-lexer relative errors absolute for the outer source
+        e.bump(base_span.end);
+        errs.push(e);
       }
     }
-
-    // No closing quote
-    lexer.bump(string_lexer.span().end);
-    errs.push(StringError::unterminated_inline_string());
-    Err(LexerError::new(lexer.span(), errs.into()))
   }
+
+  // No closing quote
+  lexer.bump(string_lexer.span().end);
+  errs.push(StringError::unterminated_inline_string());
+  Err(errs)
 }

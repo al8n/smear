@@ -5,11 +5,11 @@ use logosky::{
 
 use crate::error::{LexerError, StringError, StringErrors};
 
-use super::{super::SealedLexer, LitBlockStr, LitComplexBlockStr, LitPlainStr};
+use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[logos(crate = logosky::logos, error(StringError<char>))]
-enum LitBlockStrToken {
+pub(crate) enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
   EscapedTripleQuote,
@@ -28,153 +28,152 @@ enum LitBlockStrToken {
   Quote,
 }
 
-impl<'a, S, T, StateError> Lexable<SealedLexer<'_, 'a, T>, LexerError<char, StateError>>
-  for LitBlockStr<S::Slice<'a>>
+impl<'l, S, T, StateError> Lexable<&mut SealedWrapper<Lexer<'l, T>>, LexerError<char, StateError>>
+  for LitBlockStr<S::Slice<'l>>
 where
-  T: Logos<'a, Source = S>,
-  S: Source + ?Sized + 'a,
-  S::Slice<'a>: AsRef<str>,
+  T: Logos<'l, Source = S>,
+  S: Source + ?Sized + 'l,
+  S::Slice<'l>: AsRef<str>,
 {
   #[inline]
-  fn lex(mut lexer: SealedLexer<'_, 'a, T>) -> Result<Self, LexerError<char, StateError>>
+  fn lex(lexer: &mut SealedWrapper<Lexer<'l, T>>) -> Result<Self, LexerError<char, StateError>>
   where
     Self: Sized,
   {
-    let remainder = lexer.remainder();
-    let remainder_str = remainder.as_ref();
-    let lexer_span = lexer.span();
-    let mut string_lexer = LitBlockStrToken::lexer(remainder_str);
-    let mut errs = StringErrors::default();
-
-    let mut num_escaped_triple_quotes = 0;
-    while let Some(string_token) = string_lexer.next() {
-      match string_token {
-        Err(mut e) => {
-          e.bump(lexer_span.end);
-          errs.push(e);
-        }
-        Ok(LitBlockStrToken::EscapedTripleQuote) => {
-          num_escaped_triple_quotes += 1;
-        }
-        Ok(LitBlockStrToken::Continue | LitBlockStrToken::Backslash | LitBlockStrToken::Quote) => {}
-        Ok(LitBlockStrToken::TripleQuote) => {
-          // Outer lexer consumes up to (and including) the closing """
-          lexer.bump(string_lexer.span().end);
-
-          // inner content (between opening and closing)
-          let content = &remainder_str[..string_lexer.span().start];
-
-          // sub-lex the inner content to compute normalization knobs (no allocations)
-          let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-          while lines.next().is_some() {
-            // callbacks already updated `lines.extras`
-          }
-
-          let total_lines = lines.extras.terminators + 1;
-
-          // special case: all-blank block → trailing = leading (keeps invariants)
-          if !lines.extras.saw_nonblank_any && !content.is_empty() {
-            lines.extras.trailing_blank_lines = lines.extras.leading_blank_lines;
-          }
-
-          let has_cr_terminators = lines.extras.has_cr_terminators;
-          let leading_blank_lines = lines.extras.leading_blank_lines;
-          let trailing_blank_lines = lines.extras.trailing_blank_lines;
-          let common_indent = lines.extras.common_indent.unwrap_or(0);
-
-          let is_clean = num_escaped_triple_quotes == 0
-            && !has_cr_terminators
-            && leading_blank_lines == 0
-            && trailing_blank_lines == 0
-            && common_indent == 0;
-
-          if is_clean {
-            return Ok(LitPlainStr::new(lexer.slice()).into());
-          }
-
-          let bs = LitComplexBlockStr::new(
-            lexer.slice(),
-            num_escaped_triple_quotes,
-            has_cr_terminators,
-            leading_blank_lines,
-            trailing_blank_lines,
-            common_indent,
-            total_lines,
-          );
-
-          return Ok(bs.into());
-        }
-      }
-    }
-
-    lexer.bump(string_lexer.span().end);
-    errs.push(StringError::unterminated_block_string());
-    Err(LexerError::new(lexer.span(), errs.into()))
+    lex_block_str_from_str(lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
   }
 }
 
-// ---- extras that accumulate line-level facts during the sub-lex ----
-#[derive(Default, Debug, Clone, Copy)]
-struct BlockLineExtras {
-  has_cr_terminators: bool,
-  leading_blank_lines: usize,
-  trailing_blank_lines: usize,
-  common_indent: Option<usize>, // min indent across non-blank lines after the first
-  saw_nonblank_any: bool,
-  saw_body_this_line: bool, // whether we saw a LineBody since last Terminator
-  terminators: usize,       // count of seen line terminators
+#[inline]
+pub(crate) fn lex_block_str_from_str<'l, S, T>(
+  lexer: &mut SealedWrapper<Lexer<'l, T>>,
+) -> Result<LitBlockStr<S::Slice<'l>>, StringErrors<char>>
+where
+  T: Logos<'l, Source = S>,
+  S: Source + ?Sized + 'l,
+  S::Slice<'l>: AsRef<str>,
+{
+  let remainder = lexer.remainder();
+  let remainder_str = remainder.as_ref();
+  let outer_span = lexer.span();
+
+  let mut string_lexer = BlockStringToken::lexer(remainder_str);
+  let mut errs = StringErrors::default();
+
+  let mut escaped_triple_count = 0usize;
+
+  while let Some(tok) = string_lexer.next() {
+    match tok {
+      Err(mut e) => {
+        e.bump(outer_span.end);
+        errs.push(e);
+      }
+      Ok(BlockStringToken::EscapedTripleQuote) => {
+        escaped_triple_count += 1;
+      }
+      Ok(BlockStringToken::Continue | BlockStringToken::Backslash | BlockStringToken::Quote) => {}
+      Ok(BlockStringToken::TripleQuote) => {
+        // Consume up to (and including) the closing """
+        let end_off = string_lexer.span().end;
+        lexer.bump(end_off);
+
+        // Inner content (between opening and closing)
+        let content = &remainder_str[..string_lexer.span().start];
+
+        // Sub-lex inner content to gather normalization facts + capacity
+        let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+        while lines.next().is_some() {
+          // callbacks update lines.extras
+        }
+
+        // Build the normalization plan + exact capacity
+        let plan = super::compute_block_normalization_plan(
+          &lines.extras,
+          !content.is_empty(),
+          escaped_triple_count,
+        );
+
+        if plan.is_clean {
+          return Ok(LitPlainStr::new(lexer.slice()).into());
+        }
+
+        return Ok(
+          LitComplexBlockStr::new(
+            lexer.slice(),
+            escaped_triple_count,
+            lines.extras.has_cr_terminators,
+            lines.extras.leading_blank_lines,
+            plan.effective_trailing,
+            plan.common_indent,
+            plan.total_lines,
+            plan.required_capacity,
+          )
+          .into(),
+        );
+      }
+    }
+  }
+
+  // EOF without closing """
+  lexer.bump(string_lexer.span().end);
+  errs.push(StringError::unterminated_block_string());
+  Err(errs)
 }
 
-#[inline(always)]
-fn is_blank_line(s: &str) -> bool {
-  s.bytes().all(|b| b == b' ' || b == b'\t')
-}
-
-#[inline(always)]
-fn leading_ws_indent(s: &str) -> usize {
-  s.bytes().take_while(|&c| c == b' ' || c == b'\t').count()
-}
-
-// ---- sub-lexer over inner block-string content ----
 #[derive(Logos, Debug)]
 #[logos(crate = logosky::logos, extras = BlockLineExtras)]
 enum BlockLineTok {
-  /// Body of a line (one or more chars, never includes a terminator).
-  /// We process the whole line in the callback.
+  /// Body of a line (never includes a terminator).
   #[regex(r#"[^\r\n]+"#, on_line_body)]
   LineBody,
-
   /// One line terminator: \r\n | \r | \n
   #[regex(r#"\r\n|\r|\n"#, on_terminator)]
   Terminator,
 }
 
-// callbacks mutate `extras` to record state
 #[inline]
 fn on_line_body(lex: &mut Lexer<'_, BlockLineTok>) {
   let line = lex.slice();
-  let blank = is_blank_line(line);
+  let len = line.len(); // UTF-8 bytes
+  let blank = super::is_blank_line(line.as_bytes());
   let line_idx = lex.extras.terminators; // 0 for first logical line
 
   if !lex.extras.saw_nonblank_any {
     if blank {
       lex.extras.leading_blank_lines += 1;
+      lex.extras.pending_blank_body_bytes += len;
     } else {
       lex.extras.saw_nonblank_any = true;
+
       if line_idx > 0 {
-        let ind = leading_ws_indent(line);
+        let ind = super::leading_ws_indent(line.as_bytes());
         lex.extras.common_indent = Some(lex.extras.common_indent.map_or(ind, |m| m.min(ind)));
+        lex.extras.nonblank_after_first_count += 1;
       }
+      lex.extras.nonblank_body_bytes += len;
+
+      // discard pending leading blanks
+      lex.extras.pending_blank_body_bytes = 0;
       lex.extras.trailing_blank_lines = 0;
     }
   } else if blank {
+    // may end up middle or trailing
+    lex.extras.pending_blank_body_bytes += len;
     lex.extras.trailing_blank_lines += 1;
   } else {
-    lex.extras.trailing_blank_lines = 0;
+    // nonblank after some content
     if line_idx > 0 {
-      let ind = leading_ws_indent(line);
+      let ind = super::leading_ws_indent(line.as_bytes());
       lex.extras.common_indent = Some(lex.extras.common_indent.map_or(ind, |m| m.min(ind)));
+      lex.extras.nonblank_after_first_count += 1;
     }
+    lex.extras.nonblank_body_bytes += len;
+
+    // pending blanks are now 'middle' (kept)
+    lex.extras.middle_blank_body_bytes += lex.extras.pending_blank_body_bytes;
+    lex.extras.pending_blank_body_bytes = 0;
+
+    lex.extras.trailing_blank_lines = 0;
   }
 
   lex.extras.saw_body_this_line = true;
@@ -187,12 +186,14 @@ fn on_terminator(lex: &mut Lexer<'_, BlockLineTok>) {
     lex.extras.has_cr_terminators = true;
   }
 
-  // empty line (no LineBody since last terminator) is blank
+  // Empty physical line (no LineBody since last terminator) is a blank line
   if !lex.extras.saw_body_this_line {
     if !lex.extras.saw_nonblank_any {
       lex.extras.leading_blank_lines += 1;
+      // (body bytes = 0)
     } else {
       lex.extras.trailing_blank_lines += 1;
+      // (body bytes = 0; pending already accounts for it if any)
     }
   }
 

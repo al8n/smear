@@ -4,7 +4,7 @@ use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwra
 use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
 pub use smear_parser::error::{
-  ExponentHint, FloatHint, IntHint, LineTerminatorHint, UnpairedSurrogateHint, UnterminatedHint,
+  ExponentHint, FloatHint, IntHint, LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint,
 };
 
 /// An error encountered during lexing for float literals.
@@ -643,8 +643,10 @@ pub enum StringError<Char = char> {
   UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
   /// An unexpected escaped character in a string literal.
   UnexpectedEscapedCharacter(EscapedCharacter<Char>),
+  /// A unopened string literal. e.g. a string literal that starts with a non-quote character.
+  Unopened(UnexpectedLexeme<Option<Char>, LitStrDelimiterHint>),
   /// An unterminated string literal.
-  Unterminated(UnexpectedEnd<UnterminatedHint>),
+  Unterminated(UnexpectedEnd<LitStrDelimiterHint>),
   /// A unicode error in a string literal.
   Unicode(UnicodeError<Char>),
   /// Any other error in a string literal.
@@ -664,7 +666,7 @@ impl<Char> StringError<Char> {
   pub const fn unterminated_inline_string() -> Self {
     Self::Unterminated(UnexpectedEnd::with_name(
       Cow::Borrowed("string value"),
-      UnterminatedHint::Quote,
+      LitStrDelimiterHint::Quote,
     ))
   }
 
@@ -673,7 +675,16 @@ impl<Char> StringError<Char> {
   pub const fn unterminated_block_string() -> Self {
     Self::Unterminated(UnexpectedEnd::with_name(
       Cow::Borrowed("string value"),
-      UnterminatedHint::TripleQuote,
+      LitStrDelimiterHint::TripleQuote,
+    ))
+  }
+
+  /// Creates an expected open delimiter error.
+  #[inline]
+  pub const fn unopened_string(ch: Option<Char>, position: usize) -> Self {
+    Self::Unopened(UnexpectedLexeme::from_char(
+      PositionedChar::with_position(ch, position),
+      LitStrDelimiterHint::QuoteOrTripleQuote,
     ))
   }
 
@@ -717,6 +728,9 @@ impl<Char> StringError<Char> {
   #[inline]
   pub fn bump(&mut self, n: usize) -> &mut Self {
     match self {
+      Self::Unopened(lexeme) => {
+        lexeme.bump(n);
+      }
       Self::UnexpectedLineTerminator(lexeme) => {
         lexeme.bump(n);
       }
