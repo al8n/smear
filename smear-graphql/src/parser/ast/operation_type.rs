@@ -1,37 +1,42 @@
 use logosky::{
-  Lexed, Parseable,
+  Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::*},
-  utils::Span,
+  utils::{Span, cmp::Equivalent},
 };
 use smear_parser::{
   definitions::ast::OperationType,
   lang::keywords::{Mutation, Query, Subscription},
 };
 
-use crate::error::Error;
+use crate::{error::Error, lexer::ast::AstLexerErrors};
 
 use super::*;
 
-impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
+impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
   for OperationType
+where
+  AstToken<S>: Token<'a>,
+  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, StrAstToken<'_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, AstToken<S>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          StrAstToken::Identifier(name) => Ok(match name {
-            "query" => Self::Query(Query::new(span)),
-            "mutation" => Self::Mutation(Mutation::new(span)),
-            "subscription" => Self::Subscription(Subscription::new(span)),
-            val => return Err(Error::unknown_operation_type(val, span).into()),
+          AstToken::Identifier(name) => Ok(match () {
+            () if "query".equivalent(&name) => Self::Query(Query::new(span)),
+            () if "mutation".equivalent(&name) => Self::Mutation(Mutation::new(span)),
+            () if "subscription".equivalent(&name) => Self::Subscription(Subscription::new(span)),
+            _ => return Err(Error::unknown_operation_type(name, span).into()),
           }),
-          tok => Err(Error::unexpected_token(tok, StrAstTokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

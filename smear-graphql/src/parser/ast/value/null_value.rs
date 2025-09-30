@@ -1,12 +1,16 @@
 use logosky::{
-  Lexed, Parseable,
+  Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman,
+    sdl_display::DisplaySDL,
   },
 };
 
-use crate::{error::Error, lexer::ast::TokenKind};
+use crate::{
+  error::Error,
+  lexer::ast::{AstLexerErrors, TokenKind},
+};
 
 use super::super::*;
 
@@ -102,22 +106,27 @@ where
   }
 }
 
-impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
-  for NullValue<&'a str>
+impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+  for NullValue<S>
+where
+  AstToken<S>: Token<'a>,
+  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, StrAstToken<'_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, AstToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          StrAstToken::Identifier(name) => match name {
-            "null" => Ok(NullValue::new(span, name)),
-            val => Err(Error::invalid_null_value(val, span).into()),
+          AstToken::Identifier(name) => match () {
+            () if "null".equivalent(&name) => Ok(NullValue::new(span, name)),
+            _ => Err(Error::invalid_null_value(name, span).into()),
           },
           tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
         }

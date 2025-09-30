@@ -1,4 +1,3 @@
-
 macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty)) => {
     mod $mod {

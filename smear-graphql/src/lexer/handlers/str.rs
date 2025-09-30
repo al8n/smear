@@ -23,7 +23,8 @@ where
   match lexer.slice().as_ref().chars().next() {
     Some(ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
     None => LexerError::unexpected_eoi(lexer.span().into()),
-  }.into()
+  }
+  .into()
 }
 
 #[inline(always)]
@@ -127,7 +128,7 @@ where
 #[inline]
 pub(in crate::lexer) fn handle_float_missing_integer_part_error_and_suffix<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<&'a str, LexerErrors<Extras>>
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,

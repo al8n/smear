@@ -1,4 +1,8 @@
-use logosky::{Logos, logos::Lexer, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}};
+use logosky::{
+  Logos,
+  logos::Lexer,
+  utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+};
 
 use crate::error;
 
@@ -40,4 +44,3 @@ where
 {
   lexer.extras.decrease();
 }
-

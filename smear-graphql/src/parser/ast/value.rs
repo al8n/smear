@@ -1,10 +1,12 @@
-use super::{DefaultVec, Name, StrAstToken, StrAstTokenErrors, StrAstTokenStream};
+use crate::lexer::ast::AstLexerErrors;
+
+use super::{AstToken, AstTokenErrors, AstTokenStream, DefaultVec, Name};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra, prelude::*, select},
   logos::Logos,
-  utils::{AsSpan, IntoSpan, Span, Spanned},
+  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 
 use smear_parser::lang;
@@ -29,22 +31,22 @@ mod variable;
 macro_rules! atom_parser {
   () => {{
     select! {
-      Lexed::Token(Spanned { span, data: StrAstToken::Identifier(name) }) => {
-        match name {
-          "true" => Self::Boolean(BooleanValue::new(span, true)),
-          "false" => Self::Boolean(BooleanValue::new(span, false)),
-          "null" => Self::Null(NullValue::new(span, name)),
-          val => Self::Enum(EnumValue::new(span, val)),
+      Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
+        match () {
+          () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+          () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+          () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+          _ => Self::Enum(EnumValue::new(span, name)),
         }
       },
-      Lexed::Token(Spanned { span, data: StrAstToken::Int(val) }) => {
+      Lexed::Token(Spanned { span, data: AstToken::Int(val) }) => {
         Self::Int(IntValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: StrAstToken::Float(val) }) => {
+      Lexed::Token(Spanned { span, data: AstToken::Float(val) }) => {
         Self::Float(FloatValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: StrAstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-      Lexed::Token(Spanned { span, data: StrAstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: AstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
     }
   }};
 }
@@ -117,14 +119,25 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
-impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
-  for InputValue<&'a str>
+impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+  for InputValue<S>
+where
+  AstToken<S>: Token<'a>,
+  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    AstTokenStream<'a, S>: Tokenizer<
+        'a,
+        AstToken<S>,
+        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+      >,
+    AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
       let object_value_parser =
@@ -133,7 +146,7 @@ impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors
       choice((
         atom_parser!(),
         select! {
-          Lexed::Token(Spanned { span, data: StrAstToken::Dollar }) => span,
+          Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
         }
         .then(Name::parser::<E>())
         .map(|(span, name)| Variable::new(span.with_end(name.span().end()), name))
@@ -200,21 +213,25 @@ impl<S> IntoSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
-  for ConstInputValue<&'a str>
+impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+  for ConstInputValue<S>
+where
+  AstToken<S>: Token<'a>,
+  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
-    StrAstTokenStream<'a>: Tokenizer<
+    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    AstTokenStream<'a, S>: Tokenizer<
         'a,
-        StrAstToken<'a>,
-        Slice = <<<StrAstToken<'a> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        AstToken<S>,
+        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
       >,
-    StrAstToken<'a>: Token<'a>,
-    StrAstTokenErrors<'a, &'a str>: 'a,
+    AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
       let object_value_parser =

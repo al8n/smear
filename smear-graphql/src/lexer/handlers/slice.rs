@@ -1,5 +1,7 @@
 use logosky::{
-  Source, logos::{Lexer, Logos}, utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme}
+  Source,
+  logos::{Lexer, Logos},
+  utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
 };
 use smear_parser::error::{ExponentHint, FloatHint};
 
@@ -21,7 +23,8 @@ where
   match lexer.slice().as_ref().iter().next() {
     Some(&ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
     None => LexerError::unexpected_eoi(lexer.span().into()),
-  }.into()
+  }
+  .into()
 }
 
 #[inline(always)]
@@ -160,7 +163,9 @@ where
   let mut iter = remainder_slice.iter().copied();
 
   let err = match iter.next() {
-    Some(0xEF) if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF => {
+    Some(0xEF)
+      if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF =>
+    {
       // BOM
       UnexpectedEnd::with_name("float".into(), FloatHint::Fractional).into()
     }
@@ -269,7 +274,9 @@ where
   };
 
   let err = match iter.next() {
-    Some(0xEF) if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF => {
+    Some(0xEF)
+      if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF =>
+    {
       // BOM
       UnexpectedEnd::with_name("float".into(), hint()).into()
     }
