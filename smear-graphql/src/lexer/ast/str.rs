@@ -46,6 +46,27 @@ impl<'a> logosky::Token<'a> for AstToken<&'a str> {
   }
 }
 
+#[cfg(feature = "hipstr")]
+const _: () = {
+  use hipstr::HipStr;
+
+  impl<'a> logosky::Token<'a> for AstToken<HipStr<'a>> {
+    type Kind = TokenKind;
+    type Char = char;
+    type Logos = Token<'a>;
+
+    #[inline(always)]
+    fn from_logos(value: Self::Logos) -> Self {
+      AstToken::<HipStr>::from(value)
+    }
+
+    #[inline(always)]
+    fn kind(&self) -> Self::Kind {
+      self.kind()
+    }
+  }
+};
+
 impl<'a, T> From<Token<'a>> for AstToken<T>
 where
   &'a str: IntoEquivalent<T>,

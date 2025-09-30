@@ -86,6 +86,27 @@ const _: () = {
   }
 };
 
+#[cfg(feature = "hipstr")]
+const _: () = {
+  use hipstr::HipByt;
+
+  impl<'a> logosky::Token<'a> for AstToken<HipByt<'a>> {
+    type Kind = TokenKind;
+    type Char = u8;
+    type Logos = Token<'a>;
+
+    #[inline(always)]
+    fn from_logos(value: Self::Logos) -> Self {
+      AstToken::<HipByt>::from(value)
+    }
+
+    #[inline(always)]
+    fn kind(&self) -> Self::Kind {
+      self.kind()
+    }
+  }
+};
+
 impl<'a, T> From<Token<'a>> for AstToken<T>
 where
   &'a [u8]: IntoEquivalent<T>,
