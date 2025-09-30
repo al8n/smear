@@ -7,6 +7,8 @@ use crate::lexer::{
   tests::{self, TestToken},
 };
 
+type StrAstToken<'a> = AstToken<&'a str>;
+
 impl<'a> TestToken<'a> for AstToken<&'a str> {
   #[inline]
   fn is_ignored(&self) -> bool {

@@ -8,7 +8,9 @@ use super::{LitBlockStr, LitInlineStr};
 
 use crate::error;
 
-pub use self::{slice::*, str::*};
+use token::token;
+
+mod token;
 
 #[cfg(test)]
 mod tests;
@@ -16,6 +18,8 @@ mod tests;
 mod slice;
 mod str;
 
+/// The char type used for the AST token.
+pub type AstTokenChar<'a, S> = <AstToken<S> as Token<'a>>::Char;
 /// The error data type for lexing based on AST [`Token`].
 pub type AstLexerErrorData<'a, S> =
   error::LexerErrorData<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
@@ -129,27 +133,4 @@ pub enum TokenKind {
   Pipe,
   Bang,
   Ampersand,
-}
-
-#[inline(always)]
-pub(super) fn increase_recursion_depth<'a, C, T>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
-where
-  T: Logos<'a, Extras = RecursionLimiter>,
-{
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
-}
-
-#[inline(always)]
-pub(super) fn decrease_recursion_depth<'a, T>(lexer: &mut Lexer<'a, T>)
-where
-  T: Logos<'a, Extras = RecursionLimiter>,
-{
-  lexer.extras.decrease();
 }
