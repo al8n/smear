@@ -107,6 +107,30 @@ impl<S> LitBlockStr<S> {
       Self::Complex(c) => c.source_ref(),
     }
   }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn to_equivalent<T>(&self) -> LitBlockStr<T>
+  where
+    S: logosky::utils::ToEquivalent<T>,
+  {
+    match self {
+      Self::Plain(s) => LitBlockStr::Plain(s.to_equivalent()),
+      Self::Complex(c) => LitBlockStr::Complex(c.to_equivalent()),
+    }
+  }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn into_equivalent<T>(self) -> LitBlockStr<T>
+  where
+    S: logosky::utils::IntoEquivalent<T>,
+  {
+    match self {
+      Self::Plain(s) => LitBlockStr::Plain(s.into_equivalent()),
+      Self::Complex(c) => LitBlockStr::Complex(c.into_equivalent()),
+    }
+  }
 }
 
 impl_common_traits!(LitBlockStr::<&'a str>::as_str);

@@ -130,6 +130,30 @@ impl<S> LitInlineStr<S> {
       Self::Complex(s) => s.source_ref(),
     }
   }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn to_equivalent<T>(&self) -> LitInlineStr<T>
+  where
+    S: logosky::utils::ToEquivalent<T>,
+  {
+    match self {
+      Self::Plain(s) => LitInlineStr::Plain(s.to_equivalent()),
+      Self::Complex(s) => LitInlineStr::Complex(s.to_equivalent()),
+    }
+  }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn into_equivalent<T>(self) -> LitInlineStr<T>
+  where
+    S: logosky::utils::IntoEquivalent<T>,
+  {
+    match self {
+      Self::Plain(s) => LitInlineStr::Plain(s.into_equivalent()),
+      Self::Complex(s) => LitInlineStr::Complex(s.into_equivalent()),
+    }
+  }
 }
 
 impl_common_traits!(LitInlineStr::<&'a str>::as_str);

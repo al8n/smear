@@ -1,186 +1,70 @@
-use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexable,
-  logos::{Lexer, Logos},
+  Logos, Token,
+  logos::Lexer,
   utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
 };
 
-use super::{LitBlockStr, LitInlineStr, handlers::*, string_lexer::SealedWrapper};
+use super::{LitBlockStr, LitInlineStr};
 
-use crate::error::{self, *};
+use crate::error;
+
+pub use self::{slice::*, str::*};
 
 #[cfg(test)]
 mod tests;
 
-/// The error data type for lexing based on fast [`Token`].
-pub type LexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
-/// The error type for lexing based on fast [`Token`].
-pub type LexerError = error::LexerError<char, RecursionLimitExceeded>;
-/// A collection of errors of fast [`Token`].
-pub type LexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
+mod slice;
+mod str;
 
-#[inline(always)]
-pub(super) fn increase_recursion_depth<'a>(
-  lexer: &mut Lexer<'a, AstToken<'a>>,
-) -> Result<(), LexerError> {
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e)))
-}
-
-#[inline(always)]
-pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, AstToken<'a>>) {
-  lexer.extras.decrease();
-}
-
-/// Abstract syntax tree (AST) token lexer for the GraphQL specification: http://spec.graphql.org/.
-///
-/// Used for the AST parser implementation.
-#[derive(
-  Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
-)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[logos(
-  crate = logosky::logos,
-  extras = RecursionLimiter,
-  skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
-  error(LexerErrors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }.into())
-)]
-pub enum AstToken<'a> {
-  /// Ampersand `&` token
-  #[token("&")]
-  Ampersand,
-
-  /// At `@` token
-  #[token("@")]
-  At,
-
-  /// Comma `,` token
-  #[token("}", decrease_recursion_depth)]
-  RBrace,
-
-  /// Bracket `]` token
-  #[token("]", decrease_recursion_depth)]
-  RBracket,
-
-  /// Parenthesis `)` token
-  #[token(")", decrease_recursion_depth)]
-  RParen,
-
-  /// Dot `.` token
-  #[token(":")]
-  Colon,
-
-  /// Dollar `$` token
-  #[token("$")]
-  Dollar,
-
-  /// Equal `=` token
-  #[token("=")]
-  Equal,
-
-  /// Exclamation mark `!` token
-  #[token("!")]
-  Bang,
-
-  /// Left curly brace `{` token
-  #[token("{", increase_recursion_depth)]
-  LBrace,
-
-  /// Left square bracket `[` token
-  #[token("[", increase_recursion_depth)]
-  LBracket,
-
-  /// Left parenthesis `(` token
-  #[token("(", increase_recursion_depth)]
-  LParen,
-
-  /// Pipe `|` token
-  #[token("|")]
-  Pipe,
-
-  /// Spread operator `...` token
-  #[token("...")]
-  #[token("..", unterminated_spread_operator)]
-  #[token(".", unterminated_spread_operator)]
-  Spread,
-
-  /// Float literal token
-  #[regex("-?0[0-9]+(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix))]
-  #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
-  #[regex(
-    "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    handle_float_missing_integer_part_error_and_suffix
-  )]
-  #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", handle_leading_zeros_and_exponent_error)]
-  #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", handle_exponent_error)]
-  #[regex("-?0[0-9]+\\.", handle_leading_zeros_and_fractional_error)]
-  #[regex("-?(0|[1-9][0-9]*)\\.", handle_fractional_error)]
-  #[regex("-?0[0-9]+[eE][+-]?", handle_leading_zeros_and_exponent_error)]
-  #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", handle_exponent_error)]
-  Float(&'a str),
-
-  /// Identifier token
-  #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
-  Identifier(&'a str),
-
-  /// Integer literal token
-  #[regex("-?(0|[1-9][0-9]*)", |lexer| handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-  #[regex("-?0[0-9]+", |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))]
-  #[token("-", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))]
-  #[token("+", |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))]
-  Int(&'a str),
-  #[token("\"", |lexer| LitInlineStr::lex(SealedWrapper::<logosky::logos::Lexer<'_, AstToken<'_>>>::from_mut(lexer)))]
-  LitInlineStr(LitInlineStr<&'a str>),
-  #[token("\"\"\"", |lexer| {
-    <LitBlockStr<&str> as Lexable<_, LexerError>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, AstToken<'_>>>::from_mut(lexer))
-  })]
-  LitBlockStr(LitBlockStr<&'a str>),
-}
+/// The error data type for lexing based on AST [`Token`].
+pub type AstLexerErrorData<'a, S> =
+  error::LexerErrorData<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// The error type for lexing based on AST [`Token`].
+pub type AstLexerError<'a, S> =
+  error::LexerError<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// A collection of errors of AST [`Token`].
+pub type AstLexerErrors<'a, S> =
+  error::LexerErrors<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[repr(u16)]
-pub enum TokenKind {
-  Identifier,
-  Int,
-  Boolean,
-  Float,
-  String,
-  LitBlockStr,
-  Dollar,
-  LParen,
-  RParen,
-  Spread,
-  Colon,
-  Equal,
-  At,
-  LBracket,
-  RBracket,
-  LBrace,
-  RBrace,
-  Pipe,
-  Bang,
+pub enum AstToken<S> {
+  /// Ampersand `&` token
   Ampersand,
+  /// At `@` token
+  At,
+  /// Right curly brace `}` token
+  RBrace,
+  /// Right square bracket `]` token
+  RBracket,
+  /// Right parenthesis `)` token
+  RParen,
+  /// Dot `.` token
+  Colon,
+  /// Dollar `$` token
+  Dollar,
+  /// Equal `=` token
+  Equal,
+  /// Exclamation mark `!` token
+  Bang,
+  /// Left curly brace `{` token
+  LBrace,
+  /// Left square bracket `[` token
+  LBracket,
+  /// Left parenthesis `(` token
+  LParen,
+  /// Pipe `|` token
+  Pipe,
+  /// Spread operator `...` token
+  Spread,
+  /// Identifier token
+  Identifier(S),
+  Float(S),
+  Int(S),
+  LitInlineStr(LitInlineStr<S>),
+  LitBlockStr(LitBlockStr<S>),
 }
 
-impl<'a> logosky::Token<'a> for AstToken<'a> {
-  type Kind = TokenKind;
-  type Char = char;
-
-  #[inline(always)]
-  fn kind(&self) -> Self::Kind {
-    self.kind()
-  }
-}
-
-impl<'a> AstToken<'a> {
+impl<S> AstToken<S> {
   /// Returns the kind of the token.
   #[inline]
   pub const fn kind(&self) -> TokenKind {
@@ -208,37 +92,64 @@ impl<'a> AstToken<'a> {
   }
 }
 
-impl<'a> From<AstToken<'a>> for TokenKind {
+impl<S> From<AstToken<S>> for TokenKind {
   #[inline]
-  fn from(token: AstToken<'a>) -> Self {
+  fn from(token: AstToken<S>) -> Self {
     TokenKind::from(&token)
   }
 }
 
-impl<'a> From<&AstToken<'a>> for TokenKind {
+impl<S> From<&AstToken<S>> for TokenKind {
   #[inline]
-  fn from(token: &AstToken<'a>) -> Self {
+  fn from(token: &AstToken<S>) -> Self {
     token.kind()
   }
 }
 
-// impl<'de: 'a, 'a> TryFrom<&'de core::primitive::str> for super::LitStr<&'a core::primitive::str> {
-//   type Error = StringErrors<char>;
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(u16)]
+pub enum TokenKind {
+  Identifier,
+  Int,
+  Boolean,
+  Float,
+  String,
+  LitBlockStr,
+  Dollar,
+  LParen,
+  RParen,
+  Spread,
+  Colon,
+  Equal,
+  At,
+  LBracket,
+  RBracket,
+  LBrace,
+  RBrace,
+  Pipe,
+  Bang,
+  Ampersand,
+}
 
-//   #[inline]
-//   fn try_from(value: &'de core::primitive::str) -> Result<Self, Self::Error> {
-//     if value.starts_with("\"\"\"") {
-//       let mut lexer = Lexer::<super::string_lexer::block::str::BlockStringToken>::new(value);
-//       lexer.bump(3);
-//       super::string_lexer::block::str::lex(&mut SealedWrapper::from(&mut lexer))
-//         .map(Self::Block)
-//     } else if value.starts_with('"') {
-//       let mut lexer = Lexer::<super::string_lexer::inline::str::StringToken>::new(value);
-//       lexer.bump(1);
-//       super::string_lexer::inline::str::lex(&mut SealedWrapper::from(&mut lexer))
-//         .map(Self::Inline)
-//     } else {
-//       Err(StringError::unopened_string(value.chars().next(), 0).into())
-//     }
-//   }
-// }
+#[inline(always)]
+pub(super) fn increase_recursion_depth<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
+where
+  T: Logos<'a, Extras = RecursionLimiter>,
+{
+  lexer.extras.increase();
+
+  lexer
+    .extras
+    .check()
+    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
+}
+
+#[inline(always)]
+pub(super) fn decrease_recursion_depth<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = RecursionLimiter>,
+{
+  lexer.extras.decrease();
+}

@@ -5,7 +5,10 @@ use logosky::{
   utils::tracker::{LimitExceeded, Tracker},
 };
 
-use super::{handlers::*, string_lexer::*};
+use super::{
+  handlers::{str::*, unterminated_spread_operator},
+  string_lexer::*,
+};
 
 use crate::error::{self, *};
 
@@ -257,6 +260,12 @@ pub enum CstToken<'a> {
 impl<'a> logosky::Token<'a> for CstToken<'a> {
   type Kind = TokenKind;
   type Char = char;
+  type Logos = Self;
+
+  #[inline(always)]
+  fn from_logos(value: Self::Logos) -> Self {
+    value
+  }
 
   #[inline(always)]
   fn kind(&self) -> Self::Kind {

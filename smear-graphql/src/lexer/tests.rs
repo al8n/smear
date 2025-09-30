@@ -1,4 +1,5 @@
 use logosky::{
+  Token,
   logos::{Lexer, Logos, Source},
   utils::Span,
 };
@@ -13,8 +14,9 @@ use crate::{
 
 fn assert_token<'a, Token, StateError>(source: &'a str, kind: Token, length: usize)
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug + Eq,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer(source);
@@ -30,7 +32,7 @@ where
   );
 }
 
-pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy + core::fmt::Debug {
+pub(super) trait TestToken<'a>: Token<'a> + Eq + Copy + core::fmt::Debug {
   fn is_ignored(&self) -> bool;
 
   fn block_string_literal(&self) -> Option<&'a str>;
@@ -43,30 +45,34 @@ pub(super) trait TestToken<'a>: Logos<'a> + Eq + Copy + core::fmt::Debug {
 
   fn from_integer_literal(s: &'a str) -> Self;
 
-  fn test_lexer(source: &'a Self::Source) -> TestLexer<'a, Self>
+  fn test_lexer(source: &'a <Self::Logos as Logos<'a>>::Source) -> TestLexer<'a, Self>
   where
-    Self::Extras: Default,
+    <Self::Logos as Logos<'a>>::Extras: Default,
   {
     TestLexer::new(source)
   }
 
-  fn test_lexer_with_extras(source: &'a Self::Source, extras: Self::Extras) -> TestLexer<'a, Self> {
+  fn test_lexer_with_extras(
+    source: &'a <Self::Logos as Logos<'a>>::Source,
+    extras: <Self::Logos as Logos<'a>>::Extras,
+  ) -> TestLexer<'a, Self> {
     TestLexer::with_extras(source, extras)
   }
 }
 
-pub(super) struct TestLexer<'a, T: Logos<'a>> {
-  inner: Lexer<'a, T>,
+pub(super) struct TestLexer<'a, T: Token<'a>> {
+  inner: Lexer<'a, T::Logos>,
 }
 
 impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
-  type Item = Result<T, T::Error>;
+  type Item = Result<T, <T::Logos as Logos<'a>>::Error>;
 
   fn next(&mut self) -> Option<Self::Item> {
     loop {
       match self.inner.next() {
         None => return None,
         Some(Ok(tok)) => {
+          let tok = T::from_logos(tok);
           if tok.is_ignored() {
             // continue lexing
             continue;
@@ -80,17 +86,20 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
   }
 }
 
-impl<'a, T: Logos<'a>> TestLexer<'a, T> {
-  pub fn new(source: &'a T::Source) -> Self
+impl<'a, T: TestToken<'a>> TestLexer<'a, T> {
+  pub fn new(source: &'a <T::Logos as Logos<'a>>::Source) -> Self
   where
-    T::Extras: Default,
+    <T::Logos as Logos<'a>>::Extras: Default,
   {
     Self {
       inner: Lexer::new(source),
     }
   }
 
-  pub fn with_extras(source: &'a T::Source, extras: T::Extras) -> Self {
+  pub fn with_extras(
+    source: &'a <T::Logos as Logos<'a>>::Source,
+    extras: <T::Logos as Logos<'a>>::Extras,
+  ) -> Self {
     Self {
       inner: Lexer::with_extras(source, extras),
     }
@@ -100,15 +109,16 @@ impl<'a, T: Logos<'a>> TestLexer<'a, T> {
     self.inner.span()
   }
 
-  pub fn slice(&self) -> <T::Source as Source>::Slice<'a> {
+  pub fn slice(&self) -> <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a> {
     self.inner.slice()
   }
 }
 
 pub(super) fn test_unexpected_character<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("+1");
@@ -140,8 +150,9 @@ where
 
 pub(super) fn test_unknown_character<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("<");
@@ -188,8 +199,9 @@ where
 
 pub(super) fn test_number_leading_zero<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("00");
@@ -315,8 +327,9 @@ where
 
 pub(super) fn test_int_leading_zeros_and_suffix<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("00abc");
@@ -354,8 +367,9 @@ where
 
 pub(super) fn test_float_leading_zeros_and_other<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("01.");
@@ -411,8 +425,9 @@ where
 
 pub(super) fn test_invalid_number_suffix<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("0abc");
@@ -741,8 +756,9 @@ where
 
 pub(super) fn test_missing_integer_part<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer(".123");
@@ -818,8 +834,9 @@ where
 
 pub(super) fn test_missing_integer_part_and_invalid_suffix<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer(".123abcd");
@@ -854,8 +871,9 @@ where
 
 pub(super) fn test_unexpected_float_eof<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("1.");
@@ -1029,8 +1047,9 @@ where
 
 pub(super) fn test_unexpected_number_lexme<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let mut lexer = Token::test_lexer("1.a");
@@ -1296,8 +1315,9 @@ where
 
 pub(super) fn test_integer_ok<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let input: &[(&str, Token, usize)] = &[
@@ -1315,8 +1335,9 @@ where
 
 pub(super) fn test_float_ok<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let input: &[(&str, Token, usize)] = &[
@@ -1341,8 +1362,9 @@ where
 
 pub(super) fn test_inline_string_ok<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq + 'a,
 {
   let input: &[(&str, Token, usize)] = &[
@@ -1439,8 +1461,9 @@ where
 
 pub(super) fn test_unterminated_inline_string<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   let mut lexer = Token::test_lexer(r#"""#);
@@ -1547,8 +1570,9 @@ where
 
 pub(super) fn test_incomplete_unicode_and_eof<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   let mut lexer = Token::test_lexer(r#""\u222"#);
@@ -1592,8 +1616,9 @@ where
 
 pub(super) fn test_unexpected_line_terminator<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   let mut lexer = Token::test_lexer(
@@ -1642,8 +1667,9 @@ hello
 
 pub(super) fn test_unexpected_escaped<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   // "This is \"\"a test \a\d\q description"
@@ -1672,8 +1698,9 @@ where
 
 pub(super) fn test_surrogate_pair<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default + core::fmt::Debug,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug + Eq,
 {
   const CASES: &[&str] = &[
@@ -1694,8 +1721,9 @@ where
 
 pub(super) fn test_invalid_surrogate_pair<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
 {
   let mut lexer = Token::test_lexer(r#""Backwards pair \uDE00\uD83D""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1766,8 +1794,9 @@ where
 
 pub(super) fn test_unterminated_block_string<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
 {
   let mut lexer = Token::test_lexer(r#"""""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1800,8 +1829,9 @@ where
 
 pub(super) fn test_surrogate_pair_in_block_string<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   let mut lexer =
@@ -1817,8 +1847,9 @@ where
 
 pub(super) fn test_escape_triple_quote_block_string<'a, Token, StateError>()
 where
-  Token: TestToken<'a, Source = str, Error = LexerErrors<char, StateError>> + core::fmt::Debug,
-  Token::Extras: Default,
+  Token: TestToken<'a> + core::fmt::Debug,
+  Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
+  <Token::Logos as Logos<'a>>::Extras: Default,
   StateError: core::fmt::Debug,
 {
   let mut lexer = Token::test_lexer(

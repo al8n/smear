@@ -102,20 +102,20 @@ where
   }
 }
 
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
   for NullValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<'_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, StrAstToken<'_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Identifier(name) => match name {
+          StrAstToken::Identifier(name) => match name {
             "null" => Ok(NullValue::new(span, name)),
             val => Err(Error::invalid_null_value(val, span).into()),
           },

@@ -11,19 +11,19 @@ use super::*;
 macro_rules! punctuator_parser {
   ($($name:ident),+$(,)?) => {
     $(
-      impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>> for $name {
+      impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>> for $name {
         #[inline]
-        fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+        fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
         where
           Self: Sized,
-          E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
+          E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
         {
-          any().try_map(|res: Lexed<'_, AstToken<'_>>, span: Span| match res {
+          any().try_map(|res: Lexed<'_, StrAstToken<'_>>, span: Span| match res {
             Lexed::Token(tok) => {
               let (span, tok) = tok.into_components();
               match tok {
-                AstToken::$name => Ok($name::new(span)),
-                tok => Err(Error::unexpected_token(tok, AstTokenKind::$name, span).into()),
+                StrAstToken::$name => Ok($name::new(span)),
+                tok => Err(Error::unexpected_token(tok, StrAstTokenKind::$name, span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

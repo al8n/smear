@@ -319,19 +319,19 @@ fn handle_braced_escape_unicode<'a>(
   }
 }
 
-impl<'a, S, T, StateError> Lexable<SealedWrapper<Lexer<'a, T>>, LexerError<u8, StateError>>
+impl<'a, S, T, StateError> Lexable<&mut SealedWrapper<Lexer<'a, T>>, LexerError<u8, StateError>>
   for LitInlineStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
-  S: Source + 'a,
+  S: Source + ?Sized + 'a,
   S::Slice<'a>: AsRef<[u8]>,
 {
   #[inline]
-  fn lex(mut lexer: SealedWrapper<Lexer<'a, T>>) -> Result<Self, LexerError<u8, StateError>>
+  fn lex(lexer: &mut SealedWrapper<Lexer<'a, T>>) -> Result<Self, LexerError<u8, StateError>>
   where
     Self: Sized,
   {
-    lex_inline_str_from_bytes(&mut lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
+    lex_inline_str_from_bytes(lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
   }
 }
 

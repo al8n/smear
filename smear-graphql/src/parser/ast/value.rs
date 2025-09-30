@@ -1,4 +1,4 @@
-use super::{AstToken, AstTokenErrors, AstTokenStream, DefaultVec, Name};
+use super::{DefaultVec, Name, StrAstToken, StrAstTokenErrors, StrAstTokenStream};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
@@ -29,7 +29,7 @@ mod variable;
 macro_rules! atom_parser {
   () => {{
     select! {
-      Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
+      Lexed::Token(Spanned { span, data: StrAstToken::Identifier(name) }) => {
         match name {
           "true" => Self::Boolean(BooleanValue::new(span, true)),
           "false" => Self::Boolean(BooleanValue::new(span, false)),
@@ -37,14 +37,14 @@ macro_rules! atom_parser {
           val => Self::Enum(EnumValue::new(span, val)),
         }
       },
-      Lexed::Token(Spanned { span, data: AstToken::Int(val) }) => {
+      Lexed::Token(Spanned { span, data: StrAstToken::Int(val) }) => {
         Self::Int(IntValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: AstToken::Float(val) }) => {
+      Lexed::Token(Spanned { span, data: StrAstToken::Float(val) }) => {
         Self::Float(FloatValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-      Lexed::Token(Spanned { span, data: AstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: StrAstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
+      Lexed::Token(Spanned { span, data: StrAstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
     }
   }};
 }
@@ -117,14 +117,14 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
   for InputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
   {
     recursive(|parser| {
       let object_value_parser =
@@ -133,7 +133,7 @@ impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a 
       choice((
         atom_parser!(),
         select! {
-          Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
+          Lexed::Token(Spanned { span, data: StrAstToken::Dollar }) => span,
         }
         .then(Name::parser::<E>())
         .map(|(span, name)| Variable::new(span.with_end(name.span().end()), name))
@@ -200,21 +200,21 @@ impl<S> IntoSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
   for ConstInputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
-    AstTokenStream<'a>: Tokenizer<
+    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
+    StrAstTokenStream<'a>: Tokenizer<
         'a,
-        AstToken<'a>,
-        Slice = <<AstToken<'a> as Logos<'a>>::Source as Source>::Slice<'a>,
+        StrAstToken<'a>,
+        Slice = <<<StrAstToken<'a> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
       >,
-    AstToken<'a>: Token<'a>,
-    AstTokenErrors<'a, &'a str>: 'a,
+    StrAstToken<'a>: Token<'a>,
+    StrAstTokenErrors<'a, &'a str>: 'a,
   {
     recursive(|parser| {
       let object_value_parser =

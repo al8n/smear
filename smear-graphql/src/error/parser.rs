@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Token, TokenStream,
+  Lexed, Logos, Token, TokenStream,
   chumsky::{
     self, DefaultExpected,
     error::{self, LabelError},
@@ -475,8 +475,9 @@ impl<'a, S, T, Char, StateError>
   LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
   for Errors<S, T, T::Kind, Char, StateError>
 where
-  T: Token<'a, Error = LexerErrors<Char, StateError>>,
-  T::Extras: Copy,
+  T: Token<'a>,
+  T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
+  <T::Logos as Logos<'a>>::Extras: Copy,
   Char: Clone,
   StateError: Clone,
 {
@@ -553,8 +554,9 @@ where
 impl<'a, S, T, Char, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
   for Errors<S, T, T::Kind, Char, StateError>
 where
-  T: Token<'a, Error = LexerErrors<Char, StateError>>,
-  T::Extras: Copy,
+  T: Token<'a>,
+  T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
+  <T::Logos as Logos<'a>>::Extras: Copy,
   Char: Clone,
   StateError: Clone,
 {

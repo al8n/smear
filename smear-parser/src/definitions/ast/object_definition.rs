@@ -1,5 +1,5 @@
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
@@ -174,7 +174,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Type: Parseable<'src, I, T, Error>,
@@ -224,7 +224,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(
@@ -487,7 +487,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <T::Source as Source>::Slice<'src>>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfObjectExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error>,
@@ -560,7 +560,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(

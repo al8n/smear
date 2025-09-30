@@ -1,5 +1,5 @@
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
@@ -84,7 +84,7 @@ impl<Name> Alias<Name> {
   pub fn parser_with<'a, I, T, Error, E, P>(name_parser: P) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     P: Parser<'a, I, Name, E> + Clone,
     Colon: Parseable<'a, I, T, Error>,
     Error: 'a,
@@ -157,7 +157,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser())
@@ -341,7 +341,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Error: 'a,
     Name: Parseable<'a, I, T, Error> + 'a,
@@ -372,7 +372,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
 // impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, Container, I, T, Error> Parseable<I, T, Error> for Field<Alias, Name, Arguments, Directives, SelectionSet>
 // where
 //   T: Token<'a>,
-//   I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+//   I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
 //   On: Parseable<I, T, Error>,
 //   Spread: Parseable<I, T, Error>,
 //   LBrace: Parseable<I, T, Error>,

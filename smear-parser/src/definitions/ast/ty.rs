@@ -1,6 +1,6 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
@@ -128,7 +128,7 @@ impl<Name> NamedType<Name> {
   pub fn parser_with<'a, I, T, Error, E, NP>(name_parser: NP) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Bang: Parseable<'a, I, T, Error> + 'a,
@@ -292,7 +292,7 @@ impl<Type> ListType<Type> {
   pub fn parser_with<'a, I, T, Error, E, P>(parser: P) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     LBracket: Parseable<'a, I, T, Error> + 'a,
@@ -426,7 +426,7 @@ macro_rules! ty {
           pub fn parser_with<'a, I, T, Error, E, NP>(name_parser: NP) -> impl Parser<'a, I, Self, E> + Clone
           where
             T: Token<'a>,
-            I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+            I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a,
             Name: 'a,
@@ -453,7 +453,7 @@ macro_rules! ty {
           where
             Self: Sized + 'a,
             T: Token<'a>,
-            I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+            I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a
           {

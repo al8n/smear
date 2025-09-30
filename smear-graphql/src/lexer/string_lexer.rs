@@ -63,6 +63,24 @@ macro_rules! variant_type {
       pub const fn source(self) -> S where S: Copy {
         self.source
       }
+
+      /// Converts this to an equivalent type.
+      #[inline(always)]
+      pub fn to_equivalent<T>(&self) -> $name<T>
+      where
+        S: logosky::utils::ToEquivalent<T>,
+      {
+        $name::new(self.source.to_equivalent(), $(self.$field),*)
+      }
+
+      /// Converts this to an equivalent type.
+      #[inline(always)]
+      pub fn into_equivalent<T>(self) -> $name<T>
+      where
+        S: logosky::utils::IntoEquivalent<T>,
+      {
+        $name::new(self.source.into_equivalent(), $(self.$field),*)
+      }
     }
 
     impl<S: logosky::utils::human_display::DisplayHuman> core::fmt::Display for $name<S> {
@@ -218,6 +236,30 @@ impl<S> LitStr<S> {
       Self::Block(s) => s.source_ref(),
     }
   }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn to_equivalent<T>(&self) -> LitStr<T>
+  where
+    S: logosky::utils::ToEquivalent<T>,
+  {
+    match self {
+      Self::Inline(s) => LitStr::Inline(s.to_equivalent()),
+      Self::Block(s) => LitStr::Block(s.to_equivalent()),
+    }
+  }
+
+  /// Converts this to an equivalent type.
+  #[inline(always)]
+  pub fn into_equivalent<T>(self) -> LitStr<T>
+  where
+    S: logosky::utils::IntoEquivalent<T>,
+  {
+    match self {
+      Self::Inline(s) => LitStr::Inline(s.into_equivalent()),
+      Self::Block(s) => LitStr::Block(s.into_equivalent()),
+    }
+  }
 }
 
 #[derive(Deref, DerefMut)]
@@ -270,5 +312,18 @@ impl<'de: 'a, 'a> TryFrom<&'de [u8]> for super::LitStr<&'a [u8]> {
     } else {
       Err(StringError::unopened_string(value.first().copied(), 0).into())
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  #[cfg(feature = "bytes")]
+  fn test_to_bytes_equivalent() {
+    let s = LitInlineStr::Plain(LitPlainStr::new("hello".as_bytes()));
+    let _: LitInlineStr<bytes::Bytes> = s.to_equivalent();
+    let _: LitInlineStr<bytes::Bytes> = s.into_equivalent();
   }
 }

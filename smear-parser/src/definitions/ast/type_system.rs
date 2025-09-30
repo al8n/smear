@@ -1,6 +1,6 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra, prelude::choice},
   utils::{AsSpan, IntoSpan, Span},
 };
@@ -140,7 +140,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     choice((
@@ -289,7 +289,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     choice((
@@ -365,7 +365,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     choice((
@@ -429,7 +429,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     TypeExtension::parser::<E>()
@@ -490,7 +490,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Definition::parser::<E>()
@@ -552,7 +552,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     OperationDefinition::parser::<E>()
@@ -613,7 +613,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     TypeSystem::parser::<E>()

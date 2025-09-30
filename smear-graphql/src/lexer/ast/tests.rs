@@ -1,3 +1,5 @@
+use logosky::{Lexed, TokenStream};
+
 use super::*;
 
 use crate::lexer::{
@@ -5,7 +7,7 @@ use crate::lexer::{
   tests::{self, TestToken},
 };
 
-impl<'a> TestToken<'a> for AstToken<'a> {
+impl<'a> TestToken<'a> for AstToken<&'a str> {
   #[inline]
   fn is_ignored(&self) -> bool {
     false
@@ -45,119 +47,119 @@ impl<'a> TestToken<'a> for AstToken<'a> {
 
 #[test]
 fn test_unexpected_character() {
-  tests::test_unexpected_character::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unexpected_character::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unknown_character() {
-  tests::test_unknown_character::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unknown_character::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_number_leading_zero() {
-  tests::test_number_leading_zero::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_number_leading_zero::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_int_leading_zeros_and_suffix() {
-  tests::test_int_leading_zeros_and_suffix::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_int_leading_zeros_and_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_float_leading_zeros_and_other() {
-  tests::test_float_leading_zeros_and_other::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_float_leading_zeros_and_other::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_invalid_number_suffix() {
-  tests::test_invalid_number_suffix::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_invalid_number_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_missing_integer_part() {
-  tests::test_missing_integer_part::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_missing_integer_part::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_missing_integer_part_and_invalid_suffix() {
-  tests::test_missing_integer_part_and_invalid_suffix::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_missing_integer_part_and_invalid_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_float_eof() {
-  tests::test_unexpected_float_eof::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unexpected_float_eof::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_number_lexme() {
-  tests::test_unexpected_number_lexme::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unexpected_number_lexme::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_integer_ok() {
-  tests::test_integer_ok::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_integer_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_float_ok() {
-  tests::test_float_ok::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_float_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_inline_string_ok() {
-  tests::test_inline_string_ok::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_inline_string_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unterminated_inline_string() {
-  tests::test_unterminated_inline_string::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unterminated_inline_string::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_incomplete_unicode_and_eof() {
-  tests::test_incomplete_unicode_and_eof::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_incomplete_unicode_and_eof::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_line_terminator() {
-  tests::test_unexpected_line_terminator::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unexpected_line_terminator::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unexpected_escaped() {
-  tests::test_unexpected_escaped::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unexpected_escaped::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_surrogate_pair() {
-  tests::test_surrogate_pair::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_surrogate_pair::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_invalid_surrogate_pair() {
-  tests::test_invalid_surrogate_pair::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_invalid_surrogate_pair::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_unterminated_block_string() {
-  tests::test_unterminated_block_string::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_unterminated_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_block_string_literal() {
-  tests::test_surrogate_pair_in_block_string::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_surrogate_pair_in_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_escape_triple_quote_block_string() {
-  tests::test_escape_triple_quote_block_string::<AstToken<'_>, RecursionLimitExceeded>();
+  tests::test_escape_triple_quote_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]
 fn test_bom_lexing() {
   let input = "\u{feff}";
 
-  let mut lexer = AstToken::lexer(input);
+  let mut lexer = TokenStream::<StrAstToken<'_>>::new(input).into_iter();
 
   assert_eq!(lexer.next(), None);
 }
@@ -168,13 +170,15 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let lexer =
-    AstToken::lexer_with_extras(query.as_str(), RecursionLimiter::with_limitation(depth - 1));
+  let lexer = TokenStream::<StrAstToken<'_>>::with_state(
+    query.as_str(),
+    RecursionLimiter::with_limitation(depth - 1),
+  );
 
   for result in lexer {
     match result {
-      Ok(_) => {}
-      Err(mut errors) => {
+      Lexed::Token(_) => {}
+      Lexed::Error(mut errors) => {
         let err = errors.pop().unwrap().into_data().unwrap_state();
         assert_eq!(err.depth(), depth);
         assert_eq!(err.limitation(), depth - 1);

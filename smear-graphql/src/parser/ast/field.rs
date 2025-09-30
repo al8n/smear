@@ -1,6 +1,6 @@
 use derive_more::{From, Into};
 use logosky::{
-  Parseable, Source, Token, Tokenizer,
+  Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
@@ -205,8 +205,8 @@ where
   where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <T::Source as Source>::Slice<'a>> + 'a,
-    T: Token<'a> + 'a,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
+    T: Token<'a>,
     Error: 'a,
   {
     recursive(|field_parser| {

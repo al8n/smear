@@ -9,8 +9,8 @@ use logosky::{
   },
 };
 
-use super::{AstToken, AstTokenErrors, AstTokenStream};
-use crate::{error::Error, parser::ast::AstTokenKind};
+use super::{StrAstToken, StrAstTokenErrors, StrAstTokenStream};
+use crate::{error::Error, parser::ast::StrAstTokenKind};
 
 /// A GraphQL name identifier.
 ///
@@ -180,21 +180,21 @@ where
   }
 }
 
-impl<'a> Parseable<'a, AstTokenStream<'a>, AstToken<'a>, AstTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, StrAstTokenStream<'a>, StrAstToken<'a>, StrAstTokenErrors<'a, &'a str>>
   for Name<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, StrAstTokenStream<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a>, Error = AstTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, StrAstTokenStream<'a>, Error = StrAstTokenErrors<'a, &'a str>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<'_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, StrAstToken<'_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Identifier(name) => Ok(Name::new(span, name)),
-          tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
+          StrAstToken::Identifier(name) => Ok(Name::new(span, name)),
+          tok => Err(Error::unexpected_token(tok, StrAstTokenKind::Identifier, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

@@ -28,7 +28,7 @@ pub(crate) enum BlockStringToken {
   Quote,
 }
 
-impl<'a, S, T, StateError> Lexable<SealedWrapper<Lexer<'a, T>>, LexerError<u8, StateError>>
+impl<'a, S, T, StateError> Lexable<&mut SealedWrapper<Lexer<'a, T>>, LexerError<u8, StateError>>
   for LitBlockStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
@@ -36,11 +36,11 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   #[inline]
-  fn lex(mut lexer: SealedWrapper<Lexer<'a, T>>) -> Result<Self, LexerError<u8, StateError>>
+  fn lex(lexer: &mut SealedWrapper<Lexer<'a, T>>) -> Result<Self, LexerError<u8, StateError>>
   where
     Self: Sized,
   {
-    lex_block_str_from_bytes(&mut lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
+    lex_block_str_from_bytes(lexer).map_err(|e| LexerError::new(lexer.span(), e.into()))
   }
 }
 
