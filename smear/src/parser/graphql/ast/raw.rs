@@ -1,10 +1,9 @@
 use super::{
-  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, TypeCondition,
-  Variable, field, selection_set,
+  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, Type, TypeCondition,
+  Variable, field, selection_set, Location,
 };
 use crate::scaffold::{
-  self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType, Type,
-  UnionMemberTypes,
+  self, Described, DirectiveLocations, ImplementInterfaces, OperationType, UnionMemberTypes,
 };
 
 /// The default container type used for arguments in the AST.
@@ -138,7 +137,7 @@ pub type DirectiveDefinition<
 > = scaffold::DirectiveDefinition<
   Name<S>,
   ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  DirectiveLocations<LocationsContainer>,
+  DirectiveLocations<Location, LocationsContainer>,
 >;
 
 pub type VariableDefinition<

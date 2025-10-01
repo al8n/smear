@@ -114,7 +114,7 @@ macro_rules! punctuator {
         impl ::core::fmt::Display for $name {
           #[inline(always)]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            write!(f, $punct)
+            ::core::fmt::Display::fmt($punct, f)
           }
         }
 
@@ -129,20 +129,6 @@ macro_rules! punctuator {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
-          }
-        }
-
-        impl $crate::__private::logosky::utils::syntax_tree_display::DisplaySyntaxTree for $name {
-          #[inline]
-          fn fmt(
-            &self,
-            level: ::core::primitive::usize,
-            indent: ::core::primitive::usize,
-            f: &mut ::core::fmt::Formatter<'_>,
-          ) -> ::core::fmt::Result {
-            let padding = level * indent;
-            ::core::write!(f, "{:indent$}", "", indent = padding)?;
-            ::core::writeln!(f, ::core::concat!("- ", $syntax_tree_display, "@{}..{} \"", $punct, "\""), self.span().start(), self.span().end())
           }
         }
       )*
@@ -162,10 +148,12 @@ punctuator!(
   (Spread, "SPREAD", "..."),
   (LBracket, "L_BRACKET", "["),
   (RBracket, "R_BRACKET", "]"),
-  (LBrace, "L_BRACE", "{{"),
-  (RBrace, "R_BRACE", "}}"),
+  (LBrace, "L_BRACE", "{"),
+  (RBrace, "R_BRACE", "}"),
   (LParen, "L_PAREN", "("),
   (RParen, "R_PAREN", ")"),
   (LAngle, "L_ANGLE", "<"),
   (RAngle, "R_ANGLE", ">"),
+  (FatArrow, "FAT_ARROW", "=>"),
+  (ThinArrow, "THIN_ARROW", "->"),
 );

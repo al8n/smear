@@ -6,7 +6,6 @@ use logosky::{
 use crate::{
   keywords::{self, *},
   lexer::graphql::ast::AstLexerErrors,
-  scaffold,
 };
 
 use super::*;
@@ -69,23 +68,23 @@ keyword_parser! {
 }
 
 keyword_parser! {
-  scaffold::QueryLocation:"QUERY",
-  scaffold::MutationLocation:"MUTATION",
-  scaffold::SubscriptionLocation:"SUBSCRIPTION",
-  scaffold::FieldLocation:"FIELD",
-  scaffold::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
-  scaffold::FragmentSpreadLocation:"FRAGMENT_SPREAD",
-  scaffold::InlineFragmentLocation:"INLINE_FRAGMENT",
-  scaffold::VariableDefinitionLocation:"VARIABLE_DEFINITION",
-  scaffold::SchemaLocation:"SCHEMA",
-  scaffold::ScalarLocation:"SCALAR",
-  scaffold::ObjectLocation:"OBJECT",
-  scaffold::FieldDefinitionLocation:"FIELD_DEFINITION",
-  scaffold::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
-  scaffold::InterfaceLocation:"INTERFACE",
-  scaffold::UnionLocation:"UNION",
-  scaffold::EnumLocation:"ENUM",
-  scaffold::EnumValueLocation:"ENUM_VALUE",
-  scaffold::InputObjectLocation:"INPUT_OBJECT",
-  scaffold::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
+  keywords::QueryLocation:"QUERY",
+  keywords::MutationLocation:"MUTATION",
+  keywords::SubscriptionLocation:"SUBSCRIPTION",
+  keywords::FieldLocation:"FIELD",
+  keywords::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
+  keywords::FragmentSpreadLocation:"FRAGMENT_SPREAD",
+  keywords::InlineFragmentLocation:"INLINE_FRAGMENT",
+  keywords::VariableDefinitionLocation:"VARIABLE_DEFINITION",
+  keywords::SchemaLocation:"SCHEMA",
+  keywords::ScalarLocation:"SCALAR",
+  keywords::ObjectLocation:"OBJECT",
+  keywords::FieldDefinitionLocation:"FIELD_DEFINITION",
+  keywords::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
+  keywords::InterfaceLocation:"INTERFACE",
+  keywords::UnionLocation:"UNION",
+  keywords::EnumLocation:"ENUM",
+  keywords::EnumValueLocation:"ENUM_VALUE",
+  keywords::InputObjectLocation:"INPUT_OBJECT",
+  keywords::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
 }

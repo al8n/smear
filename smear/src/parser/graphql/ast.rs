@@ -12,7 +12,9 @@ use crate::lexer::graphql::ast::{AstToken, AstTokenChar, AstTokenKind};
 pub use fragment::*;
 pub use name::*;
 pub use raw::*;
+pub use ty::*;
 pub use value::*;
+pub use location::*;
 
 mod error;
 mod field;
@@ -24,6 +26,7 @@ mod operation_type;
 mod punctuator;
 mod raw;
 mod selection_set;
+mod ty;
 mod value;
 
 /// The token stream type used for the AST parser implementation.

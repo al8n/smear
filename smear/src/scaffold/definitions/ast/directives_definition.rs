@@ -1,713 +1,40 @@
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use core::marker::PhantomData;
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, extra::ParserExtra, prelude::*},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-    syntax_tree_display::DisplaySyntaxTree,
+    AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL,
   },
 };
 
 use crate::{
-  keyword,
-  keywords::{Directive, On, Repeatable},
+  keywords::*,
   punctuator::{At, Pipe},
 };
 
-keyword! {
-  /// `QUERY` location - directives can be applied to query operations.
-  ///
-  /// Used when defining where a directive can be placed. Query directives
-  /// affect the entire query operation and can be used for things like
-  /// authentication, caching, or operation-level configuration.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @auth on QUERY
-  /// directive @cache(ttl: 300) on QUERY
-  /// ```
-  (QueryLocation, "QUERY_KW", "QUERY"),
-
-  /// `MUTATION` location - directives can be applied to mutation operations.
-  ///
-  /// Mutation directives affect the entire mutation operation and can be used
-  /// for authorization, rate limiting, or transaction control.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @rateLimit(max: 10) on MUTATION
-  /// directive @requireAuth on MUTATION
-  /// ```
-  (MutationLocation, "MUTATION_KW", "MUTATION"),
-
-  /// `SUBSCRIPTION` location - directives can be applied to subscription operations.
-  ///
-  /// Subscription directives control real-time data flow and can be used
-  /// for filtering, authentication, or subscription management.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @requireSubscription on SUBSCRIPTION
-  /// directive @throttle(rate: "1/sec") on SUBSCRIPTION
-  /// ```
-  (SubscriptionLocation, "SUBSCRIPTION_KW", "SUBSCRIPTION"),
-
-  /// `FIELD_DEFINITION` location - directives can be applied to field definitions in schemas.
-  ///
-  /// Field definition directives control field behavior, validation, authorization,
-  /// or provide metadata about fields in type definitions.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on FIELD_DEFINITION
-  /// directive @auth(requires: Role) on FIELD_DEFINITION
-  /// ```
-  (FieldDefinitionLocation, "FIELD_DEFINITION_KW", "FIELD_DEFINITION"),
-
-  /// `FIELD` location - directives can be applied to field selections in queries.
-  ///
-  /// Field directives control individual field selection behavior, commonly
-  /// used for conditional inclusion, skipping, or field-level configuration.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @include(if: Boolean!) on FIELD
-  /// directive @skip(if: Boolean!) on FIELD
-  /// ```
-  (FieldLocation, "FIELD_KW", "FIELD"),
-
-  /// `FRAGMENT_DEFINITION` location - directives can be applied to named fragment definitions.
-  ///
-  /// Fragment definition directives control fragment behavior and can be used
-  /// for conditional fragments, caching, or fragment-level metadata.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @experimental on FRAGMENT_DEFINITION
-  /// directive @cache(scope: PRIVATE) on FRAGMENT_DEFINITION
-  /// ```
-  (FragmentDefinitionLocation, "FRAGMENT_DEFINITION_KW", "FRAGMENT_DEFINITION"),
-
-  /// `FRAGMENT_SPREAD` location - directives can be applied to fragment spreads.
-  ///
-  /// Fragment spread directives control when and how fragments are included
-  /// in selection sets, commonly used for conditional fragment inclusion.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @include(if: Boolean!) on FRAGMENT_SPREAD
-  /// directive @defer(label: String) on FRAGMENT_SPREAD
-  /// ```
-  (FragmentSpreadLocation, "FRAGMENT_SPREAD_KW", "FRAGMENT_SPREAD"),
-  /// `INLINE_FRAGMENT` location - directives can be applied to inline fragments.
-  ///
-  /// Inline fragment directives control conditional type-specific field selections
-  /// and can be used for conditional inclusion based on type or other criteria.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @include(if: Boolean!) on INLINE_FRAGMENT
-  /// directive @skip(if: Boolean!) on INLINE_FRAGMENT
-  /// ```
-  (InlineFragmentLocation, "INLINE_FRAGMENT_KW", "INLINE_FRAGMENT"),
-
-  /// `VARIABLE_DEFINITION` location - directives can be applied to variable definitions.
-  ///
-  /// Variable definition directives control variable behavior, validation,
-  /// or provide metadata about operation variables.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on VARIABLE_DEFINITION
-  /// directive @validate(pattern: String) on VARIABLE_DEFINITION
-  /// ```
-  (VariableDefinitionLocation, "VARIABLE_DEFINITION_KW", "VARIABLE_DEFINITION"),
-
-  /// `SCHEMA` location - directives can be applied to the schema definition.
-  ///
-  /// Schema directives provide global schema-level configuration, metadata,
-  /// or behavior that applies to the entire GraphQL schema.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @link(url: String!) on SCHEMA
-  /// directive @composeDirective(name: String!) on SCHEMA
-  /// ```
-  (SchemaLocation, "SCHEMA_KW", "SCHEMA"),
-
-  /// `SCALAR` location - directives can be applied to scalar type definitions.
-  ///
-  /// Scalar directives provide validation, serialization, or metadata
-  /// for custom scalar types in the schema.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @specifiedBy(url: String!) on SCALAR
-  /// directive @validate(regex: String) on SCALAR
-  /// ```
-  (ScalarLocation, "SCALAR_KW", "SCALAR"),
-
-  /// `OBJECT` location - directives can be applied to object type definitions.
-  ///
-  /// Object type directives control object behavior, provide metadata,
-  /// or enable features like interfaces, caching, or authorization.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @key(fields: String!) on OBJECT
-  /// directive @cacheControl(maxAge: Int) on OBJECT
-  /// ```
-  (ObjectLocation, "OBJECT_KW", "OBJECT"),
-
-  /// `ARGUMENT_DEFINITION` location - directives can be applied to argument definitions.
-  ///
-  /// Argument definition directives control argument validation, transformation,
-  /// or provide metadata about field and directive arguments.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on ARGUMENT_DEFINITION
-  /// directive @constraint(min: Int, max: Int) on ARGUMENT_DEFINITION
-  /// ```
-  (ArgumentDefinitionLocation, "ARGUMENT_DEFINITION_KW", "ARGUMENT_DEFINITION"),
-
-  /// `INTERFACE` location - directives can be applied to interface type definitions.
-  ///
-  /// Interface directives control interface behavior, provide metadata,
-  /// or enable features for types that implement the interface.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @key(fields: String!) on INTERFACE
-  /// directive @auth(requires: Role) on INTERFACE
-  /// ```
-  (InterfaceLocation, "INTERFACE_KW", "INTERFACE"),
-
-  /// `UNION` location - directives can be applied to union type definitions.
-  ///
-  /// Union directives control union behavior, type resolution,
-  /// or provide metadata for union types.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @unionMember(type: String!) on UNION
-  /// directive @deprecated(reason: String) on UNION
-  /// ```
-  (UnionLocation, "UNION_KW", "UNION"),
-
-  /// `ENUM_VALUE` location - directives can be applied to enum value definitions.
-  ///
-  /// Enum value directives provide metadata, deprecation information,
-  /// or control the behavior of specific enum values.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on ENUM_VALUE
-  /// directive @internal on ENUM_VALUE
-  /// ```
-  (EnumValueLocation, "ENUM_VALUE_KW", "ENUM_VALUE"),
-
-  /// `ENUM` location - directives can be applied to enum type definitions.
-  ///
-  /// Enum directives control enum behavior, validation,
-  /// or provide metadata for the entire enum type.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on ENUM
-  /// directive @oneOf on ENUM
-  /// ```
-  (EnumLocation, "ENUM_KW", "ENUM"),
-
-  /// `INPUT_OBJECT` location - directives can be applied to input object type definitions.
-  ///
-  /// Input object directives control input validation, transformation,
-  /// or provide metadata for input types used in arguments.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @oneOf on INPUT_OBJECT
-  /// directive @validate(schema: String) on INPUT_OBJECT
-  /// ```
-  (InputObjectLocation, "INPUT_OBJECT_KW", "INPUT_OBJECT"),
-
-  /// `INPUT_FIELD_DEFINITION` location - directives can be applied to input field definitions.
-  ///
-  /// Input field directives control input field validation, transformation,
-  /// or provide metadata for fields within input object types.
-  ///
-  /// ## Examples
-  ///
-  /// ```text
-  /// directive @deprecated(reason: String) on INPUT_FIELD_DEFINITION
-  /// directive @constraint(min: Int, max: Int) on INPUT_FIELD_DEFINITION
-  /// ```
-  (InputFieldDefinitionLocation, "INPUT_FIELD_DEFINITION_KW", "INPUT_FIELD_DEFINITION"),
-}
-
-/// Represents locations where directives can be applied during GraphQL execution.
-///
-/// Executable directive locations specify where directives can be used in GraphQL
-/// operations (queries, mutations, subscriptions) and their components. These
-/// directives are processed during query execution and can control field selection,
-/// fragment inclusion, and operation behavior.
-///
-/// ## Examples
-///
-/// ```text
-/// # Query operation directive
-/// query @auth { user { name } }
-///
-/// # Field directive
-/// { user { name @deprecated email } }
-///
-/// # Fragment spread directive
-/// { ...UserFragment @include(if: $showUser) }
-///
-/// # Inline fragment directive
-/// { ... on User @skip(if: $hideUser) { name } }
-///
-/// # Variable definition directive
-/// query($id: ID! @validate(pattern: "^[0-9]+$")) { user(id: $id) { name } }
-/// ```
-///
-/// Spec: [ExecutableDirectiveLocation](https://spec.graphql.org/draft/#ExecutableDirectiveLocation)
-#[derive(Debug, Clone, Copy, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum ExecutableDirectiveLocation {
-  /// `QUERY` - directive can be applied to query operations
-  Query(QueryLocation),
-  /// `MUTATION` - directive can be applied to mutation operations
-  Mutation(MutationLocation),
-  /// `SUBSCRIPTION` - directive can be applied to subscription operations
-  Subscription(SubscriptionLocation),
-  /// `FIELD` - directive can be applied to field selections
-  Field(FieldLocation),
-  /// `FRAGMENT_DEFINITION` - directive can be applied to fragment definitions
-  FragmentDefinition(FragmentDefinitionLocation),
-  /// `FRAGMENT_SPREAD` - directive can be applied to fragment spreads
-  FragmentSpread(FragmentSpreadLocation),
-  /// `INLINE_FRAGMENT` - directive can be applied to inline fragments
-  InlineFragment(InlineFragmentLocation),
-  /// `VARIABLE_DEFINITION` - directive can be applied to variable definitions
-  VariableDefinition(VariableDefinitionLocation),
-}
-
-impl AsRef<str> for ExecutableDirectiveLocation {
-  #[inline]
-  fn as_ref(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl core::borrow::Borrow<str> for ExecutableDirectiveLocation {
-  #[inline]
-  fn borrow(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl DisplaySDL for ExecutableDirectiveLocation {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "{}", self.as_str())
-  }
-}
-
-impl DisplayHuman for ExecutableDirectiveLocation {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
-  }
-}
-
-impl DisplaySyntaxTree for ExecutableDirectiveLocation {
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let mut padding = level * indent;
-    let span = self.span();
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- {}@{}..{}",
-      self.syntax_tree_name(),
-      span.start(),
-      span.end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    write!(
-      f,
-      "- IDENT@{}..{} \"{}\"",
-      span.start(),
-      span.end(),
-      self.as_str(),
-    )
-  }
-}
-
-impl ExecutableDirectiveLocation {
-  /// Returns a reference to the span covering the directive location token.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Query(loc) => loc.span(),
-      Self::Mutation(loc) => loc.span(),
-      Self::Subscription(loc) => loc.span(),
-      Self::Field(loc) => loc.span(),
-      Self::FragmentDefinition(loc) => loc.span(),
-      Self::FragmentSpread(loc) => loc.span(),
-      Self::InlineFragment(loc) => loc.span(),
-      Self::VariableDefinition(loc) => loc.span(),
-    }
-  }
-
-  /// Returns the string representation of the directive location.
-  #[inline]
-  pub const fn as_str(&self) -> &'static str {
-    match self {
-      Self::Query(_) => QueryLocation::raw(),
-      Self::Mutation(_) => MutationLocation::raw(),
-      Self::Subscription(_) => SubscriptionLocation::raw(),
-      Self::Field(_) => FieldLocation::raw(),
-      Self::FragmentDefinition(_) => FragmentDefinitionLocation::raw(),
-      Self::FragmentSpread(_) => FragmentSpreadLocation::raw(),
-      Self::InlineFragment(_) => InlineFragmentLocation::raw(),
-      Self::VariableDefinition(_) => VariableDefinitionLocation::raw(),
-    }
-  }
-
-  #[inline]
-  fn syntax_tree_name(&self) -> &'static str {
-    match self {
-      Self::Query(_) => "QUERY_KW",
-      Self::Mutation(_) => "MUTATION_KW",
-      Self::Subscription(_) => "SUBSCRIPTION_KW",
-      Self::Field(_) => "FIELD_KW",
-      Self::FragmentDefinition(_) => "FRAGMENT_DEFINITION_KW",
-      Self::FragmentSpread(_) => "FRAGMENT_SPREAD_KW",
-      Self::InlineFragment(_) => "INLINE_FRAGMENT_KW",
-      Self::VariableDefinition(_) => "VARIABLE_DEFINITION_KW",
-    }
-  }
-}
-
-/// Represents locations where directives can be applied in GraphQL schema definitions.
-///
-/// Type system directive locations specify where directives can be used in GraphQL
-/// schemas to provide metadata, validation, transformation, or other behaviors
-/// for types, fields, and other schema elements.
-///
-/// ## Examples
-///
-/// ```text
-/// # Schema directive
-/// schema @link(url: "https://specs.apollo.dev/federation/v2.0") { query: Query }
-///
-/// # Object type directive
-/// type User @key(fields: "id") { id: ID! name: String }
-///
-/// # Field definition directive
-/// type User { name: String @deprecated(reason: "Use fullName") }
-///
-/// # Scalar directive
-/// scalar DateTime @specifiedBy(url: "https://scalars.graphql.org/andimarek/datetime")
-///
-/// # Enum value directive
-/// enum Role { USER @deprecated ADMIN MODERATOR }
-/// ```
-///
-/// Spec: [TypeSystemDirectiveLocation](https://spec.graphql.org/draft/#TypeSystemDirectiveLocation)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum TypeSystemDirectiveLocation {
-  /// `SCHEMA` - directive can be applied to schema definitions
-  Schema(SchemaLocation),
-  /// `SCALAR` - directive can be applied to scalar type definitions
-  Scalar(ScalarLocation),
-  /// `OBJECT` - directive can be applied to object type definitions
-  Object(ObjectLocation),
-  /// `FIELD_DEFINITION` - directive can be applied to field definitions
-  FieldDefinition(FieldDefinitionLocation),
-  /// `ARGUMENT_DEFINITION` - directive can be applied to argument definitions
-  ArgumentDefinition(ArgumentDefinitionLocation),
-  /// `INTERFACE` - directive can be applied to interface type definitions
-  Interface(InterfaceLocation),
-  /// `UNION` - directive can be applied to union type definitions
-  Union(UnionLocation),
-  /// `ENUM` - directive can be applied to enum type definitions
-  Enum(EnumLocation),
-  /// `ENUM_VALUE` - directive can be applied to enum value definitions
-  EnumValue(EnumValueLocation),
-  /// `INPUT_OBJECT` - directive can be applied to input object type definitions
-  InputObject(InputObjectLocation),
-  /// `INPUT_FIELD_DEFINITION` - directive can be applied to input field definitions
-  InputFieldDefinition(InputFieldDefinitionLocation),
-}
-
-impl AsRef<str> for TypeSystemDirectiveLocation {
-  #[inline]
-  fn as_ref(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl core::borrow::Borrow<str> for TypeSystemDirectiveLocation {
-  #[inline]
-  fn borrow(&self) -> &str {
-    self.as_str()
-  }
-}
-
-impl DisplaySDL for TypeSystemDirectiveLocation {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "{}", self.as_str())
-  }
-}
-
-impl DisplayHuman for TypeSystemDirectiveLocation {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
-  }
-}
-
-impl DisplaySyntaxTree for TypeSystemDirectiveLocation {
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let mut padding = level * indent;
-    let span = self.span();
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- {}@{}..{}",
-      self.syntax_tree_name(),
-      span.start(),
-      span.end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    write!(
-      f,
-      "- IDENT@{}..{} \"{}\"",
-      span.start(),
-      span.end(),
-      self.as_str(),
-    )
-  }
-}
-
-impl TypeSystemDirectiveLocation {
-  /// Returns a reference to the span covering the directive location token.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Schema(loc) => loc.span(),
-      Self::Scalar(loc) => loc.span(),
-      Self::Object(loc) => loc.span(),
-      Self::FieldDefinition(loc) => loc.span(),
-      Self::ArgumentDefinition(loc) => loc.span(),
-      Self::Interface(loc) => loc.span(),
-      Self::Union(loc) => loc.span(),
-      Self::Enum(loc) => loc.span(),
-      Self::EnumValue(loc) => loc.span(),
-      Self::InputObject(loc) => loc.span(),
-      Self::InputFieldDefinition(loc) => loc.span(),
-    }
-  }
-
-  /// Returns the string representation of the directive location.
-  #[inline]
-  pub const fn as_str(&self) -> &'static str {
-    match self {
-      Self::Schema(_) => SchemaLocation::raw(),
-      Self::Scalar(_) => ScalarLocation::raw(),
-      Self::Object(_) => ObjectLocation::raw(),
-      Self::FieldDefinition(_) => FieldDefinitionLocation::raw(),
-      Self::ArgumentDefinition(_) => ArgumentDefinitionLocation::raw(),
-      Self::Interface(_) => InterfaceLocation::raw(),
-      Self::Union(_) => UnionLocation::raw(),
-      Self::Enum(_) => EnumLocation::raw(),
-      Self::EnumValue(_) => EnumValueLocation::raw(),
-      Self::InputObject(_) => InputObjectLocation::raw(),
-      Self::InputFieldDefinition(_) => InputFieldDefinitionLocation::raw(),
-    }
-  }
-
-  #[inline]
-  fn syntax_tree_name(&self) -> &'static str {
-    match self {
-      Self::Schema(_) => "SCHEMA_KW",
-      Self::Scalar(_) => "SCALAR_KW",
-      Self::Object(_) => "OBJECT_KW",
-      Self::FieldDefinition(_) => "FIELD_DEFINITION_KW",
-      Self::ArgumentDefinition(_) => "ARGUMENT_DEFINITION_KW",
-      Self::Interface(_) => "INTERFACE_KW",
-      Self::Union(_) => "UNION_KW",
-      Self::Enum(_) => "ENUM_KW",
-      Self::EnumValue(_) => "ENUM_VALUE_KW",
-      Self::InputObject(_) => "INPUT_OBJECT_KW",
-      Self::InputFieldDefinition(_) => "INPUT_FIELD_DEFINITION_KW",
-    }
-  }
-}
-
-/// Represents any location where a directive can be applied in GraphQL.
-///
-/// This is the top-level enum that encompasses both executable and type system
-/// directive locations. It provides a unified interface for working with all
-/// possible directive placement locations in GraphQL documents.
-///
-/// Spec: [DirectiveLocation](https://spec.graphql.org/draft/#DirectiveLocation)
-#[derive(Debug, Clone, Copy, IsVariant, From, Unwrap, TryUnwrap)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum Location {
-  /// Executable directive location
-  Executable(ExecutableDirectiveLocation),
-  /// Type system directive location
-  TypeSystem(TypeSystemDirectiveLocation),
-}
-
-impl DisplaySDL for Location {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    match self {
-      Self::Executable(loc) => DisplaySDL::fmt(loc, f),
-      Self::TypeSystem(loc) => DisplaySDL::fmt(loc, f),
-    }
-  }
-}
-
-impl DisplayHuman for Location {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    match self {
-      Self::Executable(loc) => DisplayHuman::fmt(loc, f),
-      Self::TypeSystem(loc) => DisplayHuman::fmt(loc, f),
-    }
-  }
-}
-
-impl DisplaySyntaxTree for Location {
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    match self {
-      Self::Executable(loc) => DisplaySyntaxTree::fmt(loc, level, indent, f),
-      Self::TypeSystem(loc) => DisplaySyntaxTree::fmt(loc, level, indent, f),
-    }
-  }
-}
-
-impl Location {
-  /// Returns a reference to the span covering the directive location token.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    match self {
-      Self::Executable(loc) => loc.span(),
-      Self::TypeSystem(loc) => loc.span(),
-    }
-  }
-}
-
-macro_rules! from_location {
-  ($($variant:ident: [$($sub_variant:ident),+$(,)?]), +$(,)?) => {
-    $(
-      $(
-        impl From<$sub_variant> for Location {
-          fn from(location: $sub_variant) -> Self {
-            Self::$variant(location.into())
-          }
-        }
-      )*
-    )*
-  };
-}
-
-from_location!(
-  Executable: [
-    QueryLocation,
-    MutationLocation,
-    SubscriptionLocation,
-    FieldLocation,
-    FragmentDefinitionLocation,
-    FragmentSpreadLocation,
-    InlineFragmentLocation,
-    VariableDefinitionLocation
-  ],
-  TypeSystem: [
-    SchemaLocation,
-    ScalarLocation,
-    ObjectLocation,
-    FieldDefinitionLocation,
-    ArgumentDefinitionLocation,
-    InterfaceLocation,
-    UnionLocation,
-    EnumLocation,
-    EnumValueLocation,
-    InputObjectLocation,
-    InputFieldDefinitionLocation,
-  ],
-);
-
 /// Represents a collection of directive locations where a directive can be applied.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DirectiveLocations<Container = Vec<Location>> {
+pub struct DirectiveLocations<Location, Container = Vec<Location>> {
   span: Span,
   locations: Container,
+  _m: PhantomData<Location>,
 }
 
-impl<Container> AsSpan<Span> for DirectiveLocations<Container> {
+impl<Location, Container> AsSpan<Span> for DirectiveLocations<Location, Container> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Container> IntoSpan<Span> for DirectiveLocations<Container> {
+impl<Location, Container> IntoSpan<Span> for DirectiveLocations<Location, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Container> IntoComponents for DirectiveLocations<Container> {
+impl<Location, Container> IntoComponents for DirectiveLocations<Location, Container> {
   type Components = (Span, Container);
 
   #[inline]
@@ -716,7 +43,7 @@ impl<Container> IntoComponents for DirectiveLocations<Container> {
   }
 }
 
-impl<Container> DirectiveLocations<Container> {
+impl<Location, Container> DirectiveLocations<Location, Container> {
   /// Returns a reference to the span covering the entire directive locations.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -739,11 +66,11 @@ impl<Container> DirectiveLocations<Container> {
   }
 }
 
-impl<'a, Container, I, T, Error> Parseable<'a, I, T, Error> for DirectiveLocations<Container>
+impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error> for DirectiveLocations<Location, Container>
 where
-  Container: chumsky::container::Container<Location>,
+  Container: chumsky::container::Container<Location> + 'a,
   Pipe: Parseable<'a, I, T, Error>,
-  Location: Parseable<'a, I, T, Error>,
+  Location: Parseable<'a, I, T, Error> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -761,14 +88,15 @@ where
       .collect()
       .map_with(|locations, exa| {
         let span = exa.span();
-        Self { span, locations }
+        Self { span, locations, _m: PhantomData, }
       })
   }
 }
 
-impl<Container> DisplaySDL for DirectiveLocations<Container>
+impl<Location, Container> DisplaySDL for DirectiveLocations<Location, Container>
 where
   Container: AsRef<[Location]>,
+  Location: DisplaySDL,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
