@@ -7,8 +7,28 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// The GraphQL parser combinators.
-pub use smear_parser as parser;
+/// The error types and traits
+pub mod error;
 
-/// The concrete GraphQL parser implementation based on the parser combinators.
-pub use smear_graphql as graphql;
+/// The hints about expection of GraphQL definitions
+pub mod hints;
+
+/// Punctuation tokens.
+pub mod punctuator;
+
+/// Keyword tokens.
+pub mod keywords;
+
+/// The scaffold structures for GraphQL definitions
+pub mod scaffold;
+
+/// The lexers for GraphQL or GraphQL-like DSLs.
+pub mod lexer;
+
+/// The parsers for GraphQL or GraphQL-like DSLs.
+pub mod parser;
+
+#[doc(hidden)]
+pub mod __private {
+  pub use logosky::{self, chumsky};
+}

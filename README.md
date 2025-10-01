@@ -3,7 +3,7 @@
 </div>
 <div align="center">
 
-You have a graph, and now, it is time to smear on it!
+Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs.
 
 [<img alt="github" src="https://img.shields.io/badge/GITHUB-smear-8da0cb?style=for-the-badge&logo=Github" height="22">][Github-url]
 <!-- [<img alt="Build" src="https://img.shields.io/github/actions/workflow/status/al8n/derivit/viewit.yml?logo=Github-Actions&style=for-the-badge" height="22">][CI-url] -->

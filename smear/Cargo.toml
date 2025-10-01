@@ -2,59 +2,34 @@
 name = "smear"
 version.workspace = true
 edition.workspace = true
-# repository.workspace = true
-# homepage.workspace = true
+repository.workspace = true
+homepage.workspace = true
 license.workspace = true
-description = "A graphql query parser and optimizer for over any database."
+description = "Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs."
+
 
 [features]
-default = ["std"]
-alloc = ["smear-graphql/alloc", "smear-parser/alloc"]
-std = ["smear-graphql/std", "smear-parser/std"]
+default = ["std", "smallvec", "graphql", "graphqlx"]
+alloc = []
+std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
-# bigint = ["dep:num-bigint"]
-# bigdecimal = ["dep:bigdecimal"]
-# chrono = ["dep:chrono"]
-# decimal = ["dep:rust_decimal"]
-# humantime = ["dep:humantime"]
-# indexmap = ["dep:indexmap"]
-# url = ["dep:url"]
+cst = ["std"]
+graphql = []
+graphqlx = []
 
+
+bytes = ["dep:bytes", "logosky/bytes"]
+bstr = ["dep:bstr", "logosky/bstr"]
+hipstr = ["dep:hipstr", "logosky/hipstr"]
 
 [dependencies]
-smear-parser.workspace = true
-smear-graphql.workspace = true
+derive_more.workspace = true
+either = { version = "1", default-features = false }
+paste = "1"
+thiserror.workspace = true
+logosky.workspace = true
 
-
-
-# apollo-parser.workspace = true
-# apollo-encoder.workspace = true
-# salsa.workspace = true
-# codespan-reporting = "0.11"
-# smear-derive = { path = "../derive" }
-# smear-types = { path = "../types" }
-# derive_more = "0.99"
-# paste = "1" # remove when concat_idents is stable
-# rowan = "0.15"
-# salsa = "0.16"
-# strsim = "0.10"
-# strum = "0.25"
-# viewit = "0.1.5"
-# uuid = { version = "1.4", features = ["serde", "v4"] }
-# ordered-float = { version = "3.9", features = ["std"] }
-# once_cell = "1.18"
-# thiserror = "1.0.31"
-
-# # optional dependencies
-# num-bigint = { version = "0.4", optional = true }
-# bigdecimal = { version = "0.4", optional = true }
-# rust_decimal = { version = "1.32", optional = true }
-
-# humantime = { version = "2.1", optional = true }
-# chrono = { version = "0.4", optional = true }
-
-# indexmap = { version = "2", optional = true }
-# url = { version = "2.4", optional = true }
-
-# [dev-dependencies]
-# trybuild = "1"
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+hipstr = { version = "0.8", default-features = false, optional = true }
+bytes = { workspace = true, optional = true }
+bstr = { workspace = true, optional = true }

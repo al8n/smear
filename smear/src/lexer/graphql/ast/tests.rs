@@ -4,7 +4,7 @@ use super::*;
 
 use crate::lexer::{
   LitInlineStr,
-  tests::{self, TestToken},
+  graphql::tests::{self, TestToken},
 };
 
 type StrAstToken<'a> = AstToken<&'a str>;
@@ -30,12 +30,12 @@ impl<'a> TestToken<'a> for AstToken<&'a str> {
 
   #[inline]
   fn from_float_literal(s: &'a str) -> Self {
-    Self::Float(s)
+    Self::LitFloat(s)
   }
 
   #[inline]
   fn from_integer_literal(s: &'a str) -> Self {
-    Self::Int(s)
+    Self::LitInt(s)
   }
 
   #[inline]
