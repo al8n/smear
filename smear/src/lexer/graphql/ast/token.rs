@@ -22,11 +22,6 @@ macro_rules! token {
         type Logos = Token $(<$lt>)?;
 
         #[inline(always)]
-        fn from_logos(value: Self::Logos) -> Self {
-          Self::from(value)
-        }
-
-        #[inline(always)]
         fn kind(&self) -> Self::Kind {
           self.kind()
         }

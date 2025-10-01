@@ -74,7 +74,7 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
       match self.inner.next() {
         None => return None,
         Some(Ok(tok)) => {
-          let tok = T::from_logos(tok);
+          let tok = T::from(tok);
           if tok.is_ignored() {
             // continue lexing
             continue;
