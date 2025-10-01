@@ -9,11 +9,7 @@ use logosky::{
   },
 };
 
-use crate::{
-  error::ParseVariableValueError,
-  hints::VariableValueHint,
-  punctuator::Dollar,
-};
+use crate::{error::ParseVariableValueError, hints::VariableValueHint, punctuator::Dollar};
 
 /// A GraphQL variable reference.
 ///

@@ -33,3 +33,51 @@ smallvec = { version = "1", default-features = false, features = ["const_new"], 
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = "0.7"
+apollo-parser = "0.8"
+graphql-parser = "0.4"
+async-graphql-parser = "7"
+cynic-parser = "0.10"
+paste = "1"
+
+[[bench]]
+name = "directive_args"
+path = "benches/directive_args.rs"
+harness = false
+
+[[bench]]
+name = "github"
+path = "benches/github_schema.rs"
+harness = false
+
+[[bench]]
+name = "inline_fragment"
+path = "benches/inline_fragment.rs"
+harness = false
+
+[[bench]]
+name = "kitchen_sink"
+path = "benches/kitchen_sink.rs"
+harness = false
+
+[[bench]]
+name = "minimal"
+path = "benches/minimal.rs"
+harness = false
+
+[[bench]]
+name = "query_vars"
+path = "benches/query_vars.rs"
+harness = false
+
+[[bench]]
+name = "query"
+path = "benches/query.rs"
+harness = false
+
+[[bench]]
+name = "supergraph"
+path = "benches/supergraph.rs"
+harness = false

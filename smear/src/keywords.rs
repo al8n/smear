@@ -2,7 +2,7 @@
 ///
 /// # Examples
 /// ```rust
-/// use smear_parser::keyword;
+/// use smear::keyword;
 ///
 /// keyword! {
 ///   (MyKeyword, "MY_KEYWORD", "my_keyword"),

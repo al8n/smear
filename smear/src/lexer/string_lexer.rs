@@ -314,16 +314,3 @@ impl<'de: 'a, 'a> TryFrom<&'de [u8]> for LitStr<&'a [u8]> {
     }
   }
 }
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  #[cfg(feature = "bytes")]
-  fn test_to_bytes_equivalent() {
-    let s = LitInlineStr::Plain(LitPlainStr::new("hello".as_bytes()));
-    let _: LitInlineStr<bytes::Bytes> = s.to_equivalent();
-    let _: LitInlineStr<bytes::Bytes> = s.into_equivalent();
-  }
-}

@@ -9,7 +9,10 @@ use logosky::{
 
 use core::fmt::Display;
 
-use crate::lexer::{graphql::ast::{AstLexerErrors, AstTokenKind}, LitStr};
+use crate::lexer::{
+  LitStr,
+  graphql::ast::{AstLexerErrors, AstTokenKind},
+};
 
 use super::super::*;
 

@@ -240,15 +240,6 @@ impl<Type> ListType<Type> {
   /// This is the type of individual elements in the list. It can be any
   /// valid GraphQL type including named types, other list types, or even
   /// nested list types for multi-dimensional arrays.
-  ///
-  /// ## Examples
-  /// ```rust
-  /// // For list type [String!]
-  /// let element_type = list_type.ty(); // References String!
-  ///
-  /// // For nested list [[User]]
-  /// let element_type = list_type.ty(); // References [User]
-  /// ```
   #[inline]
   pub const fn ty(&self) -> &Type {
     &self.ty
