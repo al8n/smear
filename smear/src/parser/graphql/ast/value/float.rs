@@ -9,10 +9,7 @@ use logosky::{
 
 use core::fmt::Display;
 
-use crate::{
-  error::Error,
-  lexer::ast::{AstLexerErrors, TokenKind},
-};
+use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
 
 use super::super::*;
 
@@ -150,8 +147,8 @@ where
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Float(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, TokenKind::Float, span).into()),
+          AstToken::LitFloat(val) => Ok(Self::new(span, val)),
+          tok => Err(Error::unexpected_token(tok, AstTokenKind::Float, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

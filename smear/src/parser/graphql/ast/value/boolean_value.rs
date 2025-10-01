@@ -4,10 +4,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, sdl_display::DisplaySDL},
 };
 
-use crate::{
-  error::Error,
-  lexer::ast::{AstLexerErrors, TokenKind},
-};
+use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
 
 use super::super::*;
 
@@ -115,7 +112,7 @@ where
             () if "false".equivalent(&ident) => BooleanValue::new(span, false),
             _ => return Err(Error::invalid_boolean_value(ident, span).into()),
           }),
-          tok => Err(Error::unexpected_token(tok, TokenKind::Boolean, span).into()),
+          tok => Err(Error::unexpected_token(tok, AstTokenKind::Boolean, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

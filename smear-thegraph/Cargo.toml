@@ -1,9 +1,0 @@
-[package]
-name = "smear-thegraph"
-version.workspace = true
-edition.workspace = true
-repository.workspace = true
-homepage.workspace = true
-license.workspace = true
-
-[dependencies]

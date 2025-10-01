@@ -9,8 +9,8 @@ use logosky::{
   },
 };
 
-use super::{AstToken, AstTokenErrors, AstTokenStream};
-use crate::{error::Error, lexer::ast::AstLexerErrors, parser::ast::AstTokenKind};
+use super::{AstToken, AstTokenErrors, AstTokenStream, Error};
+use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
 
 /// A GraphQL name identifier.
 ///

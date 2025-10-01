@@ -2,12 +2,12 @@ use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
 };
-use smear_parser::{
-  definitions::ast,
-  lang::keywords::{self, *},
-};
 
-use crate::{error::Error, lexer::ast::AstLexerErrors};
+use crate::{
+  keywords::{self, *},
+  lexer::graphql::ast::AstLexerErrors,
+  scaffold,
+};
 
 use super::*;
 
@@ -69,23 +69,23 @@ keyword_parser! {
 }
 
 keyword_parser! {
-  ast::QueryLocation:"QUERY",
-  ast::MutationLocation:"MUTATION",
-  ast::SubscriptionLocation:"SUBSCRIPTION",
-  ast::FieldLocation:"FIELD",
-  ast::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
-  ast::FragmentSpreadLocation:"FRAGMENT_SPREAD",
-  ast::InlineFragmentLocation:"INLINE_FRAGMENT",
-  ast::VariableDefinitionLocation:"VARIABLE_DEFINITION",
-  ast::SchemaLocation:"SCHEMA",
-  ast::ScalarLocation:"SCALAR",
-  ast::ObjectLocation:"OBJECT",
-  ast::FieldDefinitionLocation:"FIELD_DEFINITION",
-  ast::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
-  ast::InterfaceLocation:"INTERFACE",
-  ast::UnionLocation:"UNION",
-  ast::EnumLocation:"ENUM",
-  ast::EnumValueLocation:"ENUM_VALUE",
-  ast::InputObjectLocation:"INPUT_OBJECT",
-  ast::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
+  scaffold::QueryLocation:"QUERY",
+  scaffold::MutationLocation:"MUTATION",
+  scaffold::SubscriptionLocation:"SUBSCRIPTION",
+  scaffold::FieldLocation:"FIELD",
+  scaffold::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
+  scaffold::FragmentSpreadLocation:"FRAGMENT_SPREAD",
+  scaffold::InlineFragmentLocation:"INLINE_FRAGMENT",
+  scaffold::VariableDefinitionLocation:"VARIABLE_DEFINITION",
+  scaffold::SchemaLocation:"SCHEMA",
+  scaffold::ScalarLocation:"SCALAR",
+  scaffold::ObjectLocation:"OBJECT",
+  scaffold::FieldDefinitionLocation:"FIELD_DEFINITION",
+  scaffold::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
+  scaffold::InterfaceLocation:"INTERFACE",
+  scaffold::UnionLocation:"UNION",
+  scaffold::EnumLocation:"ENUM",
+  scaffold::EnumValueLocation:"ENUM_VALUE",
+  scaffold::InputObjectLocation:"INPUT_OBJECT",
+  scaffold::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
 }

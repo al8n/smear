@@ -1,13 +1,13 @@
+use crate::{
+  keywords::On,
+  punctuator::{LBrace, RBrace, Spread},
+  scaffold::{self, FragmentSpread},
+};
 use derive_more::{From, Into};
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-use smear_parser::lang::{
-  self, FragmentSpread,
-  keywords::On,
-  punctuator::{LBrace, RBrace, Spread},
 };
 
 use super::selection_set::{Selection, SelectionSet};
@@ -66,7 +66,7 @@ use super::selection_set::{Selection, SelectionSet};
 #[derive(Debug, Clone, From, Into)]
 #[allow(clippy::type_complexity)]
 pub struct Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
-  pub(super)  lang::Field<
+  pub(super)  scaffold::Field<
     Alias,
     Name,
     Arguments,
@@ -213,11 +213,11 @@ where
       // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
         // SelectionSet needs a `Selection` parser
-        let selection_set = lang::SelectionSet::parser_with(selection.clone());
+        let selection_set = scaffold::SelectionSet::parser_with(selection.clone());
 
         let spread = FragmentSpread::parser().map(|fs| Selection::FragmentSpread(fs));
 
-        let inline = lang::InlineFragment::parser_with(
+        let inline = scaffold::InlineFragment::parser_with(
           TypeCondition::parser(),
           Directives::parser(),
           selection_set.clone(),
@@ -228,9 +228,10 @@ where
       });
 
       // Pass the selection parser to the selection set
-      let selection_set = lang::SelectionSet::parser_with(selection);
+      let selection_set = scaffold::SelectionSet::parser_with(selection);
 
-      lang::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
+      scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
+        .map(Self)
     })
   }
 }

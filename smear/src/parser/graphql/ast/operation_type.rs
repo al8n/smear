@@ -3,12 +3,12 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{Span, cmp::Equivalent},
 };
-use smear_parser::{
-  definitions::ast::OperationType,
-  lang::keywords::{Mutation, Query, Subscription},
-};
 
-use crate::{error::Error, lexer::ast::AstLexerErrors};
+use crate::{
+  keywords::{Mutation, Query, Subscription},
+  lexer::graphql::ast::AstLexerErrors,
+  scaffold::OperationType,
+};
 
 use super::*;
 

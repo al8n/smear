@@ -37,10 +37,10 @@ macro_rules! atom_parser {
           _ => Self::Enum(EnumValue::new(span, name)),
         }
       },
-      Lexed::Token(Spanned { span, data: AstToken::Int(val) }) => {
+      Lexed::Token(Spanned { span, data: AstToken::LitInt(val) }) => {
         Self::Int(IntValue::new(span, val))
       },
-      Lexed::Token(Spanned { span, data: AstToken::Float(val) }) => {
+      Lexed::Token(Spanned { span, data: AstToken::LitFloat(val) }) => {
         Self::Float(FloatValue::new(span, val))
       },
       Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),

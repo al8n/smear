@@ -9,14 +9,9 @@ use logosky::{
 
 use core::fmt::Display;
 
-use crate::{
-  error::Error,
-  lexer::ast::{AstLexerErrors, TokenKind},
-};
+use crate::lexer::{graphql::ast::{AstLexerErrors, AstTokenKind}, LitStr};
 
 use super::super::*;
-
-pub use crate::lexer::{LitBlockStr, LitInlineStr, LitStr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StringValue<S> {
@@ -137,7 +132,7 @@ where
         Ok(match tok {
           AstToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
           AstToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
-          tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
+          tok => return Err(Error::unexpected_token(tok, AstTokenKind::String, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

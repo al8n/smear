@@ -1,9 +1,6 @@
 [workspace]
 members = [
   "smear",
-  "smear-graphql",
-  "smear-parser",
-  "smear-thegraph",
 ]
 resolver = "3"
 
@@ -25,6 +22,3 @@ logosky = { version = "*", path = "../logosky", default-features = false }
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
-
-smear-graphql = { path = "smear-graphql", default-features = false }
-smear-parser = { path = "smear-parser", default-features = false }

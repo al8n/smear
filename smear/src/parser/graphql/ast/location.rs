@@ -3,11 +3,11 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{Span, cmp::Equivalent},
 };
-use smear_parser::definitions::ast::{
-  self, ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation,
-};
 
-use crate::{error::Error, lexer::ast::AstLexerErrors};
+use crate::{
+  lexer::graphql::ast::AstLexerErrors,
+  scaffold::{self, ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation},
+};
 
 use super::*;
 
@@ -31,70 +31,76 @@ where
           AstToken::Identifier(name) => Ok({
             match () {
               () if "QUERY".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::Query(ast::QueryLocation::new(span)),
+                ExecutableDirectiveLocation::Query(scaffold::QueryLocation::new(span)),
               ),
               () if "MUTATION".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::Mutation(ast::MutationLocation::new(span)),
+                ExecutableDirectiveLocation::Mutation(scaffold::MutationLocation::new(span)),
               ),
-              () if "SUBSCRIPTION".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::Subscription(ast::SubscriptionLocation::new(span)),
-              ),
+              () if "SUBSCRIPTION".equivalent(&name) => {
+                Self::Executable(ExecutableDirectiveLocation::Subscription(
+                  scaffold::SubscriptionLocation::new(span),
+                ))
+              }
               () if "FIELD_DEFINITION".equivalent(&name) => {
                 Self::TypeSystem(TypeSystemDirectiveLocation::FieldDefinition(
-                  ast::FieldDefinitionLocation::new(span),
+                  scaffold::FieldDefinitionLocation::new(span),
                 ))
               }
               () if "FIELD".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::Field(ast::FieldLocation::new(span)),
+                ExecutableDirectiveLocation::Field(scaffold::FieldLocation::new(span)),
               ),
               () if "FRAGMENT_DEFINITION".equivalent(&name) => {
                 Self::Executable(ExecutableDirectiveLocation::FragmentDefinition(
-                  ast::FragmentDefinitionLocation::new(span),
+                  scaffold::FragmentDefinitionLocation::new(span),
                 ))
               }
-              () if "FRAGMENT_SPREAD".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::FragmentSpread(ast::FragmentSpreadLocation::new(span)),
-              ),
-              () if "INLINE_FRAGMENT".equivalent(&name) => Self::Executable(
-                ExecutableDirectiveLocation::InlineFragment(ast::InlineFragmentLocation::new(span)),
-              ),
+              () if "FRAGMENT_SPREAD".equivalent(&name) => {
+                Self::Executable(ExecutableDirectiveLocation::FragmentSpread(
+                  scaffold::FragmentSpreadLocation::new(span),
+                ))
+              }
+              () if "INLINE_FRAGMENT".equivalent(&name) => {
+                Self::Executable(ExecutableDirectiveLocation::InlineFragment(
+                  scaffold::InlineFragmentLocation::new(span),
+                ))
+              }
               () if "VARIABLE_DEFINITION".equivalent(&name) => {
                 Self::Executable(ExecutableDirectiveLocation::VariableDefinition(
-                  ast::VariableDefinitionLocation::new(span),
+                  scaffold::VariableDefinitionLocation::new(span),
                 ))
               }
               () if "SCHEMA".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Schema(ast::SchemaLocation::new(span)),
+                TypeSystemDirectiveLocation::Schema(scaffold::SchemaLocation::new(span)),
               ),
               () if "SCALAR".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Scalar(ast::ScalarLocation::new(span)),
+                TypeSystemDirectiveLocation::Scalar(scaffold::ScalarLocation::new(span)),
               ),
               () if "OBJECT".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Object(ast::ObjectLocation::new(span)),
+                TypeSystemDirectiveLocation::Object(scaffold::ObjectLocation::new(span)),
               ),
               () if "ARGUMENT_DEFINITION".equivalent(&name) => {
                 Self::TypeSystem(TypeSystemDirectiveLocation::ArgumentDefinition(
-                  ast::ArgumentDefinitionLocation::new(span),
+                  scaffold::ArgumentDefinitionLocation::new(span),
                 ))
               }
               () if "INTERFACE".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Interface(ast::InterfaceLocation::new(span)),
+                TypeSystemDirectiveLocation::Interface(scaffold::InterfaceLocation::new(span)),
               ),
               () if "UNION".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Union(ast::UnionLocation::new(span)),
+                TypeSystemDirectiveLocation::Union(scaffold::UnionLocation::new(span)),
               ),
               () if "ENUM_VALUE".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::EnumValue(ast::EnumValueLocation::new(span)),
+                TypeSystemDirectiveLocation::EnumValue(scaffold::EnumValueLocation::new(span)),
               ),
               () if "ENUM".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::Enum(ast::EnumLocation::new(span)),
+                TypeSystemDirectiveLocation::Enum(scaffold::EnumLocation::new(span)),
               ),
               () if "INPUT_OBJECT".equivalent(&name) => Self::TypeSystem(
-                TypeSystemDirectiveLocation::InputObject(ast::InputObjectLocation::new(span)),
+                TypeSystemDirectiveLocation::InputObject(scaffold::InputObjectLocation::new(span)),
               ),
               () if "INPUT_FIELD_DEFINITION".equivalent(&name) => {
                 Self::TypeSystem(TypeSystemDirectiveLocation::InputFieldDefinition(
-                  ast::InputFieldDefinitionLocation::new(span),
+                  scaffold::InputFieldDefinitionLocation::new(span),
                 ))
               }
               _ => return Err(Error::unknown_directive_location(name, span).into()),

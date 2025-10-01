@@ -9,9 +9,10 @@ use logosky::{
   },
 };
 
-use smear_parser::{
-  error::{ParseVariableValueError, VariableValueHint},
-  lang::punctuator::Dollar,
+use crate::{
+  error::ParseVariableValueError,
+  hints::VariableValueHint,
+  punctuator::Dollar,
 };
 
 /// A GraphQL variable reference.

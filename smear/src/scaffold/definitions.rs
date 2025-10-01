@@ -1,2 +1,4 @@
+pub use ast::*;
+
 /// The ast generic AST for definition specifications.
-pub mod ast;
+mod ast;

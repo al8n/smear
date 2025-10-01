@@ -6,13 +6,12 @@ use logosky::{
     sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree,
   },
 };
-use smear_parser::lang;
 
-use crate::{error::Error, lexer::ast::AstLexerErrors};
+use crate::{lexer::graphql::ast::AstLexerErrors, scaffold};
 
 use super::*;
 
-pub type TypeCondition<S> = lang::TypeCondition<Name<S>>;
+pub type TypeCondition<S> = scaffold::TypeCondition<Name<S>>;
 
 impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
   for FragmentName<S>

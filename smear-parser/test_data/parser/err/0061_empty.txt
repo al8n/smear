@@ -1,3 +1,0 @@
-- DOCUMENT@0..0
-- ERROR@1:1 "Unexpected <EOF>." EOF
-recursion limit: 500, high: 0

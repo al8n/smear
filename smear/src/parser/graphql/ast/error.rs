@@ -1,14 +1,18 @@
+use crate::{
+  error::{
+    ParseVariableValueError, UnclosedListValueError, UnclosedObjectValueError,
+    UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
+    UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
+    UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
+  },
+  hints::{
+    EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
+    ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
+  },
+};
 use logosky::{
   Token,
   utils::{IntoComponents, Span},
-};
-use smear_parser::error::{
-  EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-  ObjectTypeExtensionHint, ParseVariableValueError, SchemaExtensionHint, UnclosedListValueError,
-  UnclosedObjectValueError, UnexpectedEndOfEnumExtensionError,
-  UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError,
-  UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError,
-  UnexpectedEndOfUnionExtensionError, UnionTypeExtensionHint, VariableValueHint,
 };
 
 use super::*;
@@ -21,7 +25,7 @@ where
   fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
     Self::unexpected_token(
       AstToken::Identifier(name.into_components().1),
-      TokenKind::Dollar,
+      AstTokenKind::Dollar,
       span,
     )
   }

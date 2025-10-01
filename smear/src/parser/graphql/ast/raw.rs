@@ -3,11 +3,8 @@ use super::{
   Variable, field, selection_set,
 };
 use crate::scaffold::{
-  self,
-  ast::{
-    Described, DirectiveLocations, ImplementInterfaces, Location, OperationType, Type,
-    UnionMemberTypes,
-  },
+  self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType, Type,
+  UnionMemberTypes,
 };
 
 /// The default container type used for arguments in the AST.
@@ -127,7 +124,7 @@ pub type ArgumentsDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::ArgumentsDefinition<
+> = scaffold::ArgumentsDefinition<
   InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>,
   InputValuesContainer,
 >;
@@ -138,7 +135,7 @@ pub type DirectiveDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
-> = scaffold::ast::DirectiveDefinition<
+> = scaffold::DirectiveDefinition<
   Name<S>,
   ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
   DirectiveLocations<LocationsContainer>,
@@ -148,7 +145,7 @@ pub type VariableDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::VariableDefinition<
+> = scaffold::VariableDefinition<
   Variable<S>,
   Type<Name<S>>,
   DefaultInputValue<S>,
@@ -160,7 +157,7 @@ pub type VariablesDefinition<
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
   VariablesContainer = DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::VariablesDefinition<
+> = scaffold::VariablesDefinition<
   VariableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   VariablesContainer,
 >;
@@ -170,7 +167,7 @@ pub type InputValueDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
-  scaffold::ast::InputValueDefinition<
+  scaffold::InputValueDefinition<
     Name<S>,
     Type<Name<S>>,
     DefaultInputValue<S>,
@@ -184,7 +181,7 @@ pub type InputFieldsDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::InputFieldsDefinition<
+> = scaffold::InputFieldsDefinition<
   InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>,
   InputValuesContainer,
 >;
@@ -195,7 +192,7 @@ pub type FieldDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
-  scaffold::ast::FieldDefinition<
+  scaffold::FieldDefinition<
     Name<S>,
     ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
     Type<Name<S>>,
@@ -215,7 +212,7 @@ pub type FieldsDefinition<
     DirectivesContainer,
     InputValuesContainer,
   >,
-> = scaffold::ast::FieldsDefinition<
+> = scaffold::FieldsDefinition<
   FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
   FieldsContainer,
 >;
@@ -225,7 +222,7 @@ pub type InputObjectTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::InputObjectTypeDefinition<
+> = scaffold::InputObjectTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   InputFieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
@@ -246,7 +243,7 @@ pub type InputObjectTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::InputObjectTypeExtension<
+> = scaffold::InputObjectTypeExtension<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   InputFieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
@@ -256,7 +253,7 @@ pub type FragmentDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::FragmentDefinition<
+> = scaffold::FragmentDefinition<
   FragmentName<S>,
   TypeCondition<S>,
   Directives<S, ArgumentsContainer>,
@@ -267,7 +264,7 @@ pub type ScalarTypeDefinition<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::ScalarTypeDefinition<
+> = scaffold::ScalarTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
 >;
@@ -282,7 +279,7 @@ pub type ScalarTypeExtension<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::ScalarTypeExtension<
+> = scaffold::ScalarTypeExtension<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
 >;
@@ -293,7 +290,7 @@ pub type ObjectTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::ObjectTypeDefinition<
+> = scaffold::ObjectTypeDefinition<
   Name<S>,
   ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
@@ -323,7 +320,7 @@ pub type ObjectTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::ObjectTypeExtension<
+> = scaffold::ObjectTypeExtension<
   Name<S>,
   ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
@@ -336,7 +333,7 @@ pub type InterfaceTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::InterfaceTypeDefinition<
+> = scaffold::InterfaceTypeDefinition<
   Name<S>,
   ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
@@ -366,7 +363,7 @@ pub type InterfaceTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::InterfaceTypeExtension<
+> = scaffold::InterfaceTypeExtension<
   Name<S>,
   ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
@@ -378,7 +375,7 @@ pub type UnionTypeDefinition<
   UnionMemberTypesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::UnionTypeDefinition<
+> = scaffold::UnionTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   UnionMemberTypes<Name<S>, UnionMemberTypesContainer>,
@@ -399,7 +396,7 @@ pub type UnionTypeExtension<
   UnionMemberTypesContainer = DefaultNamesContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::UnionTypeExtension<
+> = scaffold::UnionTypeExtension<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   UnionMemberTypes<Name<S>, UnionMemberTypesContainer>,
@@ -410,7 +407,7 @@ pub type EnumValueDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
-  scaffold::ast::EnumValueDefinition<
+  scaffold::EnumValueDefinition<
     Name<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
@@ -422,7 +419,7 @@ pub type EnumValuesDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::EnumValuesDefinition<
+> = scaffold::EnumValuesDefinition<
   EnumValueDefinition<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer,
 >;
@@ -432,7 +429,7 @@ pub type EnumTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::EnumTypeDefinition<
+> = scaffold::EnumTypeDefinition<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
@@ -453,13 +450,13 @@ pub type EnumTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::EnumTypeExtension<
+> = scaffold::EnumTypeExtension<
   Name<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
 >;
 
-pub type NamedOperationDefinition<S> = scaffold::ast::NamedOperationDefinition<
+pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
   Name<S>,
   OperationType,
   VariablesDefinition<S>,
@@ -471,7 +468,7 @@ pub type OperationDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::OperationDefinition<
+> = scaffold::OperationDefinition<
   Name<S>,
   OperationType,
   VariablesDefinition<S, ArgumentsContainer, DirectivesContainer>,
@@ -480,17 +477,17 @@ pub type OperationDefinition<
 >;
 
 pub type RootOperationTypeDefinition<S> =
-  scaffold::ast::RootOperationTypeDefinition<Name<S>, OperationType>;
+  scaffold::RootOperationTypeDefinition<Name<S>, OperationType>;
 
 pub type RootOperationTypesDefinition<S, Container = DefaultRootOperationTypesContainer<S>> =
-  scaffold::ast::RootOperationTypesDefinition<RootOperationTypeDefinition<S>, Container>;
+  scaffold::RootOperationTypesDefinition<RootOperationTypeDefinition<S>, Container>;
 
 pub type SchemaDefinition<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   Container = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::SchemaDefinition<
+> = scaffold::SchemaDefinition<
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesDefinition<S, Container>,
 >;
@@ -500,7 +497,7 @@ pub type SchemaExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   Container = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::SchemaExtension<
+> = scaffold::SchemaExtension<
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesDefinition<S, Container>,
 >;
@@ -512,7 +509,7 @@ pub type TypeDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::TypeDefinition<
+> = scaffold::TypeDefinition<
   ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
   ObjectTypeDefinition<
     S,
@@ -542,7 +539,7 @@ pub type TypeSystemDefinition<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::TypeSystemDefinition<
+> = scaffold::TypeSystemDefinition<
   TypeDefinition<
     S,
     NamesContainer,
@@ -568,7 +565,7 @@ pub type TypeExtension<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::ast::TypeExtension<
+> = scaffold::TypeExtension<
   ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
   ObjectTypeExtension<
     S,
@@ -597,7 +594,7 @@ pub type TypeSystemExtension<
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::TypeSystemExtension<
+> = scaffold::TypeSystemExtension<
   TypeExtension<
     S,
     NamesContainer,
@@ -618,7 +615,7 @@ pub type TypeSystemDefinitionOrExtension<
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::TypeSystemDefinitionOrExtension<
+> = scaffold::TypeSystemDefinitionOrExtension<
   Described<
     TypeSystemDefinition<
       S,
@@ -647,7 +644,7 @@ pub type ExecutableDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ast::ExecutableDefinition<
+> = scaffold::ExecutableDefinition<
   OperationDefinition<S, ArgumentsContainer, DirectivesContainer>,
   FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
 >;
@@ -671,7 +668,7 @@ pub type Definition<
   >,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::ast::Definition<
+> = scaffold::Definition<
   TypeSystemDefinitionOrExtension<
     S,
     NamesContainer,
@@ -706,7 +703,7 @@ pub type TypeSystemDocument<
       RootOperationTypesContainer,
     >,
   >,
-> = scaffold::ast::Document<
+> = scaffold::Document<
   TypeSystemDefinitionOrExtension<
     S,
     NamesContainer,
@@ -727,7 +724,7 @@ pub type ExecutableDocument<
   DefinitionContainer = DefaultVec<
     ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   >,
-> = scaffold::ast::Document<
+> = scaffold::Document<
   ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   DefinitionContainer,
 >;
@@ -765,7 +762,7 @@ pub type Document<
       RootOperationTypesContainer,
     >,
   >,
-> = scaffold::ast::Document<
+> = scaffold::Document<
   Definition<
     S,
     ArgumentsContainer,
