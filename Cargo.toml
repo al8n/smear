@@ -1,23 +1,24 @@
 [workspace]
 members = [
   "smear",
-  "smear-graphql",
-  "smear-parser",
-  "smear-thegraph",
-  "smear-utils",
 ]
 resolver = "3"
 
 [workspace.package]
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/al8n/smear"
 homepage = "https://github.com/al8n/smear"
 license = "Apache-2.0 OR MIT"
+rust-version = "1.89"
 
 [workspace.dependencies]
-chumsky = { version = "0.10", default-features = false }
-derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref"] }
-smear-graphql = { path = "smear-graphql", default-features = false }
-smear-parser = { path = "smear-parser", default-features = false }
-smear-utils = { path = "smear-utils", default-features = false }
+bstr = { version = "1", default-features = false }
+bytes = { version = "1", default-features = false }
+chumsky = { version = "0.11", default-features = false }
+derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
+logosky = { version = "*", path = "../logosky", default-features = false }
+
+paste = "1"
+thiserror = { version = "2", default-features = false }
+
