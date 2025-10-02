@@ -37,17 +37,27 @@ macro_rules! token {
         source = $source,
         error(TokenErrors, handlers::$handlers::default_error)
       )]
-      #[logos(subpattern digit = r"[0-9]")]
-      #[logos(subpattern hex_digit = r"[0-9a-fA-F]")]
-      #[logos(subpattern octal_digit = r"[0-7]")]
-      #[logos(subpattern binary_digit = r"[01]")]
-      #[logos(subpattern digits_with_sep = r"[0-9_]*[0-9][0-9_]*")]
-      #[logos(subpattern decimal = r"(?&digit)[0-9_]*")]
-      #[logos(subpattern hex = r"0x_*(?&hex_digit)[0-9a-fA-F_]*")]
-      #[logos(subpattern octal = r"0o_*(?&octal_digit)[0-7_]*")]
-      #[logos(subpattern invalid_octal_digit = r"0o_*(?&digit)[0-9_]*")]
-      #[logos(subpattern binary = r"0b_*(?&binary_digit)[01_]*")]
-      #[logos(subpattern invalid_binary_digit = r"0b_*(?&digit)[0-9_]*")]
+      #[logos(subpattern digit = "[0-9]")]
+      #[logos(subpattern hex_digit = "[0-9a-fA-F]")]
+      #[logos(subpattern octal_digit = "[0-7]")]
+      #[logos(subpattern binary_digit = "[01]")]
+      #[logos(subpattern digits_with_sep = "[0-9_]*[0-9][0-9_]*")]
+      #[logos(subpattern hex_digits_with_sep = "[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
+      #[logos(subpattern decimal = "-?(?&digit)[0-9_]*")]
+      #[logos(subpattern hex_start = "-?0x_*")]
+      #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
+      #[logos(subpattern octal_start = "-?0o_*")]
+      #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
+      #[logos(subpattern invalid_octal_digit = "(?&octal_start)(?&digit)[0-9_]*")]
+      #[logos(subpattern binary_start = "-?0b_*")]
+      #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
+      #[logos(subpattern invalid_binary_digit = "(?&binary_start)(?&digit)[0-9_]*")]
+      #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
+      #[logos(subpattern esign = "[eE][+-]?")]
+      #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
+      #[logos(subpattern psign = "[pP][+-]?")]
+      #[logos(subpattern hex_exp = "(?&psign)(?&hex_digits_with_sep)")]
+      #[logos(subpattern hex_frac = "\\.(?&hex_digits_with_sep)")]
       pub enum Token $(<$lt>)? {
         #[token("&")]
         Ampersand,
@@ -94,6 +104,12 @@ macro_rules! token {
         #[token("|")]
         Pipe,
 
+        #[token("+")]
+        Plus,
+
+        #[token("-")]
+        Minus,
+
         #[token("...")]
         #[token("..", unterminated_spread_operator)]
         #[token(".", unterminated_spread_operator)]
@@ -102,33 +118,45 @@ macro_rules! token {
         #[token("=>")]
         FatArrow,
 
-        #[regex("-?(?&decimal)(\\.(?&digits_with_sep)[eE][+-]?(?&digits_with_sep)|\\.(?&digits_with_sep)|[eE][+-]?(?&digits_with_sep))", |lexer| handlers::$handlers::handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
-        #[regex(
-          "-?\\.(?&digits_with_sep)([eE][+-]?(?&digits_with_sep))?",
-          handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
-        )]
-        #[regex("-?(?&decimal)\\.[0-9_]+[eE][+-]?", handlers::$handlers::handle_exponent_error)]
-        #[regex("-?(?&decimal)\\._?", handlers::$handlers::handle_fractional_error)] 
-        #[regex("-?(?&decimal)[eE][+-]?", handlers::$handlers::handle_exponent_error)]
-        Float($slice),
-
         #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
         Identifier($slice),
 
-        #[regex("-?(?&decimal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[token("-", handlers::$handlers::unexpected_minus_token)]
-        #[token("+", handlers::$handlers::unexpected_plus_token)]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex(
+          "-?(?&frac)(?&exp)?",
+          handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
+        )]
+        #[regex("(?&decimal)(?&frac)(?&esign)", handlers::$handlers::handle_exponent_error)]
+        #[regex("(?&decimal)\\._*", handlers::$handlers::handle_fractional_error)] 
+        #[regex("(?&decimal)(?&esign)", handlers::$handlers::handle_exponent_error)]
+        Float($slice),
+
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exp(lexer))]
+        #[regex(
+          "-?(?&hex_frac)?(?&hex_exp)",
+          handlers::$handlers::handle_hex_float_missing_integer_part_error_and_suffix
+        )]
+        #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        #[regex("(?&hex)\\._*", handlers::$handlers::handle_hex_fractional_error)] 
+        #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        HexFloat($slice),
+
+        #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
         Decimal($slice),
 
-        #[regex("-?(?&binary)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("-?(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
+        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
+        #[regex("(?&binary_start)", |lexer| handlers::$handlers::missing_digits_after_binary_prefix(lexer))]
         Binary($slice),
 
-        #[regex("-?(?&octal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("-?(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
+        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
+        #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
         Octal($slice),
 
-        #[regex("-?(?&hex)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&hex_start)", |lexer| handlers::$handlers::missing_digits_after_hex_prefix(lexer))]
         Hex($slice),
 
         #[token("\"", |lexer| {

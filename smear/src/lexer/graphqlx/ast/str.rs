@@ -5,5 +5,6 @@
 
 #[test]
 fn t() {
-  // let a: i32 = -0o191919;
+  let a = "\x5634";
+  println!("{}", a);
 }
