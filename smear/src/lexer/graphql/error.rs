@@ -289,10 +289,10 @@ impl<Char> BadStateError for LexerError<Char, RecursionLimitExceeded>
   }
 }
 
-// impl<Char> BadStateError for LexerErrors<Char, RecursionLimitExceeded> {
-//   type StateError = RecursionLimitExceeded;
-//   #[inline]
-//   fn bad_state(span: Span, error: Self::StateError) -> Self {
-//     LexerError::const_new(span, LexerErrorData::State(error)).into()
-//   }
-// }
+impl<Char> BadStateError for LexerErrors<Char, RecursionLimitExceeded> {
+  type StateError = RecursionLimitExceeded;
+  #[inline]
+  fn bad_state(span: Span, error: Self::StateError) -> Self {
+    LexerError::const_new(span, LexerErrorData::State(error)).into()
+  }
+}

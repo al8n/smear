@@ -27,103 +27,6 @@ where
   .into()
 }
 
-#[inline(always)]
-pub(in crate::lexer) fn unexpected_plus_token<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<S::Slice<'a>, error::LexerError<char, Extras>>
-where
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-{
-  let span = lexer.span();
-  let pos = span.start;
-  Err(error::LexerError::unexpected_char(span.into(), '+', pos))
-}
-
-#[inline(always)]
-pub(in crate::lexer) fn unexpected_minus_token<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<S::Slice<'a>, error::LexerError<char, Extras>>
-where
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-{
-  let span = lexer.span();
-  let pos = span.start;
-  Err(error::LexerError::unexpected_char(span.into(), '-', pos))
-}
-
-#[inline]
-pub(in crate::lexer) fn leading_zero_error<'a, S, E, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-  leading_zeros: impl FnOnce(Lexeme<char>) -> E,
-) -> LexerError<Extras>
-where
-  E: Into<LexerErrorData<Extras>>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-  T: Logos<'a, Source = S>,
-{
-  let slice = lexer.slice();
-  let mut zeros = 0;
-
-  let mut chars = slice.as_ref().chars();
-
-  let zero_start_at = match chars.next() {
-    Some('-') => lexer.span().start + 1,
-    Some('0') => {
-      zeros += 1;
-      lexer.span().start
-    }
-    Some(_) | None => unreachable!("regex should ensure the first char is '-' or '0'"),
-  };
-
-  for ch in chars {
-    if ch == '0' {
-      zeros += 1;
-    } else {
-      break;
-    }
-  }
-
-  let l = if zeros == 1 {
-    let pc = PositionedChar::with_position('0', zero_start_at);
-    Lexeme::Char(pc)
-  } else {
-    Lexeme::Span(Span::from(zero_start_at..(zero_start_at + zeros)))
-  };
-
-  LexerError::new(lexer.span(), leading_zeros(l).into())
-}
-
-#[allow(clippy::result_large_err)]
-#[inline(always)]
-pub(in crate::lexer) fn handle_leading_zero_and_number_suffix_error<'a, S, T, LE, SE, Extras>(
-  lexer: &mut Lexer<'a, T>,
-  leading_zeros: impl FnOnce(Lexeme<char>) -> LE,
-  unexpected_suffix: impl FnOnce(Lexeme<char>) -> SE,
-) -> Result<S::Slice<'a>, LexerErrors<Extras>>
-where
-  LE: Into<LexerErrorData<Extras>>,
-  SE: Into<LexerErrorData<Extras>>,
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-{
-  let err = leading_zero_error(lexer, leading_zeros);
-  let mut errs = LexerErrors::default();
-  errs.push(err);
-  match handle_number_suffix(lexer, unexpected_suffix) {
-    Ok(_) => Err(errs),
-    Err(e) => {
-      errs.push(e);
-      Err(errs)
-    }
-  }
-}
-
 #[allow(clippy::result_large_err)]
 #[inline]
 pub(in crate::lexer) fn handle_float_missing_integer_part_error_and_suffix<'a, S, T, Extras>(
@@ -140,7 +43,7 @@ where
     LexerErrorData::Float(FloatError::MissingIntegerPart),
   ));
 
-  match handle_number_suffix(lexer, FloatError::UnexpectedSuffix) {
+  match handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(e);
@@ -229,23 +132,6 @@ where
   Err(fractional_error(lexer))
 }
 
-#[allow(clippy::result_large_err)]
-#[inline]
-pub(in crate::lexer) fn handle_leading_zeros_and_fractional_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<S::Slice<'a>, LexerErrors<Extras>>
-where
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-{
-  let err = leading_zero_error(lexer, FloatError::LeadingZeros);
-  let mut errs = LexerErrors::with_capacity(2);
-  errs.push(err);
-  errs.push(fractional_error(lexer));
-  Err(errs)
-}
-
 #[inline]
 pub(in crate::lexer) fn exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
@@ -331,25 +217,8 @@ where
   Err(exponent_error(lexer))
 }
 
-#[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_leading_zeros_and_exponent_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<S::Slice<'a>, LexerErrors<Extras>>
-where
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<str>,
-{
-  let err = leading_zero_error(lexer, FloatError::LeadingZeros);
-  let mut errs = LexerErrors::with_capacity(2);
-  errs.push(err);
-  errs.push(exponent_error(lexer));
-  Err(errs)
-}
-
-#[inline]
-pub(in crate::lexer) fn handle_number_suffix<'a, S, T, E, Extras>(
+pub(in crate::lexer) fn handle_decimal_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -367,7 +236,7 @@ where
 
   match iter.next() {
     // we have a following character after the float literal, need to report the error
-    Some(item @ ('a'..='z' | 'A'..='Z' | '_' | '.')) => {
+    Some(item @ ('a'..='z' | 'A'..='Z' | '.')) => {
       // the first char is already consumed and it cannot be a digit,
       curr += 1;
 

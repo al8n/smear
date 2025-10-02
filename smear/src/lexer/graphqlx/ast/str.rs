@@ -1,4 +1,4 @@
-// super::token!(str_token<'a>(&'a str, char, str, str));
+super::token!(str_token<'a>(&'a str, char, str, str, core::primitive::str::chars));
 
 // #[cfg(feature = "hipstr")]
 // super::token!(hipstr_token<'a>(hipstr::HipStr<'a>, char, str, logosky::source::CustomSource<hipstr::HipStr<'static>>));

@@ -1,20 +1,35 @@
 macro_rules! token {
-  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty)) => {
+  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty, $to_slice_iter:expr)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+        Logos, logos::Lexer, Lexable, utils::{recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}, Lexeme},
       };
       use crate::{
         error::StringErrors,
         lexer::{graphqlx::{
-          error::{LexerErrors, LexerError, IntError, FloatError},
-          handlers::{unterminated_spread_operator, decrease_recursion_depth, increase_recursion_depth, self},
+          error::{LexerErrors, LexerError, LexerErrorData, IntError, FloatError},
+          handlers::{increase_recursion_depth, self},
           ast::{AstToken, AstTokenKind},
-        }, LitBlockStr, LitInlineStr, SealedWrapper,},
+        }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
 
+      type TokenErrorData = LexerErrorData<$char, RecursionLimitExceeded>;
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
+      type TokenErrorOnlyResult = Result<(), TokenError>;
+
+      #[inline(always)]
+      fn handle_decimal_suffix<'a, E>(
+        lexer: &mut Lexer<'a, Token<'a>>,
+        unexpected_suffix: impl FnOnce(Lexeme<$char>) -> E,
+      ) -> Result<$slice, TokenError>
+      where
+        E: Into<TokenErrorData>,
+      {
+        let remainder = lexer.remainder();
+        handle_graphqlx_decimal_suffix(lexer, remainder.len(), $to_slice_iter(remainder), unexpected_suffix)
+          .map_err(|e| TokenError::new(lexer.span(), e.into()))
+      }
 
       impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for AstToken<$slice> {
         type Kind = AstTokenKind;
@@ -48,10 +63,10 @@ macro_rules! token {
       #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
       #[logos(subpattern octal_start = "-?0o_*")]
       #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
-      #[logos(subpattern invalid_octal_digit = "(?&octal_start)(?&digit)[0-9_]*")]
+      // #[logos(subpattern invalid_octal_digit = "(?&octal_start)(?&digit)[0-9_]*")]
       #[logos(subpattern binary_start = "-?0b_*")]
       #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
-      #[logos(subpattern invalid_binary_digit = "(?&binary_start)(?&digit)[0-9_]*")]
+      // #[logos(subpattern invalid_binary_digit = "(?&binary_start)(?&digit)[0-9_]*")]
       #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
       #[logos(subpattern esign = "[eE][+-]?")]
       #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
@@ -111,8 +126,8 @@ macro_rules! token {
         Minus,
 
         #[token("...")]
-        #[token("..", unterminated_spread_operator)]
-        #[token(".", unterminated_spread_operator)]
+        #[token("..", |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer)))]
+        #[token(".", |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer)))]
         Spread,
 
         #[token("=>")]
@@ -121,7 +136,7 @@ macro_rules! token {
         #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
         Identifier($slice),
 
-        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
         #[regex(
           "-?(?&frac)(?&exp)?",
           handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
@@ -146,12 +161,12 @@ macro_rules! token {
         Decimal($slice),
 
         #[regex("(?&binary)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
+        // #[regex("(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
         #[regex("(?&binary_start)", |lexer| handlers::$handlers::missing_digits_after_binary_prefix(lexer))]
         Binary($slice),
 
         #[regex("(?&octal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
+        // #[regex("(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
         #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
         Octal($slice),
 
