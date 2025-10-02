@@ -7,3 +7,5 @@ pub mod graphql;
 
 /// The lexers for GraphQL extension.
 pub mod graphqlx;
+
+mod handlers;
