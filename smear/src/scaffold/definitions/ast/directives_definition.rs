@@ -2,9 +2,7 @@ use core::marker::PhantomData;
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL,
-  },
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
 };
 
 use crate::{
@@ -66,7 +64,8 @@ impl<Location, Container> DirectiveLocations<Location, Container> {
   }
 }
 
-impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error> for DirectiveLocations<Location, Container>
+impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for DirectiveLocations<Location, Container>
 where
   Container: chumsky::container::Container<Location> + 'a,
   Pipe: Parseable<'a, I, T, Error>,
@@ -88,7 +87,11 @@ where
       .collect()
       .map_with(|locations, exa| {
         let span = exa.span();
-        Self { span, locations, _m: PhantomData, }
+        Self {
+          span,
+          locations,
+          _m: PhantomData,
+        }
       })
   }
 }

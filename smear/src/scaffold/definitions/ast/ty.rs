@@ -1,8 +1,8 @@
+pub use angle_type::*;
 pub use list_type::*;
 pub use map_type::*;
 pub use named_type::*;
 pub use set_type::*;
-pub use angle_type::*;
 
 mod angle_type;
 mod list_type;

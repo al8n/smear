@@ -1,4 +1,7 @@
-use crate::hints::{ExponentHint, FloatHint};
+use crate::{
+  hints::{ExponentHint, FloatHint},
+  lexer::handlers::{self, handle_graphql_decimal_suffix},
+};
 use logosky::{
   Source,
   logos::{Lexer, Logos},
@@ -115,10 +118,17 @@ where
   let err = leading_zero_error(lexer, leading_zeros);
   let mut errs = LexerErrors::default();
   errs.push(err);
-  match handle_number_suffix(lexer, unexpected_suffix) {
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  match handle_graphql_decimal_suffix(
+    lexer,
+    remainder_len,
+    remainder.as_ref().iter().copied(),
+    unexpected_suffix,
+  ) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(e);
+      errs.push(LexerError::new(lexer.span(), e.into()));
       Err(errs)
     }
   }
@@ -134,19 +144,13 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let mut errs = LexerErrors::default();
-  errs.push(LexerError::new(
-    lexer.span(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart),
-  ));
-
-  match handle_number_suffix(lexer, FloatError::UnexpectedSuffix) {
-    Ok(_) => Err(errs),
-    Err(e) => {
-      errs.push(e);
-      Err(errs)
-    }
-  }
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  super::handle_float_missing_integer_part_error_and_suffix(
+    lexer,
+    remainder_len,
+    remainder.as_ref().iter().copied(),
+  )
 }
 
 #[inline]
@@ -155,73 +159,28 @@ pub(in crate::lexer) fn fractional_error<'a, S, T, Extras>(
 ) -> LexerError<Extras>
 where
   T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<[u8]>,
+  S: ?Sized + Source + 'a,
+  S::Slice<'a>: AsRef<[u8]> + 'a,
 {
   let remainder = lexer.remainder();
   let remainder_slice = remainder.as_ref();
-  let mut iter = remainder_slice.iter().copied();
-
-  let err = match iter.next() {
-    Some(0xEF)
-      if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF =>
-    {
-      // BOM
-      UnexpectedEnd::with_name("float".into(), FloatHint::Fractional).into()
-    }
-    None | Some(b' ' | b'\t' | b'\r' | b'\n' | b',') => {
-      UnexpectedEnd::with_name("float".into(), FloatHint::Fractional).into()
-    }
-    Some(ch @ (b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')) => {
-      // The first char is already consumed.
-      let mut curr = 1;
-      let span = lexer.span();
-
-      for ch in iter {
-        if matches!(ch, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.') {
-          curr += 1;
-          continue;
+  let remainder_len = remainder_slice.len();
+  let iter = remainder_slice.iter().copied();
+  LexerError::float(lexer.span().into(), handlers::graphql_fractional_error(
+    lexer,
+    remainder_len,
+    iter,
+    |ch| {
+      match ch {
+        b' ' | b'\t' | b'\r' | b'\n' | b',' => true,
+        0xEF => {
+          // BOM
+          remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF
         }
-
-        // bump the lexer to the end of the invalid sequence
-        lexer.bump(curr);
-
-        let l = if curr == 1 {
-          let pc = PositionedChar::with_position(ch, span.end);
-          Lexeme::Char(pc)
-        } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
-        };
-
-        return LexerError::float(
-          lexer.span().into(),
-          UnexpectedLexeme::new(l, FloatHint::Fractional).into(),
-        );
+        _ => false,
       }
-
-      // we reached the end of remainder
-      let len = remainder_slice.len();
-      // bump the lexer to the end of the invalid sequence
-      lexer.bump(len);
-      let l = if len == 1 {
-        let pc = PositionedChar::with_position(ch, span.end);
-        Lexeme::Char(pc)
-      } else {
-        Lexeme::Span(Span::from(span.end..(span.end + len)))
-      };
-
-      UnexpectedLexeme::new(l, FloatHint::Fractional).into()
     }
-    Some(ch) => {
-      let span = lexer.span();
-      lexer.bump(1);
-
-      let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
-      UnexpectedLexeme::new(l, FloatHint::Fractional).into()
-    }
-  };
-
-  LexerError::float(lexer.span().into(), err)
+  ))
 }
 
 #[inline(always)]
@@ -360,69 +319,4 @@ where
   errs.push(err);
   errs.push(exponent_error(lexer));
   Err(errs)
-}
-
-#[inline]
-pub(in crate::lexer) fn handle_number_suffix<'a, S, T, E, Extras>(
-  lexer: &mut Lexer<'a, T>,
-  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
-) -> Result<S::Slice<'a>, LexerError<Extras>>
-where
-  E: Into<LexerErrorData<Extras>>,
-  T: Logos<'a, Source = S>,
-  S: ?Sized + Source,
-  S::Slice<'a>: AsRef<[u8]>,
-{
-  let remainder = lexer.remainder();
-  let mut iter = remainder.as_ref().iter().copied();
-
-  let mut curr = 0;
-
-  match iter.next() {
-    // we have a following character after the float literal, need to report the error
-    Some(item @ (b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')) => {
-      // the first char is already consumed and it cannot be a digit,
-      curr += 1;
-
-      let span = lexer.span();
-      // try to consume the longest invalid sequence,
-      // the first char is already consumed and it cannot be a digit,
-      // but the following chars can be digits as well
-      for ch in iter {
-        if matches!(ch, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.') {
-          curr += 1;
-          continue;
-        }
-
-        // bump the lexer to the end of the invalid sequence
-        lexer.bump(curr);
-
-        let l = if curr == 1 {
-          // only one invalid char
-          let pc = PositionedChar::with_position(item, span.end);
-          Lexeme::Char(pc)
-        } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
-        };
-        return Err(LexerError::new(lexer.span(), unexpected_suffix(l).into()));
-      }
-
-      // we reached the end of remainder
-      let len = remainder.as_ref().len();
-      // bump the lexer to the end of the invalid sequence
-      lexer.bump(len);
-
-      let l = if len == 1 {
-        let pc = PositionedChar::with_position(item, span.end);
-        Lexeme::Char(pc)
-      } else {
-        Lexeme::Span(Span::from(span.end..(span.end + len)))
-      };
-
-      // return the range of the invalid sequence
-      Err(LexerError::new(lexer.span(), unexpected_suffix(l).into()))
-    }
-    // For other characters, just return the float literal
-    Some(_) | None => Ok(lexer.slice()),
-  }
 }

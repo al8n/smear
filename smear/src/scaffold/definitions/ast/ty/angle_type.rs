@@ -1,4 +1,4 @@
-use derive_more::{From, IsVariant, Unwrap, TryUnwrap};
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
@@ -93,14 +93,7 @@ impl<Key, Value> AngleType<Key, Value> {
         RAngle::parser()
           .ignored()
           .map(|_| None)
-          .or(
-            FatArrow::parser()
-              .ignore_then(
-                value_parser
-                  .then_ignore(RAngle::parser())
-                  .map(Some)
-              )
-          )
+          .or(FatArrow::parser().ignore_then(value_parser.then_ignore(RAngle::parser()).map(Some))),
       )
       .then(Bang::parser().or_not())
       .map_with(|((k, v), bang), exa| match v {

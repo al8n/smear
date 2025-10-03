@@ -1,6 +1,6 @@
 use super::{
-  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, Type, TypeCondition,
-  Variable, field, selection_set, Location,
+  ConstInputValue, DefaultVec, FragmentName, InputValue, Location, Name, StringValue, Type,
+  TypeCondition, Variable, field, selection_set,
 };
 use crate::scaffold::{
   self, Described, DirectiveLocations, ImplementInterfaces, OperationType, UnionMemberTypes,

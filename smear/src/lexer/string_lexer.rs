@@ -9,8 +9,6 @@ pub use inline::{LitComplexInlineStr, LitInlineStr};
 
 use crate::error::{StringError, StringErrors};
 
-
-
 variant_type!(
   /// A plain string without any escapes.
   #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]

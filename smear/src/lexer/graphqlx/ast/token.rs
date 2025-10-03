@@ -142,7 +142,7 @@ macro_rules! token {
           handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
         )]
         #[regex("(?&decimal)(?&frac)(?&esign)", handlers::$handlers::handle_exponent_error)]
-        #[regex("(?&decimal)\\._*", handlers::$handlers::handle_fractional_error)] 
+        #[regex("(?&decimal)\\._*", handlers::$handlers::handle_fractional_error)]
         #[regex("(?&decimal)(?&esign)", handlers::$handlers::handle_exponent_error)]
         Float($slice),
 
@@ -153,11 +153,11 @@ macro_rules! token {
           handlers::$handlers::handle_hex_float_missing_integer_part_error_and_suffix
         )]
         #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
-        #[regex("(?&hex)\\._*", handlers::$handlers::handle_hex_fractional_error)] 
+        #[regex("(?&hex)\\._*", handlers::$handlers::handle_hex_fractional_error)]
         #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         HexFloat($slice),
 
-        #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&decimal)", |lexer| handle_decimal_suffix(lexer, IntError::UnexpectedSuffix))]
         Decimal($slice),
 
         #[regex("(?&binary)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
