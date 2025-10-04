@@ -1,5 +1,5 @@
 macro_rules! token {
-  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty, $to_slice_iter:expr $(,)?)) => {
+  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
     mod $mod {
       use logosky::{
         Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
@@ -7,7 +7,7 @@ macro_rules! token {
       use crate::{
         error::StringErrors,
         lexer::{graphql::{
-          error::{LexerErrors, LexerError, LexerErrorData, DecimalError, FloatError},
+          error::{LexerErrors, LexerError, DecimalError, FloatError},
           handlers::{
             increase_recursion_depth,
             self,
@@ -16,7 +16,6 @@ macro_rules! token {
         }, handlers::*, LitBlockStr, LitInlineStr, SealedWrapper,},
       };
 
-      type TokenErrorData = LexerErrorData<$char, RecursionLimitExceeded>;
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;

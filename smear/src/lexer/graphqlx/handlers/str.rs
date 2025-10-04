@@ -2,17 +2,16 @@ use super::error;
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
+  utils::Lexeme,
 };
 
 use crate::{
-  hints::{ExponentHint, FloatHint},
-  lexer::handlers::is_ignored_char,
+  hints::{ExponentHint, FloatHint, HexExponentHint, HexFloatHint},
+  lexer::handlers::{self, is_ignored_char},
 };
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<char, Extras>;
-type LexerErrorData<Extras> = error::LexerErrorData<char, Extras>;
 
 #[inline(always)]
 pub(in crate::lexer) fn default_error<'a, S, T, Extras>(
@@ -69,7 +68,7 @@ where
 }
 
 #[inline]
-pub(in crate::lexer) fn exponent_error<'a, S, T, Extras>(
+fn exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> LexerError<Extras>
 where
@@ -78,67 +77,24 @@ where
   S::Slice<'a>: AsRef<str>,
 {
   let remainder = lexer.remainder();
-  let mut iter = remainder.as_ref().chars();
-  let slice = lexer.slice();
+  let remainder_str = remainder.as_ref();
+  let remainder_len = remainder_str.len();
+  let iter = remainder_str.chars();
 
-  let hint = || match slice.as_ref().chars().last() {
-    Some('e' | 'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
-    Some('+' | '-') => FloatHint::Exponent(ExponentHint::Digit),
-    _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-  };
-
-  let err = match iter.next() {
-    None | Some(' ' | '\t' | '\r' | '\n' | '\u{feff}' | ',') => {
-      UnexpectedEnd::with_name("float".into(), hint()).into()
-    }
-    Some(ch @ ('a'..='z' | 'A'..='Z' | '_' | '.')) => {
-      // The first char is already consumed.
-      let mut curr = 1;
-      let span = lexer.span();
-
-      for ch in iter {
-        if matches!(ch, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.') {
-          curr += 1;
-          continue;
-        }
-
-        // bump the lexer to the end of the invalid sequence
-        lexer.bump(curr);
-
-        let l = if curr == 1 {
-          let pc = PositionedChar::with_position(ch, span.end);
-          Lexeme::Char(pc)
-        } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
-        };
-
-        return LexerError::float(lexer.span().into(), UnexpectedLexeme::new(l, hint()).into());
-      }
-
-      // we reached the end of remainder
-      let len = remainder.as_ref().len();
-      // bump the lexer to the end of the invalid sequence
-      lexer.bump(len);
-      let l = if len == 1 {
-        let pc = PositionedChar::with_position(ch, span.end);
-        Lexeme::Char(pc)
-      } else {
-        Lexeme::Span(Span::from(span.end..(span.end + len)))
-      };
-
-      UnexpectedLexeme::new(l, hint()).into()
-    }
-    // For other characters, just yield one
-    Some(ch) => {
-      let span = lexer.span();
-      lexer.bump(ch.len_utf8());
-
-      let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
-      UnexpectedLexeme::new(l, hint()).into()
-    }
-  };
-
-  LexerError::float(lexer.span().into(), err)
+  LexerError::float(
+    lexer.span().into(),
+    handlers::lit_float_suffix_error::<_, super::GraphQLxNumber, _, _, _, _>(
+      lexer,
+      remainder_len,
+      iter,
+      is_ignored_char,
+      || match remainder_str.chars().last() {
+        Some('e' | 'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
+        Some('+' | '-') => FloatHint::Exponent(ExponentHint::Digit),
+        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
+      },
+    ),
+  )
 }
 
 #[inline(always)]
@@ -151,6 +107,48 @@ where
   S::Slice<'a>: AsRef<str>,
 {
   Err(exponent_error(lexer))
+}
+
+#[inline]
+fn hex_exponent_error<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> LexerError<Extras>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let remainder = lexer.remainder();
+  let remainder_str = remainder.as_ref();
+  let remainder_len = remainder_str.len();
+  let iter = remainder_str.chars();
+
+  LexerError::hex_float(
+    lexer.span().into(),
+    handlers::lit_float_suffix_error::<_, super::GraphQLxHexExponent, _, _, _, _>(
+      lexer,
+      remainder_len,
+      iter,
+      is_ignored_char,
+      || match remainder_str.chars().last() {
+        Some('p' | 'P') => HexFloatHint::Exponent(HexExponentHint::SignOrDigit),
+        Some('+' | '-' | '_') => HexFloatHint::Exponent(HexExponentHint::Digit),
+        _ => unreachable!("regex should ensure the last char is 'p', 'P', '+', '-' or '_'"),
+      },
+    ),
+  )
+}
+
+#[inline(always)]
+pub(in crate::lexer) fn handle_hex_exponent_error<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  Err(hex_exponent_error(lexer))
 }
 
 #[allow(clippy::result_large_err)]
@@ -203,12 +201,7 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_hex_float_missing_exponent_then_check_suffix<
-  'a,
-  S,
-  T,
-  Extras,
->(
+pub(in crate::lexer) fn handle_hex_float_missing_exponent_then_check_suffix<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
@@ -288,7 +281,7 @@ where
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }
 
-pub(in crate::lexer) fn handle_hex_suffix<'a, S, T, E, Extras>(
+pub(in crate::lexer) fn handle_valid_hex_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -300,11 +293,26 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_hex_suffix(
+  super::handle_valid_hex_suffix(
     lexer,
     remainder_len,
     remainder.as_ref().chars(),
     unexpected_suffix,
   )
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
+}
+
+
+#[inline]
+pub(in crate::lexer) fn handle_invalid_hex_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  todo!()
 }

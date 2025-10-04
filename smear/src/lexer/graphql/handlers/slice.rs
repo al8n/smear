@@ -1,11 +1,11 @@
 use crate::{
   hints::{ExponentHint, FloatHint},
-  lexer::handlers::is_ignored_byte,
+  lexer::handlers::{self, is_ignored_byte},
 };
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
+  utils::{Lexeme, PositionedChar, Span},
 };
 
 use super::error::{self, FloatError};
@@ -130,7 +130,12 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_float_missing_integer_part_error_then_check_suffix<'a, S, T, Extras>(
+pub(in crate::lexer) fn handle_float_missing_integer_part_error_then_check_suffix<
+  'a,
+  S,
+  T,
+  Extras,
+>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
@@ -208,73 +213,23 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_slice = remainder.as_ref();
-  let mut iter = remainder_slice.iter().copied();
-  let slice = lexer.slice();
+  let remainder_len = remainder_slice.len();
+  let iter = remainder_slice.iter().copied();
 
-  let hint = || match slice.as_ref().iter().last().copied() {
-    Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
-    Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
-    _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-  };
-
-  let err = match iter.next() {
-    Some(0xEF)
-      if remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF =>
-    {
-      // BOM
-      UnexpectedEnd::with_name("float".into(), hint()).into()
-    }
-    None | Some(b' ' | b'\t' | b'\r' | b'\n' | b',') => {
-      UnexpectedEnd::with_name("float".into(), hint()).into()
-    }
-    Some(ch @ (b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')) => {
-      // The first char is already consumed.
-      let mut curr = 1;
-      let span = lexer.span();
-
-      for ch in iter {
-        if matches!(ch, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.') {
-          curr += 1;
-          continue;
-        }
-
-        // bump the lexer to the end of the invalid sequence
-        lexer.bump(curr);
-
-        let l = if curr == 1 {
-          let pc = PositionedChar::with_position(ch, span.end);
-          Lexeme::Char(pc)
-        } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
-        };
-
-        return LexerError::float(lexer.span().into(), UnexpectedLexeme::new(l, hint()).into());
-      }
-
-      // we reached the end of remainder
-      let len = remainder_slice.len();
-      // bump the lexer to the end of the invalid sequence
-      lexer.bump(len);
-      let l = if len == 1 {
-        let pc = PositionedChar::with_position(ch, span.end);
-        Lexeme::Char(pc)
-      } else {
-        Lexeme::Span(Span::from(span.end..(span.end + len)))
-      };
-
-      UnexpectedLexeme::new(l, hint()).into()
-    }
-    // For other characters, just yield one
-    Some(ch) => {
-      let span = lexer.span();
-      lexer.bump(1);
-
-      let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
-      UnexpectedLexeme::new(l, hint()).into()
-    }
-  };
-
-  LexerError::float(lexer.span().into(), err)
+  LexerError::float(
+    lexer.span().into(),
+    handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
+      lexer,
+      remainder_len,
+      iter,
+      |b| is_ignored_byte(remainder_slice, b),
+      || match remainder_slice.iter().last().copied() {
+        Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
+        Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
+        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
+      },
+    ),
+  )
 }
 
 #[inline(always)]

@@ -49,7 +49,7 @@ where
     error::LexerErrorData::HexFloat(error::HexFloatError::MissingExponent(lexer.span().into())),
   ));
 
-  match handle_hex_suffix(
+  match handle_valid_hex_suffix(
     lexer,
     remainder_len,
     remainder,
@@ -76,7 +76,7 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<FloatHint>> + From<UnexpectedLexeme<Char, FloatHint>>,
 {
-  handlers::fractional_error(lexer, remainder_len, remainder, is_ignored_char, || {
+  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
     FloatHint::Fractional
   })
 }
@@ -94,7 +94,7 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<HexFloatHint>> + From<UnexpectedLexeme<Char, HexFloatHint>>,
 {
-  handlers::fractional_error(lexer, remainder_len, remainder, is_ignored_char, || {
+  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
     HexFloatHint::Fractional
   })
 }
@@ -141,15 +141,17 @@ fn handle_hex_float_missing_integer_part_error_then_check_suffix<'a, Char, S, T,
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
-  Char: Copy + ValidateNumberChar<GraphQLxHexNumber>,
+  Char: Copy + ValidateNumberChar<GraphQLxHexExponent>,
 {
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
     lexer.span(),
-    error::LexerErrorData::HexFloat(error::HexFloatError::MissingIntegerPart(lexer.span().into())),
+    error::LexerErrorData::HexFloat(error::HexFloatError::MissingIntegerPart(
+      lexer.span().into(),
+    )),
   ));
 
-  match handle_hex_suffix(
+  match handle_hex_float_suffix(
     lexer,
     remainder_len,
     remainder,
@@ -209,7 +211,7 @@ where
 }
 
 #[inline]
-fn handle_hex_suffix<'a, Char, S, T, E>(
+fn handle_valid_hex_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
@@ -223,8 +225,24 @@ where
   handle_number_suffix(lexer, remainder_len, remainder, unexpected_suffix)
 }
 
+#[inline]
+fn handle_hex_float_suffix<'a, Char, S, T, E>(
+  lexer: &mut Lexer<'a, T>,
+  remainder_len: usize,
+  remainder: impl Iterator<Item = Char>,
+  unexpected_suffix: impl FnOnce(Lexeme<Char>) -> E,
+) -> Result<S::Slice<'a>, E>
+where
+  Char: Copy + ValidateNumberChar<GraphQLxHexExponent>,
+  S: ?Sized + Source,
+  T: Logos<'a, Source = S>,
+{
+  handle_number_suffix(lexer, remainder_len, remainder, unexpected_suffix)
+}
+
 struct GraphQLxNumber;
 struct GraphQLxHexNumber;
+struct GraphQLxHexExponent;
 struct GraphQLxOctalNumber;
 struct GraphQLxBinaryNumber;
 
@@ -248,7 +266,19 @@ impl ValidateNumberChar<GraphQLxHexNumber> for char {
 
   #[inline(always)]
   fn is_following_invalid_char(&self) -> bool {
-    matches!(*self, '0'..='9' | 'g'..='z' | 'G'..='Z' | '.')
+    matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
+  }
+}
+
+impl ValidateNumberChar<GraphQLxHexExponent> for char {
+  #[inline(always)]
+  fn is_first_invalid_char(&self) -> bool {
+    matches!(*self, 'a'..='z' | 'A'..='Z' | '.')
+  }
+
+  #[inline(always)]
+  fn is_following_invalid_char(&self) -> bool {
+    matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
@@ -272,7 +302,19 @@ impl ValidateNumberChar<GraphQLxHexNumber> for u8 {
 
   #[inline(always)]
   fn is_following_invalid_char(&self) -> bool {
-    matches!(*self, b'0'..=b'9' | b'g'..=b'z' | b'G'..=b'Z' | b'.')
+    matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
+  }
+}
+
+impl ValidateNumberChar<GraphQLxHexExponent> for u8 {
+  #[inline(always)]
+  fn is_first_invalid_char(&self) -> bool {
+    matches!(*self, b'a'..=b'z' | b'A'..=b'Z' | b'.')
+  }
+
+  #[inline(always)]
+  fn is_following_invalid_char(&self) -> bool {
+    matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
 

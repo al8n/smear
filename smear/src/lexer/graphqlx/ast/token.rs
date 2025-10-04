@@ -50,10 +50,8 @@ macro_rules! token {
       #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
       #[logos(subpattern octal_start = "-?0o_*")]
       #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
-      // #[logos(subpattern invalid_octal_digit = "(?&octal_start)(?&digit)[0-9_]*")]
       #[logos(subpattern binary_start = "-?0b_*")]
       #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
-      // #[logos(subpattern invalid_binary_digit = "(?&binary_start)(?&digit)[0-9_]*")]
       #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
       #[logos(subpattern esign = "[eE][+-]?")]
       #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
@@ -135,15 +133,15 @@ macro_rules! token {
         #[token("nan", |lexer| lexer.slice())]
         Float($slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix(lexer))]
         #[regex(
           "-?(?&hex_frac)?(?&hex_exp)",
           handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix
         )]
-        // #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         #[regex("(?&hex)\\._*", handlers::$handlers::handle_hex_fractional_error)]
-        // #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         HexFloat($slice),
 
         #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix))]
@@ -159,8 +157,8 @@ macro_rules! token {
         // #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
         Octal($slice),
 
-        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_hex_suffix(lexer, HexError::UnexpectedSuffix))]
-        // #[regex("(?&hex_start)", |lexer| handlers::$handlers::missing_digits_after_hex_prefix(lexer))]
+        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix))]
+        #[regex("(?&hex_start)", handlers::$handlers::handle_invalid_hex_suffix)]
         Hex($slice),
 
         #[token("\"", |lexer| {

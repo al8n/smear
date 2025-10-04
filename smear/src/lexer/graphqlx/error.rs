@@ -224,6 +224,12 @@ impl<Char, StateError> LexerError<Char, StateError> {
     Self::const_new(span, LexerErrorData::HexFloat(error))
   }
 
+  /// Creates a new hex error.
+  #[inline]
+  pub const fn hex(span: Span, error: HexError<Char>) -> Self {
+    Self::const_new(span, LexerErrorData::Hex(error))
+  }
+
   /// Creates a new decimal error.
   #[inline]
   pub const fn decimal(span: Span, error: DecimalError<Char>) -> Self {

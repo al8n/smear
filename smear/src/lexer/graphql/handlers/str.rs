@@ -2,7 +2,7 @@ use super::error::{self, FloatError};
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme},
+  utils::{Lexeme, PositionedChar, Span},
 };
 
 use crate::{
@@ -136,7 +136,12 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_float_missing_integer_part_error_then_check_suffix<'a, S, T, Extras>(
+pub(in crate::lexer) fn handle_float_missing_integer_part_error_then_check_suffix<
+  'a,
+  S,
+  T,
+  Extras,
+>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
@@ -217,13 +222,17 @@ where
 
   LexerError::float(
     lexer.span().into(),
-    handlers::fractional_error::<_, super::GraphQLNumber, _, _, _, _>(lexer, remainder_len, iter, is_ignored_char, || {
-      match remainder_str.chars().last() {
+    handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
+      lexer,
+      remainder_len,
+      iter,
+      is_ignored_char,
+      || match remainder_str.chars().last() {
         Some('e' | 'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
         Some('+' | '-') => FloatHint::Exponent(ExponentHint::Digit),
         _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-      }
-    })
+      },
+    ),
   )
 }
 

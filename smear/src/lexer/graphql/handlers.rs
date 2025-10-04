@@ -77,11 +77,10 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<FloatHint>> + From<UnexpectedLexeme<Char, FloatHint>>,
 {
-  handlers::fractional_error(lexer, remainder_len, remainder, is_ignored_char, || {
+  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
     FloatHint::Fractional
   })
 }
-
 
 #[inline]
 fn handle_decimal_suffix<'a, Char, S, T, E>(

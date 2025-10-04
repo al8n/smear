@@ -92,7 +92,7 @@ where
 }
 
 #[inline]
-pub(super) fn fractional_error<'a, Char, Language, H, S, T, E>(
+pub(super) fn lit_float_suffix_error<'a, Char, Language, H, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   mut remainder: impl Iterator<Item = Char>,
@@ -154,87 +154,15 @@ where
   }
 }
 
-// #[inline]
-// pub(in crate::lexer) fn exponent_error<'a, Char, Language, H, S, T, E>(
-//   lexer: &mut Lexer<'a, T>,
-//   remainder_len: usize,
-//   mut remainder: impl Iterator<Item = Char>,
-//   is_ignored_char: impl FnOnce(&Char) -> bool,
-//   hint: impl Fn() -> H,
-// ) -> E
-// where
-//   Char: Copy + ValidateNumberChar<Language>,
-//   T: Logos<'a, Source = S>,
-//   S: ?Sized + Source,
-//   E: From<UnexpectedEnd<H>> + From<UnexpectedLexeme<Char, H>>,
-// {
-//   let hint = || match slice.as_ref().chars().last() {
-//     Some('e' | 'E') => H::from(ExponentHint::SignOrDigit),
-//     Some('+' | '-') => H::from(ExponentHint::Digit),
-//     _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-//   };
-
-//   match remainder.next() {
-//     None => {
-//       UnexpectedEnd::with_name("float".into(), hint()).into()
-//     }
-//     Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name("float".into(), hint()).into(),
-//     Some(ch) if ch.is_first_invalid_char() => {
-//       // The first char is already consumed.
-//       let mut curr = 1;
-//       let span = lexer.span();
-
-//       for ch in remainder {
-//         if ch.is_following_invalid_char() {
-//           curr += 1;
-//           continue;
-//         }
-
-//         // bump the lexer to the end of the invalid sequence
-//         lexer.bump(curr);
-
-//         let l = if curr == 1 {
-//           let pc = PositionedChar::with_position(ch, span.end);
-//           Lexeme::Char(pc)
-//         } else {
-//           Lexeme::Span(Span::from(span.end..(span.end + curr)))
-//         };
-
-//         return UnexpectedLexeme::new(l, hint()).into();
-//       }
-
-//       // we reached the end of remainder
-//       // bump the lexer to the end of the invalid sequence
-//       lexer.bump(remainder_len);
-//       let l = if remainder_len == 1 {
-//         let pc = PositionedChar::with_position(ch, span.end);
-//         Lexeme::Char(pc)
-//       } else {
-//         Lexeme::Span(Span::from(span.end..(span.end + remainder_len)))
-//       };
-
-//       UnexpectedLexeme::new(l, hint()).into()
-//     }
-//     // For other characters, just yield one
-//     Some(ch) => {
-//       let span = lexer.span();
-//       lexer.bump(ch.char_size());
-
-//       let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
-//       UnexpectedLexeme::new(l, hint()).into()
-//     }
-//   }
-// }
-
 #[inline(always)]
 pub(super) const fn is_ignored_char(ch: &char) -> bool {
-  matches!(ch, ' ' | '\t' | '\r' | '\n' | '\u{FEFF}' | ',')
+  matches!(ch, ' ' | '\t' | '\r' | '\n' | '\u{FEFF}' | ',' | '#')
 }
 
 #[inline(always)]
 pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   match b {
-    b' ' | b'\t' | b'\r' | b'\n' | b',' => true,
+    b' ' | b'\t' | b'\r' | b'\n' | b',' | b'#' => true,
     0xEF => {
       // BOM
       slice.len() >= 3 && slice[1] == 0xBB && slice[2] == 0xBF
