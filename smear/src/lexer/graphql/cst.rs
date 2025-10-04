@@ -225,7 +225,7 @@ pub enum CstToken<'a> {
   #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix)))]
   #[regex(
     "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_and_suffix)
+    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_then_check_suffix)
   )]
   #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
   #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]

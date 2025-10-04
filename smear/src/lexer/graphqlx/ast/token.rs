@@ -7,7 +7,7 @@ macro_rules! token {
       use crate::{
         error::StringErrors,
         lexer::{graphqlx::{
-          error::{LexerErrors, LexerError, LexerErrorData, IntError, FloatError},
+          error::{LexerErrors, LexerError, LexerErrorData, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
           ast::{AstToken, AstTokenKind},
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
@@ -17,19 +17,6 @@ macro_rules! token {
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
-
-      #[inline(always)]
-      fn handle_decimal_suffix<'a, E>(
-        lexer: &mut Lexer<'a, Token<'a>>,
-        unexpected_suffix: impl FnOnce(Lexeme<$char>) -> E,
-      ) -> Result<$slice, TokenError>
-      where
-        E: Into<TokenErrorData>,
-      {
-        let remainder = lexer.remainder();
-        handle_graphqlx_decimal_suffix(lexer, remainder.len(), $to_slice_iter(remainder), unexpected_suffix)
-          .map_err(|e| TokenError::new(lexer.span(), e.into()))
-      }
 
       impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for AstToken<$slice> {
         type Kind = AstTokenKind;
@@ -136,42 +123,44 @@ macro_rules! token {
         #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
         Identifier($slice),
 
-        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
         #[regex(
           "-?(?&frac)(?&exp)?",
-          handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
+          handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix
         )]
         #[regex("(?&decimal)(?&frac)(?&esign)", handlers::$handlers::handle_exponent_error)]
         #[regex("(?&decimal)\\._*", handlers::$handlers::handle_fractional_error)]
         #[regex("(?&decimal)(?&esign)", handlers::$handlers::handle_exponent_error)]
+        #[token("inf", |lexer| lexer.slice())]
+        #[token("nan", |lexer| lexer.slice())]
         Float($slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_number_suffix(lexer, FloatError::UnexpectedSuffix))]
-        #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exp(lexer))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
+        #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix(lexer))]
         #[regex(
           "-?(?&hex_frac)?(?&hex_exp)",
-          handlers::$handlers::handle_hex_float_missing_integer_part_error_and_suffix
+          handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix
         )]
-        #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        // #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         #[regex("(?&hex)\\._*", handlers::$handlers::handle_hex_fractional_error)]
-        #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
+        // #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         HexFloat($slice),
 
-        #[regex("(?&decimal)", |lexer| handle_decimal_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix))]
         Decimal($slice),
 
-        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_binary_suffix(lexer, BinaryError::UnexpectedSuffix))]
         // #[regex("(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
-        #[regex("(?&binary_start)", |lexer| handlers::$handlers::missing_digits_after_binary_prefix(lexer))]
+        // #[regex("(?&binary_start)", |lexer| handlers::$handlers::missing_digits_after_binary_prefix(lexer))]
         Binary($slice),
 
-        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
+        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_octal_suffix(lexer, OctalError::UnexpectedSuffix))]
         // #[regex("(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
-        #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
+        // #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
         Octal($slice),
 
-        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_number_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("(?&hex_start)", |lexer| handlers::$handlers::missing_digits_after_hex_prefix(lexer))]
+        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_hex_suffix(lexer, HexError::UnexpectedSuffix))]
+        // #[regex("(?&hex_start)", |lexer| handlers::$handlers::missing_digits_after_hex_prefix(lexer))]
         Hex($slice),
 
         #[token("\"", |lexer| {
@@ -208,9 +197,10 @@ macro_rules! token {
             Token::Spread => Self::Spread,
             Token::Float(s) => Self::LitFloat(s),
             Token::Identifier(s) => Self::Identifier(s),
-            Token::Int(s) => Self::LitInt(s),
+            // Token::Decimal(s) => Self::LitDecimal(s),
             Token::LitInlineStr(s) => Self::LitInlineStr(s),
             Token::LitBlockStr(s) => Self::LitBlockStr(s),
+            _ => todo!()
           }
         }
       }

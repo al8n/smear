@@ -1,6 +1,6 @@
 use crate::{
   hints::{ExponentHint, FloatHint},
-  lexer::handlers::{self, handle_graphql_decimal_suffix},
+  lexer::handlers::is_ignored_byte,
 };
 use logosky::{
   Source,
@@ -118,14 +118,8 @@ where
   let err = leading_zero_error(lexer, leading_zeros);
   let mut errs = LexerErrors::default();
   errs.push(err);
-  let remainder = lexer.remainder();
-  let remainder_len = remainder.as_ref().len();
-  match handle_graphql_decimal_suffix(
-    lexer,
-    remainder_len,
-    remainder.as_ref().iter().copied(),
-    unexpected_suffix,
-  ) {
+
+  match handle_decimal_suffix(lexer, unexpected_suffix) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(LexerError::new(lexer.span(), e.into()));
@@ -136,7 +130,7 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_float_missing_integer_part_error_and_suffix<'a, S, T, Extras>(
+pub(in crate::lexer) fn handle_float_missing_integer_part_error_then_check_suffix<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
@@ -146,7 +140,7 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_float_missing_integer_part_error_and_suffix(
+  super::handle_float_missing_integer_part_error_then_check_suffix(
     lexer,
     remainder_len,
     remainder.as_ref().iter().copied(),
@@ -166,21 +160,12 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
-  LexerError::float(lexer.span().into(), handlers::graphql_fractional_error(
-    lexer,
-    remainder_len,
-    iter,
-    |ch| {
-      match ch {
-        b' ' | b'\t' | b'\r' | b'\n' | b',' => true,
-        0xEF => {
-          // BOM
-          remainder_slice.len() >= 3 && remainder_slice[1] == 0xBB && remainder_slice[2] == 0xBF
-        }
-        _ => false,
-      }
-    }
-  ))
+  LexerError::float(
+    lexer.span().into(),
+    super::fractional_error(lexer, remainder_len, iter, |ch| {
+      is_ignored_byte(remainder_slice, ch)
+    }),
+  )
 }
 
 #[inline(always)]
@@ -319,4 +304,25 @@ where
   errs.push(err);
   errs.push(exponent_error(lexer));
   Err(errs)
+}
+
+pub(in crate::lexer) fn handle_decimal_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+  E: Into<LexerErrorData<Extras>>,
+{
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  super::handle_decimal_suffix(
+    lexer,
+    remainder_len,
+    remainder.as_ref().iter().copied(),
+    unexpected_suffix,
+  )
+  .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }

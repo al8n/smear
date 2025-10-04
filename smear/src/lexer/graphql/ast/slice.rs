@@ -1,7 +1,15 @@
 super::token!(slice_token<'a>(&'a [u8], u8, slice, [u8], |val: &'a [u8]| val.iter().copied()));
 
 #[cfg(feature = "bytes")]
-super::token!(bytes_token(bytes::Bytes, u8, slice, logosky::source::CustomSource<bytes::Bytes>, super::iter_bytes_bytes));
+super::token!(
+  bytes_token(
+    bytes::Bytes,
+    u8,
+    slice,
+    logosky::source::CustomSource<bytes::Bytes>,
+    super::iter_bytes_bytes,
+  )
+);
 
 #[cfg(feature = "bytes")]
 fn iter_bytes_bytes<'a>(s: &'a bytes::Bytes) -> impl Iterator<Item = u8> + 'a {

@@ -1,4 +1,4 @@
-// super::token!(slice_token<'a>(&'a [u8], u8, slice, [u8]));
+super::token!(slice_token<'a>(&'a [u8], u8, slice, [u8], |val: &'a [u8]| val.iter().copied()));
 
 // #[cfg(feature = "bytes")]
 // super::token!(bytes_token(bytes::Bytes, u8, slice, logosky::source::CustomSource<bytes::Bytes>));

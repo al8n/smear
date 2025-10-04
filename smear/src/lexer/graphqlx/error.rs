@@ -20,27 +20,77 @@ pub enum FloatError<Char = char> {
   UnexpectedLexeme(UnexpectedLexeme<Char, FloatHint>),
   /// Unexpected end of input in float literal.
   UnexpectedEnd(UnexpectedEnd<FloatHint>),
-  /// Float must not have non-significant leading zeroes.
-  #[from(skip)]
-  LeadingZeros(Lexeme<Char>),
   /// Float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
-  MissingIntegerPart,
+  MissingIntegerPart(Span),
 }
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
-pub enum IntError<Char = char> {
-  /// Unexpected character in integer literal suffix, e.g. `123abc`
+pub enum HexFloatError<Char = char> {
+  /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
   #[from(skip)]
   UnexpectedSuffix(Lexeme<Char>),
-  /// Unexpected character in integer literal, e.g. `-A`
-  UnexpectedEnd(UnexpectedEnd<IntHint>),
-  // #[error("integer must not have non-significant leading zeroes")]
+  /// Unexpected lexeme in float literal, e.g. `1.x`, `1.ex`, `1.e+x`
+  UnexpectedLexeme(UnexpectedLexeme<Char, HexFloatHint>),
+  /// Unexpected end of input in float literal.
+  UnexpectedEnd(UnexpectedEnd<HexFloatHint>),
+  /// Hex float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
-  LeadingZeros(Lexeme<Char>),
+  MissingIntegerPart(Span),
+  /// Hex float literals must have an exponent part, e.g. `0x1.0` is invalid.
+  #[from(skip)]
+  MissingExponent(Span),
+}
+
+/// An error encountered during lexing for float literals.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref)]
+#[try_unwrap(ref)]
+pub enum DecimalError<Char = char> {
+  /// Unexpected character in decimal literal suffix, e.g. `123abc`
+  #[from(skip)]
+  UnexpectedSuffix(Lexeme<Char>),
+  /// Unexpected character in decimal literal, e.g. `-A`
+  UnexpectedEnd(UnexpectedEnd<DecimalHint>),
+}
+
+/// An error encountered during lexing for hex literals.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref)]
+#[try_unwrap(ref)]
+pub enum HexError<Char = char> {
+  /// Unexpected character in hex literal suffix, e.g. `0x123abc`
+  #[from(skip)]
+  UnexpectedSuffix(Lexeme<Char>),
+  /// Unexpected character in hex literal, e.g. `0x-1`
+  UnexpectedEnd(UnexpectedEnd<HexHint>),
+}
+
+/// An error encountered during lexing for octal literals.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref)]
+#[try_unwrap(ref)]
+pub enum OctalError<Char = char> {
+  /// Unexpected character in octal literal suffix, e.g. `0o123abc`
+  #[from(skip)]
+  UnexpectedSuffix(Lexeme<Char>),
+  /// Unexpected character in octal literal, e.g. `0o-1`
+  UnexpectedEnd(UnexpectedEnd<OctalHint>),
+}
+
+/// An error encountered during lexing for binary literals.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref)]
+#[try_unwrap(ref)]
+pub enum BinaryError<Char = char> {
+  /// Unexpected character in binary literal suffix, e.g. `0b10102`
+  #[from(skip)]
+  UnexpectedSuffix(Lexeme<Char>),
+  /// Unexpected character in binary literal, e.g. `0b-1`
+  UnexpectedEnd(UnexpectedEnd<BinaryHint>),
 }
 
 /// The data of the lexer error.
@@ -50,8 +100,16 @@ pub enum IntError<Char = char> {
 pub enum LexerErrorData<Char = char, StateError = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
-  /// An error encountered during lexing for integer literals.
-  Int(IntError<Char>),
+  /// An error encountered during lexing for hex float literals.
+  HexFloat(HexFloatError<Char>),
+  /// An error encountered during lexing for decimal literals.
+  Decimal(DecimalError<Char>),
+  /// An error encountered during lexing for hex literals.
+  Hex(HexError<Char>),
+  /// An error encountered during lexing for octal literals.
+  Octal(OctalError<Char>),
+  /// An error encountered during lexing for binary literals.
+  Binary(BinaryError<Char>),
   /// An error encountered during lexing for string literals.
   String(StringErrors<Char>),
   /// Unexpected token character.
@@ -93,10 +151,10 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
     Self::Float(error)
   }
 
-  /// Creates new int error data.
+  /// Creates new decimal error data.
   #[inline]
-  pub const fn int(error: IntError<Char>) -> Self {
-    Self::Int(error)
+  pub const fn decimal(error: DecimalError<Char>) -> Self {
+    Self::Decimal(error)
   }
 
   /// Creates new unexpected lexeme error data.
@@ -160,10 +218,16 @@ impl<Char, StateError> LexerError<Char, StateError> {
     Self::const_new(span, LexerErrorData::Float(error))
   }
 
-  /// Creates a new int error.
+  /// Creates a new hex float error.
   #[inline]
-  pub const fn int(span: Span, error: IntError<Char>) -> Self {
-    Self::const_new(span, LexerErrorData::Int(error))
+  pub const fn hex_float(span: Span, error: HexFloatError<Char>) -> Self {
+    Self::const_new(span, LexerErrorData::HexFloat(error))
+  }
+
+  /// Creates a new decimal error.
+  #[inline]
+  pub const fn decimal(span: Span, error: DecimalError<Char>) -> Self {
+    Self::const_new(span, LexerErrorData::Decimal(error))
   }
 
   /// Creates a new unexpected lexeme error.

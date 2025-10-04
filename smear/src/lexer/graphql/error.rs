@@ -28,17 +28,17 @@ pub enum FloatError<Char = char> {
   MissingIntegerPart,
 }
 
-/// An error encountered during lexing for float literals.
+/// An error encountered during lexing for decimal literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
-pub enum IntError<Char = char> {
-  /// Unexpected character in integer literal suffix, e.g. `123abc`
+pub enum DecimalError<Char = char> {
+  /// Unexpected character in decimal literal suffix, e.g. `123abc`
   #[from(skip)]
   UnexpectedSuffix(Lexeme<Char>),
-  /// Unexpected character in integer literal, e.g. `-A`
-  UnexpectedEnd(UnexpectedEnd<IntHint>),
-  // #[error("integer must not have non-significant leading zeroes")]
+  /// Unexpected character in decimal literal, e.g. `-A`
+  UnexpectedEnd(UnexpectedEnd<DecimalHint>),
+  // #[error("decimal must not have non-significant leading zeroes")]
   #[from(skip)]
   LeadingZeros(Lexeme<Char>),
 }
@@ -51,7 +51,7 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
   /// An error encountered during lexing for integer literals.
-  Int(IntError<Char>),
+  Int(DecimalError<Char>),
   /// An error encountered during lexing for string literals.
   String(StringErrors<Char>),
   /// Unexpected token character.
@@ -95,7 +95,7 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
 
   /// Creates new int error data.
   #[inline]
-  pub const fn int(error: IntError<Char>) -> Self {
+  pub const fn int(error: DecimalError<Char>) -> Self {
     Self::Int(error)
   }
 
@@ -162,7 +162,7 @@ impl<Char, StateError> LexerError<Char, StateError> {
 
   /// Creates a new int error.
   #[inline]
-  pub const fn int(span: Span, error: IntError<Char>) -> Self {
+  pub const fn int(span: Span, error: DecimalError<Char>) -> Self {
     Self::const_new(span, LexerErrorData::Int(error))
   }
 

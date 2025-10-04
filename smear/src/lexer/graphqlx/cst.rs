@@ -225,7 +225,7 @@ pub enum CstToken<'a> {
   #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix)))]
   #[regex(
     "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_and_suffix)
+    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_then_check_suffix)
   )]
   #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
   #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
@@ -240,9 +240,9 @@ pub enum CstToken<'a> {
   Identifier(&'a str),
 
   /// Integer literal token
-  #[regex("-?(0|[1-9][0-9]*)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, IntError::UnexpectedSuffix)))]
+  #[regex("-?(0|[1-9][0-9]*)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, DecimalError::UnexpectedSuffix)))]
   #[regex("-?0[0-9]+", |lexer| {
-    tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))
+    tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, DecimalError::LeadingZeros, DecimalError::UnexpectedSuffix))
   })]
   #[token("-", |lexer| {
     tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))

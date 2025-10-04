@@ -61,8 +61,8 @@ fn test_number_leading_zero() {
 }
 
 #[test]
-fn test_int_leading_zeros_and_suffix() {
-  tests::test_int_leading_zeros_and_suffix::<CstToken<'_>, LimitExceeded>();
+fn test_int_leading_zeros_then_check_suffix() {
+  tests::test_int_leading_zeros_then_check_suffix::<CstToken<'_>, LimitExceeded>();
 }
 
 #[test]

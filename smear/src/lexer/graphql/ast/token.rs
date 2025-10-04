@@ -1,13 +1,13 @@
 macro_rules! token {
-  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty, $to_slice_iter:expr)) => {
+  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty, $to_slice_iter:expr $(,)?)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, logos::Lexer, utils::{recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}, Lexeme},
+        Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
       use crate::{
         error::StringErrors,
         lexer::{graphql::{
-          error::{LexerErrors, LexerError, LexerErrorData, IntError, FloatError},
+          error::{LexerErrors, LexerError, LexerErrorData, DecimalError, FloatError},
           handlers::{
             increase_recursion_depth,
             self,
@@ -20,19 +20,6 @@ macro_rules! token {
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
-
-      #[inline(always)]
-      fn handle_decimal_suffix<'b $(: $lt)?, $($lt: 'b,)? E>(
-        lexer: &mut Lexer<'b, Token $(<$lt>)?>,
-        unexpected_suffix: impl FnOnce(Lexeme<$char>) -> E,
-      ) -> Result<$slice, TokenError>
-      where
-        E: Into<TokenErrorData>,
-      {
-        let remainder = lexer.remainder();
-        handle_graphql_decimal_suffix(lexer, remainder.len(), $to_slice_iter(&remainder), unexpected_suffix)
-          .map_err(|e| TokenError::new(lexer.span(), e.into()))
-      }
 
       impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for AstToken<$slice> {
         type Kind = AstTokenKind;
@@ -107,10 +94,10 @@ macro_rules! token {
         Spread,
 
         #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix))]
-        #[regex("(?&int)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex("(?&int)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
         #[regex(
           "-?(?&frac)(?&exp)?",
-          handlers::$handlers::handle_float_missing_integer_part_error_and_suffix
+          handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix
         )]
         #[regex("-?0(?&digit)+(?&frac)(?&esign)", handlers::$handlers::handle_leading_zeros_and_exponent_error)]
         #[regex("-?(0|(?&non_zero_digit)(?&digit)*)(?&frac)(?&esign)", handlers::$handlers::handle_exponent_error)]
@@ -123,8 +110,8 @@ macro_rules! token {
         #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
         Identifier($slice),
 
-        #[regex("(?&int)", |lexer| handle_decimal_suffix(lexer, IntError::UnexpectedSuffix))]
-        #[regex("-?0(?&digit)+", |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))]
+        #[regex("(?&int)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix))]
+        #[regex("-?0(?&digit)+", |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, DecimalError::LeadingZeros, DecimalError::UnexpectedSuffix))]
         #[token("-", handlers::$handlers::unexpected_minus_token)]
         #[token("+", handlers::$handlers::unexpected_plus_token)]
         Int($slice),
