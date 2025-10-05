@@ -230,6 +230,18 @@ impl<Char, StateError> LexerError<Char, StateError> {
     Self::const_new(span, LexerErrorData::Hex(error))
   }
 
+  /// Creates a new octal error.
+  #[inline]
+  pub const fn octal(span: Span, error: OctalError<Char>) -> Self {
+    Self::const_new(span, LexerErrorData::Octal(error))
+  }
+
+  /// Creates a new binary error.
+  #[inline]
+  pub const fn binary(span: Span, error: BinaryError<Char>) -> Self {
+    Self::const_new(span, LexerErrorData::Binary(error))
+  }
+
   /// Creates a new decimal error.
   #[inline]
   pub const fn decimal(span: Span, error: DecimalError<Char>) -> Self {

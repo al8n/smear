@@ -181,7 +181,7 @@ where
 }
 
 #[inline]
-fn handle_binary_suffix<'a, Char, S, T, E>(
+fn handle_valid_binary_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
@@ -196,7 +196,7 @@ where
 }
 
 #[inline]
-fn handle_octal_suffix<'a, Char, S, T, E>(
+fn handle_valid_octal_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,

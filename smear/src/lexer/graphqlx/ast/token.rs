@@ -2,18 +2,17 @@ macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty, $to_slice_iter:expr)) => {
     mod $mod {
       use logosky::{
-        Logos, logos::Lexer, Lexable, utils::{recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}, Lexeme},
+        Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
       use crate::{
         error::StringErrors,
         lexer::{graphqlx::{
-          error::{LexerErrors, LexerError, LexerErrorData, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
+          error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
           ast::{AstToken, AstTokenKind},
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
 
-      type TokenErrorData = LexerErrorData<$char, RecursionLimitExceeded>;
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
@@ -147,14 +146,12 @@ macro_rules! token {
         #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix))]
         Decimal($slice),
 
-        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_binary_suffix(lexer, BinaryError::UnexpectedSuffix))]
-        // #[regex("(?&invalid_binary_digit)", |lexer| handlers::$handlers::handle_invalid_binary_digit_error_and_number_suffix(lexer))]
-        // #[regex("(?&binary_start)", |lexer| handlers::$handlers::missing_digits_after_binary_prefix(lexer))]
+        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix))]
+        #[regex("(?&binary_start)", |lexer| handlers::$handlers::handle_invalid_binary_suffix(lexer))]
         Binary($slice),
 
-        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_octal_suffix(lexer, OctalError::UnexpectedSuffix))]
-        // #[regex("(?&invalid_octal_digit)", |lexer| handlers::$handlers::handle_invalid_octal_digit_error_and_number_suffix(lexer))]
-        // #[regex("(?&octal_start)", |lexer| handlers::$handlers::missing_digits_after_octal_prefix(lexer))]
+        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix))]
+        #[regex("(?&octal_start)", |lexer| handlers::$handlers::handle_invalid_octal_suffix(lexer))]
         Octal($slice),
 
         #[regex("(?&hex)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix))]

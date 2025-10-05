@@ -1,6 +1,9 @@
 use crate::{
-  hints::{ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint},
-  lexer::{graphqlx::error::{HexError, HexFloatError}, handlers::{self, is_ignored_byte}},
+  hints::{ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint, BinaryHint},
+  lexer::{
+    graphqlx::error::{HexError, OctalError, BinaryError},
+    handlers::{self, is_ignored_byte},
+  },
 };
 use logosky::{
   Source,
@@ -73,9 +76,7 @@ where
 }
 
 #[inline]
-fn exponent_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> LexerError<Extras>
+fn exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
@@ -115,9 +116,7 @@ where
 }
 
 #[inline]
-fn hex_exponent_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> LexerError<Extras>
+fn hex_exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
@@ -244,7 +243,7 @@ where
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }
 
-pub(in crate::lexer) fn handle_binary_suffix<'a, S, T, E, Extras>(
+pub(in crate::lexer) fn handle_valid_binary_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -256,7 +255,7 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_binary_suffix(
+  super::handle_valid_binary_suffix(
     lexer,
     remainder_len,
     remainder.as_ref().iter().copied(),
@@ -265,7 +264,37 @@ where
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }
 
-pub(in crate::lexer) fn handle_octal_suffix<'a, S, T, E, Extras>(
+#[allow(clippy::result_large_err)]
+#[inline]
+pub(in crate::lexer) fn handle_invalid_binary_suffix<'a, S, T, Extras
+  >(lexer: &mut Lexer<'a, T>) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  let mut errs = error::LexerErrors::default();
+  let remainder = lexer.remainder();
+  let remainder_ref = remainder.as_ref();
+
+  if remainder_ref.is_empty() {
+    errs.push(error::LexerError::binary(
+      lexer.span().into(),
+      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name("binary".into(), BinaryHint::Digit)),
+    ));
+    return Err(errs);
+  }
+
+  match handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix) {
+    Ok(_) => Err(errs),
+    Err(e) => {
+      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      Err(errs)
+    }
+  }
+}
+
+pub(in crate::lexer) fn handle_valid_octal_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -277,13 +306,44 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_octal_suffix(
+  super::handle_valid_octal_suffix(
     lexer,
     remainder_len,
     remainder.as_ref().iter().copied(),
     unexpected_suffix,
   )
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
+}
+
+#[allow(clippy::result_large_err)]
+#[inline]
+pub(in crate::lexer) fn handle_invalid_octal_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  let mut errs = error::LexerErrors::default();
+  let remainder = lexer.remainder();
+  let remainder_ref = remainder.as_ref();
+
+  if remainder_ref.is_empty() {
+    errs.push(error::LexerError::octal(
+      lexer.span().into(),
+      OctalError::UnexpectedEnd(UnexpectedEnd::with_name("octal".into(), OctalHint::Digit)),
+    ));
+    return Err(errs);
+  }
+
+  match handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix) {
+    Ok(_) => Err(errs),
+    Err(e) => {
+      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      Err(errs)
+    }
+  }
 }
 
 pub(in crate::lexer) fn handle_valid_hex_suffix<'a, S, T, E, Extras>(
@@ -324,15 +384,12 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::hex(
       lexer.span().into(),
-      HexError::UnexpectedEnd(UnexpectedEnd::with_name(
-        "hex".into(),
-        HexHint::Digit,
-      )),
+      HexError::UnexpectedEnd(UnexpectedEnd::with_name("hex".into(), HexHint::Digit)),
     ));
     return Err(errs);
   }
 
-  match handle_valid_hex_suffix(lexer, error::HexError::UnexpectedSuffix) {
+  match handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
