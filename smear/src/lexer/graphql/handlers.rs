@@ -77,9 +77,14 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<FloatHint>> + From<UnexpectedLexeme<Char, FloatHint>>,
 {
-  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
-    FloatHint::Fractional
-  })
+  handlers::lit_float_suffix_error(
+    "float",
+    lexer,
+    remainder_len,
+    remainder,
+    is_ignored_char,
+    || FloatHint::Fractional,
+  )
 }
 
 #[inline]

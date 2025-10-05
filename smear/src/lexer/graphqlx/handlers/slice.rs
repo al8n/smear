@@ -93,6 +93,7 @@ where
   LexerError::float(
     lexer.span().into(),
     handlers::lit_float_suffix_error::<_, super::GraphQLxNumber, _, _, _, _>(
+      "float",
       lexer,
       remainder_len,
       iter,
@@ -136,6 +137,7 @@ where
   LexerError::hex_float(
     lexer.span().into(),
     handlers::lit_float_suffix_error::<_, super::GraphQLxHexExponent, _, _, _, _>(
+      "hex float",
       lexer,
       remainder_len,
       iter,

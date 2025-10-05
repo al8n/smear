@@ -93,6 +93,7 @@ where
 
 #[inline]
 pub(super) fn lit_float_suffix_error<'a, Char, Language, H, S, T, E>(
+  name: &'static str,
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   mut remainder: impl Iterator<Item = Char>,
@@ -106,8 +107,8 @@ where
   E: From<UnexpectedEnd<H>> + From<UnexpectedLexeme<Char, H>>,
 {
   match remainder.next() {
-    None => UnexpectedEnd::with_name("float".into(), hint()).into(),
-    Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name("float".into(), hint()).into(),
+    None => UnexpectedEnd::with_name(name.into(), hint()).into(),
+    Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name(name.into(), hint()).into(),
     Some(ch) if ch.is_first_invalid_char() => {
       // The first char is already consumed.
       let mut curr = 1;

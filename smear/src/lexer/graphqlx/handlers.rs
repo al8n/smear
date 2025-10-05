@@ -76,9 +76,14 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<FloatHint>> + From<UnexpectedLexeme<Char, FloatHint>>,
 {
-  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
-    FloatHint::Fractional
-  })
+  handlers::lit_float_suffix_error(
+    "float",
+    lexer,
+    remainder_len,
+    remainder,
+    is_ignored_char,
+    || FloatHint::Fractional,
+  )
 }
 
 #[inline]
@@ -94,9 +99,14 @@ where
   S: ?Sized + Source,
   E: From<UnexpectedEnd<HexFloatHint>> + From<UnexpectedLexeme<Char, HexFloatHint>>,
 {
-  handlers::lit_float_suffix_error(lexer, remainder_len, remainder, is_ignored_char, || {
-    HexFloatHint::Fractional
-  })
+  handlers::lit_float_suffix_error(
+    "hex float",
+    lexer,
+    remainder_len,
+    remainder,
+    is_ignored_char,
+    || HexFloatHint::Fractional,
+  )
 }
 
 #[allow(clippy::result_large_err)]

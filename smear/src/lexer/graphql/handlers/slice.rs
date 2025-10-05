@@ -222,6 +222,7 @@ where
   LexerError::float(
     lexer.span().into(),
     handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
+      "float",
       lexer,
       remainder_len,
       iter,
