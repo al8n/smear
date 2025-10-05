@@ -13,7 +13,7 @@ fn async_graphql_issue_1039() {
   let mut iter = definitions.iter();
 
   {
-    let fragment = iter.next().unwrap().unwrap_executable_ref().unwrap_fragment_ref();
+    let fragment = iter.next().unwrap().unwrap_definition_ref().unwrap_executable_ref().unwrap_fragment_ref();
 
     assert_eq!(fragment.name().source(), "onboardingFull");
     assert_eq!(fragment.type_condition().name().source(), "OnboardingState");
@@ -25,7 +25,7 @@ fn async_graphql_issue_1039() {
   }
 
   {
-    let query = iter.next().unwrap().unwrap_executable_ref().unwrap_operation_ref().unwrap_named_ref();
+    let query = iter.next().unwrap().unwrap_definition_ref().unwrap_executable_ref().unwrap_operation_ref().unwrap_named_ref();
     assert_eq!(query.name().unwrap().source(), "globalConfig");
     assert!(query.operation_type().is_query());
 

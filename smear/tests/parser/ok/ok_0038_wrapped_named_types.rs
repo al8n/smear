@@ -11,8 +11,8 @@ fn wrapped_named_types() {
   assert_eq!(definitions.len(), 2);
 
   let mut definitions = definitions.iter().map(|d| {
-    d.unwrap_type_system_ref()
-      .unwrap_definition_ref()
+    d.unwrap_definition_ref()
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref()
   });

@@ -15,8 +15,8 @@ fn scalar_type_definition() {
     .iter()
     .next()
     .unwrap()
-    .unwrap_type_system_ref()
     .unwrap_definition_ref()
+    .unwrap_type_system_ref()
     .unwrap_type_ref()
     .unwrap_scalar_ref();
 

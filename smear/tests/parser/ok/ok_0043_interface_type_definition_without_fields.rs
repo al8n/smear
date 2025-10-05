@@ -14,10 +14,10 @@ fn interface_type_definition_without_fields() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
     
     let interface = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_interface_ref();
 
@@ -36,7 +36,6 @@ fn interface_type_definition_without_fields() {
     let interface = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_interface_ref();

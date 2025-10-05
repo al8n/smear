@@ -216,6 +216,9 @@ where
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
 
+  let slice = lexer.slice();
+  let slice_bytes = slice.as_ref();
+
   LexerError::float(
     lexer.span().into(),
     handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
@@ -223,7 +226,7 @@ where
       remainder_len,
       iter,
       |b| is_ignored_byte(remainder_slice, b),
-      || match remainder_slice.iter().last().copied() {
+      || match slice_bytes.iter().last().copied() {
         Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
         Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
         _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),

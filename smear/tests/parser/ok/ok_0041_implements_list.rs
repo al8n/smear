@@ -14,10 +14,10 @@ fn implements_list() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
 
     let object = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
 
@@ -45,9 +45,9 @@ fn implements_list() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
     let object = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
 
@@ -79,9 +79,9 @@ fn implements_list() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
     let object = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
 

@@ -220,6 +220,9 @@ where
   let remainder_len = remainder_str.len();
   let iter = remainder_str.chars();
 
+  let slice = lexer.slice();
+  let slice_str = slice.as_ref();
+
   LexerError::float(
     lexer.span().into(),
     handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
@@ -227,10 +230,10 @@ where
       remainder_len,
       iter,
       is_ignored_char,
-      || match remainder_str.chars().last() {
+      || match slice_str.chars().last() {
         Some('e' | 'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
         Some('+' | '-') => FloatHint::Exponent(ExponentHint::Digit),
-        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
+        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-'"),
       },
     ),
   )

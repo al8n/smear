@@ -5,7 +5,6 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-    syntax_tree_display::DisplaySyntaxTree,
   },
 };
 

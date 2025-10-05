@@ -557,6 +557,29 @@ pub type TypeSystemDefinition<
   SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
 >;
 
+pub type DescribedTypeSystemDefinition<
+  S,
+  NamesContainer = DefaultNamesContainer<S>,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+  LocationsContainer = DefaultLocationsContainer,
+  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+> = Described<
+  TypeSystemDefinition<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
+  >,
+  StringValue<S>,
+>;
+
 pub type TypeExtension<
   S,
   NamesContainer = DefaultNamesContainer<S>,
@@ -615,18 +638,15 @@ pub type TypeSystemDefinitionOrExtension<
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
 > = scaffold::TypeSystemDefinitionOrExtension<
-  Described<
-    TypeSystemDefinition<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-    StringValue<S>,
+  DescribedTypeSystemDefinition<
+    S,
+    NamesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
   >,
   TypeSystemExtension<
     S,
@@ -648,6 +668,12 @@ pub type ExecutableDefinition<
   FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
+pub type DescribedExecutableDefinition<
+  S,
+  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+> = Described<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
+
 pub type Definition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
@@ -668,7 +694,7 @@ pub type Definition<
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
 > = scaffold::Definition<
-  TypeSystemDefinitionOrExtension<
+  TypeSystemDefinition<
     S,
     NamesContainer,
     ConstArgumentsContainer,
@@ -679,6 +705,84 @@ pub type Definition<
     RootOperationTypesContainer,
   >,
   ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+>;
+
+pub type DescribedDefinition<
+  S,
+  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+  NamesContainer = DefaultNamesContainer<S>,
+  InputValuesContainer = DefaultInputValuesContainer<
+    S,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+  >,
+  EnumValuesContainer = DefaultEnumValuesContainer<
+    S,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+  >,
+  LocationsContainer = DefaultLocationsContainer,
+  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+> = Described<
+  Definition<
+    S,
+    ArgumentsContainer,
+    DirectivesContainer,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+    NamesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
+  >,
+  StringValue<S>,
+>;
+
+pub type DefinitionOrExtension<
+  S,
+  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+  NamesContainer = DefaultNamesContainer<S>,
+  InputValuesContainer = DefaultInputValuesContainer<
+    S,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+  >,
+  EnumValuesContainer = DefaultEnumValuesContainer<
+    S,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+  >,
+  LocationsContainer = DefaultLocationsContainer,
+  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+> = scaffold::DefinitionOrExtension<
+  DescribedDefinition<
+    S,
+    ArgumentsContainer,
+    DirectivesContainer,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+    NamesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    LocationsContainer,
+    RootOperationTypesContainer,
+  >,
+  TypeSystemExtension<
+    S,
+    NamesContainer,
+    ConstArgumentsContainer,
+    ConstDirectivesContainer,
+    InputValuesContainer,
+    EnumValuesContainer,
+    RootOperationTypesContainer,
+  >,
 >;
 
 pub type TypeSystemDocument<
@@ -748,7 +852,7 @@ pub type Document<
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
   DefinitionContainer = DefaultVec<
-    Definition<
+    DefinitionOrExtension<
       S,
       ArgumentsContainer,
       DirectivesContainer,
@@ -762,7 +866,7 @@ pub type Document<
     >,
   >,
 > = scaffold::Document<
-  Definition<
+  DefinitionOrExtension<
     S,
     ArgumentsContainer,
     DirectivesContainer,
