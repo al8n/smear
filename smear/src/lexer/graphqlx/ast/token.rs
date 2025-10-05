@@ -38,6 +38,7 @@ macro_rules! token {
         source = $source,
         error(TokenErrors, handlers::$handlers::default_error)
       )]
+      #[logos(subpattern ident = "[a-zA-Z_][a-zA-Z0-9_]*")]
       #[logos(subpattern digit = "[0-9]")]
       #[logos(subpattern hex_digit = "[0-9a-fA-F]")]
       #[logos(subpattern octal_digit = "[0-7]")]
@@ -114,10 +115,13 @@ macro_rules! token {
         #[token(".", |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer)))]
         Spread,
 
+        #[token("::")]
+        PathSep,
+
         #[token("=>")]
         FatArrow,
 
-        #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice())]
+        #[regex("(?&ident)", |lex| lex.slice())]
         Identifier($slice),
 
         #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
@@ -199,6 +203,7 @@ macro_rules! token {
             Token::LitBlockStr(s) => Self::LitBlockStr(s),
             Token::Plus => Self::Plus,
             Token::Minus => Self::Minus,
+            Token::PathSep => Self::PathSep,
           }
         }
       }

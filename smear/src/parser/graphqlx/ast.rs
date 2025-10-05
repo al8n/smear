@@ -2,12 +2,16 @@ use logosky::utils::recursion_tracker::RecursionLimitExceeded;
 
 pub use ty::*;
 pub use value::*;
+pub use declare_generic::*;
+pub use type_generic::*;
 
 use super::error::{Error, Errors, Extra};
 use crate::lexer::graphqlx::ast::{AstToken, AstTokenChar, AstTokenKind};
 
 mod ty;
 mod value;
+mod declare_generic;
+mod type_generic;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;

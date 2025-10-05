@@ -75,6 +75,8 @@ pub enum AstToken<S> {
   Plus,
   /// Minus `-` token
   Minus,
+  /// Path separator `::` token
+  PathSep,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -116,6 +118,7 @@ impl<S> AstToken<S> {
       Self::FatArrow => AstTokenKind::FatArrow,
       Self::Plus => AstTokenKind::Plus,
       Self::Minus => AstTokenKind::Minus,
+      Self::PathSep => AstTokenKind::PathSep,
     }
   }
 }
@@ -163,6 +166,7 @@ pub enum AstTokenKind {
   Ampersand,
   Plus,
   Minus,
+  PathSep,
 }
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
