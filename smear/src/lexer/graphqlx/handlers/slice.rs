@@ -1,7 +1,7 @@
 use crate::{
-  hints::{ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint, BinaryHint},
+  hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
   lexer::{
-    graphqlx::error::{HexError, OctalError, BinaryError},
+    graphqlx::error::{BinaryError, HexError, OctalError},
     handlers::{self, is_ignored_byte},
   },
 };
@@ -266,8 +266,9 @@ where
 
 #[allow(clippy::result_large_err)]
 #[inline]
-pub(in crate::lexer) fn handle_invalid_binary_suffix<'a, S, T, Extras
-  >(lexer: &mut Lexer<'a, T>) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+pub(in crate::lexer) fn handle_invalid_binary_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,

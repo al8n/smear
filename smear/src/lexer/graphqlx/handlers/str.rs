@@ -6,8 +6,11 @@ use logosky::{
 };
 
 use crate::{
-  hints::{ExponentHint, FloatHint, HexExponentHint, HexFloatHint, OctalHint, BinaryHint, HexHint},
-  lexer::{graphqlx::error::{HexError, OctalError, BinaryError}, handlers::{self, is_ignored_char}},
+  hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
+  lexer::{
+    graphqlx::error::{BinaryError, HexError, OctalError},
+    handlers::{self, is_ignored_char},
+  },
 };
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
@@ -387,5 +390,3 @@ where
     }
   }
 }
-
-

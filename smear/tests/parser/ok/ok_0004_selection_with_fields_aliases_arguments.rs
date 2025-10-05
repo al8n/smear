@@ -12,7 +12,7 @@ fn selection_with_fields_aliases_arguments() {
   let fave_snack = fields.next().unwrap().unwrap_field();
   assert!(fields.next().is_none());
 
-  assert_eq!(pet.name().slice(), "pet");
+  assert_eq!(pet.name().source(), "pet");
 
   {
     let spet = pet.selection_set().cloned().unwrap();
@@ -20,8 +20,8 @@ fn selection_with_fields_aliases_arguments() {
 
     let mut fields = spet.into_selections().into_iter();
     let name = fields.next().unwrap().unwrap_field();
-    assert_eq!(name.alias().unwrap().name().slice(), "name");
-    assert_eq!(name.name().slice(), "nickname");
+    assert_eq!(name.alias().unwrap().name().source(), "name");
+    assert_eq!(name.name().source(), "nickname");
     assert!(name.selection_set().is_none());
 
     let birthday = fields.next().unwrap().unwrap_field();
@@ -59,13 +59,13 @@ fn selection_with_fields_aliases_arguments() {
     }
   }
 
-  assert_eq!(fave_snack.name().slice(), "faveSnack");
+  assert_eq!(fave_snack.name().source(), "faveSnack");
   assert!(fave_snack.selection_set().is_none());
 
   let fave_snack_args = fave_snack.arguments().expect("expect arguments");
   assert_eq!(fave_snack_args.arguments().len(), 1, "expect one argument");
 
   let arg1 = &fave_snack_args.arguments()[0];
-  assert_eq!(arg1.name().slice(), "quantity");
-  assert_eq!(arg1.value().unwrap_int_ref().slice(), "4");
+  assert_eq!(arg1.name().source(), "quantity");
+  assert_eq!(arg1.value().unwrap_int_ref().source(), "4");
 }

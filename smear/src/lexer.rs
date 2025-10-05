@@ -51,7 +51,7 @@ macro_rules! variant_type {
 
       /// Returns the underlying source.
       #[inline(always)]
-      pub const fn source(self) -> S where S: Copy {
+      pub const fn source(&self) -> S where S: Copy {
         self.source
       }
 

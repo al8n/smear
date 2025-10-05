@@ -8,7 +8,7 @@ fn query_with_variables() {
   .unwrap()
   .unwrap_named();
 
-  assert_eq!(values.name().unwrap().slice(), "Foo");
+  assert_eq!(values.name().unwrap().source(), "Foo");
   let variable_definitions = values
     .variable_definitions()
     .unwrap()
@@ -16,9 +16,9 @@ fn query_with_variables() {
   assert_eq!(variable_definitions.len(), 1);
   let variable_definition = &variable_definitions[0];
   assert_eq!(
-    variable_definition.variable().name().slice(),
+    variable_definition.variable().name().source(),
     "bar"
   );
   let ty = variable_definition.ty().unwrap_name_ref();
-  assert_eq!(ty.name().slice(), "Int");
+  assert_eq!(ty.name().source(), "Int");
 }

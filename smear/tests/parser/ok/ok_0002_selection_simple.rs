@@ -13,8 +13,8 @@ fn selection_simple() {
   let fave_snack = fields.next().unwrap().unwrap_field();
   assert!(fields.next().is_none());
 
-  assert_eq!(pet.name().slice(), "pet");
+  assert_eq!(pet.name().source(), "pet");
   assert!(pet.selection_set().is_none());
-  assert_eq!(fave_snack.name().slice(), "faveSnack");
+  assert_eq!(fave_snack.name().source(), "faveSnack");
   assert!(fave_snack.selection_set().is_none());
 }

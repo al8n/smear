@@ -19,26 +19,26 @@ fn values() {
 
   {
     let user = iter.next().unwrap().unwrap_field_ref();
-    assert_eq!(user.name().slice(), "user");
+    assert_eq!(user.name().source(), "user");
     let arguments = user.arguments().cloned().unwrap();
     assert_eq!(arguments.arguments().len(), 7);
     let mut arg_iter = arguments.arguments().iter();
 
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "id");
+      assert_eq!(arg.name().source(), "id");
       let value = arg.value();
-      assert_eq!(value.unwrap_int_ref().slice(), "4");
+      assert_eq!(value.unwrap_int_ref().source(), "4");
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "size");
+      assert_eq!(arg.name().source(), "size");
       let value = arg.value();
-      assert_eq!(value.unwrap_variable_ref().name().slice(), "size");
+      assert_eq!(value.unwrap_variable_ref().name().source(), "size");
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "value");
+      assert_eq!(arg.name().source(), "value");
       let value = arg.value();
       assert_eq!(
         value.unwrap_string_ref().source().trim_matches('"'),
@@ -47,7 +47,7 @@ fn values() {
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "input");
+      assert_eq!(arg.name().source(), "input");
       let value = arg.value();
       let list = value.unwrap_list_ref();
       let items = list.values();
@@ -58,30 +58,30 @@ fn values() {
       }
       {
         let second = &items[1];
-        assert_eq!(second.unwrap_float_ref().slice(), "1.34");
+        assert_eq!(second.unwrap_float_ref().source(), "1.34");
       }
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "otherInput");
+      assert_eq!(arg.name().source(), "otherInput");
       let value = arg.value();
       let object = value.unwrap_object_ref();
       let fields = object.fields();
       assert_eq!(fields.len(), 2);
       {
         let first = &fields[0];
-        assert_eq!(first.name().slice(), "key");
+        assert_eq!(first.name().source(), "key");
         assert!(!first.value().unwrap_boolean_ref().value());
       }
       {
         let second = &fields[1];
-        assert_eq!(second.name().slice(), "output");
-        assert_eq!(second.value().unwrap_null_ref().slice(), "null");
+        assert_eq!(second.name().source(), "output");
+        assert_eq!(second.value().unwrap_null_ref().source(), "null");
       }
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "emptyList");
+      assert_eq!(arg.name().source(), "emptyList");
       let value = arg.value();
       let list = value.unwrap_list_ref();
       let items = list.values();
@@ -89,7 +89,7 @@ fn values() {
     }
     {
       let arg = arg_iter.next().unwrap();
-      assert_eq!(arg.name().slice(), "emptyObject");
+      assert_eq!(arg.name().source(), "emptyObject");
       let value = arg.value();
       let object = value.unwrap_object_ref();
       let fields = object.fields();

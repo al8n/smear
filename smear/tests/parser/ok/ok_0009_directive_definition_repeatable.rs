@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0009_directive_definiti
 fn directive_definition_repeatable() {
   let definition = DirectiveDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().slice(), "example");
+  assert_eq!(definition.name().source(), "example");
   let locations = definition.locations();
   let locations = locations.locations();
   assert_eq!(locations.len(), 2);
@@ -23,17 +23,17 @@ fn directive_definition_repeatable() {
 
   {
     let is_treat = iter.next().unwrap();
-    assert_eq!(is_treat.name().slice(), "isTreat");
+    assert_eq!(is_treat.name().source(), "isTreat");
     let ty = is_treat.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "Boolean");
+    assert_eq!(ty.name().source(), "Boolean");
     assert!(!ty.required());
   }
 
   {
     let treat_kind = iter.next().unwrap();
-    assert_eq!(treat_kind.name().slice(), "treatKind");
+    assert_eq!(treat_kind.name().source(), "treatKind");
     let ty = treat_kind.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required());
   }
 

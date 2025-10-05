@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0018_object_type_defini
 fn object_type_definition() {
   let definition = DescribedObjectTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().slice(), "Person");
+  assert_eq!(definition.name().source(), "Person");
   assert_eq!(
     definition.description().unwrap().source().trim_matches('"'),
     "description of type"
@@ -15,7 +15,7 @@ fn object_type_definition() {
   let impls = definition.implements().unwrap();
   let ifs = impls.interfaces();
   assert_eq!(
-    ifs[0].slice(),
+    ifs[0].source(),
     "Human"
   );
 
@@ -25,32 +25,32 @@ fn object_type_definition() {
 
   {
     let name = fields.next().unwrap();
-    assert_eq!(name.name().slice(), "name");
+    assert_eq!(name.name().source(), "name");
     assert_eq!(
       name.description().unwrap().source().trim_matches('"'),
       "\n    description of field\n    "
     );
     let ty = name.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required());
   }
 
   {
     let age = fields.next().unwrap();
-    assert_eq!(age.name().slice(), "age");
+    assert_eq!(age.name().source(), "age");
     let ty = age.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(!ty.required());
   }
 
   {
     let picture = fields.next().unwrap();
-    assert_eq!(picture.name().slice(), "picture");
+    assert_eq!(picture.name().source(), "picture");
     let ty = picture.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Url");
+    assert_eq!(ty.name().source(), "Url");
     assert!(!ty.required());
   }
 }

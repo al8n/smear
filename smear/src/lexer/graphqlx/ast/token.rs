@@ -9,7 +9,7 @@ macro_rules! token {
         lexer::{graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
-          ast::{AstToken, AstTokenKind},
+          ast::{AstToken, AstTokenKind, LitInt, LitFloat},
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
 
@@ -128,8 +128,6 @@ macro_rules! token {
         #[regex("(?&decimal)(?&frac)(?&esign)", handlers::$handlers::handle_exponent_error)]
         #[regex("(?&decimal)\\._*", handlers::$handlers::handle_fractional_error)]
         #[regex("(?&decimal)(?&esign)", handlers::$handlers::handle_exponent_error)]
-        #[token("inf", |lexer| lexer.slice())]
-        #[token("nan", |lexer| lexer.slice())]
         Float($slice),
 
         #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
@@ -190,12 +188,17 @@ macro_rules! token {
             Token::LParen => Self::LParen,
             Token::Pipe => Self::Pipe,
             Token::Spread => Self::Spread,
-            Token::Float(s) => Self::LitFloat(s),
+            Token::Float(s) => Self::LitFloat(LitFloat::Decimal(s)),
+            Token::HexFloat(s) => Self::LitFloat(LitFloat::Hex(s)),
             Token::Identifier(s) => Self::Identifier(s),
-            // Token::Decimal(s) => Self::LitDecimal(s),
+            Token::Decimal(s) => Self::LitInt(LitInt::Decimal(s)),
+            Token::Hex(s) => Self::LitInt(LitInt::Hex(s)),
+            Token::Binary(s) => Self::LitInt(LitInt::Binary(s)),
+            Token::Octal(s) => Self::LitInt(LitInt::Octal(s)),
             Token::LitInlineStr(s) => Self::LitInlineStr(s),
             Token::LitBlockStr(s) => Self::LitBlockStr(s),
-            _ => todo!()
+            Token::Plus => Self::Plus,
+            Token::Minus => Self::Minus,
           }
         }
       }

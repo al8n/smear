@@ -7,7 +7,7 @@ fn operation_type_definition() {
   let definition = OperationDefinition::<&str>::parse_str(ALL)
   .unwrap()
   .unwrap_named();
-  assert_eq!(definition.name().unwrap().slice(), "myQuery");
+  assert_eq!(definition.name().unwrap().source(), "myQuery");
   assert_eq!(definition.operation_type().as_str(), "query");
 
   let selection_set = definition.selection_set();
@@ -16,8 +16,8 @@ fn operation_type_definition() {
 
   {
     let cat = selections.next().unwrap().unwrap_field();
-    assert_eq!(cat.name().slice(), "cat");
-    assert_eq!(cat.alias().unwrap().name().slice(), "animal");
+    assert_eq!(cat.name().source(), "cat");
+    assert_eq!(cat.alias().unwrap().name().source(), "animal");
     assert!(cat.arguments().is_none());
     assert!(cat.directives().is_none());
     assert!(cat.selection_set().is_none());
@@ -25,7 +25,7 @@ fn operation_type_definition() {
 
   {
     let dog = selections.next().unwrap().unwrap_field();
-    assert_eq!(dog.name().slice(), "dog");
+    assert_eq!(dog.name().source(), "dog");
     assert!(dog.alias().is_none());
     assert!(dog.arguments().is_none());
     assert!(dog.directives().is_none());
@@ -35,7 +35,7 @@ fn operation_type_definition() {
 
     {
       let panda = dog_selections.next().unwrap().unwrap_field();
-      assert_eq!(panda.name().slice(), "panda");
+      assert_eq!(panda.name().source(), "panda");
       assert!(panda.alias().is_none());
       assert!(panda.arguments().is_none());
       assert!(panda.directives().is_none());
@@ -45,13 +45,13 @@ fn operation_type_definition() {
 
       {
         let another_cat = panda_selections.next().unwrap().unwrap_field();
-        assert_eq!(another_cat.name().slice(), "anotherCat");
+        assert_eq!(another_cat.name().source(), "anotherCat");
         assert!(another_cat.alias().is_none());
         assert!(another_cat.arguments().is_none());
         let directives = another_cat.directives().cloned().unwrap();
         assert_eq!(directives.directives().len(), 1);
         let directive = directives.directives().first().unwrap();
-        assert_eq!(directive.name().slice(), "deprecated");
+        assert_eq!(directive.name().source(), "deprecated");
         assert!(directive.arguments().is_none());
         assert!(another_cat.selection_set().is_none());
       }
@@ -60,7 +60,7 @@ fn operation_type_definition() {
 
   {
     let lion = selections.next().unwrap().unwrap_field();
-    assert_eq!(lion.name().slice(), "lion");
+    assert_eq!(lion.name().source(), "lion");
     assert!(lion.alias().is_none());
     assert!(lion.arguments().is_none());
     assert!(lion.directives().is_none());

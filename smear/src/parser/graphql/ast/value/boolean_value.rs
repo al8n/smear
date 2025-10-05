@@ -1,93 +1,14 @@
 use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, sdl_display::DisplaySDL},
+  utils::{Span, cmp::Equivalent},
 };
 
 use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
 
 use super::super::*;
 
-use core::fmt::Display;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BooleanValue {
-  span: Span,
-  value: bool,
-}
-
-impl Display for BooleanValue {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "{}", self.value())
-  }
-}
-
-impl AsSpan<Span> for BooleanValue {
-  #[inline]
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl IntoSpan<Span> for BooleanValue {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl IntoComponents for BooleanValue {
-  type Components = (Span, bool);
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.value)
-  }
-}
-
-impl AsRef<bool> for BooleanValue {
-  #[inline]
-  fn as_ref(&self) -> &bool {
-    &self.value
-  }
-}
-
-impl core::ops::Deref for BooleanValue {
-  type Target = bool;
-
-  #[inline]
-  fn deref(&self) -> &Self::Target {
-    &self.value
-  }
-}
-
-impl BooleanValue {
-  /// Creates a new boolean value.
-  #[inline]
-  pub(crate) const fn new(span: Span, value: bool) -> Self {
-    Self { span, value }
-  }
-
-  /// Returns the span of the boolean value.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns the boolean value.
-  #[inline]
-  pub const fn value(&self) -> bool {
-    self.value
-  }
-}
-
-impl DisplaySDL for BooleanValue {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "{}", self.value())
-  }
-}
+pub use crate::parser::value::BooleanValue;
 
 impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
   for BooleanValue

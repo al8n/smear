@@ -7,7 +7,7 @@ fn operation_type_definition_with_arguments() {
   let definition = OperationDefinition::<&str>::parse_str(ALL)
   .unwrap()
   .unwrap_named();
-  assert_eq!(definition.name().unwrap().slice(), "myQuery");
+  assert_eq!(definition.name().unwrap().source(), "myQuery");
   assert_eq!(definition.operation_type().as_str(), "query");
 
   let args = definition.variable_definitions().unwrap();
@@ -15,17 +15,17 @@ fn operation_type_definition_with_arguments() {
   let mut args = args.variable_definitions().iter();
   {
     let var = args.next().unwrap();
-    assert_eq!(var.variable().name().slice(), "var");
+    assert_eq!(var.variable().name().source(), "var");
     let ty = var.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "input");
+    assert_eq!(ty.name().source(), "input");
     assert!(!ty.required());
   }
 
   {
     let var_other = args.next().unwrap();
-    assert_eq!(var_other.variable().name().slice(), "varOther");
+    assert_eq!(var_other.variable().name().source(), "varOther");
     let ty = var_other.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "otherInput");
+    assert_eq!(ty.name().source(), "otherInput");
     assert!(!ty.required());
   }
 
@@ -35,7 +35,7 @@ fn operation_type_definition_with_arguments() {
 
   {
     let animal = selections.next().unwrap().unwrap_field();
-    assert_eq!(animal.name().slice(), "animal");
+    assert_eq!(animal.name().source(), "animal");
     assert!(animal.alias().is_none());
     assert!(animal.arguments().is_none());
     assert!(animal.directives().is_none());
@@ -44,7 +44,7 @@ fn operation_type_definition_with_arguments() {
 
   {
     let treat = selections.next().unwrap().unwrap_field();
-    assert_eq!(treat.name().slice(), "treat");
+    assert_eq!(treat.name().source(), "treat");
     assert!(treat.alias().is_none());
     assert!(treat.arguments().is_none());
     assert!(treat.directives().is_none());

@@ -19,12 +19,12 @@ fn union_type_definition_followed_by_object_definition() {
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_union_ref();
-    assert_eq!(union.name().slice(), "SearchResult");
+    assert_eq!(union.name().source(), "SearchResult");
     let member_types = union.member_types().unwrap();
     let members = member_types.members();
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].slice(), "Photo");
-    assert_eq!(members[1].slice(), "Person");
+    assert_eq!(members[0].source(), "Photo");
+    assert_eq!(members[1].source(), "Person");
   }
 
   {
@@ -35,13 +35,13 @@ fn union_type_definition_followed_by_object_definition() {
       .unwrap_definition_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
-    assert_eq!(object.name().slice(), "Error");
+    assert_eq!(object.name().source(), "Error");
     let fields = object.fields_definition().unwrap().field_definitions();
     assert_eq!(fields.len(), 1);
     let field = &fields[0];
-    assert_eq!(field.name().slice(), "code");
+    assert_eq!(field.name().source(), "code");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(!ty.required());
   }
 }

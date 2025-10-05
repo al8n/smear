@@ -16,13 +16,13 @@ fn schema_definition() {
   {
     let query = operation_types.next().unwrap();
     assert_eq!(query.operation_type().as_str(), "query");
-    assert_eq!(query.name().slice(), "MyQueryRootType");
+    assert_eq!(query.name().source(), "MyQueryRootType");
   }
 
   {
     let mutation = operation_types.next().unwrap();
     assert_eq!(mutation.operation_type().as_str(), "mutation");
-    assert_eq!(mutation.name().slice(), "MyMutationRootType");
+    assert_eq!(mutation.name().source(), "MyMutationRootType");
   }
 
   {
@@ -32,7 +32,7 @@ fn schema_definition() {
       "subscription"
     );
     assert_eq!(
-      subscription.name().slice(),
+      subscription.name().source(),
       "MySubscriptionRootType"
     );
   }

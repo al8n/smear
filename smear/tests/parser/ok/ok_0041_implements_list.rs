@@ -21,22 +21,22 @@ fn implements_list() {
       .unwrap_type_ref()
       .unwrap_object_ref();
 
-    assert_eq!(object.name().slice(), "One");
+    assert_eq!(object.name().source(), "One");
     assert_eq!(
       described.description().unwrap().source().trim_matches('"'),
       "Just one interface"
     );
     let impls = object.implements().unwrap();
     let first = impls.interfaces().first().unwrap();
-    assert_eq!(first.slice(), "A");
+    assert_eq!(first.source(), "A");
 
     {
       let selections = object.fields_definition().unwrap().field_definitions();
       assert_eq!(selections.len(), 1);
       let field = &selections[0];
-      assert_eq!(field.name().slice(), "field");
+      assert_eq!(field.name().source(), "field");
       let ty = field.ty().unwrap_name_ref();
-      assert_eq!(ty.name().slice(), "Int");
+      assert_eq!(ty.name().source(), "Int");
       assert!(ty.required());
     }
   }
@@ -51,7 +51,7 @@ fn implements_list() {
       .unwrap_type_ref()
       .unwrap_object_ref();
 
-    assert_eq!(object.name().slice(), "Two");
+    assert_eq!(object.name().source(), "Two");
     assert_eq!(
       described.description().unwrap().source().trim_matches('"'),
       "Several interfaces"
@@ -60,17 +60,17 @@ fn implements_list() {
     let ifs = impls.interfaces();
 
     assert_eq!(impls.interfaces().len(), 3);
-    assert_eq!(ifs[0].slice(), "A");
-    assert_eq!(ifs[1].slice(), "B");
-    assert_eq!(ifs[2].slice(), "C");
+    assert_eq!(ifs[0].source(), "A");
+    assert_eq!(ifs[1].source(), "B");
+    assert_eq!(ifs[2].source(), "C");
 
     {
       let selections = object.fields_definition().unwrap().field_definitions();
       assert_eq!(selections.len(), 1);
       let field = &selections[0];
-      assert_eq!(field.name().slice(), "field");
+      assert_eq!(field.name().source(), "field");
       let ty = field.ty().unwrap_name_ref();
-      assert_eq!(ty.name().slice(), "Int");
+      assert_eq!(ty.name().source(), "Int");
       assert!(ty.required());
     }
   }
@@ -85,7 +85,7 @@ fn implements_list() {
       .unwrap_type_ref()
       .unwrap_object_ref();
 
-    assert_eq!(object.name().slice(), "Three");
+    assert_eq!(object.name().source(), "Three");
     assert_eq!(
       described.description().unwrap().source().trim_matches('"'),
       "&-prefixed"
@@ -94,17 +94,17 @@ fn implements_list() {
     let ifs = impls.interfaces();
 
     assert_eq!(ifs.len(), 3);
-    assert_eq!(ifs[0].slice(), "A");
-    assert_eq!(ifs[1].slice(), "B");
-    assert_eq!(ifs[2].slice(), "C");
+    assert_eq!(ifs[0].source(), "A");
+    assert_eq!(ifs[1].source(), "B");
+    assert_eq!(ifs[2].source(), "C");
 
     {
       let selections = object.fields_definition().unwrap().field_definitions();
       assert_eq!(selections.len(), 1);
       let field = &selections[0];
-      assert_eq!(field.name().slice(), "field");
+      assert_eq!(field.name().source(), "field");
       let ty = field.ty().unwrap_name_ref();
-      assert_eq!(ty.name().slice(), "Int");
+      assert_eq!(ty.name().source(), "Int");
       assert!(ty.required());
     }
   }

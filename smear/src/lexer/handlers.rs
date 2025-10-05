@@ -7,7 +7,7 @@ use logosky::{
   },
 };
 
-use crate::{error::UnterminatedSpreadOperatorError, hints::FloatHint};
+use crate::error::UnterminatedSpreadOperatorError;
 
 pub(super) mod slice;
 pub(super) mod str;

@@ -1,6 +1,6 @@
 use super::{
   ConstInputValue, DefaultVec, FragmentName, InputValue, Location, Name, StringValue, Type,
-  TypeCondition, Variable, field, selection_set,
+  TypeCondition, VariableValue, field, selection_set,
 };
 use crate::scaffold::{
   self, Described, DirectiveLocations, ImplementInterfaces, OperationType, UnionMemberTypes,
@@ -145,7 +145,7 @@ pub type VariableDefinition<
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::VariableDefinition<
-  Variable<S>,
+  VariableValue<S>,
   Type<Name<S>>,
   DefaultInputValue<S>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,

@@ -7,3 +7,9 @@ pub mod graphql;
 #[cfg(feature = "graphqlx")]
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
+
+/// common values
+mod value;
+
+/// The identifier
+mod ident;

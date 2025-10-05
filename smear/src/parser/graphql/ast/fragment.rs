@@ -83,7 +83,7 @@ where
 {
   #[inline]
   fn eq(&self, other: &S) -> bool {
-    self.slice_ref().eq(other)
+    self.source_ref().eq(other)
   }
 }
 
@@ -132,7 +132,7 @@ impl<S> FragmentName<S> {
 
   /// Returns a reference to the underlying source value.
   #[inline]
-  pub const fn slice(&self) -> S
+  pub const fn source(&self) -> S
   where
     S: Copy,
   {
@@ -141,7 +141,7 @@ impl<S> FragmentName<S> {
 
   /// Returns a reference to the underlying source value.
   #[inline]
-  pub const fn slice_ref(&self) -> &S {
+  pub const fn source_ref(&self) -> &S {
     &self.value
   }
 }
@@ -152,7 +152,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.slice_ref(), f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
@@ -161,7 +161,7 @@ impl<S> core::ops::Deref for FragmentName<S> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.slice_ref()
+    self.source_ref()
   }
 }
 

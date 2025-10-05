@@ -12,7 +12,7 @@ fn selection_with_fields() {
   let fave_snack = fields.next().unwrap().unwrap_field();
   assert!(fields.next().is_none());
 
-  assert_eq!(pet.name().slice(), "pet");
+  assert_eq!(pet.name().source(), "pet");
 
   {
     let spet = pet.selection_set().cloned().unwrap();
@@ -57,6 +57,6 @@ fn selection_with_fields() {
     }
   }
 
-  assert_eq!(fave_snack.name().slice(), "faveSnack");
+  assert_eq!(fave_snack.name().source(), "faveSnack");
   assert!(fave_snack.selection_set().is_none());
 }

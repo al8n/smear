@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0040_type_token_order.g
 fn type_token_order() {
   let definition = ObjectTypeDefinition::<&str>::parse_str(ALL).unwrap();
 
-  assert_eq!(definition.name().slice(), "Object");
+  assert_eq!(definition.name().source(), "Object");
 
   let mut fields = definition
     .fields_definition()
@@ -16,26 +16,26 @@ fn type_token_order() {
 
   {
     let field = fields.next().unwrap();
-    assert_eq!(field.name().slice(), "field");
+    assert_eq!(field.name().source(), "field");
     let ty = field.ty().unwrap_list_ref();
     let inner_ty = ty.ty().unwrap_name_ref();
-    assert_eq!(inner_ty.name().slice(), "Int");
+    assert_eq!(inner_ty.name().source(), "Int");
     assert!(inner_ty.required());
   }
 
   {
     let other = fields.next().unwrap();
-    assert_eq!(other.name().slice(), "_other");
+    assert_eq!(other.name().source(), "_other");
     let ty = other.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required());
   }
 
   {
     let real_field = fields.next().unwrap();
-    assert_eq!(real_field.name().slice(), "realField");
+    assert_eq!(real_field.name().source(), "realField");
     let ty = real_field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "ID");
+    assert_eq!(ty.name().source(), "ID");
     assert!(ty.required());
   }
 }

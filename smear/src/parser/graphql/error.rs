@@ -12,7 +12,7 @@ use logosky::{
 };
 
 pub use crate::{
-  error::ParseVariableValueError,
+  error::{ParseVariableValueError, UnexpectedKeyword, UnexpectedToken},
   hints::{
     EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
     ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
@@ -27,102 +27,10 @@ pub use core::num::{IntErrorKind, ParseFloatError, ParseIntError};
 pub type Extra<S, T, TK, Char = char, StateError = ()> =
   logosky::chumsky::extra::Err<Errors<S, T, TK, Char, StateError>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnexpectedToken<T, TK> {
-  found: Option<T>,
-  expected: TK,
-}
-
-impl<T, TK> UnexpectedToken<T, TK> {
-  /// Creates an unexpected token error without found token.
-  #[inline]
-  pub const fn new(expected: TK) -> Self {
-    Self::maybe_found(None, expected)
-  }
-
-  /// Creates a new unexpected token error.
-  #[inline]
-  pub const fn maybe_found(found: Option<T>, expected: TK) -> Self {
-    Self { found, expected }
-  }
-
-  /// Creates a new unexpected token error with found token.
-  #[inline]
-  pub const fn with_found(found: T, expected: TK) -> Self {
-    Self::maybe_found(Some(found), expected)
-  }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct UnexpectedObjectFieldValueShape {
-  has_name: bool,
-  has_colon: bool,
-  has_value: bool,
-}
-
-impl UnexpectedObjectFieldValueShape {
-  /// Creates a new unexpected object field value shape error.
-  #[inline]
-  pub const fn new(has_name: bool, has_colon: bool, has_value: bool) -> Self {
-    Self {
-      has_name,
-      has_colon,
-      has_value,
-    }
-  }
-
-  /// Returns `true` if the object field value has a name.
-  #[inline]
-  pub const fn has_name(&self) -> bool {
-    self.has_name
-  }
-
-  /// Returns `true` if the object field value has a colon.
-  #[inline]
-  pub const fn has_colon(&self) -> bool {
-    self.has_colon
-  }
-
-  /// Returns `true` if the object field value has a value.
-  #[inline]
-  pub const fn has_value(&self) -> bool {
-    self.has_value
-  }
-}
-
 #[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Unclosed {
   List,
   Object,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnexpectedKeyword<S> {
-  found: S,
-  expected: &'static str,
-}
-
-impl<S> UnexpectedKeyword<S> {
-  /// Creates a new unexpected keyword error.
-  #[inline]
-  pub const fn new(found: S, expected_kw: &'static str) -> Self {
-    Self {
-      found,
-      expected: expected_kw,
-    }
-  }
-
-  /// Returns the found keyword.
-  #[inline]
-  pub const fn found(&self) -> &S {
-    &self.found
-  }
-
-  /// Returns the name of the expected keyword.
-  #[inline]
-  pub const fn expected(&self) -> &'static str {
-    self.expected
-  }
 }
 
 /// The data of a parser error.
@@ -156,8 +64,6 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   UnexpectedToken(UnexpectedToken<T, TK>),
   /// An unexpected keyword was found.
   UnexpectedKeyword(UnexpectedKeyword<S>),
-  /// The shape of an object field value is invalid.
-  UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape),
   /// An unexpected end was found in a variable value.
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
@@ -227,22 +133,6 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     Self::new(
       span,
       ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(found, expected_kw)),
-    )
-  }
-
-  /// Creates an unexpected object field value shape error.
-  #[inline]
-  pub const fn unexpected_object_field_value_shape(
-    has_name: bool,
-    has_colon: bool,
-    has_value: bool,
-    span: Span,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedObjectFieldValueShape(UnexpectedObjectFieldValueShape::new(
-        has_name, has_colon, has_value,
-      )),
     )
   }
 
