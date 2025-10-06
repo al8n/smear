@@ -128,7 +128,7 @@ keyword! {
   (Import, "import_KW", "import"),
   (As, "as_KW", "as"),
   (From, "from_KW", "from"),
-  (Package, "package_KW", "package"),
+  (Where, "where_KW", "where"),
 }
 
 // GraphQL Keywords

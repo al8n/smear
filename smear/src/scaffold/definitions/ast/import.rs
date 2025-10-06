@@ -19,7 +19,7 @@ use super::Path;
 /// ## Grammar
 ///
 /// ```graphqlx
-/// namedSpecifier 
+/// namedSpecifier
 ///     : identifier ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

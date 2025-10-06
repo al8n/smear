@@ -69,7 +69,7 @@ keyword_parser! {
   Import:"import",
   From:"from",
   As:"as",
-  keywords::Package:"package",
+  Where:"where",
 }
 
 keyword_parser! {

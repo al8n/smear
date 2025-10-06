@@ -8,9 +8,12 @@ use logosky::{
 use std::{boxed::Box, rc::Rc, sync::Arc};
 
 use crate::{
+  parser::ident::Ident,
   punctuator::{Bang, FatArrow, LAngle, LBracket, RAngle, RBracket},
   scaffold::{ListType, MapType, NamedType, SetType},
 };
+
+use super::Path;
 
 macro_rules! ty {
   ($(
@@ -280,3 +283,8 @@ ty!(
   /// for multi-threaded schema processing or when types need to be Send + Sync.
   Arc<ArcType>,
 );
+
+pub struct GenericNamedType<S, Container = Vec<Ident<S>>> {
+  span: Span,
+  path: Path<S, Container>,
+}
