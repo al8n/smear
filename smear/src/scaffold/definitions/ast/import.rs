@@ -19,7 +19,7 @@ use super::Path;
 /// ## Grammar
 ///
 /// ```graphqlx
-/// importedItem
+/// namedSpecifier 
 ///     : identifier ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -190,16 +190,16 @@ impl<Ident, Container> WildcardSpecifier<Ident, Container> {
 /// ## Grammar
 ///
 /// ```graphqlx
-/// importedItem
-///    : namedItem | wildcardItem
+/// importedMember
+///    : namedSpecifier | wildcardSpecifier
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Unwrap, TryUnwrap, IsVariant)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ImportMember<Ident, Container = Vec<Ident>> {
-  /// A named import item, potentially with an alias.
+  /// A named import specifier, potentially with an alias.
   Named(NamedSpecifier<Ident, Container>),
-  /// A wildcard import item, potentially with an alias.
+  /// A wildcard import specifier, potentially with an alias.
   Wildcard(WildcardSpecifier<Ident, Container>),
 }
 

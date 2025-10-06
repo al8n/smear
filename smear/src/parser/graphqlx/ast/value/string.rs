@@ -55,7 +55,7 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           AstToken::LitInlineStr(raw) => InlineStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, AstTokenKind::String, span).into()),
+          tok => return Err(Error::unexpected_token(tok, AstTokenKind::InlineString, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -81,7 +81,7 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           AstToken::LitBlockStr(raw) => BlockStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, AstTokenKind::String, span).into()),
+          tok => return Err(Error::unexpected_token(tok, AstTokenKind::BlockString, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
