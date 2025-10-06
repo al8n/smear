@@ -1,9 +1,10 @@
 use super::{
-  ConstInputValue, DefaultVec, FragmentName, InputValue, Location, Name, StringValue, Type,
-  TypeCondition, VariableValue, field, selection_set,
+  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, Type, TypeCondition,
+  VariableValue, field, selection_set,
 };
 use crate::scaffold::{
-  self, Described, DirectiveLocations, ImplementInterfaces, OperationType, UnionMemberTypes,
+  self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType,
+  UnionMemberTypes,
 };
 
 /// The default container type used for arguments in the AST.

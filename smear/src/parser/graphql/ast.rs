@@ -10,7 +10,6 @@ use super::error::{Error, Errors, Extra};
 use crate::lexer::graphql::ast::{AstToken, AstTokenChar, AstTokenKind};
 
 pub use fragment::*;
-pub use location::*;
 pub use name::*;
 pub use raw::*;
 pub use ty::*;

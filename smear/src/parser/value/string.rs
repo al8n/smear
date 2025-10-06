@@ -1,11 +1,10 @@
 use logosky::utils::{
   AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-  syntax_tree_display::DisplaySyntaxTree,
 };
 
 use core::fmt::Display;
 
-use crate::lexer::LitStr;
+use crate::lexer::{LitBlockStr, LitInlineStr, LitStr};
 
 /// A string value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -85,25 +84,158 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for StringValue<S>
+/// A inline string value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InlineStringValue<S> {
+  span: Span,
+  lit: LitInlineStr<S>,
+}
+
+impl<S> AsSpan<Span> for InlineStringValue<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for InlineStringValue<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<S> IntoComponents for InlineStringValue<S> {
+  type Components = (Span, LitInlineStr<S>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.lit)
+  }
+}
+
+impl<S> Display for InlineStringValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let padding = level * indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- STRING@{}..{} \"{}\"",
-      self.span.start(),
-      self.span.end(),
-      self.source_ref().display(),
-    )
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplaySDL::fmt(self, f)
+  }
+}
+
+impl<S> InlineStringValue<S> {
+  #[inline(always)]
+  pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self {
+    Self { span, lit }
+  }
+
+  /// Returns the span of the name.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the underlying source.
+  #[inline(always)]
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.lit.source()
+  }
+
+  /// Returns the reference to the underlying source.
+  #[inline(always)]
+  pub const fn source_ref(&self) -> &S {
+    self.lit.source_ref()
+  }
+}
+
+impl<S> DisplaySDL for InlineStringValue<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayHuman::fmt(self.source_ref(), f)
+  }
+}
+
+/// A block string value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlockStringValue<S> {
+  span: Span,
+  lit: LitBlockStr<S>,
+}
+
+impl<S> AsSpan<Span> for BlockStringValue<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for BlockStringValue<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<S> IntoComponents for BlockStringValue<S> {
+  type Components = (Span, LitBlockStr<S>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.lit)
+  }
+}
+
+impl<S> Display for BlockStringValue<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplaySDL::fmt(self, f)
+  }
+}
+
+impl<S> BlockStringValue<S> {
+  #[inline(always)]
+  pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self {
+    Self { span, lit }
+  }
+
+  /// Returns the span of the name.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the underlying source.
+  #[inline(always)]
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.lit.source()
+  }
+
+  /// Returns the reference to the underlying source.
+  #[inline(always)]
+  pub const fn source_ref(&self) -> &S {
+    self.lit.source_ref()
+  }
+}
+
+impl<S> DisplaySDL for BlockStringValue<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }

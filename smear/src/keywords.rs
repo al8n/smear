@@ -123,6 +123,15 @@ macro_rules! keyword {
   };
 }
 
+// GraphQLx Keywords
+keyword! {
+  (Import, "import_KW", "import"),
+  (As, "as_KW", "as"),
+  (From, "from_KW", "from"),
+  (Package, "package_KW", "package"),
+}
+
+// GraphQL Keywords
 keyword!(
   (On, "on_KW", "on"),
   (Input, "input_KW", "input"),

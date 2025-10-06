@@ -59,6 +59,9 @@ macro_rules! token {
       #[logos(subpattern hex_exp = "(?&psign)(?&hex_digits_with_sep)")]
       #[logos(subpattern hex_frac = "\\.(?&hex_digits_with_sep)")]
       pub enum Token $(<$lt>)? {
+        #[token("*")]
+        Asterisk,
+
         #[token("&")]
         Ampersand,
 
@@ -116,7 +119,7 @@ macro_rules! token {
         Spread,
 
         #[token("::")]
-        PathSep,
+        PathSeparator,
 
         #[token("=>")]
         FatArrow,
@@ -177,6 +180,7 @@ macro_rules! token {
           match value {
             Token::Ampersand => Self::Ampersand,
             Token::At => Self::At,
+            Token::Asterisk => Self::Asterisk,
             Token::RAngle => Self::RAngle,
             Token::RBrace => Self::RBrace,
             Token::RBracket => Self::RBracket,
@@ -203,7 +207,7 @@ macro_rules! token {
             Token::LitBlockStr(s) => Self::LitBlockStr(s),
             Token::Plus => Self::Plus,
             Token::Minus => Self::Minus,
-            Token::PathSep => Self::PathSep,
+            Token::PathSeparator => Self::PathSeparator,
           }
         }
       }

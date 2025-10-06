@@ -37,6 +37,8 @@ pub type AstLexerErrors<'a, S> =
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum AstToken<S> {
+  /// Asterisk `*` token
+  Asterisk,
   /// Ampersand `&` token
   Ampersand,
   /// At `@` token
@@ -76,7 +78,7 @@ pub enum AstToken<S> {
   /// Minus `-` token
   Minus,
   /// Path separator `::` token
-  PathSep,
+  PathSeparator,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -118,7 +120,8 @@ impl<S> AstToken<S> {
       Self::FatArrow => AstTokenKind::FatArrow,
       Self::Plus => AstTokenKind::Plus,
       Self::Minus => AstTokenKind::Minus,
-      Self::PathSep => AstTokenKind::PathSep,
+      Self::PathSeparator => AstTokenKind::PathSeparator,
+      Self::Asterisk => AstTokenKind::Asterisk,
     }
   }
 }
@@ -156,6 +159,7 @@ pub enum AstTokenKind {
   Spread,
   Colon,
   Equal,
+  Asterisk,
   At,
   LBracket,
   RBracket,
@@ -166,7 +170,7 @@ pub enum AstTokenKind {
   Ampersand,
   Plus,
   Minus,
-  PathSep,
+  PathSeparator,
 }
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.

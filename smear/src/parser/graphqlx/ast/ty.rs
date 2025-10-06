@@ -20,13 +20,15 @@ macro_rules! ty {
     paste::paste! {
       $(
         ///
-        /// Represents a complete GraphQLx type that can be either named or a list.
+        /// Represents a complete GraphQLx type that can be either named, a list, a set or a map.
         ///
         /// This enum captures the two fundamental categories of types in GraphQL:
         /// - **Named Types**: Direct references to schema-defined types
         /// - **List Types**: Collections wrapping other types
+        /// - **Set Types**: Collections of unique elements
+        /// - **Map Types**: Key-value pair collections
         ///
-        /// The type system is recursive - list types can contain other list types,
+        /// The type system is recursive - set, map or list types can contain other list types,
         /// enabling complex nested structures like lists of lists.
         ///
         /// ## Type Categories
@@ -45,6 +47,16 @@ macro_rules! ty {
         /// - **Simple Lists**: `[String]`, `[User]`, `[ID!]`
         /// - **Nested Lists**: `[[String]]`, `[[[Int]]]`
         /// - **Mixed Nullability**: `[String!]!`, `[User]!`, `[[String!]]`
+        ///
+        /// ### Set Types (`Set` variant)
+        /// Collections of unique elements:
+        /// - **Simple Sets**: `<String>`, `<User>`, `<ID!>`
+        /// - **Nested Sets**: `<<String>>`, `<<<Int>>>`
+        ///
+        /// ### Map Types (`Map` variant)
+        /// Key-value pair collections:
+        /// - **Simple Maps**: `<String => Int>`, `<ID! => User!>`
+        /// - **Nested Maps**: `<<String => Int>>`, `<<<ID! => User!>>>`
         ///
         /// ## Examples
         ///
@@ -70,6 +82,18 @@ macro_rules! ty {
         ///   posts: [Post]!             # Non-null list of nullable posts
         ///   categories: [[Category!]]! # Non-null list of non-null lists of non-null categories
         /// }
+        ///
+        /// # Set types in field definitions
+        /// type Collection {
+        ///   uniqueTags: <String!>!     # Set type: non-null set of non-null strings
+        ///   uniqueUsers: <User>         # Set type: nullable set of nullable users
+        /// }
+        ///
+        /// # Map types in field definitions
+        /// type Dictionary {
+        ///   translations: <String => String!>! # Map type: non-null map of non-null strings
+        ///   userRoles: <ID! => UserRole>        # Map type: nullable map of nullable enums
+        /// }
         /// ```
         ///
         /// ## Type Resolution
@@ -77,7 +101,9 @@ macro_rules! ty {
         /// During schema processing, types are resolved as follows:
         /// 1. **Named Types**: Lookup in schema type registry
         /// 2. **List Types**: Recursively resolve element type, then wrap in list
-        /// 3. **Validation**: Ensure all referenced types exist and are valid
+        /// 3. **Set Types**: Recursively resolve element type, then wrap in set
+        /// 4. **Map Types**: Recursively resolve key and value types, then wrap in map
+        /// 5. **Validation**: Ensure all referenced types exist and are valid
         ///
         /// ## Memory Management
         ///
@@ -113,6 +139,20 @@ macro_rules! ty {
           #[inline]
           fn from(ty: ListType<Self>) -> Self {
             Self::List(<$ty<ListType<Self>>>::new(ty))
+          }
+        }
+
+        impl<Name> From<SetType<Self>> for $name<Name> {
+          #[inline]
+          fn from(ty: SetType<Self>) -> Self {
+            Self::Set(<$ty<SetType<Self>>>::new(ty))
+          }
+        }
+
+        impl<Name> From<MapType<Self, Self>> for $name<Name> {
+          #[inline]
+          fn from(ty: MapType<Self, Self>) -> Self {
+            Self::Map(<$ty<MapType<Self, Self>>>::new(ty))
           }
         }
 
