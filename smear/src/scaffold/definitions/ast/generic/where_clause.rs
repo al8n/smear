@@ -13,7 +13,7 @@ use crate::{
 
 use super::{super::Path, TypeGenerics};
 
-/// A GraphQLx type path.
+/// A GraphQLx predicate type path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PredicateTypePath<
   Ident,

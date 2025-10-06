@@ -267,7 +267,7 @@ impl<Ident, Container> ImportMember<Ident, Container> {
 ///
 /// ```graphqlx
 /// importList
-///    : "{" importedItem* "}"
+///    : "{" importedMember* "}"
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImportList<

@@ -1,3 +1,6 @@
+/// Generic definitions scaffold.
+pub mod generic;
+
 mod arguments_definition;
 mod described;
 mod directives_definition;
@@ -5,7 +8,7 @@ mod document;
 mod enum_definition;
 mod fields_definition;
 mod fragment_definition;
-mod generic;
+
 mod import;
 mod input_fields_definition;
 mod input_object_definition;
@@ -30,7 +33,6 @@ pub use document::Document;
 pub use enum_definition::*;
 pub use fields_definition::*;
 pub use fragment_definition::*;
-pub use generic::*;
 pub use import::*;
 pub use input_fields_definition::*;
 pub use input_object_definition::*;

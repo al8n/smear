@@ -10,7 +10,7 @@ use super::{super::Path, TypeGenerics};
 
 /// A GraphQLx type path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DeclareTypePath<
+pub struct TypePath<
   Ident,
   Type,
   PathSegmentContainer = Vec<Ident>,
@@ -23,7 +23,7 @@ pub struct DeclareTypePath<
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
-  for DeclareTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -32,7 +32,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
-  for DeclareTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -41,7 +41,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
-  for DeclareTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   type Components = (
     Span,
@@ -57,7 +57,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer>
-  DeclareTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   /// Creates a new path from the given segments.
   #[inline]
@@ -129,7 +129,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
 }
 
 impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for DeclareTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 where
   PathSegmentContainer: ChumskyContainer<Ident>,
   TypeContainer: ChumskyContainer<Type>,

@@ -6,52 +6,45 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::punctuator::{Equal, LAngle, RAngle};
+use crate::punctuator::{LAngle, RAngle};
 
-/// A declare type parameter with an optional default type.
-///
-/// ```graphqlx
-/// T = String # A type parameter `T` with a default type of `String`
-/// T # A type parameter `T` without a default type
-/// ```
+/// A extension type parameter with an optional default type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct DeclareTypeParam<Ident, Type> {
+pub struct ExtensionTypeParam<Ident> {
   span: Span,
   ident: Ident,
-  default: Option<Type>,
 }
 
-impl<Ident, Type> AsSpan<Span> for DeclareTypeParam<Ident, Type> {
+impl<Ident> AsSpan<Span> for ExtensionTypeParam<Ident> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type> IntoSpan<Span> for DeclareTypeParam<Ident, Type> {
+impl<Ident> IntoSpan<Span> for ExtensionTypeParam<Ident> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type> IntoComponents for DeclareTypeParam<Ident, Type> {
-  type Components = (Span, Ident, Option<Type>);
+impl<Ident> IntoComponents for ExtensionTypeParam<Ident> {
+  type Components = (Span, Ident);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ident, self.default)
+    (self.span, self.ident)
   }
 }
 
-impl<Ident, Type> DeclareTypeParam<Ident, Type> {
-  /// Creates a new `DeclareTypeParam` with the given identifier and optional default type.
+impl<Ident> ExtensionTypeParam<Ident> {
+  /// Creates a new `ExtensionTypeParam` with the given identifier and optional default type.
   #[inline]
-  const fn new(span: Span, ident: Ident, default: Option<Type>) -> Self {
+  const fn new(span: Span, ident: Ident) -> Self {
     Self {
       span,
       ident,
-      default,
     }
   }
 
@@ -67,17 +60,10 @@ impl<Ident, Type> DeclareTypeParam<Ident, Type> {
     &self.ident
   }
 
-  /// Returns the optional default type of the type parameter.
+  /// Returns a parser for the extension type parameter.
   #[inline]
-  pub const fn default(&self) -> Option<&Type> {
-    self.default.as_ref()
-  }
-
-  /// Returns a parser for the declare type parameter.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP>(
+  pub fn parser_with<'a, I, T, Error, E, IP>(
     ident_parser: IP,
-    type_parser: TP,
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
@@ -85,20 +71,15 @@ impl<Ident, Type> DeclareTypeParam<Ident, Type> {
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    Equal: Parseable<'a, I, T, Error> + 'a,
   {
     ident_parser
-      .then(Equal::parser().ignore_then(type_parser).or_not())
-      .map_with(|(ident, default), exa| Self::new(exa.span(), ident, default))
+      .map_with(|ident, exa| Self::new(exa.span(), ident))
   }
 }
 
-impl<'a, Ident, Type, I, T, Error> Parseable<'a, I, T, Error> for DeclareTypeParam<Ident, Type>
+impl<'a, Ident, I, T, Error> Parseable<'a, I, T, Error> for ExtensionTypeParam<Ident>
 where
-  Equal: Parseable<'a, I, T, Error> + 'a,
   Ident: Parseable<'a, I, T, Error> + 'a,
-  Type: Parseable<'a, I, T, Error> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -109,39 +90,38 @@ where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    Self::parser_with(Ident::parser(), Type::parser())
+    Self::parser_with(Ident::parser())
   }
 }
 
-/// A declare type generics with a list of type parameters.
+/// A extension type generics with a list of type parameters.
 ///
 /// ```graphqlx
 /// <T, U = String> # A type generics with two type parameters: `T` and `U` where `U` has a default type of `String`
 /// <T, U> # A type generics with two type parameters: `T` and `U`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DeclareTypeGenerics<Ident, Type, Container = Vec<DeclareTypeParam<Ident, Type>>> {
+pub struct ExtensionTypeGenerics<Ident, Container = Vec<ExtensionTypeParam<Ident>>> {
   span: Span,
   params: Container,
   _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
 }
 
-impl<Ident, Type, Container> AsSpan<Span> for DeclareTypeGenerics<Ident, Type, Container> {
+impl<Ident, Container> AsSpan<Span> for ExtensionTypeGenerics<Ident, Container> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type, Container> IntoSpan<Span> for DeclareTypeGenerics<Ident, Type, Container> {
+impl<Ident, Container> IntoSpan<Span> for ExtensionTypeGenerics<Ident, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type, Container> IntoComponents for DeclareTypeGenerics<Ident, Type, Container> {
+impl<Ident, Container> IntoComponents for ExtensionTypeGenerics<Ident, Container> {
   type Components = (Span, Container);
 
   #[inline]
@@ -150,15 +130,14 @@ impl<Ident, Type, Container> IntoComponents for DeclareTypeGenerics<Ident, Type,
   }
 }
 
-impl<Ident, Type, Container> DeclareTypeGenerics<Ident, Type, Container> {
-  /// Creates a new `DeclareTypeGenerics` with the given parameters.
+impl<Ident, Container> ExtensionTypeGenerics<Ident, Container> {
+  /// Creates a new `ExtensionTypeGenerics` with the given parameters.
   #[inline]
   const fn new(span: Span, params: Container) -> Self {
     Self {
       span,
       params,
       _ident: PhantomData,
-      _type: PhantomData,
     }
   }
 
@@ -176,18 +155,17 @@ impl<Ident, Type, Container> DeclareTypeGenerics<Ident, Type, Container> {
 
   /// Returns the mutable parameters of the type generics.
   #[inline]
-  pub fn params_slice(&mut self) -> &[DeclareTypeParam<Ident, Type>]
+  pub fn params_slice(&mut self) -> &[ExtensionTypeParam<Ident>]
   where
-    Container: AsRef<[DeclareTypeParam<Ident, Type>]>,
+    Container: AsRef<[ExtensionTypeParam<Ident>]>,
   {
     self.params.as_ref()
   }
 
-  /// Returns a parser for the declare type generics.
+  /// Returns a parser for the extension type generics.
   #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP>(
+  pub fn parser_with<'a, I, T, Error, E, IP>(
     ident_parser: IP,
-    type_parser: TP,
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
@@ -195,15 +173,13 @@ impl<Ident, Type, Container> DeclareTypeGenerics<Ident, Type, Container> {
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    Equal: Parseable<'a, I, T, Error> + 'a,
     LAngle: Parseable<'a, I, T, Error> + 'a,
     RAngle: Parseable<'a, I, T, Error> + 'a,
-    Container: ChumskyContainer<DeclareTypeParam<Ident, Type>>,
+    Container: ChumskyContainer<ExtensionTypeParam<Ident>>,
   {
     LAngle::parser()
       .ignore_then(
-        DeclareTypeParam::parser_with(ident_parser, type_parser)
+        ExtensionTypeParam::parser_with(ident_parser)
           .repeated()
           .at_least(1)
           .collect(),
@@ -213,15 +189,13 @@ impl<Ident, Type, Container> DeclareTypeGenerics<Ident, Type, Container> {
   }
 }
 
-impl<'a, Ident, Type, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for DeclareTypeGenerics<Ident, Type, Container>
+impl<'a, Ident, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for ExtensionTypeGenerics<Ident, Container>
 where
-  Equal: Parseable<'a, I, T, Error> + 'a,
   Ident: Parseable<'a, I, T, Error> + 'a,
-  Type: Parseable<'a, I, T, Error> + 'a,
   LAngle: Parseable<'a, I, T, Error> + 'a,
   RAngle: Parseable<'a, I, T, Error> + 'a,
-  Container: ChumskyContainer<DeclareTypeParam<Ident, Type>> + 'a,
+  Container: ChumskyContainer<ExtensionTypeParam<Ident>> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -232,6 +206,6 @@ where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    Self::parser_with(Ident::parser(), Type::parser())
+    Self::parser_with(Ident::parser())
   }
 }
