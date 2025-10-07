@@ -49,11 +49,18 @@ macro_rules! atom_parser {
 }
 
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+pub type Set<S, Container = DefaultVec<InputValue<S>>> = scaffold::Set<InputValue<S>, Container>;
+pub type Map<S, Container = DefaultVec<(InputValue<S>, InputValue<S>)>> =
+  scaffold::Map<InputValue<S>, InputValue<S>, Container>;
 pub type Object<S, Container = DefaultVec<InputValue<S>>> =
   scaffold::Object<Ident<S>, InputValue<S>, Container>;
 
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::List<ConstInputValue<S>, Container>;
+pub type ConstSet<S, Container = DefaultVec<ConstInputValue<S>>> =
+  scaffold::Set<ConstInputValue<S>, Container>;
+pub type ConstMap<S, Container = DefaultVec<(ConstInputValue<S>, ConstInputValue<S>)>> =
+  scaffold::Map<ConstInputValue<S>, ConstInputValue<S>, Container>;
 pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Object<Ident<S>, ConstInputValue<S>, Container>;
 

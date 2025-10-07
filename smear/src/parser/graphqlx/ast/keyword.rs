@@ -70,8 +70,8 @@ keyword_parser! {
   From:"from",
   As:"as",
   Where:"where",
-  Set:"set",
-  Map:"map",
+  keywords::Set:"set",
+  keywords::Map:"map",
 }
 
 keyword_parser! {
