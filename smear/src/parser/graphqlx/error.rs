@@ -30,14 +30,10 @@ pub type Extra<S, T, TK, Char = char, StateError = ()> =
 /// An unclosed structure error.
 #[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Unclosed {
-  /// An unclosed list.
-  List,
-  /// An unclosed object.
-  Object,
-  /// An unclosed map.
-  Map,
-  /// An unclosed set.
-  Set,
+  /// An unclosed bracket.
+  Bracket,
+  /// An unclosed brace.
+  Brace,
 }
 
 /// The data of a parser error.
@@ -239,16 +235,16 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     )
   }
 
-  /// Creates an unclosed list error.
+  /// Creates an unclosed bracket error.
   #[inline]
-  pub const fn unclosed_list(span: Span) -> Self {
-    Self::new(span, ErrorData::Unclosed(Unclosed::List))
+  pub const fn unclosed_bracket(span: Span) -> Self {
+    Self::new(span, ErrorData::Unclosed(Unclosed::Bracket))
   }
 
-  /// Creates an unclosed object error.
+  /// Creates an unclosed brace error.
   #[inline]
-  pub const fn unclosed_object(span: Span) -> Self {
-    Self::new(span, ErrorData::Unclosed(Unclosed::Object))
+  pub const fn unclosed_brace(span: Span) -> Self {
+    Self::new(span, ErrorData::Unclosed(Unclosed::Bracket))
   }
 
   /// Creates an error from a lexer error.

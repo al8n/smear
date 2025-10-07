@@ -1,24 +1,28 @@
 use logosky::utils::recursion_tracker::RecursionLimitExceeded;
 
-pub use declare_generic::*;
 pub use import::*;
 pub use path::*;
 pub use ty::*;
-pub use type_generic::*;
 pub use value::*;
 
 use super::error::{Error, Errors, Extra};
-use crate::lexer::graphqlx::ast::{AstToken, AstTokenChar, AstTokenKind};
+use crate::{
+  lexer::graphqlx::ast::{AstToken, AstTokenChar, AstTokenKind},
+  parser::ident::Ident,
+  scaffold,
+};
 
-mod declare_generic;
+mod error;
+mod ident;
 mod import;
 mod keyword;
 mod location;
 mod path;
 mod punctuator;
 mod ty;
-mod type_generic;
 mod value;
+
+// mod raw;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
@@ -34,3 +38,6 @@ pub type AstTokenError<'a, S> =
 /// The errors type used for the AST parser implementation.
 pub type AstTokenErrors<'a, S> =
   Errors<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+
+pub type ExtensionName<S> = scaffold::generic::ExtensionName<Ident<S>>;
+pub type DefinitionName<S> = scaffold::generic::DefinitionName<Ident<S>, Type<S>>;

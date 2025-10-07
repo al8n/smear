@@ -17,12 +17,12 @@ use logosky::{
 
 use super::*;
 
-impl<'a, S> ParseVariableValueError<Name<S>> for AstTokenError<'a, S>
+impl<'a, S> ParseVariableValueError<Ident<S>> for AstTokenError<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
+  fn missing_dollar_token(name: Ident<S>, span: Span) -> Self {
     Self::unexpected_token(
       AstToken::Identifier(name.into_components().1),
       AstTokenKind::Dollar,
@@ -36,19 +36,19 @@ where
   }
 }
 
-impl<'a, S> ParseVariableValueError<Name<S>> for AstTokenErrors<'a, S>
+impl<'a, S> ParseVariableValueError<Ident<S>> for AstTokenErrors<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
-    <AstTokenError<'a, S> as ParseVariableValueError<Name<S>>>::missing_dollar_token(name, span)
+  fn missing_dollar_token(name: Ident<S>, span: Span) -> Self {
+    <AstTokenError<'a, S> as ParseVariableValueError<Ident<S>>>::missing_dollar_token(name, span)
       .into()
   }
 
   #[inline]
   fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    <AstTokenError<'a, S> as ParseVariableValueError<Name<S>>>::unexpected_end_of_variable_value(
+    <AstTokenError<'a, S> as ParseVariableValueError<Ident<S>>>::unexpected_end_of_variable_value(
       hint, span,
     )
     .into()
@@ -193,7 +193,7 @@ where
 {
   #[inline]
   fn unclosed_brace(span: Span) -> Self {
-    Self::unclosed_object(span)
+    Self::unclosed_brace(span)
   }
 }
 
@@ -213,7 +213,7 @@ where
 {
   #[inline]
   fn unclosed_bracket(span: Span) -> Self {
-    Self::unclosed_list(span)
+    Self::unclosed_bracket(span)
   }
 }
 
@@ -226,3 +226,4 @@ where
     <AstTokenError<'a, S> as UnclosedBracketError>::unclosed_bracket(span).into()
   }
 }
+

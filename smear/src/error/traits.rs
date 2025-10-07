@@ -97,14 +97,14 @@ pub trait UnexpectedEndOfSchemaExtensionError {
     Self: Sized;
 }
 
-/// An error which can occur when an unclosed object value is encountered.
-pub trait UnclosedObjectValueError {
-  /// Creates a new error indicating that an unclosed object value was encountered.
-  fn unclosed_object(span: Span) -> Self;
+/// An error which can occur when an unclosed brace is encountered.
+pub trait UnclosedBraceError {
+  /// Creates a new error indicating that an unclosed brace value was encountered.
+  fn unclosed_brace(span: Span) -> Self;
 }
 
-/// An error which can occur when an unclosed list value is encountered.
-pub trait UnclosedListValueError {
-  /// Creates a new error indicating that an unclosed list value was encountered.
-  fn unclosed_list(span: Span) -> Self;
+/// An error which can occur when an unclosed bracket is encountered.
+pub trait UnclosedBracketError {
+  /// Creates a new error indicating that an unclosed bracket value was encountered.
+  fn unclosed_bracket(span: Span) -> Self;
 }

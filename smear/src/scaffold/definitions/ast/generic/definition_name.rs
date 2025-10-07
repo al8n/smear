@@ -6,13 +6,13 @@ use logosky::{
 
 use crate::punctuator::{Equal, LAngle, RAngle};
 
-use super::{DefinitionTypeParam, DefinitionTypeGenerics};
+use super::{DefinitionTypeGenerics, DefinitionTypeParam};
 
 /// The AST for a definition name.
 ///
 /// In the below example, `User<ID, Name = String>` is a definition name, where `User` is the identifier,
 /// and `<ID, Name = String>` are the [`DefinitionTypeGenerics`].
-/// 
+///
 /// ```graphqlx
 /// type User<ID, Name = String> {
 ///   id: ID!
@@ -41,7 +41,11 @@ impl<Ident, Type, Container> IntoSpan<Span> for DefinitionName<Ident, Type, Cont
 }
 
 impl<Ident, Type, Container> IntoComponents for DefinitionName<Ident, Type, Container> {
-  type Components = (Span, Ident, Option<DefinitionTypeGenerics<Ident, Type, Container>>);
+  type Components = (
+    Span,
+    Ident,
+    Option<DefinitionTypeGenerics<Ident, Type, Container>>,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -100,11 +104,9 @@ impl<Ident, Type, Container> DefinitionName<Ident, Type, Container> {
     RAngle: Parseable<'a, I, T, Error> + 'a,
     Container: ChumskyContainer<DefinitionTypeParam<Ident, Type>>,
   {
-    ident_parser.clone()
-      .then(
-        DefinitionTypeGenerics::parser_with(ident_parser, type_parser)
-          .or_not(),
-      )
+    ident_parser
+      .clone()
+      .then(DefinitionTypeGenerics::parser_with(ident_parser, type_parser).or_not())
       .map_with(|(ident, generics), exa| Self::new(exa.span(), ident, generics))
   }
 }

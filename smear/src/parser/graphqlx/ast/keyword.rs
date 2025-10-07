@@ -70,6 +70,8 @@ keyword_parser! {
   From:"from",
   As:"as",
   Where:"where",
+  Set:"set",
+  Map:"map",
 }
 
 keyword_parser! {

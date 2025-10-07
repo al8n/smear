@@ -42,10 +42,7 @@ impl<Ident> ExtensionTypeParam<Ident> {
   /// Creates a new `ExtensionTypeParam` with the given identifier and optional default type.
   #[inline]
   const fn new(span: Span, ident: Ident) -> Self {
-    Self {
-      span,
-      ident,
-    }
+    Self { span, ident }
   }
 
   /// Returns the span of the type parameter.
@@ -72,8 +69,7 @@ impl<Ident> ExtensionTypeParam<Ident> {
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone,
   {
-    ident_parser
-      .map_with(|ident, exa| Self::new(exa.span(), ident))
+    ident_parser.map_with(|ident, exa| Self::new(exa.span(), ident))
   }
 }
 

@@ -10,12 +10,7 @@ use super::{super::Path, TypeGenerics};
 
 /// A GraphQLx type path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypePath<
-  Ident,
-  Type,
-  PathSegmentContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
-> {
+pub struct TypePath<Ident, Type, PathSegmentContainer = Vec<Ident>, TypeContainer = Vec<Type>> {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,
   generics: Option<TypeGenerics<Type, TypeContainer>>,

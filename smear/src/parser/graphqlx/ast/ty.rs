@@ -13,7 +13,8 @@ use crate::{
   scaffold::{self, ListType, MapType, SetType},
 };
 
-pub type TypePath<S, Type, PathSegmentContainer = Vec<Ident<S>>, TypeContainer = Vec<Type>> = scaffold::generic::TypePath<Ident<S>, Type, PathSegmentContainer, TypeContainer>;
+pub type TypePath<S, Type, PathSegmentContainer = Vec<Ident<S>>, TypeContainer = Vec<Type>> =
+  scaffold::generic::TypePath<Ident<S>, Type, PathSegmentContainer, TypeContainer>;
 
 macro_rules! ty {
   ($(

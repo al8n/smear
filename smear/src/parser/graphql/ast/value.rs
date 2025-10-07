@@ -138,7 +138,7 @@ where
   {
     recursive(|parser| {
       let object_value_parser =
-        scaffold::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
+        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
       let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
       choice((
         atom_parser!(),
@@ -232,7 +232,7 @@ where
   {
     recursive(|parser| {
       let object_value_parser =
-        scaffold::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
+        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
       let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
 
       choice((atom_parser!(), object_value_parser, list_value_parser))
