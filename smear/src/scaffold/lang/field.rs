@@ -9,6 +9,10 @@ use logosky::{
 
 use crate::punctuator::Colon;
 
+pub use standard::*;
+
+mod standard;
+
 /// Represents a field alias in GraphQL syntax.
 ///
 /// An alias allows you to rename the result of a field to avoid conflicts or

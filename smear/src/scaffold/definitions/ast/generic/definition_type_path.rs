@@ -4,7 +4,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::punctuator::{LAngle, PathSeparator, RAngle};
+use crate::punctuator::{Bang, LAngle, PathSeparator, RAngle};
 
 use super::{super::Path, TypeGenerics};
 
@@ -17,14 +17,20 @@ use super::{super::Path, TypeGenerics};
 /// v1::Comment<ID, Name>
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypePath<Ident, Type, PathSegmentContainer = Vec<Ident>, TypeContainer = Vec<Type>> {
+pub struct DefinitionTypePath<
+  Ident,
+  Type,
+  PathSegmentContainer = Vec<Ident>,
+  TypeContainer = Vec<Type>,
+> {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,
   generics: Option<TypeGenerics<Type, TypeContainer>>,
+  required: bool,
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -33,7 +39,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -42,32 +48,35 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   type Components = (
     Span,
+    bool,
     Path<Ident, PathSegmentContainer>,
     Option<TypeGenerics<Type, TypeContainer>>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.path, self.generics)
+    (self.span, self.required, self.path, self.generics)
   }
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer>
-  TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   /// Creates a new path from the given segments.
   #[inline]
   const fn new(
     span: Span,
+    required: bool,
     path: Path<Ident, PathSegmentContainer>,
     generics: Option<TypeGenerics<Type, TypeContainer>>,
   ) -> Self {
     Self {
       span,
+      required,
       path,
       generics,
     }
@@ -77,6 +86,12 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
   #[inline]
   pub const fn path(&self) -> &Path<Ident, PathSegmentContainer> {
     &self.path
+  }
+
+  /// Returns `true` if the type is required (non-nullable).
+  #[inline]
+  pub const fn is_required(&self) -> bool {
+    self.required
   }
 
   /// Returns the type generics.
@@ -105,6 +120,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
     PathSeparator: Parseable<'a, I, T, Error>,
     LAngle: Parseable<'a, I, T, Error> + 'a,
     RAngle: Parseable<'a, I, T, Error> + 'a,
+    Bang: Parseable<'a, I, T, Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone + 'a,
     TP: Parser<'a, I, Type, E> + Clone + 'a,
     PathSegmentContainer: ChumskyContainer<Ident>,
@@ -112,12 +128,15 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
   {
     Path::parser_with(ident_parser)
       .then(TypeGenerics::parser_with(type_parser).or_not())
-      .map_with(|(path, generics), exa| Self::new(exa.span(), path, generics))
+      .then(Bang::parser().or_not())
+      .map_with(|((path, generics), bang), exa| {
+        Self::new(exa.span(), bang.is_some(), path, generics)
+      })
   }
 }
 
 impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 where
   PathSegmentContainer: ChumskyContainer<Ident>,
   TypeContainer: ChumskyContainer<Type>,
@@ -125,6 +144,7 @@ where
   PathSeparator: Parseable<'a, I, T, Error>,
   LAngle: Parseable<'a, I, T, Error> + 'a,
   RAngle: Parseable<'a, I, T, Error> + 'a,
+  Bang: Parseable<'a, I, T, Error> + 'a,
   Type: Parseable<'a, I, T, Error>,
 {
   #[inline]

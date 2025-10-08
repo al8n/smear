@@ -1,10 +1,16 @@
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, container::Container as ChumskyContainer, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{
+    AsSpan, IntoComponents, IntoSpan, Span,
+    cmp::{self, Equivalent},
+  },
 };
 
-use crate::punctuator::{LAngle, PathSeparator, RAngle};
+use crate::{
+  error::InvalidFragmentTypePath,
+  punctuator::{LAngle, PathSeparator, RAngle},
+};
 
 use super::{super::Path, TypeGenerics};
 
@@ -17,14 +23,19 @@ use super::{super::Path, TypeGenerics};
 /// v1::Comment<ID, Name>
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypePath<Ident, Type, PathSegmentContainer = Vec<Ident>, TypeContainer = Vec<Type>> {
+pub struct FragmentTypePath<
+  Ident,
+  Type,
+  PathSegmentContainer = Vec<Ident>,
+  TypeContainer = Vec<Type>,
+> {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,
   generics: Option<TypeGenerics<Type, TypeContainer>>,
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -33,7 +44,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -42,7 +53,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   type Components = (
     Span,
@@ -57,7 +68,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
 }
 
 impl<Ident, Type, PathSegmentContainer, TypeContainer>
-  TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   /// Creates a new path from the given segments.
   #[inline]
@@ -100,7 +111,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
   where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
-    Error: 'a,
+    Error: InvalidFragmentTypePath<Path = Path<Ident, PathSegmentContainer>> + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     PathSeparator: Parseable<'a, I, T, Error>,
     LAngle: Parseable<'a, I, T, Error> + 'a,
@@ -109,15 +120,22 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
     TP: Parser<'a, I, Type, E> + Clone + 'a,
     PathSegmentContainer: ChumskyContainer<Ident>,
     TypeContainer: ChumskyContainer<Type>,
+    str: cmp::Equivalent<Path<Ident, PathSegmentContainer>>,
   {
     Path::parser_with(ident_parser)
       .then(TypeGenerics::parser_with(type_parser).or_not())
-      .map_with(|(path, generics), exa| Self::new(exa.span(), path, generics))
+      .try_map_with(|(path, generics), exa| {
+        if "on".equivalent(&path) {
+          Err(Error::invalid_fragment_type_path(exa.span(), path))
+        } else {
+          Ok(Self::new(exa.span(), path, generics))
+        }
+      })
   }
 }
 
 impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for TypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+  for FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 where
   PathSegmentContainer: ChumskyContainer<Ident>,
   TypeContainer: ChumskyContainer<Type>,
@@ -126,6 +144,8 @@ where
   LAngle: Parseable<'a, I, T, Error> + 'a,
   RAngle: Parseable<'a, I, T, Error> + 'a,
   Type: Parseable<'a, I, T, Error>,
+  Error: InvalidFragmentTypePath<Path = Path<Ident, PathSegmentContainer>>,
+  str: cmp::Equivalent<Path<Ident, PathSegmentContainer>>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

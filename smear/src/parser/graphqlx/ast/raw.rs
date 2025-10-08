@@ -1,11 +1,30 @@
 use super::{
-  ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, Type, TypeCondition,
-  VariableValue, field, selection_set,
+  ConstInputValue, DefaultVec, DefinitionTypePath, FragmentTypePath, InputValue, StringValue, Type,
+  TypeCondition, TypePath, VariableValue,
 };
-use crate::scaffold::{
-  self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType,
-  UnionMemberTypes,
+use crate::{
+  parser::ident::Ident,
+  scaffold::{
+    self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType, Path,
+    generic::WherePredicate,
+  },
 };
+
+/// The default path segments container type used in the AST.
+pub type DefaultPathSegmentsContainer<S> = DefaultVec<Ident<S>>;
+
+/// The default type container type used in the AST.
+pub type DefaultTypeContainer<S> = DefaultVec<Type<S>>;
+
+pub type DefinitionTypeParam<S> = scaffold::generic::DefinitionTypeParam<Ident<S>, Type<S>>;
+
+pub type ExtensionName<
+  S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = scaffold::generic::ExtensionName<Ident<S>, PathSegmentsContainer, TypeContainer>;
+pub type DefinitionName<S, ParamsContainer = DefaultVec<DefinitionTypeParam<S>>> =
+  scaffold::generic::DefinitionName<Ident<S>, Type<S>, ParamsContainer>;
 
 /// The default container type used for arguments in the AST.
 pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
@@ -19,16 +38,16 @@ pub type DefaultConstDirectivesContainer<S, ConstArgumentsContainer> =
   Vec<ConstDirective<S, ConstArgumentsContainer>>;
 
 pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
-pub type Argument<S> = scaffold::Argument<Name<S>, InputValue<S>>;
+pub type Argument<S> = scaffold::Argument<Ident<S>, InputValue<S>>;
 pub type Arguments<S, Container = DefaultArgumentsContainer<S>> =
   scaffold::Arguments<Argument<S>, Container>;
 
-pub type ConstArgument<S> = scaffold::Argument<Name<S>, ConstInputValue<S>>;
+pub type ConstArgument<S> = scaffold::Argument<Ident<S>, ConstInputValue<S>>;
 pub type ConstArguments<S, Container = DefaultConstArgumentsContainer<S>> =
   scaffold::Arguments<ConstArgument<S>, Container>;
 
 pub type Directive<S, ArgumentsContainer = DefaultArgumentsContainer<S>> =
-  scaffold::Directive<Name<S>, Arguments<S, ArgumentsContainer>>;
+  scaffold::Directive<Ident<S>, Arguments<S, ArgumentsContainer>>;
 pub type Directives<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
@@ -36,7 +55,7 @@ pub type Directives<
 > = scaffold::Directives<Directive<S, ArgumentsContainer>, Container>;
 
 pub type ConstDirective<S, ArgumentsContainer = DefaultConstArgumentsContainer<S>> =
-  scaffold::Directive<Name<S>, ConstArguments<S, ArgumentsContainer>>;
+  scaffold::Directive<Ident<S>, ConstArguments<S, ArgumentsContainer>>;
 pub type ConstDirectives<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
@@ -49,12 +68,26 @@ pub type DefaultInputValuesContainer<S, ConstArgumentsContainer, ConstDirectives
 /// The default container type used for enum values in the AST.
 pub type DefaultEnumValuesContainer<S, ConstArgumentsContainer, ConstDirectivesContainer> =
   Vec<EnumValueDefinition<S, ConstArgumentsContainer, ConstDirectivesContainer>>;
-/// The default container type used for names in the AST.
-pub type DefaultNamesContainer<S> = DefaultVec<Name<S>>;
+/// The default container type used for type paths in the AST.
+pub type DefaultTypePathsContainer<
+  S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = DefaultVec<TypePath<S, PathSegmentsContainer, TypeContainer>>;
+/// The default where predicates container type used in the AST.
+pub type DefaultWherePredicatesContainer<
+  S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+> = DefaultVec<
+  WherePredicate<Ident<S>, Type<S>, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+>;
+
 /// The default container type used for locations in the AST.
 pub type DefaultLocationsContainer = DefaultVec<Location>;
-/// The default container type used for root operation types in the AST.
-pub type DefaultRootOperationTypesContainer<S> = DefaultVec<RootOperationTypeDefinition<S>>;
+// /// The default container type used for root operation types in the AST.
+// pub type DefaultRootOperationTypesContainer<S> = DefaultVec<RootOperationTypeDefinition<S>>;
 /// The default container type used for variable definitions in the AST.
 pub type DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer> =
   Vec<VariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
@@ -64,57 +97,70 @@ pub type DefaultFieldsContainer<S, ArgumentsContainer, DirectivesContainer, Inpu
 
 pub type FragmentSpread<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentContainer = Vec<Argument<S>>,
   Container = Vec<Directive<S, ArgumentContainer>>,
-> = scaffold::FragmentSpread<FragmentName<S>, Directives<S, ArgumentContainer, Container>>;
+> = scaffold::FragmentSpread<
+  FragmentTypePath<S, PathSegmentsContainer, TypeContainer>,
+  Directives<S, ArgumentContainer, Container>,
+>;
 
 pub type InlineFragment<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentContainer = Vec<Argument<S>>,
   DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
 > = scaffold::InlineFragment<
-  TypeCondition<S>,
+  TypeCondition<S, PathSegmentsContainer, TypeContainer>,
   Directives<S, ArgumentContainer, DirectiveContainer>,
-  SelectionSet<S, ArgumentContainer, DirectiveContainer>,
+  SelectionSet<S, PathSegmentsContainer, TypeContainer, ArgumentContainer, DirectiveContainer>,
 >;
 
 pub type Selection<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = selection_set::Selection<
+> = scaffold::StandardSelection<
   Alias<S>,
-  Name<S>,
-  FragmentName<S>,
-  TypeCondition<S>,
+  Ident<S>,
+  FragmentTypePath<S, PathSegmentsContainer, TypeContainer>,
+  TypeCondition<S, PathSegmentsContainer, TypeContainer>,
   Arguments<S, ArgumentsContainer>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
 pub type SelectionSet<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = selection_set::SelectionSet<
+> = scaffold::StandardSelectionSet<
   Alias<S>,
-  Name<S>,
-  FragmentName<S>,
-  TypeCondition<S>,
+  Ident<S>,
+  FragmentTypePath<S, PathSegmentsContainer, TypeContainer>,
+  TypeCondition<S, PathSegmentsContainer, TypeContainer>,
   Arguments<S, ArgumentsContainer>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
-pub type Alias<S> = scaffold::Alias<Name<S>>;
+pub type Alias<S> = scaffold::Alias<Ident<S>>;
 
 pub type Field<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = field::Field<
+> = scaffold::StandardField<
   Alias<S>,
-  Name<S>,
-  FragmentName<S>,
-  TypeCondition<S>,
+  Ident<S>,
+  FragmentTypePath<S, PathSegmentsContainer, TypeContainer>,
+  TypeCondition<S, PathSegmentsContainer, TypeContainer>,
   Arguments<S, ArgumentsContainer>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,
 >;
@@ -136,7 +182,7 @@ pub type DirectiveDefinition<
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
 > = scaffold::DirectiveDefinition<
-  Name<S>,
+  Ident<S>,
   ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
   DirectiveLocations<Location, LocationsContainer>,
 >;
@@ -147,7 +193,7 @@ pub type VariableDefinition<
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::VariableDefinition<
   VariableValue<S>,
-  Type<Name<S>>,
+  Type<S>,
   DefaultInputValue<S>,
   Directives<S, ArgumentsContainer, DirectivesContainer>,
 >;
@@ -168,8 +214,8 @@ pub type InputValueDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
   scaffold::InputValueDefinition<
-    Name<S>,
-    Type<Name<S>>,
+    Ident<S>,
+    Type<S>,
     DefaultInputValue<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
@@ -178,12 +224,29 @@ pub type InputValueDefinition<
 
 pub type InputFieldsDefinition<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::InputFieldsDefinition<
-  InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  InputValuesContainer,
+> = scaffold::generic::Constrained<
+  Ident<S>,
+  Type<S>,
+  scaffold::InputFieldsDefinition<
+    InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>,
+    InputValuesContainer,
+  >,
+  PathSegmentsContainer,
+  TypeContainer,
+  TypePathsContainer,
+  PredicatesContainer,
 >;
 
 pub type FieldDefinition<
@@ -193,9 +256,9 @@ pub type FieldDefinition<
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
   scaffold::FieldDefinition<
-    Name<S>,
+    Ident<S>,
     ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-    Type<Name<S>>,
+    Type<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
   StringValue<S>,
@@ -203,6 +266,15 @@ pub type FieldDefinition<
 
 pub type FieldsDefinition<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
@@ -212,52 +284,116 @@ pub type FieldsDefinition<
     DirectivesContainer,
     InputValuesContainer,
   >,
-> = scaffold::FieldsDefinition<
-  FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  FieldsContainer,
+> = scaffold::generic::Constrained<
+  Ident<S>,
+  Type<S>,
+  scaffold::FieldsDefinition<
+    FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+    FieldsContainer,
+  >,
+  PathSegmentsContainer,
+  TypeContainer,
+  TypePathsContainer,
+  PredicatesContainer,
 >;
 
 pub type InputObjectTypeDefinition<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InputObjectTypeDefinition<
-  Name<S>,
+  DefinitionName<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  InputFieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  InputFieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
 >;
 
 pub type DescribedInputObjectTypeDefinition<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
-  InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  InputObjectTypeDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
   StringValue<S>,
 >;
 
 pub type InputObjectTypeExtension<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InputObjectTypeExtension<
-  Name<S>,
+  ExtensionName<S, PathSegmentsContainer, TypeContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  InputFieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  InputFieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
 >;
 
 pub type FragmentDefinition<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::FragmentDefinition<
-  FragmentName<S>,
-  TypeCondition<S>,
+  DefinitionName<S>, // TODO: fragment<A, B, C> MyFragment<A, B, C> on User<A, B, C> { ... }
+  TypeCondition<S, PathSegmentsContainer, TypeContainer>,
   Directives<S, ArgumentsContainer>,
-  SelectionSet<S, ArgumentsContainer, DirectivesContainer>,
+  SelectionSet<S, PathSegmentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>,
 >;
 
 pub type ScalarTypeDefinition<
@@ -265,7 +401,7 @@ pub type ScalarTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::ScalarTypeDefinition<
-  Name<S>,
+  Ident<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
@@ -280,33 +416,61 @@ pub type ScalarTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::ScalarTypeExtension<
-  Name<S>,
+  Ident<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
 pub type ObjectTypeDefinition<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::ObjectTypeDefinition<
-  Name<S>,
-  ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
+  DefinitionName<S>,
+  ImplementInterfaces<TypePath<S, PathSegmentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  FieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
 >;
 
 pub type DescribedObjectTypeDefinition<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
   ObjectTypeDefinition<
     S,
-    ImplementInterfacesContainer,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
     ArgumentsContainer,
     DirectivesContainer,
     InputValuesContainer,
@@ -316,40 +480,85 @@ pub type DescribedObjectTypeDefinition<
 
 pub type ObjectTypeExtension<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::ObjectTypeExtension<
-  Name<S>,
-  ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
+  ExtensionName<S, PathSegmentsContainer, TypeContainer>,
+  ImplementInterfaces<TypePath<S, PathSegmentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  FieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
 >;
 
 pub type InterfaceTypeDefinition<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InterfaceTypeDefinition<
-  Name<S>,
-  ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
+  DefinitionName<S>,
+  ImplementInterfaces<TypePath<S, PathSegmentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  FieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
 >;
 
 pub type DescribedInterfaceTypeDefinition<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
   InterfaceTypeDefinition<
     S,
-    ImplementInterfacesContainer,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
     ArgumentsContainer,
     DirectivesContainer,
     InputValuesContainer,
@@ -359,47 +568,129 @@ pub type DescribedInterfaceTypeDefinition<
 
 pub type InterfaceTypeExtension<
   S,
-  ImplementInterfacesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InterfaceTypeExtension<
-  Name<S>,
-  ImplementInterfaces<Name<S>, ImplementInterfacesContainer>,
+  ExtensionName<S, PathSegmentsContainer, TypeContainer>,
+  ImplementInterfaces<TypePath<S, PathSegmentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  FieldsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+  FieldsDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+    InputValuesContainer,
+  >,
+>;
+
+pub type UnionMemberTypes<
+  S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
+> = scaffold::generic::Constrained<
+  Ident<S>,
+  Type<S>,
+  scaffold::UnionMemberTypes<TypePath<S, PathSegmentsContainer, TypeContainer>, TypePathsContainer>,
+  PathSegmentsContainer,
+  TypeContainer,
+  TypePathsContainer,
+  PredicatesContainer,
 >;
 
 pub type UnionTypeDefinition<
   S,
-  UnionMemberTypesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::UnionTypeDefinition<
-  Name<S>,
+  DefinitionName<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  UnionMemberTypes<Name<S>, UnionMemberTypesContainer>,
+  UnionMemberTypes<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+  >,
 >;
 
 pub type DescribedUnionTypeDefinition<
   S,
-  UnionMemberTypesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
-  UnionTypeDefinition<S, UnionMemberTypesContainer, ArgumentsContainer, DirectivesContainer>,
+  UnionTypeDefinition<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >,
   StringValue<S>,
 >;
 
 pub type UnionTypeExtension<
   S,
-  UnionMemberTypesContainer = DefaultNamesContainer<S>,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+  TypePathsContainer = DefaultTypePathsContainer<S, PathSegmentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+  >,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::UnionTypeExtension<
-  Name<S>,
+  ExtensionName<S, PathSegmentsContainer, TypeContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  UnionMemberTypes<Name<S>, UnionMemberTypesContainer>,
+  UnionMemberTypes<
+    S,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    PredicatesContainer,
+  >,
 >;
 
 pub type EnumValueDefinition<
@@ -408,7 +699,7 @@ pub type EnumValueDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
   scaffold::EnumValueDefinition<
-    Name<S>,
+    Ident<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
   StringValue<S>,
@@ -430,7 +721,7 @@ pub type EnumTypeDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::EnumTypeDefinition<
-  Name<S>,
+  Ident<S>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
 >;
@@ -447,437 +738,438 @@ pub type DescribedEnumTypeDefinition<
 
 pub type EnumTypeExtension<
   S,
+  PathSegmentsContainer = DefaultPathSegmentsContainer<S>,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::EnumTypeExtension<
-  Name<S>,
+  Path<S, PathSegmentsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
 >;
 
-pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
-  Name<S>,
-  OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  SelectionSet<S>,
->;
+// pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
+//   Name<S>,
+//   OperationType,
+//   VariablesDefinition<S>,
+//   Directives<S>,
+//   SelectionSet<S>,
+// >;
 
-pub type OperationDefinition<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::OperationDefinition<
-  Name<S>,
-  OperationType,
-  VariablesDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  Directives<S, ArgumentsContainer, DirectivesContainer>,
-  SelectionSet<S, ArgumentsContainer, DirectivesContainer>,
->;
+// pub type OperationDefinition<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+// > = scaffold::OperationDefinition<
+//   Name<S>,
+//   OperationType,
+//   VariablesDefinition<S, ArgumentsContainer, DirectivesContainer>,
+//   Directives<S, ArgumentsContainer, DirectivesContainer>,
+//   SelectionSet<S, ArgumentsContainer, DirectivesContainer>,
+// >;
 
-pub type RootOperationTypeDefinition<S> =
-  scaffold::RootOperationTypeDefinition<Name<S>, OperationType>;
+// pub type RootOperationTypeDefinition<S> =
+//   scaffold::RootOperationTypeDefinition<Name<S>, OperationType>;
 
-pub type RootOperationTypesDefinition<S, Container = DefaultRootOperationTypesContainer<S>> =
-  scaffold::RootOperationTypesDefinition<RootOperationTypeDefinition<S>, Container>;
+// pub type RootOperationTypesDefinition<S, Container = DefaultRootOperationTypesContainer<S>> =
+//   scaffold::RootOperationTypesDefinition<RootOperationTypeDefinition<S>, Container>;
 
-pub type SchemaDefinition<
-  S,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  Container = DefaultRootOperationTypesContainer<S>,
-> = scaffold::SchemaDefinition<
-  ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  RootOperationTypesDefinition<S, Container>,
->;
+// pub type SchemaDefinition<
+//   S,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   Container = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::SchemaDefinition<
+//   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
+//   RootOperationTypesDefinition<S, Container>,
+// >;
 
-pub type SchemaExtension<
-  S,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  Container = DefaultRootOperationTypesContainer<S>,
-> = scaffold::SchemaExtension<
-  ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
-  RootOperationTypesDefinition<S, Container>,
->;
+// pub type SchemaExtension<
+//   S,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   Container = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::SchemaExtension<
+//   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
+//   RootOperationTypesDefinition<S, Container>,
+// >;
 
-pub type TypeDefinition<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::TypeDefinition<
-  ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  ObjectTypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >,
-  InterfaceTypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >,
-  UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
-  EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
-  InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
->;
+// pub type TypeDefinition<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+// > = scaffold::TypeDefinition<
+//   ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>,
+//   ObjectTypeDefinition<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//   >,
+//   InterfaceTypeDefinition<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//   >,
+//   UnionTypeDefinition<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
+//   EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+//   InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+// >;
 
-pub type TypeSystemDefinition<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::TypeSystemDefinition<
-  TypeDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >,
-  DirectiveDefinition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >,
-  SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
->;
+// pub type TypeSystemDefinition<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::TypeSystemDefinition<
+//   TypeDefinition<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//   >,
+//   DirectiveDefinition<
+//     S,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     LocationsContainer,
+//   >,
+//   SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
+// >;
 
-pub type DescribedTypeSystemDefinition<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = Described<
-  TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  StringValue<S>,
->;
+// pub type DescribedTypeSystemDefinition<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = Described<
+//   TypeSystemDefinition<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   StringValue<S>,
+// >;
 
-pub type TypeExtension<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = scaffold::TypeExtension<
-  ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
-  ObjectTypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >,
-  InterfaceTypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-  >,
-  UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
-  EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
-  InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
->;
+// pub type TypeExtension<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+// > = scaffold::TypeExtension<
+//   ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
+//   ObjectTypeExtension<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//   >,
+//   InterfaceTypeExtension<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//   >,
+//   UnionTypeExtension<S, NamesContainer, ArgumentsContainer, DirectivesContainer>,
+//   EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+//   InputObjectTypeExtension<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
+// >;
 
-pub type TypeSystemExtension<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::TypeSystemExtension<
-  TypeExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-  >,
-  SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
->;
+// pub type TypeSystemExtension<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::TypeSystemExtension<
+//   TypeExtension<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//   >,
+//   SchemaExtension<S, ArgumentsContainer, DirectivesContainer, RootOperationTypesContainer>,
+// >;
 
-pub type TypeSystemDefinitionOrExtension<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::TypeSystemDefinitionOrExtension<
-  DescribedTypeSystemDefinition<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  TypeSystemExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >,
->;
+// pub type TypeSystemDefinitionOrExtension<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::TypeSystemDefinitionOrExtension<
+//   DescribedTypeSystemDefinition<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   TypeSystemExtension<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     RootOperationTypesContainer,
+//   >,
+// >;
 
-pub type ExecutableDefinition<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = scaffold::ExecutableDefinition<
-  OperationDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
->;
+// pub type ExecutableDefinition<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+// > = scaffold::ExecutableDefinition<
+//   OperationDefinition<S, ArgumentsContainer, DirectivesContainer>,
+//   FragmentDefinition<S, ArgumentsContainer, DirectivesContainer>,
+// >;
 
-pub type DescribedExecutableDefinition<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = Described<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
+// pub type DescribedExecutableDefinition<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+// > = Described<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
 
-pub type Definition<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
-  NamesContainer = DefaultNamesContainer<S>,
-  InputValuesContainer = DefaultInputValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  EnumValuesContainer = DefaultEnumValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::Definition<
-  TypeSystemDefinition<
-    S,
-    NamesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
->;
+// pub type Definition<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+//   ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   InputValuesContainer = DefaultInputValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   EnumValuesContainer = DefaultEnumValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::Definition<
+//   TypeSystemDefinition<
+//     S,
+//     NamesContainer,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+// >;
 
-pub type DescribedDefinition<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
-  NamesContainer = DefaultNamesContainer<S>,
-  InputValuesContainer = DefaultInputValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  EnumValuesContainer = DefaultEnumValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = Described<
-  Definition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  StringValue<S>,
->;
+// pub type DescribedDefinition<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+//   ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   InputValuesContainer = DefaultInputValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   EnumValuesContainer = DefaultEnumValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = Described<
+//   Definition<
+//     S,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//     NamesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   StringValue<S>,
+// >;
 
-pub type DefinitionOrExtension<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
-  NamesContainer = DefaultNamesContainer<S>,
-  InputValuesContainer = DefaultInputValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  EnumValuesContainer = DefaultEnumValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-> = scaffold::DefinitionOrExtension<
-  DescribedDefinition<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  TypeSystemExtension<
-    S,
-    NamesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    RootOperationTypesContainer,
-  >,
->;
+// pub type DefinitionOrExtension<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+//   ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   InputValuesContainer = DefaultInputValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   EnumValuesContainer = DefaultEnumValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+// > = scaffold::DefinitionOrExtension<
+//   DescribedDefinition<
+//     S,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//     NamesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   TypeSystemExtension<
+//     S,
+//     NamesContainer,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     RootOperationTypesContainer,
+//   >,
+// >;
 
-pub type TypeSystemDocument<
-  S,
-  NamesContainer = DefaultNamesContainer<S>,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-  DefinitionContainer = DefaultVec<
-    TypeSystemDefinitionOrExtension<
-      S,
-      NamesContainer,
-      ArgumentsContainer,
-      DirectivesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-> = scaffold::Document<
-  TypeSystemDefinitionOrExtension<
-    S,
-    NamesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  DefinitionContainer,
->;
+// pub type TypeSystemDocument<
+//   S,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+//   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+//   DefinitionContainer = DefaultVec<
+//     TypeSystemDefinitionOrExtension<
+//       S,
+//       NamesContainer,
+//       ArgumentsContainer,
+//       DirectivesContainer,
+//       InputValuesContainer,
+//       EnumValuesContainer,
+//       LocationsContainer,
+//       RootOperationTypesContainer,
+//     >,
+//   >,
+// > = scaffold::Document<
+//   TypeSystemDefinitionOrExtension<
+//     S,
+//     NamesContainer,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   DefinitionContainer,
+// >;
 
-pub type ExecutableDocument<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  DefinitionContainer = DefaultVec<
-    ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  >,
-> = scaffold::Document<
-  ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
-  DefinitionContainer,
->;
+// pub type ExecutableDocument<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+//   DefinitionContainer = DefaultVec<
+//     ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+//   >,
+// > = scaffold::Document<
+//   ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+//   DefinitionContainer,
+// >;
 
-pub type Document<
-  S,
-  ArgumentsContainer = DefaultArgumentsContainer<S>,
-  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-  ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
-  NamesContainer = DefaultNamesContainer<S>,
-  InputValuesContainer = DefaultInputValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  EnumValuesContainer = DefaultEnumValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  LocationsContainer = DefaultLocationsContainer,
-  RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
-  DefinitionContainer = DefaultVec<
-    DefinitionOrExtension<
-      S,
-      ArgumentsContainer,
-      DirectivesContainer,
-      ConstArgumentsContainer,
-      ConstDirectivesContainer,
-      NamesContainer,
-      InputValuesContainer,
-      EnumValuesContainer,
-      LocationsContainer,
-      RootOperationTypesContainer,
-    >,
-  >,
-> = scaffold::Document<
-  DefinitionOrExtension<
-    S,
-    ArgumentsContainer,
-    DirectivesContainer,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-    NamesContainer,
-    InputValuesContainer,
-    EnumValuesContainer,
-    LocationsContainer,
-    RootOperationTypesContainer,
-  >,
-  DefinitionContainer,
->;
+// pub type Document<
+//   S,
+//   ArgumentsContainer = DefaultArgumentsContainer<S>,
+//   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+//   ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
+//   ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
+//   NamesContainer = DefaultNamesContainer<S>,
+//   InputValuesContainer = DefaultInputValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   EnumValuesContainer = DefaultEnumValuesContainer<
+//     S,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//   >,
+//   LocationsContainer = DefaultLocationsContainer,
+//   RootOperationTypesContainer = DefaultRootOperationTypesContainer<S>,
+//   DefinitionContainer = DefaultVec<
+//     DefinitionOrExtension<
+//       S,
+//       ArgumentsContainer,
+//       DirectivesContainer,
+//       ConstArgumentsContainer,
+//       ConstDirectivesContainer,
+//       NamesContainer,
+//       InputValuesContainer,
+//       EnumValuesContainer,
+//       LocationsContainer,
+//       RootOperationTypesContainer,
+//     >,
+//   >,
+// > = scaffold::Document<
+//   DefinitionOrExtension<
+//     S,
+//     ArgumentsContainer,
+//     DirectivesContainer,
+//     ConstArgumentsContainer,
+//     ConstDirectivesContainer,
+//     NamesContainer,
+//     InputValuesContainer,
+//     EnumValuesContainer,
+//     LocationsContainer,
+//     RootOperationTypesContainer,
+//   >,
+//   DefinitionContainer,
+// >;

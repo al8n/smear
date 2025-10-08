@@ -265,7 +265,13 @@ where
       let set_value_parser = scaffold::Set::parser_with(parser.clone()).map(Self::Set);
       let map_value_parser = scaffold::Map::parser_with(parser.clone(), parser).map(Self::Map);
 
-      choice((atom_parser!(), set_value_parser, map_value_parser, object_value_parser, list_value_parser,))
+      choice((
+        atom_parser!(),
+        set_value_parser,
+        map_value_parser,
+        object_value_parser,
+        list_value_parser,
+      ))
     })
   }
 }

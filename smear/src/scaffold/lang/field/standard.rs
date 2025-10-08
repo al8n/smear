@@ -10,11 +10,11 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use super::selection_set::{Selection, SelectionSet};
+use super::super::{StandardSelection, StandardSelectionSet};
 
 /// Represents a field in a GraphQL selection set.
 ///
-/// A field is the basic unit of data that can be requested in GraphQL. Fields can have
+/// A field is the basic unit of data that can be requested in GraphQL. StandardFields can have
 /// aliases, arguments, directives, and nested selection sets. This structure represents
 /// the complete syntax for a field including all its optional components.
 ///
@@ -24,16 +24,16 @@ use super::selection_set::{Selection, SelectionSet};
 /// # Simple field
 /// name
 ///
-/// ### Field with alias
+/// ### StandardField with alias
 /// userName: name
 ///
-/// ### Field with arguments
+/// ### StandardField with arguments
 /// user(id: "123")
 ///
-/// ### Field with directives
+/// ### StandardField with directives
 /// name @deprecated
 ///
-/// ### Field with selection set (for object types)
+/// ### StandardField with selection set (for object types)
 /// user {
 ///   id
 ///   name
@@ -53,30 +53,30 @@ use super::selection_set::{Selection, SelectionSet};
 ///
 /// * `Args` - The type representing field arguments
 /// * `Directives` - The type representing field directives
-/// * `SelectionSet` - The type representing nested field selections
+/// * `StandardSelectionSet` - The type representing nested field selections
 /// * `Span` - The type representing source location information
 ///
 /// ## Grammar
 ///
 /// ```text
-/// Field : Alias? Name Arguments? Directives? SelectionSet?
+/// StandardField : Alias? Name Arguments? Directives? StandardSelectionSet?
 /// ```
 ///
-/// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
+/// Spec: [StandardFields](https://spec.graphql.org/draft/#sec-Language.StandardFields)
 #[derive(Debug, Clone, From, Into)]
 #[allow(clippy::type_complexity)]
-pub struct Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
-  pub(super)  scaffold::Field<
+pub struct StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
+  scaffold::Field<
     Alias,
     Name,
     Arguments,
     Directives,
-    SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
+    StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
   >,
 );
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Span>
-  for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -85,7 +85,7 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Spa
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<Span>
-  for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -94,7 +94,7 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<S
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoComponents
-  for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   type Components = (
     Span,
@@ -102,7 +102,7 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoCompon
     Name,
     Option<Arguments>,
     Option<Directives>,
-    Option<SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>,
+    Option<StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>,
   );
 
   #[inline]
@@ -112,7 +112,7 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoCompon
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
-  Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   /// Returns a reference to the span covering the entire field.
   ///
@@ -170,7 +170,8 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
   #[inline]
   pub const fn selection_set(
     &self,
-  ) -> Option<&SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>> {
+  ) -> Option<&StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>
+  {
     self.0.selection_set()
   }
 }
@@ -187,7 +188,7 @@ impl<
   T,
   Error,
 > Parseable<'a, I, T, Error>
-  for Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
   On: Parseable<'a, I, T, Error> + 'a,
   Spread: Parseable<'a, I, T, Error> + 'a,
@@ -210,25 +211,25 @@ where
     Error: 'a,
   {
     recursive(|field_parser| {
-      // Inner fixpoint: build a `Selection<Span>` parser by using the recursive `field_parser`.
+      // Inner fixpoint: build a `StandardSelection<Span>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
-        // SelectionSet needs a `Selection` parser
-        let selection_set = scaffold::SelectionSet::parser_with(selection.clone());
+        // StandardSelectionSet needs a `StandardSelection` parser
+        let selection_set = scaffold::StandardSelectionSet::parser_with(selection.clone());
 
-        let spread = FragmentSpread::parser().map(|fs| Selection::FragmentSpread(fs));
+        let spread = FragmentSpread::parser().map(|fs| StandardSelection::FragmentSpread(fs));
 
         let inline = scaffold::InlineFragment::parser_with(
           TypeCondition::parser(),
           Directives::parser(),
           selection_set.clone(),
         )
-        .map(|f| Selection::InlineFragment(f));
+        .map(|f| StandardSelection::InlineFragment(f));
 
-        choice((field_parser.map(Selection::Field), spread, inline))
+        choice((field_parser.map(StandardSelection::Field), spread, inline))
       });
 
       // Pass the selection parser to the selection set
-      let selection_set = scaffold::SelectionSet::parser_with(selection);
+      let selection_set = scaffold::StandardSelectionSet::parser_with(selection);
 
       scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
         .map(Self)

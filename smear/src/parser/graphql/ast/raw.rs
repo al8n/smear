@@ -1,6 +1,6 @@
 use super::{
   ConstInputValue, DefaultVec, FragmentName, InputValue, Name, StringValue, Type, TypeCondition,
-  VariableValue, field, selection_set,
+  VariableValue,
 };
 use crate::scaffold::{
   self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType,
@@ -82,7 +82,7 @@ pub type Selection<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = selection_set::Selection<
+> = scaffold::StandardSelection<
   Alias<S>,
   Name<S>,
   FragmentName<S>,
@@ -95,7 +95,7 @@ pub type SelectionSet<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = selection_set::SelectionSet<
+> = scaffold::StandardSelectionSet<
   Alias<S>,
   Name<S>,
   FragmentName<S>,
@@ -110,7 +110,7 @@ pub type Field<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = field::Field<
+> = scaffold::StandardField<
   Alias<S>,
   Name<S>,
   FragmentName<S>,

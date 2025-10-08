@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, IterParser, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 
 use crate::punctuator::PathSeparator;
@@ -121,5 +121,40 @@ where
     T: Token<'a>,
   {
     Self::parser_with(Ident::parser())
+  }
+}
+
+impl<Ident, Container> Equivalent<Path<Ident, Container>> for str
+where
+  str: Equivalent<Ident>,
+  Container: AsRef<[Ident]>,
+{
+  #[inline]
+  fn equivalent(&self, other: &Path<Ident, Container>) -> bool {
+    // 1) leading `::` must match the path's FQP flag
+    let self_fqp = self.starts_with("::");
+    if self_fqp != other.is_fully_qualified() {
+      return false;
+    }
+
+    // 2) strip the leading `::` (if any)
+    let body = if self_fqp { &self[2..] } else { self };
+
+    let mut parts = body.split("::");
+    let mut segs = other.as_slice().iter();
+
+    loop {
+      match (parts.next(), segs.next()) {
+        (None, None) => return true, // same length & all matched
+        (Some(p), Some(ident)) => {
+          // reject empty segments like "a::::b" or "::a" (after stripping FQP)
+          if p.is_empty() || !p.equivalent(ident) {
+            return false;
+          }
+        }
+        // different lengths
+        _ => return false,
+      }
+    }
   }
 }

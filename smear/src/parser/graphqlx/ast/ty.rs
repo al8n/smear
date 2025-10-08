@@ -13,8 +13,37 @@ use crate::{
   scaffold::{self, ListType, MapType, SetType},
 };
 
-pub type TypePath<S, Type, PathSegmentContainer = Vec<Ident<S>>, TypeContainer = Vec<Type>> =
-  scaffold::generic::TypePath<Ident<S>, Type, PathSegmentContainer, TypeContainer>;
+use super::{DefaultPathSegmentsContainer, DefaultTypeContainer};
+
+pub type TypePath<
+  S,
+  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = scaffold::generic::TypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
+pub type DefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
+pub type TypeGenerics<S, TypeContainer = DefaultTypeContainer<S>> =
+  scaffold::generic::TypeGenerics<Type<S>, TypeContainer>;
+
+pub type ArcDefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = Vec<ArcType<S>>,
+> =
+  scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>, PathSegmentContainer, TypeContainer>;
+pub type ArcTypeGenerics<S, TypeContainer = Vec<ArcType<S>>> =
+  scaffold::generic::TypeGenerics<ArcType<S>, TypeContainer>;
+
+pub type RcDefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  TypeContainer = Vec<RcType<S>>,
+> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>, PathSegmentContainer, TypeContainer>;
+pub type RcTypeGenerics<S, TypeContainer = Vec<RcType<S>>> =
+  scaffold::generic::TypeGenerics<RcType<S>, TypeContainer>;
 
 macro_rules! ty {
   ($(
@@ -121,7 +150,7 @@ macro_rules! ty {
           /// A path type referencing a schema-defined type.
           ///
           /// Examples: `String!`, `user::User`, `PostStatus!`, `ID`
-          Path(TypePath<S, Self>),
+          Path(scaffold::generic::DefinitionTypePath<Ident<S>, Self>),
 
           /// A list type containing elements of another type.
           ///
@@ -238,7 +267,7 @@ macro_rules! ty {
               choice((
                 angle,
                 ListType::parser_with(parser.clone()).map(Self::from),
-                TypePath::parser_with(ident_parser, parser).map(Self::Path),
+                scaffold::generic::DefinitionTypePath::<Ident<S>, Self>::parser_with(ident_parser, parser).map(Self::Path),
               ))
             })
           }

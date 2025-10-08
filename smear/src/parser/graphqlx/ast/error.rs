@@ -1,6 +1,6 @@
 use crate::{
   error::{
-    ParseVariableValueError, UnclosedBracketError, UnclosedBraceError,
+    ParseVariableValueError, UnclosedBraceError, UnclosedBracketError,
     UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
     UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
     UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
@@ -226,4 +226,3 @@ where
     <AstTokenError<'a, S> as UnclosedBracketError>::unclosed_bracket(span).into()
   }
 }
-

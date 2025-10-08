@@ -11,162 +11,48 @@ use crate::{
   punctuator::{Ampersand, Colon, LAngle, PathSeparator, RAngle},
 };
 
-use super::{super::Path, TypeGenerics};
-
-/// A GraphQLx predicate type path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PredicateTypePath<
-  Ident,
-  Type,
-  PathSegmentContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
-> {
-  span: Span,
-  path: Path<Ident, PathSegmentContainer>,
-  generics: Option<TypeGenerics<Type, TypeContainer>>,
-}
-
-impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
-  for PredicateTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
-{
-  #[inline]
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
-  for PredicateTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
-{
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
-  for PredicateTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
-{
-  type Components = (
-    Span,
-    Path<Ident, PathSegmentContainer>,
-    Option<TypeGenerics<Type, TypeContainer>>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.path, self.generics)
-  }
-}
-
-impl<Ident, Type, PathSegmentContainer, TypeContainer>
-  PredicateTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
-{
-  /// Creates a new path from the given segments.
-  #[inline]
-  const fn new(
-    span: Span,
-    path: Path<Ident, PathSegmentContainer>,
-    generics: Option<TypeGenerics<Type, TypeContainer>>,
-  ) -> Self {
-    Self {
-      span,
-      path,
-      generics,
-    }
-  }
-
-  /// Returns the path.
-  #[inline]
-  pub const fn path(&self) -> &Path<Ident, PathSegmentContainer> {
-    &self.path
-  }
-
-  /// Returns the type generics.
-  #[inline]
-  pub const fn type_generics(&self) -> Option<&TypeGenerics<Type, TypeContainer>> {
-    self.generics.as_ref()
-  }
-
-  /// Returns the span of the path.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Creates a parser for the path.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP>(
-    ident_parser: IP,
-    type_parser: TP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error>,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    PathSegmentContainer: ChumskyContainer<Ident>,
-    TypeContainer: ChumskyContainer<Type>,
-  {
-    Path::parser_with(ident_parser)
-      .then(TypeGenerics::parser_with(type_parser).or_not())
-      .map_with(|(path, generics), exa| Self::new(exa.span(), path, generics))
-  }
-}
-
-impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for PredicateTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
-where
-  PathSegmentContainer: ChumskyContainer<Ident>,
-  TypeContainer: ChumskyContainer<Type>,
-  Ident: Parseable<'a, I, T, Error>,
-  PathSeparator: Parseable<'a, I, T, Error>,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Type: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Self::parser_with(Ident::parser(), Type::parser())
-  }
-}
+use super::TypePath;
 
 /// A where predicate, which constrains a type to implement certain interfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WherePredicate<Ident, Type, Container = Vec<PredicateTypePath<Ident, Type>>> {
+pub struct WherePredicate<
+  Ident,
+  Type,
+  PathSegmentsContainer = Vec<Ident>,
+  TypeContainer = Vec<Type>,
+  Container = Vec<TypePath<Ident, Type>>,
+> {
   span: Span,
-  bounded_type: PredicateTypePath<Ident, Type>,
+  bounded_type: TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
   bounds: Container,
 }
 
-impl<Ident, Type, Container> AsSpan<Span> for WherePredicate<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> AsSpan<Span>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+{
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type, Container> IntoSpan<Span> for WherePredicate<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> IntoSpan<Span>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type, Container> IntoComponents for WherePredicate<Ident, Type, Container> {
-  type Components = (Span, PredicateTypePath<Ident, Type>, Container);
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> IntoComponents
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+{
+  type Components = (
+    Span,
+    TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
+    Container,
+  );
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -174,12 +60,14 @@ impl<Ident, Type, Container> IntoComponents for WherePredicate<Ident, Type, Cont
   }
 }
 
-impl<Ident, Type, Container> WherePredicate<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+  WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+{
   /// Creates a new `WherePredicate` with the given bounded type and bounds.
   #[inline]
   const fn new(
     span: Span,
-    bounded_type: PredicateTypePath<Ident, Type>,
+    bounded_type: TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
     bounds: Container,
   ) -> Self {
     Self {
@@ -197,7 +85,7 @@ impl<Ident, Type, Container> WherePredicate<Ident, Type, Container> {
 
   /// Returns the bounded type.
   #[inline]
-  pub const fn bounded_type(&self) -> &PredicateTypePath<Ident, Type> {
+  pub const fn bounded_type(&self) -> &TypePath<Ident, Type, PathSegmentsContainer, TypeContainer> {
     &self.bounded_type
   }
 
@@ -209,9 +97,9 @@ impl<Ident, Type, Container> WherePredicate<Ident, Type, Container> {
 
   /// Returns the bounds as a slice.
   #[inline]
-  pub fn bounds_slice(&self) -> &[PredicateTypePath<Ident, Type>]
+  pub fn bounds_slice(&self) -> &[TypePath<Ident, Type>]
   where
-    Container: AsRef<[PredicateTypePath<Ident, Type>]>,
+    Container: AsRef<[TypePath<Ident, Type>]>,
   {
     self.bounds.as_ref()
   }
@@ -229,17 +117,19 @@ impl<Ident, Type, Container> WherePredicate<Ident, Type, Container> {
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone + 'a,
     TP: Parser<'a, I, Type, E> + Clone + 'a,
-    Container: ChumskyContainer<PredicateTypePath<Ident, Type>> + 'a,
+    Container: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
+    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
+    TypeContainer: ChumskyContainer<Type> + 'a,
     Colon: Parseable<'a, I, T, Error> + 'a,
     Ampersand: Parseable<'a, I, T, Error> + 'a,
     PathSeparator: Parseable<'a, I, T, Error> + 'a,
     LAngle: Parseable<'a, I, T, Error> + 'a,
     RAngle: Parseable<'a, I, T, Error> + 'a,
   {
-    PredicateTypePath::parser_with(ident_parser.clone(), type_parser.clone())
+    TypePath::parser_with(ident_parser.clone(), type_parser.clone())
       .then_ignore(Colon::parser())
       .then(
-        PredicateTypePath::parser_with(ident_parser, type_parser)
+        TypePath::parser_with(ident_parser, type_parser)
           .separated_by(Ampersand::parser())
           .allow_leading()
           .at_least(1)
@@ -249,29 +139,74 @@ impl<Ident, Type, Container> WherePredicate<Ident, Type, Container> {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WhereClause<Ident, Type, Container = Vec<WherePredicate<Ident, Type>>> {
-  span: Span,
-  predicates: Container,
-  _m: PhantomData<Ident>,
-  _n: PhantomData<Type>,
+impl<'a, Ident, Type, PathSegmentsContainer, TypeContainer, Container, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+where
+  Container: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  PathSegmentsContainer: ChumskyContainer<Ident>,
+  TypeContainer: ChumskyContainer<Type>,
+  TypePath<Ident, Type>: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error> + 'a,
+  Ampersand: Parseable<'a, I, T, Error> + 'a,
+  PathSeparator: Parseable<'a, I, T, Error> + 'a,
+  LAngle: Parseable<'a, I, T, Error> + 'a,
+  RAngle: Parseable<'a, I, T, Error> + 'a,
+  Ident: Parseable<'a, I, T, Error>,
+  Type: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
+  {
+    Self::parser_with(Ident::parser(), Type::parser())
+  }
 }
 
-impl<Ident, Type, Container> AsSpan<Span> for WhereClause<Ident, Type, Container> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WhereClause<
+  Ident,
+  Type,
+  PathSegmentsContainer = Vec<Ident>,
+  TypeContainer = Vec<Type>,
+  TypePathsContainer = Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Container = Vec<WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+> {
+  span: Span,
+  predicates: Container,
+  _m: PhantomData<
+    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+  >,
+}
+
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container> AsSpan<Span>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+{
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type, Container> IntoSpan<Span> for WhereClause<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  IntoSpan<Span>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type, Container> IntoComponents for WhereClause<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  IntoComponents
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+{
   type Components = (Span, Container);
 
   #[inline]
@@ -280,7 +215,9 @@ impl<Ident, Type, Container> IntoComponents for WhereClause<Ident, Type, Contain
   }
 }
 
-impl<Ident, Type, Container> WhereClause<Ident, Type, Container> {
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+{
   /// Creates a new `WhereClause` with the given predicates.
   #[inline]
   const fn new(span: Span, predicates: Container) -> Self {
@@ -288,7 +225,6 @@ impl<Ident, Type, Container> WhereClause<Ident, Type, Container> {
       span,
       predicates,
       _m: PhantomData,
-      _n: PhantomData,
     }
   }
 
@@ -306,9 +242,13 @@ impl<Ident, Type, Container> WhereClause<Ident, Type, Container> {
 
   /// Returns the predicates as a slice.
   #[inline]
-  pub fn predicates_slice(&self) -> &[WherePredicate<Ident, Type>]
+  pub fn predicates_slice(
+    &self,
+  ) -> &[WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>]
   where
-    Container: AsRef<[WherePredicate<Ident, Type>]>,
+    Container: AsRef<
+      [WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>],
+    >,
   {
     self.predicates.as_ref()
   }
@@ -328,7 +268,13 @@ impl<Ident, Type, Container> WhereClause<Ident, Type, Container> {
     TP: Parser<'a, I, Type, E> + Clone + 'a,
     Ident: 'a,
     Type: 'a,
-    Container: ChumskyContainer<WherePredicate<Ident, Type>> + 'a,
+    Container: ChumskyContainer<
+        WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+      > + 'a,
+    TypePathsContainer:
+      ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
+    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
+    TypeContainer: ChumskyContainer<Type> + 'a,
     Colon: Parseable<'a, I, T, Error> + 'a,
     Ampersand: Parseable<'a, I, T, Error> + 'a,
     PathSeparator: Parseable<'a, I, T, Error> + 'a,
@@ -346,11 +292,27 @@ impl<Ident, Type, Container> WhereClause<Ident, Type, Container> {
   }
 }
 
-impl<'a, Ident, Type, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for WhereClause<Ident, Type, Container>
+impl<
+  'a,
+  Ident,
+  Type,
+  PathSegmentsContainer,
+  TypeContainer,
+  TypePathsContainer,
+  Container,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
 where
-  Container: ChumskyContainer<WherePredicate<Ident, Type>>,
-  WherePredicate<Ident, Type>: Parseable<'a, I, T, Error>,
+  Container: ChumskyContainer<
+    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+  >,
+  TypePathsContainer: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  PathSegmentsContainer: ChumskyContainer<Ident>,
+  TypeContainer: ChumskyContainer<Type>,
+  WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>: Parseable<'a, I, T, Error>,
   Where: Parseable<'a, I, T, Error>,
   Ident: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
@@ -371,5 +333,224 @@ where
     T: Token<'a>,
   {
     Self::parser_with(Ident::parser(), Type::parser())
+  }
+}
+
+/// A constrained `Target`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Constrained<
+  Ident,
+  Type,
+  Target,
+  PathSegmentsContainer = Vec<Ident>,
+  TypeContainer = Vec<Type>,
+  TypePathsContainer = Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Container = Vec<
+    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+  >,
+> {
+  span: Span,
+  where_clause: Option<
+    WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
+  >,
+  target: Target,
+}
+
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  AsSpan<Span>
+  for Constrained<
+    Ident,
+    Type,
+    Target,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    Container,
+  >
+{
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  IntoSpan<Span>
+  for Constrained<
+    Ident,
+    Type,
+    Target,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    Container,
+  >
+{
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  IntoComponents
+  for Constrained<
+    Ident,
+    Type,
+    Target,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    Container,
+  >
+{
+  type Components = (
+    Span,
+    Option<
+      WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
+    >,
+    Target,
+  );
+
+  fn into_components(self) -> Self::Components {
+    (self.span, self.where_clause, self.target)
+  }
+}
+
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  Constrained<
+    Ident,
+    Type,
+    Target,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    Container,
+  >
+{
+  /// Creates a new `Constrained` with the given target and optional where clause.
+  #[inline]
+  const fn new(
+    span: Span,
+    where_clause: Option<
+      WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
+    >,
+    target: Target,
+  ) -> Self {
+    Self {
+      span,
+      where_clause,
+      target,
+    }
+  }
+
+  /// Returns the span of the constrained type.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the optional where clause.
+  #[inline]
+  pub const fn where_clause(
+    &self,
+  ) -> Option<
+    &WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
+  > {
+    self.where_clause.as_ref()
+  }
+
+  /// Returns the target.
+  #[inline]
+  pub const fn target(&self) -> &Target {
+    &self.target
+  }
+
+  /// Creates a parser for the constrained type.
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, IP, TP, P>(
+    ident_parser: IP,
+    type_parser: TP,
+    target_parser: P,
+  ) -> impl Parser<'a, I, Self, E> + Clone
+  where
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: Token<'a>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    IP: Parser<'a, I, Ident, E> + Clone + 'a,
+    TP: Parser<'a, I, Type, E> + Clone + 'a,
+    P: Parser<'a, I, Target, E> + Clone + 'a,
+    Ident: 'a,
+    Type: 'a,
+    Container: ChumskyContainer<
+        WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+      > + 'a,
+    TypePathsContainer:
+      ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
+    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
+    TypeContainer: ChumskyContainer<Type> + 'a,
+    Colon: Parseable<'a, I, T, Error> + 'a,
+    Ampersand: Parseable<'a, I, T, Error> + 'a,
+    PathSeparator: Parseable<'a, I, T, Error> + 'a,
+    LAngle: Parseable<'a, I, T, Error> + 'a,
+    RAngle: Parseable<'a, I, T, Error> + 'a,
+    Where: Parseable<'a, I, T, Error> + 'a,
+  {
+    WhereClause::parser_with(ident_parser, type_parser)
+      .or_not()
+      .then(target_parser)
+      .map_with(|(where_clause, target), exa| Self::new(exa.span(), where_clause, target))
+  }
+}
+
+impl<
+  'a,
+  Ident,
+  Type,
+  Target,
+  PathSegmentsContainer,
+  TypeContainer,
+  TypePathsContainer,
+  Container,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
+  for Constrained<
+    Ident,
+    Type,
+    Target,
+    PathSegmentsContainer,
+    TypeContainer,
+    TypePathsContainer,
+    Container,
+  >
+where
+  Ident: Parseable<'a, I, T, Error>,
+  Type: Parseable<'a, I, T, Error>,
+  Target: Parseable<'a, I, T, Error>,
+  PathSegmentsContainer: ChumskyContainer<Ident>,
+  TypeContainer: ChumskyContainer<Type>,
+  TypePathsContainer: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Container: ChumskyContainer<
+    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
+  >,
+  WherePredicate<Ident, Type>: Parseable<'a, I, T, Error>,
+  Where: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error> + 'a,
+  Ampersand: Parseable<'a, I, T, Error> + 'a,
+  PathSeparator: Parseable<'a, I, T, Error> + 'a,
+  LAngle: Parseable<'a, I, T, Error> + 'a,
+  RAngle: Parseable<'a, I, T, Error> + 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    T: Token<'a>,
+  {
+    Self::parser_with(Ident::parser(), Type::parser(), Target::parser())
   }
 }

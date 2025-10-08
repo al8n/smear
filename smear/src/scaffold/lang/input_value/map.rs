@@ -6,7 +6,10 @@ use logosky::{
 
 use crate::error::UnclosedBraceError;
 
-use crate::{punctuator::{LAngle, RAngle, FatArrow}, keywords};
+use crate::{
+  keywords,
+  punctuator::{FatArrow, LAngle, RAngle},
+};
 
 use core::marker::PhantomData;
 
@@ -128,7 +131,7 @@ where
 /// ```text
 /// Map ::= 'map' '{' Entries? '}'
 /// Entries ::= MapEntry+
-/// 
+///
 /// MapEntry ::= Key '=>' Value
 /// ```
 ///
@@ -216,7 +219,11 @@ impl<Key, Value, Container> Map<Key, Value, Container> {
   {
     keywords::Map::parser()
       .then(LAngle::parser())
-      .ignore_then(MapEntry::parser_with(key_parser, value_parser).repeated().collect())
+      .ignore_then(
+        MapEntry::parser_with(key_parser, value_parser)
+          .repeated()
+          .collect(),
+      )
       .then(RAngle::parser().or_not())
       .try_map(move |(entries, r), span| match r {
         Some(_) => Ok(Map::new(span, entries)),
@@ -248,7 +255,8 @@ impl<Key, Value, Container> IntoComponents for Map<Key, Value, Container> {
   }
 }
 
-impl<'a, Key, Value, Container, I, T, Error> Parseable<'a, I, T, Error> for Map<Key, Value, Container>
+impl<'a, Key, Value, Container, I, T, Error> Parseable<'a, I, T, Error>
+  for Map<Key, Value, Container>
 where
   Error: UnclosedBraceError + 'a,
   Key: Parseable<'a, I, T, Error> + 'a,

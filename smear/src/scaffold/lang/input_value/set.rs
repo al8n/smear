@@ -6,7 +6,10 @@ use logosky::{
 
 use crate::error::UnclosedBraceError;
 
-use crate::{punctuator::{LAngle, RAngle}, keywords};
+use crate::{
+  keywords,
+  punctuator::{LAngle, RAngle},
+};
 
 use core::marker::PhantomData;
 
@@ -112,7 +115,8 @@ impl<Value, Container> Set<Value, Container> {
     RAngle: Parseable<'src, I, T, Error>,
     keywords::Set: Parseable<'src, I, T, Error>,
   {
-    keywords::Set::parser().then(LAngle::parser())
+    keywords::Set::parser()
+      .then(LAngle::parser())
       .ignore_then(value_parser.repeated().collect())
       .then(RAngle::parser().or_not())
       .try_map(move |(values, r), span| match r {
