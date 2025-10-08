@@ -7,8 +7,8 @@ use logosky::{
 
 use crate::{
   keywords,
-  punctuator::{Bang, LAngle, PathSeparator, RAngle},
-  scaffold::{self, And},
+  punctuator::{Ampersand, Bang, Colon, LAngle, PathSeparator, RAngle},
+  scaffold::{self, And, generic::Constrained},
 };
 
 use super::*;
@@ -55,6 +55,13 @@ type FragmentDefinitionAlias<
   S,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
+  TypePathContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+  >,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::FragmentDefinition<
@@ -64,7 +71,15 @@ type FragmentDefinitionAlias<
   >,
   TypeCondition<S, IdentsContainer, TypeContainer>,
   Directives<S, ArgumentsContainer>,
-  SelectionSet<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>,
+  Constrained<
+    Ident<S>,
+    Type<S>,
+    SelectionSet<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+  >,
 >;
 
 #[derive(Debug, Clone, From, Into)]
@@ -72,6 +87,13 @@ pub struct FragmentDefinition<
   S,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
+  TypePathContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
+  PredicatesContainer = DefaultWherePredicatesContainer<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+  >,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
 >(
@@ -79,13 +101,31 @@ pub struct FragmentDefinition<
     S,
     IdentsContainer,
     TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
     ArgumentsContainer,
     DirectivesContainer,
   >,
 );
 
-impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer> AsSpan<Span>
-  for FragmentDefinition<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
+impl<
+  S,
+  IdentsContainer,
+  TypeContainer,
+  TypePathContainer,
+  PredicatesContainer,
+  ArgumentsContainer,
+  DirectivesContainer,
+> AsSpan<Span>
+  for FragmentDefinition<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -93,8 +133,24 @@ impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
   }
 }
 
-impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer> IntoSpan<Span>
-  for FragmentDefinition<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
+impl<
+  S,
+  IdentsContainer,
+  TypeContainer,
+  TypePathContainer,
+  PredicatesContainer,
+  ArgumentsContainer,
+  DirectivesContainer,
+> IntoSpan<Span>
+  for FragmentDefinition<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -102,8 +158,24 @@ impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
   }
 }
 
-impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer> IntoComponents
-  for FragmentDefinition<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
+impl<
+  S,
+  IdentsContainer,
+  TypeContainer,
+  TypePathContainer,
+  PredicatesContainer,
+  ArgumentsContainer,
+  DirectivesContainer,
+> IntoComponents
+  for FragmentDefinition<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >
 {
   type Components = (
     Span,
@@ -111,45 +183,127 @@ impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
     ExecutableDefinitionName<S, IdentsContainer>,
     TypeCondition<S, IdentsContainer, TypeContainer>,
     Option<Directives<S, ArgumentsContainer>>,
+    Option<WhereClause<S, IdentsContainer, TypeContainer, TypePathContainer, PredicatesContainer>>,
     SelectionSet<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name_and_generics, type_condition, directives, selection_set) =
+    let (span, name_and_generics, type_condition, directives, constrained_selection_set) =
       self.0.into_components();
     let (_, generics, name) = name_and_generics.into_components();
+    let (_, where_clause, selection_set) = constrained_selection_set.into_components();
     (
       span,
       generics,
       name,
       type_condition,
       directives,
+      where_clause,
       selection_set,
     )
   }
 }
 
-impl<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
-  FragmentDefinition<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
+impl<
+  S,
+  IdentsContainer,
+  TypeContainer,
+  TypePathContainer,
+  PredicatesContainer,
+  ArgumentsContainer,
+  DirectivesContainer,
+>
+  FragmentDefinition<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >
 {
   /// Returns a reference to the span covering the entire fragment definition.
   #[inline]
   pub const fn span(&self) -> &Span {
     self.0.span()
   }
+
+  /// Returns the impl generics of the fragment definition, if any.
+  #[inline]
+  pub const fn generics(&self) -> Option<&ExecutableDefinitionTypeGenerics<S, IdentsContainer>> {
+    self.0.name().first().as_ref()
+  }
+
+  /// Returns a reference to the name of the fragment definition.
+  #[inline]
+  pub const fn name(&self) -> &ExecutableDefinitionName<S, IdentsContainer> {
+    self.0.name().second()
+  }
+
+  /// Returns a reference to the type condition of the fragment definition.
+  #[inline]
+  pub const fn type_condition(&self) -> &TypeCondition<S, IdentsContainer, TypeContainer> {
+    self.0.type_condition()
+  }
+
+  /// Returns a reference to the optional directives of the fragment definition.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives<S, ArgumentsContainer>> {
+    self.0.directives()
+  }
+
+  /// Returns a reference to the selection set of the fragment definition.
+  #[inline]
+  pub const fn selection_set(
+    &self,
+  ) -> &SelectionSet<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer> {
+    self.0.selection_set().target()
+  }
+
+  /// Returns a reference to the optional where clause of the fragment definition.
+  #[inline]
+  pub const fn where_clause(
+    &self,
+  ) -> Option<&WhereClause<S, IdentsContainer, TypeContainer, TypePathContainer, PredicatesContainer>>
+  {
+    self.0.selection_set().where_clause()
+  }
 }
 
-impl<'a, S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for FragmentDefinition<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>
+impl<
+  'a,
+  S,
+  IdentsContainer,
+  TypeContainer,
+  TypePathContainer,
+  PredicatesContainer,
+  ArgumentsContainer,
+  DirectivesContainer,
+  I,
+  T,
+  Error,
+> Parseable<'a, I, T, Error>
+  for FragmentDefinition<
+    S,
+    IdentsContainer,
+    TypeContainer,
+    TypePathContainer,
+    PredicatesContainer,
+    ArgumentsContainer,
+    DirectivesContainer,
+  >
 where
   keywords::Fragment: Parseable<'a, I, T, Error>,
   keywords::On: Parseable<'a, I, T, Error>,
+  keywords::Where: Parseable<'a, I, T, Error>,
   PathSeparator: Parseable<'a, I, T, Error>,
+  Ampersand: Parseable<'a, I, T, Error>,
   LAngle: Parseable<'a, I, T, Error>,
   RAngle: Parseable<'a, I, T, Error>,
   Bang: Parseable<'a, I, T, Error>,
+  Colon: Parseable<'a, I, T, Error>,
   Ident<S>: Parseable<'a, I, T, Error>,
   Type<S>: Parseable<'a, I, T, Error>,
   ExecutableDefinitionName<Ident<S>, IdentsContainer>: Parseable<'a, I, T, Error>,
@@ -159,6 +313,9 @@ where
     Parseable<'a, I, T, Error>,
   IdentsContainer: ChumskyContainer<Ident<S>>,
   TypeContainer: ChumskyContainer<Type<S>>,
+  TypePathContainer: ChumskyContainer<TypePath<S, IdentsContainer, TypeContainer>>,
+  PredicatesContainer:
+    ChumskyContainer<WherePredicate<S, IdentsContainer, TypeContainer, TypePathContainer>>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

@@ -1,5 +1,6 @@
 use logosky::utils::recursion_tracker::RecursionLimitExceeded;
 
+pub use directive::*;
 pub use fragment::*;
 pub use import::*;
 pub use path::*;
@@ -13,6 +14,7 @@ use crate::{
   parser::ident::Ident,
 };
 
+mod directive;
 mod error;
 mod fragment;
 mod ident;
@@ -39,3 +41,4 @@ pub type AstTokenError<'a, S> =
 /// The errors type used for the AST parser implementation.
 pub type AstTokenErrors<'a, S> =
   Errors<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+
