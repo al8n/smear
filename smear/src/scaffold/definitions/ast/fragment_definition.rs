@@ -111,7 +111,7 @@ use crate::keywords::Fragment;
 /// ```
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet> {
   span: Span,
   name: FragmentName,

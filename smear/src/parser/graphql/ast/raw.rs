@@ -3,9 +3,10 @@ use super::{
   VariableValue,
 };
 use crate::scaffold::{
-  self, Described, DirectiveLocations, ImplementInterfaces, Location, OperationType,
-  UnionMemberTypes,
+  self, DirectiveLocations, ImplementInterfaces, Location, OperationType, UnionMemberTypes,
 };
+
+pub type Described<T, S> = scaffold::Described<T, StringValue<S>>;
 
 /// The default container type used for arguments in the AST.
 pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
@@ -57,7 +58,7 @@ pub type DefaultLocationsContainer = DefaultVec<Location>;
 pub type DefaultRootOperationTypesContainer<S> = DefaultVec<RootOperationTypeDefinition<S>>;
 /// The default container type used for variable definitions in the AST.
 pub type DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer> =
-  Vec<VariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
+  Vec<DescribedVariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
 /// The default container type used for fields in the AST.
 pub type DefaultFieldsContainer<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer> =
   Vec<FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>>;
@@ -152,13 +153,19 @@ pub type VariableDefinition<
   Directives<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
+pub type DescribedVariableDefinition<
+  S,
+  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+> = Described<VariableDefinition<S, ArgumentsContainer, DirectivesContainer>, S>;
+
 pub type VariablesDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
   VariablesContainer = DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::VariablesDefinition<
-  VariableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  DescribedVariableDefinition<S, ArgumentsContainer, DirectivesContainer>,
   VariablesContainer,
 >;
 
@@ -173,7 +180,7 @@ pub type InputValueDefinition<
     DefaultInputValue<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type InputFieldsDefinition<
@@ -198,7 +205,7 @@ pub type FieldDefinition<
     Type<Name<S>>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type FieldsDefinition<
@@ -235,7 +242,7 @@ pub type DescribedInputObjectTypeDefinition<
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = Described<
   InputObjectTypeDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  StringValue<S>,
+  S,
 >;
 
 pub type InputObjectTypeExtension<
@@ -273,7 +280,7 @@ pub type DescribedScalarTypeDefinition<
   S,
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-> = Described<ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
+> = Described<ScalarTypeDefinition<S, ArgumentsContainer, DirectivesContainer>, S>;
 
 pub type ScalarTypeExtension<
   S,
@@ -311,7 +318,7 @@ pub type DescribedObjectTypeDefinition<
     DirectivesContainer,
     InputValuesContainer,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type ObjectTypeExtension<
@@ -354,7 +361,7 @@ pub type DescribedInterfaceTypeDefinition<
     DirectivesContainer,
     InputValuesContainer,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type InterfaceTypeExtension<
@@ -388,7 +395,7 @@ pub type DescribedUnionTypeDefinition<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = Described<
   UnionTypeDefinition<S, UnionMemberTypesContainer, ArgumentsContainer, DirectivesContainer>,
-  StringValue<S>,
+  S,
 >;
 
 pub type UnionTypeExtension<
@@ -411,7 +418,7 @@ pub type EnumValueDefinition<
     Name<S>,
     ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type EnumValuesDefinition<
@@ -440,10 +447,8 @@ pub type DescribedEnumTypeDefinition<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-> = Described<
-  EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
-  StringValue<S>,
->;
+> =
+  Described<EnumTypeDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>, S>;
 
 pub type EnumTypeExtension<
   S,
@@ -456,12 +461,16 @@ pub type EnumTypeExtension<
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
 >;
 
-pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
+pub type NamedOperationDefinition<
+  S,
+  ArgumentsContainer = DefaultArgumentsContainer<S>,
+  DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
+> = scaffold::NamedOperationDefinition<
   Name<S>,
   OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  SelectionSet<S>,
+  VariablesDefinition<S, ArgumentsContainer, DirectivesContainer>,
+  Directives<S, ArgumentsContainer, DirectivesContainer>,
+  SelectionSet<S, ArgumentsContainer, DirectivesContainer>,
 >;
 
 pub type OperationDefinition<
@@ -491,6 +500,13 @@ pub type SchemaDefinition<
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   RootOperationTypesDefinition<S, Container>,
 >;
+
+pub type DescribedSchemaDefinition<
+  S,
+  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
+  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
+  Container = DefaultRootOperationTypesContainer<S>,
+> = Described<SchemaDefinition<S, ArgumentsContainer, DirectivesContainer, Container>, S>;
 
 pub type SchemaExtension<
   S,
@@ -578,7 +594,7 @@ pub type DescribedTypeSystemDefinition<
     LocationsContainer,
     RootOperationTypesContainer,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type TypeExtension<
@@ -673,7 +689,7 @@ pub type DescribedExecutableDefinition<
   S,
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
-> = Described<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, StringValue<S>>;
+> = Described<ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>, S>;
 
 pub type Definition<
   S,
@@ -740,7 +756,7 @@ pub type DescribedDefinition<
     LocationsContainer,
     RootOperationTypesContainer,
   >,
-  StringValue<S>,
+  S,
 >;
 
 pub type DefinitionOrExtension<

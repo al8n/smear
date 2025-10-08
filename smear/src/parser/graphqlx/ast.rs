@@ -11,7 +11,6 @@ use super::error::{Error, Errors, Extra};
 use crate::{
   lexer::graphqlx::ast::{AstToken, AstTokenChar, AstTokenKind},
   parser::ident::Ident,
-  scaffold,
 };
 
 mod error;

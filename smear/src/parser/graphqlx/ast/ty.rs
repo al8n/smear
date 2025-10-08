@@ -13,16 +13,16 @@ use crate::{
   scaffold::{self, ListType, MapType, SetType},
 };
 
-use super::{DefaultPathSegmentsContainer, DefaultTypeContainer};
+use super::{DefaultIdentsContainer, DefaultTypeContainer};
 
 pub type TypePath<
   S,
-  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
 > = scaffold::generic::TypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
 pub type DefinitionTypePath<
   S,
-  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
 > = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
 pub type TypeGenerics<S, TypeContainer = DefaultTypeContainer<S>> =
@@ -30,7 +30,7 @@ pub type TypeGenerics<S, TypeContainer = DefaultTypeContainer<S>> =
 
 pub type ArcDefinitionTypePath<
   S,
-  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
   TypeContainer = Vec<ArcType<S>>,
 > =
   scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>, PathSegmentContainer, TypeContainer>;
@@ -39,7 +39,7 @@ pub type ArcTypeGenerics<S, TypeContainer = Vec<ArcType<S>>> =
 
 pub type RcDefinitionTypePath<
   S,
-  PathSegmentContainer = DefaultPathSegmentsContainer<S>,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
   TypeContainer = Vec<RcType<S>>,
 > = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>, PathSegmentContainer, TypeContainer>;
 pub type RcTypeGenerics<S, TypeContainer = Vec<RcType<S>>> =
