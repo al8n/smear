@@ -139,6 +139,7 @@ macro_rules! punctuator {
 punctuator!(
   (At, "AT", "@"),
   (Ampersand, "AMPERSAND", "&"),
+  (Asterisk, "ASTERISK", "*"),
   (Bang, "BANG", "!"),
   (Comma, "COMMA", ","),
   (Colon, "COLON", ":"),
@@ -156,4 +157,5 @@ punctuator!(
   (RAngle, "R_ANGLE", ">"),
   (FatArrow, "FAT_ARROW", "=>"),
   (ThinArrow, "THIN_ARROW", "->"),
+  (PathSeparator, "PATH_SEPARATOR", "::"),
 );

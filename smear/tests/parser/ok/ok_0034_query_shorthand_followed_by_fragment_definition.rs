@@ -22,7 +22,7 @@ fn query_shorthand_followed_by_fragment_definition() {
     let selections = query.selections();
     assert_eq!(selections.len(), 1);
     let selection = selections.first().unwrap().unwrap_fragment_spread_ref();
-    assert_eq!(selection.name().slice(), "friendFields");
+    assert_eq!(selection.name().source(), "friendFields");
     assert!(selection.directives().is_none());
   }
 
@@ -31,9 +31,9 @@ fn query_shorthand_followed_by_fragment_definition() {
       .next()
       .unwrap()
       .unwrap_fragment_ref();
-    assert_eq!(definition.name().slice(), "friendFields");
+    assert_eq!(definition.name().source(), "friendFields");
     let type_condition = definition.type_condition();
-    assert_eq!(type_condition.name().slice(), "User");
+    assert_eq!(type_condition.name().source(), "User");
     assert!(definition.directives().is_none());
     let selection_set = definition.selection_set();
     assert_eq!(selection_set.selections().len(), 2);
@@ -41,13 +41,13 @@ fn query_shorthand_followed_by_fragment_definition() {
 
     {
       let id = fields.next().unwrap().unwrap_field();
-      assert_eq!(id.name().slice(), "id");
+      assert_eq!(id.name().source(), "id");
       assert!(id.selection_set().is_none());
     }
 
     {
       let name = fields.next().unwrap().unwrap_field();
-      assert_eq!(name.name().slice(), "name");
+      assert_eq!(name.name().source(), "name");
       assert!(name.selection_set().is_none());
     }
   }

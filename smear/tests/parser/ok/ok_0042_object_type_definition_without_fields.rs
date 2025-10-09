@@ -14,14 +14,14 @@ fn object_type_definition_without_fields() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
 
     let object = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
 
-    assert_eq!(object.name().slice(), "AnObjectTypeWithoutFields");
+    assert_eq!(object.name().source(), "AnObjectTypeWithoutFields");
     assert_eq!(
       described.description().unwrap().source().trim_matches('"'),
       "A type with no fields"
@@ -33,18 +33,17 @@ fn object_type_definition_without_fields() {
     let object = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_object_ref();
-    assert_eq!(object.name().slice(), "AnObjectTypeWithoutFields");
+    assert_eq!(object.name().source(), "AnObjectTypeWithoutFields");
     let fields = object.fields_definition().unwrap();
     let field_definitions = fields.field_definitions();
     assert_eq!(field_definitions.len(), 1);
     let field = &field_definitions[0];
-    assert_eq!(field.name().slice(), "id");
+    assert_eq!(field.name().source(), "id");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "ID");
+    assert_eq!(ty.name().source(), "ID");
     assert!(ty.required());
   }
 }

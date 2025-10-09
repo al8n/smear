@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0014_input_definition.g
 fn input_object_definition() {
   let definition = DescribedInputObjectTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().slice(), "ExampleInputObject");
+  assert_eq!(definition.name().source(), "ExampleInputObject");
 
   let input_fields = definition.fields_definition().cloned().unwrap();
   assert_eq!(input_fields.input_value_definitions().len(), 2);
@@ -14,18 +14,18 @@ fn input_object_definition() {
 
   {
     let a = fields.next().unwrap();
-    assert_eq!(a.name().slice(), "a");
+    assert_eq!(a.name().source(), "a");
     let ty = a.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required());
   }
 
   {
     let b = fields.next().unwrap();
-    assert_eq!(b.name().slice(), "b");
+    assert_eq!(b.name().source(), "b");
     let ty = b.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(ty.required());
   }
 }

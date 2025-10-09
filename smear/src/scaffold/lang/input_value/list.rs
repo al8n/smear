@@ -4,7 +4,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::error::UnclosedListValueError;
+use crate::error::UnclosedBracketError;
 
 use crate::punctuator::{LBracket, RBracket};
 
@@ -107,7 +107,7 @@ impl<Value, Container> List<Value, Container> {
   where
     T: Token<'src>,
     I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnclosedListValueError + 'src,
+    Error: UnclosedBracketError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     VP: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
@@ -119,7 +119,7 @@ impl<Value, Container> List<Value, Container> {
       .then(RBracket::parser().or_not())
       .try_map(move |(values, r), span| match r {
         Some(_) => Ok(List::new(span, values)),
-        None => Err(Error::unclosed_list(span)),
+        None => Err(Error::unclosed_bracket(span)),
       })
   }
 }
@@ -149,7 +149,7 @@ impl<Value, Container> IntoComponents for List<Value, Container> {
 
 impl<'a, Value, Container, I, T, Error> Parseable<'a, I, T, Error> for List<Value, Container>
 where
-  Error: UnclosedListValueError + 'a,
+  Error: UnclosedBracketError + 'a,
   Value: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<Value>,
   LBracket: Parseable<'a, I, T, Error>,

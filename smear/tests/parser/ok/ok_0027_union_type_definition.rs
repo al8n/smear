@@ -14,24 +14,24 @@ fn union_type_definition() {
     let definition = definitions.next().unwrap().unwrap_definition_ref();
     let definition = definition.unwrap_type_ref().unwrap_union_ref();
 
-    assert_eq!(definition.name().slice(), "SearchResult");
+    assert_eq!(definition.name().source(), "SearchResult");
 
     let members = definition.member_types().cloned().unwrap();
     let members = members.members();
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].slice(), "Photo");
-    assert_eq!(members[1].slice(), "Person");
+    assert_eq!(members[0].source(), "Photo");
+    assert_eq!(members[1].source(), "Person");
   }
 
   {
     let definition = definitions.next().unwrap().unwrap_definition_ref();
     let definition = definition.unwrap_type_ref().unwrap_union_ref();
-    assert_eq!(definition.name().slice(), "MultiLine");
+    assert_eq!(definition.name().source(), "MultiLine");
 
     let members = definition.member_types().cloned().unwrap();
     let members = members.members();
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].slice(), "Photo");
-    assert_eq!(members[1].slice(), "Person");
+    assert_eq!(members[0].source(), "Photo");
+    assert_eq!(members[1].source(), "Person");
   }
 }

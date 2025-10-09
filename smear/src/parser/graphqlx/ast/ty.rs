@@ -8,9 +8,42 @@ use logosky::{
 use std::{boxed::Box, rc::Rc, sync::Arc};
 
 use crate::{
-  punctuator::{Bang, FatArrow, LAngle, LBracket, RAngle, RBracket},
-  scaffold::{ListType, MapType, NamedType, SetType},
+  parser::ident::Ident,
+  punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket},
+  scaffold::{self, ListType, MapType, SetType},
 };
+
+use super::{DefaultIdentsContainer, DefaultTypeContainer};
+
+pub type TypePath<
+  S,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = scaffold::generic::TypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
+pub type DefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
+  TypeContainer = DefaultTypeContainer<S>,
+> = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
+pub type TypeGenerics<S, TypeContainer = DefaultTypeContainer<S>> =
+  scaffold::generic::TypeGenerics<Type<S>, TypeContainer>;
+
+pub type ArcDefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
+  TypeContainer = Vec<ArcType<S>>,
+> =
+  scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>, PathSegmentContainer, TypeContainer>;
+pub type ArcTypeGenerics<S, TypeContainer = Vec<ArcType<S>>> =
+  scaffold::generic::TypeGenerics<ArcType<S>, TypeContainer>;
+
+pub type RcDefinitionTypePath<
+  S,
+  PathSegmentContainer = DefaultIdentsContainer<S>,
+  TypeContainer = Vec<RcType<S>>,
+> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>, PathSegmentContainer, TypeContainer>;
+pub type RcTypeGenerics<S, TypeContainer = Vec<RcType<S>>> =
+  scaffold::generic::TypeGenerics<RcType<S>, TypeContainer>;
 
 macro_rules! ty {
   ($(
@@ -20,13 +53,15 @@ macro_rules! ty {
     paste::paste! {
       $(
         ///
-        /// Represents a complete GraphQLx type that can be either named or a list.
+        /// Represents a complete GraphQLx type that can be either named, a list, a set or a map.
         ///
         /// This enum captures the two fundamental categories of types in GraphQL:
         /// - **Named Types**: Direct references to schema-defined types
         /// - **List Types**: Collections wrapping other types
+        /// - **Set Types**: Collections of unique elements
+        /// - **Map Types**: Key-value pair collections
         ///
-        /// The type system is recursive - list types can contain other list types,
+        /// The type system is recursive - set, map or list types can contain other list types,
         /// enabling complex nested structures like lists of lists.
         ///
         /// ## Type Categories
@@ -45,6 +80,16 @@ macro_rules! ty {
         /// - **Simple Lists**: `[String]`, `[User]`, `[ID!]`
         /// - **Nested Lists**: `[[String]]`, `[[[Int]]]`
         /// - **Mixed Nullability**: `[String!]!`, `[User]!`, `[[String!]]`
+        ///
+        /// ### Set Types (`Set` variant)
+        /// Collections of unique elements:
+        /// - **Simple Sets**: `<String>`, `<User>`, `<ID!>`
+        /// - **Nested Sets**: `<<String>>`, `<<<Int>>>`
+        ///
+        /// ### Map Types (`Map` variant)
+        /// Key-value pair collections:
+        /// - **Simple Maps**: `<String => Int>`, `<ID! => User!>`
+        /// - **Nested Maps**: `<<String => Int>>`, `<<<ID! => User!>>>`
         ///
         /// ## Examples
         ///
@@ -70,6 +115,18 @@ macro_rules! ty {
         ///   posts: [Post]!             # Non-null list of nullable posts
         ///   categories: [[Category!]]! # Non-null list of non-null lists of non-null categories
         /// }
+        ///
+        /// # Set types in field definitions
+        /// type Collection {
+        ///   uniqueTags: <String!>!     # Set type: non-null set of non-null strings
+        ///   uniqueUsers: <User>         # Set type: nullable set of nullable users
+        /// }
+        ///
+        /// # Map types in field definitions
+        /// type Dictionary {
+        ///   translations: <String => String!>! # Map type: non-null map of non-null strings
+        ///   userRoles: <ID! => UserRole>        # Map type: nullable map of nullable enums
+        /// }
         /// ```
         ///
         /// ## Type Resolution
@@ -77,7 +134,9 @@ macro_rules! ty {
         /// During schema processing, types are resolved as follows:
         /// 1. **Named Types**: Lookup in schema type registry
         /// 2. **List Types**: Recursively resolve element type, then wrap in list
-        /// 3. **Validation**: Ensure all referenced types exist and are valid
+        /// 3. **Set Types**: Recursively resolve element type, then wrap in set
+        /// 4. **Map Types**: Recursively resolve key and value types, then wrap in map
+        /// 5. **Validation**: Ensure all referenced types exist and are valid
         ///
         /// ## Memory Management
         ///
@@ -87,11 +146,11 @@ macro_rules! ty {
         #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
         #[unwrap(ref, ref_mut)]
         #[try_unwrap(ref, ref_mut)]
-        pub enum $name<Name> {
-          /// A named type referencing a schema-defined type.
+        pub enum $name<S> {
+          /// A path type referencing a schema-defined type.
           ///
-          /// Examples: `String!`, `User`, `PostStatus!`, `ID`
-          Name(NamedType<Name>),
+          /// Examples: `String!`, `user::User`, `PostStatus!`, `ID`
+          Path(scaffold::generic::DefinitionTypePath<Ident<S>, Self>),
 
           /// A list type containing elements of another type.
           ///
@@ -109,30 +168,39 @@ macro_rules! ty {
           Map($ty<MapType<Self, Self>>),
         }
 
-        impl<Name> From<ListType<Self>> for $name<Name> {
+        impl<S> From<ListType<Self>> for $name<S> {
           #[inline]
           fn from(ty: ListType<Self>) -> Self {
             Self::List(<$ty<ListType<Self>>>::new(ty))
           }
         }
 
-        impl<Name> AsSpan<Span> for $name<Name> {
+        impl<S> From<SetType<Self>> for $name<S> {
           #[inline]
-          fn as_span(&self) -> &Span {
-            match self {
-              Self::Name(ty) => ty.span(),
-              Self::List(ty) => ty.span(),
-              Self::Set(ty) => ty.span(),
-              Self::Map(ty) => ty.span(),
-            }
+          fn from(ty: SetType<Self>) -> Self {
+            Self::Set(<$ty<SetType<Self>>>::new(ty))
           }
         }
 
-        impl<Name> IntoSpan<Span> for $name<Name> {
+        impl<S> From<MapType<Self, Self>> for $name<S> {
+          #[inline]
+          fn from(ty: MapType<Self, Self>) -> Self {
+            Self::Map(<$ty<MapType<Self, Self>>>::new(ty))
+          }
+        }
+
+        impl<S> AsSpan<Span> for $name<S> {
+          #[inline]
+          fn as_span(&self) -> &Span {
+            self.span()
+          }
+        }
+
+        impl<S> IntoSpan<Span> for $name<S> {
           #[inline]
           fn into_span(self) -> Span {
             match self {
-              Self::Name(ty) => ty.into_span(),
+              Self::Path(ty) => ty.into_span(),
               Self::List(ty) => *ty.span(),
               Self::Map(ty) => *ty.span(),
               Self::Set(ty) => *ty.span(),
@@ -140,27 +208,39 @@ macro_rules! ty {
           }
         }
 
-        impl<Name> $name<Name> {
+        impl<S> $name<S> {
+          /// Returns the span of the type.
+          #[inline]
+          pub fn span(&self) -> &Span {
+            match self {
+              Self::Path(ty) => ty.span(),
+              Self::List(ty) => ty.span(),
+              Self::Set(ty) => ty.span(),
+              Self::Map(ty) => ty.span(),
+            }
+          }
+
           /// Creates a recursive parser for GraphQLx types.
           ///
           /// This parser handles the complete GraphQLx type syntax including
           /// named types, list types, and nested combinations. It uses recursion
           /// to handle arbitrarily nested list types.
           #[inline]
-          pub fn parser_with<'a, I, T, Error, E, NP>(name_parser: NP) -> impl Parser<'a, I, Self, E> + Clone
+          pub fn parser_with<'a, I, T, Error, E, IP>(ident_parser: IP) -> impl Parser<'a, I, Self, E> + Clone
           where
             T: Token<'a>,
             I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a,
-            Name: 'a,
+            S: 'a,
             Bang: Parseable<'a, I, T, Error> + 'a,
             LBracket: Parseable<'a, I, T, Error> + 'a,
             RBracket: Parseable<'a, I, T, Error> + 'a,
             LAngle: Parseable<'a, I, T, Error> + 'a,
             RAngle: Parseable<'a, I, T, Error> + 'a,
             FatArrow: Parseable<'a, I, T, Error> + 'a,
-            NP: Parser<'a, I, Name, E> + Clone + 'a,
+            PathSeparator: Parseable<'a, I, T, Error> + 'a,
+            IP: Parser<'a, I, Ident<S>, E> + Clone + 'a,
           {
             recursive(|parser| {
               let angle = LAngle::parser()
@@ -186,22 +266,23 @@ macro_rules! ty {
 
               choice((
                 angle,
-                NamedType::parser_with(name_parser).map(Self::Name),
-                ListType::parser_with(parser).map(Self::from),
+                ListType::parser_with(parser.clone()).map(Self::from),
+                scaffold::generic::DefinitionTypePath::<Ident<S>, Self>::parser_with(ident_parser, parser).map(Self::Path),
               ))
             })
           }
         }
 
-        impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for $name<Name>
+        impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for $name<S>
         where
-          Name: Parseable<'a, I, T, Error> + 'a,
+          Ident<S>: Parseable<'a, I, T, Error> + 'a,
           Bang: Parseable<'a, I, T, Error> + 'a,
           LBracket: Parseable<'a, I, T, Error> + 'a,
           RBracket: Parseable<'a, I, T, Error> + 'a,
           LAngle: Parseable<'a, I, T, Error> + 'a,
           RAngle: Parseable<'a, I, T, Error> + 'a,
           FatArrow: Parseable<'a, I, T, Error> + 'a,
+          PathSeparator: Parseable<'a, I, T, Error> + 'a,
         {
           #[inline]
           fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -212,7 +293,7 @@ macro_rules! ty {
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a
           {
-            Self::parser_with(Name::parser())
+            Self::parser_with(Ident::parser())
           }
         }
       )*
@@ -221,19 +302,19 @@ macro_rules! ty {
 }
 
 ty!(
-  /// GraphQLx type using `Box` for recursive list types.
+  /// GraphQLx type using `Box` for recursive types.
   ///
   /// This is the standard type representation that uses heap allocation
   /// for recursive structures. Suitable for most use cases where types
   /// are processed once and don't require sharing.
   Box<Type>,
-  /// GraphQLx type using `Rc` for recursive list types with reference counting.
+  /// GraphQLx type using `Rc` for recursive types with reference counting.
   ///
   /// This type uses `Rc` (Reference Counted) smart pointers to enable
   /// sharing of type structures within single-threaded contexts. Useful
   /// when the same type structure is referenced in multiple places.
   Rc<RcType>,
-  /// GraphQLx type using `Arc` for recursive list types with atomic reference counting.
+  /// GraphQLx type using `Arc` for recursive types with atomic reference counting.
   ///
   /// This type uses `Arc` (Atomically Reference Counted) smart pointers
   /// to enable sharing of type structures across thread boundaries. Required

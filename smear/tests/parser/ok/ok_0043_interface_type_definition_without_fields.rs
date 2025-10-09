@@ -14,15 +14,15 @@ fn interface_type_definition_without_fields() {
     let described = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_definition_ref();
     
     let interface = described
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_interface_ref();
 
     assert_eq!(
-      interface.name().slice(),
+      interface.name().source(),
       "AnInterfaceWithoutFields"
     );
     assert_eq!(
@@ -36,21 +36,20 @@ fn interface_type_definition_without_fields() {
     let interface = types
       .next()
       .unwrap()
-      .unwrap_type_system_ref()
       .unwrap_extension_ref()
       .unwrap_type_ref()
       .unwrap_interface_ref();
     assert_eq!(
-      interface.name().slice(),
+      interface.name().source(),
       "AnInterfaceWithoutFields"
     );
     let fields = interface.fields_definition().unwrap();
     let field_definitions = fields.field_definitions();
     assert_eq!(field_definitions.len(), 1);
     let field = &field_definitions[0];
-    assert_eq!(field.name().slice(), "id");
+    assert_eq!(field.name().source(), "id");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "ID");
+    assert_eq!(ty.name().source(), "ID");
     assert!(ty.required());
   }
 }

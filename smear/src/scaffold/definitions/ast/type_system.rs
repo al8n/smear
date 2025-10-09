@@ -621,3 +621,60 @@ where
       .or(Executable::parser::<E>().map(Self::Executable))
   }
 }
+
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum DefinitionOrExtension<Definition, Extension> {
+  Definition(Definition),
+  Extension(Extension),
+}
+
+impl<Definition, Extension> AsSpan<Span> for DefinitionOrExtension<Definition, Extension>
+where
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Definition(d) => d.as_span(),
+      Self::Extension(e) => e.as_span(),
+    }
+  }
+}
+
+impl<Definition, Extension> IntoSpan<Span> for DefinitionOrExtension<Definition, Extension>
+where
+  Definition: IntoSpan<Span>,
+  Extension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Definition(d) => d.into_span(),
+      Self::Extension(e) => e.into_span(),
+    }
+  }
+}
+
+impl<'a, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
+  for DefinitionOrExtension<Definition, Extension>
+where
+  Definition: Parseable<'a, I, T, Error>,
+  Extension: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Definition::parser::<E>()
+      .map(Self::Definition)
+      .or(Extension::parser::<E>().map(Self::Extension))
+  }
+}

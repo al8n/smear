@@ -16,7 +16,7 @@ pub use int::*;
 pub use null_value::*;
 pub use string::*;
 
-pub type Variable<S> = variable::Variable<super::Name<S>>;
+pub type VariableValue<S> = crate::parser::value::VariableValue<super::Name<S>>;
 
 mod boolean_value;
 mod enum_value;
@@ -24,7 +24,6 @@ mod float;
 mod int;
 mod null_value;
 mod string;
-mod variable;
 
 macro_rules! atom_parser {
   () => {{
@@ -64,7 +63,7 @@ pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S> {
   /// GraphQL Variable
-  Variable(Variable<S>),
+  Variable(VariableValue<S>),
   /// GraphQL Boolean
   Boolean(BooleanValue),
   /// GraphQL String
@@ -139,7 +138,7 @@ where
   {
     recursive(|parser| {
       let object_value_parser =
-        scaffold::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
+        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
       let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
       choice((
         atom_parser!(),
@@ -147,7 +146,7 @@ where
           Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
         }
         .then(Name::parser::<E>())
-        .map(|(span, name)| Variable::new(span.with_end(name.span().end()), name))
+        .map(|(span, name)| VariableValue::new(span.with_end(name.span().end()), name))
         .map(Self::Variable),
         list_value_parser,
         object_value_parser,
@@ -233,7 +232,7 @@ where
   {
     recursive(|parser| {
       let object_value_parser =
-        scaffold::Object::parser_with(Name::parser(), parser.clone()).map(Self::Object);
+        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
       let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
 
       choice((atom_parser!(), object_value_parser, list_value_parser))

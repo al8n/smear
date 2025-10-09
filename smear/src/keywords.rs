@@ -44,7 +44,7 @@ macro_rules! keyword {
           /// Creates a new keyword.
           #[doc = "Creates a new `" $kw "` keyword."]
           #[inline(always)]
-          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
+          pub(crate) const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
             Self { span }
           }
 
@@ -123,6 +123,17 @@ macro_rules! keyword {
   };
 }
 
+// GraphQLx contextual keywords
+keyword! {
+  (Import, "import_KW", "import"),
+  (As, "as_KW", "as"),
+  (From, "from_KW", "from"),
+  (Where, "where_KW", "where"),
+  (Set, "set_KW", "set"),
+  (Map, "map_KW", "map"),
+}
+
+// GraphQL Keywords
 keyword!(
   (On, "on_KW", "on"),
   (Input, "input_KW", "input"),

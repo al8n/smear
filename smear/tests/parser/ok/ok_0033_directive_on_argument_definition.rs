@@ -10,7 +10,7 @@ fn directive_on_argument_definition() {
   let fields = values.fields_definition().unwrap().field_definitions();
   assert_eq!(fields.len(), 1);
   let field = &fields[0];
-  assert_eq!(field.name().slice(), "login");
+  assert_eq!(field.name().source(), "login");
 
   let arguments = field
     .arguments_definition()
@@ -18,16 +18,16 @@ fn directive_on_argument_definition() {
     .input_value_definitions();
   assert_eq!(arguments.len(), 1);
   let argument = &arguments[0];
-  assert_eq!(argument.name().slice(), "userId");
+  assert_eq!(argument.name().source(), "userId");
 
   let directives = argument.directives().unwrap().directives();
   assert_eq!(directives.len(), 1);
   let directive = &directives[0];
-  assert_eq!(directive.name().slice(), "deprecated");
+  assert_eq!(directive.name().source(), "deprecated");
   let arguments = directive.arguments().unwrap().arguments();
   assert_eq!(arguments.len(), 1);
   let argument = &arguments[0];
-  assert_eq!(argument.name().slice(), "reason");
+  assert_eq!(argument.name().source(), "reason");
   let value = argument.value();
   assert_eq!(
     value.unwrap_string_ref().source().trim_matches('"'),

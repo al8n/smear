@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0015_input_extension.gr
 fn input_object_extension() {
   let extension = InputObjectTypeExtension::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(extension.name().slice(), "ExampleInputObject");
+  assert_eq!(extension.name().source(), "ExampleInputObject");
 
   let input_fields = extension.fields_definition().unwrap();
   assert_eq!(input_fields.input_value_definitions().len(), 1);
@@ -14,10 +14,10 @@ fn input_object_extension() {
 
   {
     let a = fields.next().unwrap();
-    assert_eq!(a.name().slice(), "a");
+    assert_eq!(a.name().source(), "a");
     let ty = a.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required(), "Source: {ALL}");
   }
 }

@@ -6,12 +6,12 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0011_enum_type_extensio
 fn enum_type_extension() {
   let extension = EnumTypeExtension::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(extension.name().slice(), "Direction");
+  assert_eq!(extension.name().source(), "Direction");
 
   let directives = extension.directives().cloned().unwrap();
   assert_eq!(directives.directives().len(), 1);
   let directive = directives.directives().first().unwrap();
-  assert_eq!(directive.name().slice(), "example");
+  assert_eq!(directive.name().source(), "example");
   assert!(directive.arguments().is_none());
 
   let variants = extension.enum_values_definition().unwrap();
@@ -20,14 +20,14 @@ fn enum_type_extension() {
 
   {
     let south = iter.next().unwrap();
-    assert_eq!(south.value().slice(), "SOUTH");
+    assert_eq!(south.value().source(), "SOUTH");
     assert!(south.description().is_none());
     assert!(south.directives().is_none());
   }
 
   {
     let west = iter.next().unwrap();
-    assert_eq!(west.value().slice(), "WEST");
+    assert_eq!(west.value().source(), "WEST");
     assert!(west.description().is_none());
     assert!(west.directives().is_none());
   }

@@ -18,12 +18,12 @@ fn parses_variable_definition_with_list_type() {
     assert_eq!(variable_definitions.len(), 1);
     let variable_definition = &variable_definitions[0];
     assert_eq!(
-      variable_definition.variable().name().slice(),
+      variable_definition.variable().name().source(),
       "height"
     );
     let ty = variable_definition.ty().unwrap_list_ref();
     let inner_ty = ty.ty().unwrap_name_ref();
-    assert_eq!(inner_ty.name().slice(), "Int");
+    assert_eq!(inner_ty.name().source(), "Int");
   }
 
   {
@@ -35,17 +35,17 @@ fn parses_variable_definition_with_list_type() {
 
     {
       let id = fields.next().unwrap().unwrap_field_ref();
-      assert_eq!(id.name().slice(), "id");
+      assert_eq!(id.name().source(), "id");
     }
     {
       let trees = fields.next().unwrap().unwrap_field_ref();
-      assert_eq!(trees.name().slice(), "trees");
+      assert_eq!(trees.name().source(), "trees");
       let arguments = trees.arguments().unwrap().arguments();
       assert_eq!(arguments.len(), 1);
       let argument = &arguments[0];
-      assert_eq!(argument.name().slice(), "height");
+      assert_eq!(argument.name().source(), "height");
       let value = argument.value().unwrap_variable_ref();
-      assert_eq!(value.name().slice(), "height");
+      assert_eq!(value.name().source(), "height");
     }
   }
 }

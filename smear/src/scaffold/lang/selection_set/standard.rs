@@ -1,7 +1,7 @@
 use crate::{
   keywords::On,
   punctuator::{LBrace, RBrace, Spread},
-  scaffold::{self, FragmentSpread, InlineFragment},
+  scaffold::{self, FragmentSpread, InlineFragment, StandardField},
 };
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
@@ -11,31 +11,29 @@ use logosky::{
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 
-use super::field::Field;
-
-pub type SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> =
-  scaffold::SelectionSet<
-    Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
+pub type StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> =
+  super::SelectionSet<
+    StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
   >;
 
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
-  Field(Field<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>),
+pub enum StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> {
+  Field(StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>),
   FragmentSpread(FragmentSpread<FragmentName, Directives>),
   InlineFragment(
     InlineFragment<
       TypeCondition,
       Directives,
-      SelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
+      StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
     >,
   ),
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Span>
-  for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -44,7 +42,7 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> AsSpan<Spa
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<Span>
-  for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -68,7 +66,7 @@ impl<
   T,
   Error,
 > Parseable<'a, I, T, Error>
-  for Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  for StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 where
   On: Parseable<'a, I, T, Error>,
   Spread: Parseable<'a, I, T, Error>,
@@ -98,7 +96,7 @@ where
         Directives::parser(),
         selsetion_set.clone(),
       )
-      .map(Field);
+      .map(StandardField::from);
 
       let inline_p = scaffold::InlineFragment::parser_with(
         TypeCondition::parser(),
@@ -115,7 +113,7 @@ where
 }
 
 impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
-  Selection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
+  StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
 {
   #[inline]
   pub const fn span(&self) -> &Span {

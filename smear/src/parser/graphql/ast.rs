@@ -14,10 +14,8 @@ pub use name::*;
 pub use raw::*;
 pub use ty::*;
 pub use value::*;
-pub use location::*;
 
 mod error;
-mod field;
 mod fragment;
 mod keyword;
 mod location;
@@ -25,7 +23,6 @@ mod name;
 mod operation_type;
 mod punctuator;
 mod raw;
-mod selection_set;
 mod ty;
 mod value;
 

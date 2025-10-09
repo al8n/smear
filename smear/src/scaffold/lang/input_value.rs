@@ -7,10 +7,14 @@ use logosky::{
 use crate::punctuator::Equal;
 
 pub use list::List;
+pub use map::Map;
 pub use object::*;
+pub use set::Set;
 
 mod list;
+mod map;
 mod object;
+mod set;
 
 /// A GraphQL default value assignment for input parameters.
 ///

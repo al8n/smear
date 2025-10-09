@@ -108,15 +108,15 @@ impl<Key, Value> MapType<Key, Value> {
   ///
   /// ## Grammar Handled
   /// ```text
-  /// MapType : [ Type ] !?
+  /// MapType : < Key!? => Value !? > !?
   /// ```
   ///
   /// ## Example Parsed Input
   /// ```text
-  /// [String]        # Nullable map of nullable strings
-  /// [String!]!      # Non-null map of non-null strings
-  /// [[User]]        # Nested map type
-  /// [ID!]           # Nullable map of non-null IDs
+  /// <String => Int>        # Nullable map of nullable strings
+  /// <String => Int!>!      # Non-null map of non-null strings
+  /// <<ID! => User>>               # Nested map type
+  /// <ID! => User>                  # Nullable map of non-null IDs
   /// ```
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, KP, VP>(

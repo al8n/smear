@@ -63,8 +63,8 @@ fn test_number_leading_zero() {
 }
 
 #[test]
-fn test_int_leading_zeros_and_suffix() {
-  tests::test_int_leading_zeros_and_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
+fn test_int_leading_zeros_then_check_suffix() {
+  tests::test_int_leading_zeros_then_check_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
 }
 
 #[test]

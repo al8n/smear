@@ -6,7 +6,7 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0016_interface_definiti
 fn interface_object_definition() {
   let definition = DescribedInterfaceTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().slice(), "ValuedEntity");
+  assert_eq!(definition.name().source(), "ValuedEntity");
 
   let fields = definition.fields_definition().unwrap();
   assert_eq!(fields.field_definitions().len(), 1);
@@ -14,10 +14,10 @@ fn interface_object_definition() {
 
   {
     let a = fields.next().unwrap();
-    assert_eq!(a.name().slice(), "value");
+    assert_eq!(a.name().source(), "value");
     let ty = a.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(!ty.required());
   }
 }

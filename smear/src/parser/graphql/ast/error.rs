@@ -1,6 +1,6 @@
 use crate::{
   error::{
-    ParseVariableValueError, UnclosedListValueError, UnclosedObjectValueError,
+    ParseVariableValueError, UnclosedBraceError, UnclosedBracketError,
     UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
     UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
     UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
@@ -187,42 +187,42 @@ where
   }
 }
 
-impl<'a, S> UnclosedObjectValueError for AstTokenError<'a, S>
+impl<'a, S> UnclosedBraceError for AstTokenError<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn unclosed_object(span: Span) -> Self {
+  fn unclosed_brace(span: Span) -> Self {
     Self::unclosed_object(span)
   }
 }
 
-impl<'a, S> UnclosedObjectValueError for AstTokenErrors<'a, S>
+impl<'a, S> UnclosedBraceError for AstTokenErrors<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn unclosed_object(span: Span) -> Self {
-    <AstTokenError<'a, S> as UnclosedObjectValueError>::unclosed_object(span).into()
+  fn unclosed_brace(span: Span) -> Self {
+    <AstTokenError<'a, S> as UnclosedBraceError>::unclosed_brace(span).into()
   }
 }
 
-impl<'a, S> UnclosedListValueError for AstTokenError<'a, S>
+impl<'a, S> UnclosedBracketError for AstTokenError<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn unclosed_list(span: Span) -> Self {
+  fn unclosed_bracket(span: Span) -> Self {
     Self::unclosed_list(span)
   }
 }
 
-impl<'a, S> UnclosedListValueError for AstTokenErrors<'a, S>
+impl<'a, S> UnclosedBracketError for AstTokenErrors<'a, S>
 where
   AstToken<S>: Token<'a>,
 {
   #[inline]
-  fn unclosed_list(span: Span) -> Self {
-    <AstTokenError<'a, S> as UnclosedListValueError>::unclosed_list(span).into()
+  fn unclosed_bracket(span: Span) -> Self {
+    <AstTokenError<'a, S> as UnclosedBracketError>::unclosed_bracket(span).into()
   }
 }

@@ -1,7 +1,8 @@
 use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 
 /// The hint about what is expected for the next character
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
+#[non_exhaustive]
 pub enum ExponentHint {
   /// Expect the next character to be digit.
   #[display("digit")]
@@ -11,6 +12,22 @@ pub enum ExponentHint {
   SignOrDigit,
   /// Expect the next character to be an exponent identifier 'e' or 'E'.
   #[display("'e' or 'E'")]
+  Identifier,
+}
+
+/// The hint about what is expected for the next character
+/// in a hexadecimal float literal exponent.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
+#[non_exhaustive]
+pub enum HexExponentHint {
+  /// Expect the next character to be digit.
+  #[display("digit")]
+  Digit,
+  /// Expect the next character to be a sign or a digit.
+  #[display("'+', '-' or digit")]
+  SignOrDigit,
+  /// Expect the next character to be an exponent identifier 'p' or 'P'.
+  #[display("'p' or 'P'")]
   Identifier,
 }
 
@@ -30,9 +47,83 @@ pub enum ExponentHint {
   Unwrap,
   TryUnwrap,
 )]
-pub enum IntHint {
+#[non_exhaustive]
+pub enum DecimalHint {
   /// Expect the next character to be digit.
   #[display("digit")]
+  Digit,
+}
+
+/// The hint about what is expected for the next character
+/// in a hexadecimal literal.
+#[derive(
+  Copy,
+  Clone,
+  Debug,
+  Display,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+#[non_exhaustive]
+pub enum HexHint {
+  /// Expect the next character to be a hex digit.
+  #[display("hex digit")]
+  Digit,
+}
+
+/// The hint about what is expected for the next character
+/// in a octal literal.
+#[derive(
+  Copy,
+  Clone,
+  Debug,
+  Display,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+#[non_exhaustive]
+pub enum OctalHint {
+  /// Expect the next character to be an octal digit.
+  #[display("octal digit")]
+  Digit,
+}
+
+/// The hint about what is expected for the next character
+/// in a binary literal.
+#[derive(
+  Copy,
+  Clone,
+  Debug,
+  Display,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+#[non_exhaustive]
+pub enum BinaryHint {
+  /// Expect the next character to be a binary digit.
+  /// '0' or '1'.
+  #[display("binary digit")]
   Digit,
 }
 
@@ -52,6 +143,7 @@ pub enum IntHint {
   Unwrap,
   TryUnwrap,
 )]
+#[non_exhaustive]
 pub enum FloatHint {
   /// Expect the next character to be fractional digits.
   #[display("fractional digits")]
@@ -64,8 +156,38 @@ pub enum FloatHint {
   Digit,
 }
 
+/// The hint about what is expected for the hexadecimal float
+#[derive(
+  Copy,
+  Clone,
+  Display,
+  Debug,
+  Eq,
+  PartialEq,
+  Ord,
+  PartialOrd,
+  Hash,
+  From,
+  IsVariant,
+  Unwrap,
+  TryUnwrap,
+)]
+#[non_exhaustive]
+pub enum HexFloatHint {
+  /// Expect the next character to be fractional digits.
+  #[display("fractional digits")]
+  Fractional,
+  /// Expect the next character to be a hex exponent part.
+  #[display("_0")]
+  Exponent(HexExponentHint),
+  /// Expect the next character to be a hex digit.
+  #[display("digit")]
+  Digit,
+}
+
 /// An unpaired unicode surrogate error.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
+#[non_exhaustive]
 pub enum UnpairedSurrogateHint {
   /// An unpaired high surrogate.
   #[display("high surrogate")]
@@ -77,6 +199,7 @@ pub enum UnpairedSurrogateHint {
 
 /// An unterminated string hint.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[non_exhaustive]
 pub enum LitStrDelimiterHint {
   /// A double quote character.
   #[display("\"")]
@@ -92,6 +215,7 @@ pub enum LitStrDelimiterHint {
 
 /// A hint about what line terminator was found.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[non_exhaustive]
 pub enum LineTerminatorHint {
   /// A line feed character.
   #[display("'\\n'")]
@@ -106,6 +230,7 @@ pub enum LineTerminatorHint {
 
 /// A hint about what line terminator was found.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[non_exhaustive]
 pub enum WhiteSpaceHint {
   /// A space character.
   #[display(" ")]
@@ -117,6 +242,7 @@ pub enum WhiteSpaceHint {
 
 /// A hint for what was expected in a object field value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum ObjectFieldValueHint {
   /// A [`Colon`](crate::parser::ast::Colon) was expected.
   #[display("colon")]
@@ -131,6 +257,7 @@ pub enum ObjectFieldValueHint {
 
 /// Hints for parsing a variable value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum VariableValueHint {
   /// A [`Name`](crate::parser::ast::Name) was expected.
   #[display("name")]
@@ -142,6 +269,7 @@ pub enum VariableValueHint {
 
 /// Hints for the next component was expected while parsing a schema extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum SchemaExtensionHint {
   /// Directives.
   #[display("directives")]
@@ -162,6 +290,7 @@ pub enum SchemaExtensionHint {
 
 /// Hints for the next component was expected while parsing a union type extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum UnionTypeExtensionHint {
   /// Directives.
   #[display("directives")]
@@ -185,6 +314,7 @@ pub enum UnionTypeExtensionHint {
 
 /// Hints for the next component was expected while parsing an input object type extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum InputObjectTypeExtensionHint {
   /// Directives.
   #[display("directives")]
@@ -208,6 +338,7 @@ pub enum InputObjectTypeExtensionHint {
 
 /// Hints for the next component was expected while parsing an object type extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum ObjectTypeExtensionHint {
   /// Implements interfaces.
   #[display("implements")]
@@ -234,6 +365,7 @@ pub enum ObjectTypeExtensionHint {
 
 /// Hints for the next component was expected while parsing an interface type extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum InterfaceTypeExtensionHint {
   /// Implements interfaces.
   #[display("implements")]
@@ -260,6 +392,7 @@ pub enum InterfaceTypeExtensionHint {
 
 /// Hints for the next component was expected while parsing an enum type extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
+#[non_exhaustive]
 pub enum EnumTypeExtensionHint {
   /// Directives.
   #[display("directives")]

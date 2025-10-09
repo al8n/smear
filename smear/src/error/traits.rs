@@ -2,6 +2,21 @@ use logosky::utils::Span;
 
 use crate::hints::*;
 
+/// An error about unterminated spread operator.
+pub trait UnterminatedSpreadOperatorError {
+  /// Creates a new error indicating that an unterminated spread operator was encountered.
+  fn unterminated_spread_operator(span: Span) -> Self;
+}
+
+/// An state error which can occur when lexing.
+pub trait BadStateError {
+  /// The actual state error type.
+  type StateError;
+
+  /// Creates a new error indicating that a state related error was encountered.
+  fn bad_state(span: Span, error: Self::StateError) -> Self;
+}
+
 /// An error which can occur when parsing a variable value.
 pub trait ParseVariableValueError<Name> {
   /// Creates a new error indicating that an unexpected end of input was encountered
@@ -82,14 +97,20 @@ pub trait UnexpectedEndOfSchemaExtensionError {
     Self: Sized;
 }
 
-/// An error which can occur when an unclosed object value is encountered.
-pub trait UnclosedObjectValueError {
-  /// Creates a new error indicating that an unclosed object value was encountered.
-  fn unclosed_object(span: Span) -> Self;
+/// An error which can occur when an unclosed brace is encountered.
+pub trait UnclosedBraceError {
+  /// Creates a new error indicating that an unclosed brace value was encountered.
+  fn unclosed_brace(span: Span) -> Self;
 }
 
-/// An error which can occur when an unclosed list value is encountered.
-pub trait UnclosedListValueError {
-  /// Creates a new error indicating that an unclosed list value was encountered.
-  fn unclosed_list(span: Span) -> Self;
+/// An error which can occur when an unclosed bracket is encountered.
+pub trait UnclosedBracketError {
+  /// Creates a new error indicating that an unclosed bracket value was encountered.
+  fn unclosed_bracket(span: Span) -> Self;
+}
+
+/// An error which can occur when parsing a fragment path
+pub trait InvalidFragmentTypePath {
+  /// Creates a new error indicating that an invalid fragment path.
+  fn invalid_fragment_type_path(span: Span) -> Self;
 }

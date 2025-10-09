@@ -4,7 +4,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::error::UnclosedObjectValueError;
+use crate::error::UnclosedBraceError;
 
 use crate::punctuator::{Colon, LBrace, RBrace};
 
@@ -329,7 +329,7 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   where
     T: Token<'src>,
     I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnclosedObjectValueError + 'src,
+    Error: UnclosedBraceError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     NP: Parser<'src, I, Name, E> + Clone + 'src,
     VP: Parser<'src, I, InputValue, E> + Clone + 'src,
@@ -347,7 +347,7 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
       .then(RBrace::parser().or_not())
       .try_map(move |(values, r), span| match r {
         Some(_) => Ok(Self::new(span, values)),
-        None => Err(Error::unclosed_object(span)),
+        None => Err(Error::unclosed_brace(span)),
       })
   }
 }
@@ -358,7 +358,7 @@ where
   Name: Parseable<'a, I, T, Error>,
   InputValue: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
-  Error: UnclosedObjectValueError,
+  Error: UnclosedBraceError,
   Colon: Parseable<'a, I, T, Error>,
   LBrace: Parseable<'a, I, T, Error>,
   RBrace: Parseable<'a, I, T, Error>,

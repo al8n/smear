@@ -5,12 +5,12 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0019_object_type_extens
 #[test]
 fn object_type_extension() {
   let extension = ObjectTypeExtension::<&str>::parse_str(ALL).unwrap();
-  assert_eq!(extension.name().slice(), "Person");
+  assert_eq!(extension.name().source(), "Person");
 
   let impls = extension.implements().unwrap();
   let ifs = impls.interfaces();
   assert_eq!(
-    ifs[0].slice(),
+    ifs[0].source(),
     "Human"
   );
 
@@ -20,28 +20,28 @@ fn object_type_extension() {
 
   {
     let name = fields.next().unwrap();
-    assert_eq!(name.name().slice(), "name");
+    assert_eq!(name.name().source(), "name");
 
     let ty = name.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
     assert!(!ty.required());
   }
 
   {
     let age = fields.next().unwrap();
-    assert_eq!(age.name().slice(), "age");
+    assert_eq!(age.name().source(), "age");
     let ty = age.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(!ty.required());
   }
 
   {
     let picture = fields.next().unwrap();
-    assert_eq!(picture.name().slice(), "picture");
+    assert_eq!(picture.name().source(), "picture");
     let ty = picture.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Url");
+    assert_eq!(ty.name().source(), "Url");
     assert!(!ty.required());
   }
 }

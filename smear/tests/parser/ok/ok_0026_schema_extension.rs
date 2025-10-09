@@ -12,13 +12,13 @@ fn schema_extension() {
 
   {
     let skip = directives.next().unwrap();
-    assert_eq!(skip.name().slice(), "skip");
+    assert_eq!(skip.name().source(), "skip");
     assert!(skip.arguments().is_none());
   }
 
   {
     let example = directives.next().unwrap();
-    assert_eq!(example.name().slice(), "example");
+    assert_eq!(example.name().source(), "example");
     assert!(example.arguments().is_none());
   }
 
@@ -28,7 +28,7 @@ fn schema_extension() {
   let operation_type = operation_types.first().unwrap();
   assert_eq!(operation_type.operation_type().as_str(), "query");
   assert_eq!(
-    operation_type.name().slice(),
+    operation_type.name().source(),
     "MyExtendedQueryType"
   );
 }

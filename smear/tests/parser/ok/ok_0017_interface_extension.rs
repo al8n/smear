@@ -6,12 +6,12 @@ const ALL: &str = include_str!("../../fixtures/parser/ok/0017_interface_extensio
 fn interface_object_extension() {
   let extension = InterfaceTypeExtension::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(extension.name().slice(), "ValuedEntity");
+  assert_eq!(extension.name().source(), "ValuedEntity");
 
   let directives = extension.directives().unwrap();
   assert_eq!(directives.directives().len(), 1);
   let directive = directives.directives().first().unwrap();
-  assert_eq!(directive.name().slice(), "skip");
+  assert_eq!(directive.name().source(), "skip");
 
   let fields = extension.fields_definition().unwrap();
   assert_eq!(fields.field_definitions().len(), 1);
@@ -19,10 +19,10 @@ fn interface_object_extension() {
 
   {
     let value = fields.next().unwrap();
-    assert_eq!(value.name().slice(), "value");
+    assert_eq!(value.name().source(), "value");
     let ty = value.ty().unwrap_name_ref();
 
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(!ty.required());
   }
 }

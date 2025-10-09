@@ -11,8 +11,8 @@ fn wrapped_named_types() {
   assert_eq!(definitions.len(), 2);
 
   let mut definitions = definitions.iter().map(|d| {
-    d.unwrap_type_system_ref()
-      .unwrap_definition_ref()
+    d.unwrap_definition_ref()
+      .unwrap_type_system_ref()
       .unwrap_type_ref()
       .unwrap_object_ref()
   });
@@ -29,7 +29,7 @@ fn wrapped_named_types() {
 }
 
 fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
-  assert_eq!(def.name().slice(), name);
+  assert_eq!(def.name().source(), name);
   let fields = def.fields_definition().unwrap().field_definitions();
   assert_eq!(fields.len(), 5);
 
@@ -37,34 +37,34 @@ fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().slice(), "a");
+    assert_eq!(field.name().source(), "a");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "String");
+    assert_eq!(ty.name().source(), "String");
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().slice(), "b");
+    assert_eq!(field.name().source(), "b");
     let ty = field.ty().unwrap_name_ref();
-    assert_eq!(ty.name().slice(), "Int");
+    assert_eq!(ty.name().source(), "Int");
     assert!(ty.required());
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().slice(), "c");
+    assert_eq!(field.name().source(), "c");
     let ty = field.ty().unwrap_list_ref();
     assert!(ty.required());
     {
       let inner = ty.ty().unwrap_name_ref();
-      assert_eq!(inner.name().slice(), "Int");
+      assert_eq!(inner.name().source(), "Int");
       assert!(inner.required());
     }
   }
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().slice(), "d");
+    assert_eq!(field.name().source(), "d");
     let ty = field.ty().unwrap_list_ref();
     assert!(!ty.required());
     {
@@ -85,7 +85,7 @@ fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
 
             {
               let level5 = level4.ty().unwrap_name_ref();
-              assert_eq!(level5.name().slice(), "Int");
+              assert_eq!(level5.name().source(), "Int");
               assert!(!level5.required());
             }
           }
@@ -96,7 +96,7 @@ fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
 
   {
     let field = iter.next().unwrap();
-    assert_eq!(field.name().slice(), "d");
+    assert_eq!(field.name().source(), "d");
     let ty = field.ty().unwrap_list_ref();
     assert!(ty.required());
     {
@@ -117,7 +117,7 @@ fn check_object_def(def: &ObjectTypeDefinition<&str>, name: &str) {
 
             {
               let level5 = level4.ty().unwrap_name_ref();
-              assert_eq!(level5.name().slice(), "Int");
+              assert_eq!(level5.name().source(), "Int");
               assert!(level5.required());
             }
           }

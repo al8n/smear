@@ -10,7 +10,7 @@ use crate::{
   },
   lexer::{
     LitComplexInlineStr, LitInlineStr, LitPlainStr,
-    graphql::error::{FloatError, IntError, LexerErrorData, LexerErrors},
+    graphql::error::{DecimalError, FloatError, LexerErrorData, LexerErrors},
   },
 };
 
@@ -74,7 +74,7 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
       match self.inner.next() {
         None => return None,
         Some(Ok(tok)) => {
-          let tok = T::from_logos(tok);
+          let tok = T::from(tok);
           if tok.is_ignored() {
             // continue lexing
             continue;
@@ -215,7 +215,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Int(IntError::LeadingZeros(_))
+    LexerErrorData::Int(DecimalError::LeadingZeros(_))
   ));
 
   let mut lexer = Token::test_lexer("-01");
@@ -227,7 +227,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Int(IntError::LeadingZeros(_))
+    LexerErrorData::Int(DecimalError::LeadingZeros(_))
   ));
 
   let mut lexer = Token::test_lexer("01.23");
@@ -327,7 +327,7 @@ where
   ));
 }
 
-pub(super) fn test_int_leading_zeros_and_suffix<'a, Token, StateError>()
+pub(super) fn test_int_leading_zeros_then_check_suffix<'a, Token, StateError>()
 where
   Token: TestToken<'a> + core::fmt::Debug,
   Token::Logos: Logos<'a, Source = str, Error = LexerErrors<char, StateError>>,
