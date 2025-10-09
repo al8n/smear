@@ -1,14 +1,11 @@
 use crate::{
   error::{
-    ParseVariableValueError, UnclosedBraceError, UnclosedBracketError,
-    UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
-    UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
-    UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
+    InvalidFragmentTypePath, ParseVariableValueError, UnclosedBraceError, UnclosedBracketError, UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError
   },
   hints::{
     EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
     ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
-  },
+  }, scaffold::Path,
 };
 use logosky::{
   Token,
@@ -224,5 +221,24 @@ where
   #[inline]
   fn unclosed_bracket(span: Span) -> Self {
     <AstTokenError<'a, S> as UnclosedBracketError>::unclosed_bracket(span).into()
+  }
+}
+
+
+impl<'a, S> InvalidFragmentTypePath for AstTokenError<'a, S>
+where
+  AstToken<S>: Token<'a>,
+{
+  fn invalid_fragment_type_path(span: Span) -> Self {
+    Self::invalid_fragment_type_path(span)
+  }
+}
+
+impl<'a, S> InvalidFragmentTypePath for AstTokenErrors<'a, S>
+where
+  AstToken<S>: Token<'a>,
+{
+  fn invalid_fragment_type_path(span: Span) -> Self {
+    <AstTokenError<'a, S> as InvalidFragmentTypePath>::invalid_fragment_type_path(span).into()
   }
 }

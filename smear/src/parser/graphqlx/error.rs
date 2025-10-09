@@ -58,9 +58,9 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   /// A null value is invalid.
   #[from(skip)]
   InvalidNullValue(S),
-  /// A fragment name is invalid.
+  /// A fragment type path is invalid.
   #[from(skip)]
-  InvalidFragmentName(S),
+  InvalidFragmentTypePath,
   /// A list or object was not closed.
   Unclosed(Unclosed),
   /// An unexpected token was found.
@@ -253,10 +253,10 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     Self::new(span, ErrorData::Lexer(err))
   }
 
-  /// Creates an invalid fragment name error.
+  /// Creates an invalid fragment type path error.
   #[inline]
-  pub const fn invalid_fragment_name(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidFragmentName(value))
+  pub const fn invalid_fragment_type_path(span: Span) -> Self {
+    Self::new(span, ErrorData::InvalidFragmentTypePath)
   }
 
   /// Creates an invalid enum value error.

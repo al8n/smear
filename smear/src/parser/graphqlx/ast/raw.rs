@@ -14,8 +14,10 @@ pub type DefaultIdentsContainer<S> = DefaultVec<Ident<S>>;
 
 /// The default type container type used in the AST.
 pub type DefaultTypeContainer<S> = DefaultVec<Type<S>>;
-/// The default type params container type used in the AST.
+/// The default definition type params container type used in the AST.
 pub type DefaultDefinitionTypeParamsContainer<S> = DefaultVec<DefinitionTypeParam<S>>;
+/// The default extension type params container type used in the AST.
+pub type DefaultExtensionTypeParamsContainer<S> = DefaultVec<ExtensionTypeParam<S>>;
 
 pub type DefinitionTypeParam<S> = scaffold::generic::DefinitionTypeParam<Ident<S>, Type<S>>;
 
@@ -52,11 +54,18 @@ pub type WhereClause<
   PredicatesContainer,
 >;
 
+pub type ExtensionTypeParam<S> = scaffold::generic::ExtensionTypeParam<Ident<S>>;
+
+pub type ExtensionTypeGenerics<
+  S,
+  Container = DefaultVec<ExtensionTypeParam<S>>,
+> = scaffold::generic::ExtensionTypeGenerics<Ident<S>, Container>;
+
 pub type ExtensionName<
   S,
   IdentsContainer = DefaultIdentsContainer<S>,
-  TypeContainer = DefaultTypeContainer<S>,
-> = scaffold::generic::ExtensionName<Ident<S>, IdentsContainer, TypeContainer>;
+  TypeParamContainer = DefaultVec<ExtensionTypeParam<S>>,
+> = scaffold::generic::ExtensionName<Ident<S>, IdentsContainer, TypeParamContainer>;
 pub type DefinitionName<S, ParamsContainer = DefaultDefinitionTypeParamsContainer<S>> =
   scaffold::generic::DefinitionName<Ident<S>, Type<S>, ParamsContainer>;
 pub type ExecutableDefinitionName<S, IdentsContainer = DefaultIdentsContainer<S>> =
@@ -130,7 +139,7 @@ pub type DefaultRootOperationTypesContainer<
 > = DefaultVec<RootOperationTypeDefinition<S, IdentsContainer, TypeContainer>>;
 /// The default container type used for variable definitions in the AST.
 pub type DefaultVariablesContainer<S, ArgumentsContainer, DirectivesContainer> =
-  Vec<VariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
+  Vec<DescribedVariableDefinition<S, ArgumentsContainer, DirectivesContainer>>;
 /// The default container type used for fields in the AST.
 pub type DefaultFieldsContainer<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer> =
   Vec<FieldDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>>;
@@ -401,6 +410,7 @@ pub type DescribedInputObjectTypeDefinition<
 
 pub type InputObjectTypeExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -414,7 +424,7 @@ pub type InputObjectTypeExtension<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InputObjectTypeExtension<
-  ExtensionName<S, IdentsContainer, TypeContainer>,
+  ExtensionName<S, IdentsContainer, ParamsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   InputFieldsDefinition<
     S,
@@ -515,6 +525,7 @@ pub type DescribedObjectTypeDefinition<
 
 pub type ObjectTypeExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -528,7 +539,7 @@ pub type ObjectTypeExtension<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::ObjectTypeExtension<
-  ExtensionName<S, IdentsContainer, TypeContainer>,
+  ExtensionName<S, IdentsContainer, ParamsContainer>,
   ImplementInterfaces<TypePath<S, IdentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   FieldsDefinition<
@@ -606,6 +617,7 @@ pub type DescribedInterfaceTypeDefinition<
 
 pub type InterfaceTypeExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -619,7 +631,7 @@ pub type InterfaceTypeExtension<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::InterfaceTypeExtension<
-  ExtensionName<S, IdentsContainer, TypeContainer>,
+  ExtensionName<S, IdentsContainer, ParamsContainer>,
   ImplementInterfaces<TypePath<S, IdentsContainer, TypeContainer>, TypePathsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   FieldsDefinition<
@@ -705,6 +717,7 @@ pub type DescribedUnionTypeDefinition<
 
 pub type UnionTypeExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -717,7 +730,7 @@ pub type UnionTypeExtension<
   ArgumentsContainer = DefaultConstArgumentsContainer<S>,
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
 > = scaffold::UnionTypeExtension<
-  ExtensionName<S, IdentsContainer, TypeContainer>,
+  ExtensionName<S, IdentsContainer, ParamsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   UnionMemberTypes<S, IdentsContainer, TypeContainer, TypePathsContainer, PredicatesContainer>,
 >;
@@ -770,7 +783,7 @@ pub type EnumTypeExtension<
   DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
   EnumValuesContainer = DefaultEnumValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
 > = scaffold::EnumTypeExtension<
-  Path<S, IdentsContainer>,
+  Path<Ident<S>, IdentsContainer>,
   ConstDirectives<S, ArgumentsContainer, DirectivesContainer>,
   EnumValuesDefinition<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
 >;
@@ -1028,6 +1041,7 @@ pub type DescribedTypeSystemDefinition<
 
 pub type TypeExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1045,6 +1059,7 @@ pub type TypeExtension<
   ScalarTypeExtension<S, ArgumentsContainer, DirectivesContainer>,
   ObjectTypeExtension<
     S,
+    ParamsContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1055,6 +1070,7 @@ pub type TypeExtension<
   >,
   InterfaceTypeExtension<
     S,
+    ParamsContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1065,6 +1081,7 @@ pub type TypeExtension<
   >,
   UnionTypeExtension<
     S,
+    ParamsContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1072,9 +1089,10 @@ pub type TypeExtension<
     ArgumentsContainer,
     DirectivesContainer,
   >,
-  EnumTypeExtension<S, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
+  EnumTypeExtension<S, IdentsContainer, ArgumentsContainer, DirectivesContainer, EnumValuesContainer>,
   InputObjectTypeExtension<
     S,
+    ParamsContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1087,6 +1105,7 @@ pub type TypeExtension<
 
 pub type TypeSystemExtension<
   S,
+  ParamsContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1108,6 +1127,7 @@ pub type TypeSystemExtension<
 > = scaffold::TypeSystemExtension<
   TypeExtension<
     S,
+    ParamsContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1129,7 +1149,8 @@ pub type TypeSystemExtension<
 
 pub type TypeSystemDefinitionOrExtension<
   S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  DefinitionParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  ExtensionParametersContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1152,7 +1173,7 @@ pub type TypeSystemDefinitionOrExtension<
 > = scaffold::TypeSystemDefinitionOrExtension<
   DescribedTypeSystemDefinition<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1166,6 +1187,7 @@ pub type TypeSystemDefinitionOrExtension<
   >,
   TypeSystemExtension<
     S,
+    ExtensionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1242,7 +1264,7 @@ pub type DescribedExecutableDefinition<
 
 pub type Definition<
   S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  DefinitionParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1256,16 +1278,8 @@ pub type Definition<
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
   ConstArgumentsContainer = DefaultConstArgumentsContainer<S>,
   ConstDirectivesContainer = DefaultConstDirectivesContainer<S, ConstArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
-  EnumValuesContainer = DefaultEnumValuesContainer<
-    S,
-    ConstArgumentsContainer,
-    ConstDirectivesContainer,
-  >,
+  InputValuesContainer = DefaultInputValuesContainer<S, ConstArgumentsContainer, ConstDirectivesContainer>,
+  EnumValuesContainer = DefaultEnumValuesContainer<S, ConstArgumentsContainer, ConstDirectivesContainer>,
   LocationsContainer = DefaultLocationsContainer,
   RootOperationTypesContainer = DefaultRootOperationTypesContainer<
     S,
@@ -1275,7 +1289,7 @@ pub type Definition<
 > = scaffold::Definition<
   TypeSystemDefinition<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1289,7 +1303,7 @@ pub type Definition<
   >,
   ExecutableDefinition<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1353,7 +1367,8 @@ pub type DescribedDefinition<
 
 pub type DefinitionOrExtension<
   S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  DefinitionParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  ExtensionParametersContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1386,7 +1401,7 @@ pub type DefinitionOrExtension<
 > = scaffold::DefinitionOrExtension<
   DescribedDefinition<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1402,6 +1417,7 @@ pub type DefinitionOrExtension<
   >,
   TypeSystemExtension<
     S,
+    ExtensionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1416,7 +1432,8 @@ pub type DefinitionOrExtension<
 
 pub type TypeSystemDocument<
   S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  DefinitionParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  ExtensionParametersContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1439,7 +1456,8 @@ pub type TypeSystemDocument<
   DefinitionContainer = DefaultVec<
     TypeSystemDefinitionOrExtension<
       S,
-      ParametersContainer,
+      DefinitionParametersContainer,
+      ExtensionParametersContainer,
       IdentsContainer,
       TypeContainer,
       TypePathsContainer,
@@ -1455,7 +1473,8 @@ pub type TypeSystemDocument<
 > = scaffold::Document<
   TypeSystemDefinitionOrExtension<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
+    ExtensionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,
@@ -1485,10 +1504,19 @@ pub type ExecutableDocument<
   ArgumentsContainer = DefaultArgumentsContainer<S>,
   DirectivesContainer = DefaultDirectivesContainer<S, ArgumentsContainer>,
   DefinitionContainer = DefaultVec<
-    ExecutableDefinition<S, ArgumentsContainer, DirectivesContainer>,
+    DescribedExecutableDefinition<
+      S,
+      ParametersContainer,
+      IdentsContainer,
+      TypeContainer,
+      TypePathsContainer,
+      PredicatesContainer,
+      ArgumentsContainer,
+      DirectivesContainer,
+    >,
   >,
 > = scaffold::Document<
-  ExecutableDefinition<
+  DescribedExecutableDefinition<
     S,
     ParametersContainer,
     IdentsContainer,
@@ -1503,7 +1531,8 @@ pub type ExecutableDocument<
 
 pub type Document<
   S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  DefinitionParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
+  ExtensionParametersContainer = DefaultExtensionTypeParamsContainer<S>,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
   TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
@@ -1536,7 +1565,8 @@ pub type Document<
   DefinitionContainer = DefaultVec<
     DefinitionOrExtension<
       S,
-      ParametersContainer,
+      DefinitionParametersContainer,
+      ExtensionParametersContainer,
       IdentsContainer,
       TypeContainer,
       TypePathsContainer,
@@ -1554,7 +1584,8 @@ pub type Document<
 > = scaffold::Document<
   DefinitionOrExtension<
     S,
-    ParametersContainer,
+    DefinitionParametersContainer,
+    ExtensionParametersContainer,
     IdentsContainer,
     TypeContainer,
     TypePathsContainer,

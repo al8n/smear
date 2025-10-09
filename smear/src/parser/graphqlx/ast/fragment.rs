@@ -40,11 +40,13 @@ pub type FragmentTypePath<
   PathSegmentContainer = DefaultVec<Ident<S>>,
   TypeContainer = DefaultVec<Type<S>>,
 > = scaffold::generic::FragmentTypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
+
 pub type FragmentRcTypePath<
   S,
   PathSegmentContainer = DefaultVec<Ident<S>>,
   TypeContainer = DefaultVec<RcType<S>>,
 > = scaffold::generic::FragmentTypePath<Ident<S>, RcType<S>, PathSegmentContainer, TypeContainer>;
+
 pub type FragmentArcTypePath<
   S,
   PathSegmentContainer = DefaultVec<Ident<S>>,
@@ -306,8 +308,8 @@ where
   Colon: Parseable<'a, I, T, Error>,
   Ident<S>: Parseable<'a, I, T, Error>,
   Type<S>: Parseable<'a, I, T, Error>,
-  ExecutableDefinitionName<Ident<S>, IdentsContainer>: Parseable<'a, I, T, Error>,
-  ExecutableDefinitionTypeGenerics<Ident<S>, IdentsContainer>: Parseable<'a, I, T, Error>,
+  ExecutableDefinitionName<S, IdentsContainer>: Parseable<'a, I, T, Error>,
+  ExecutableDefinitionTypeGenerics<S, IdentsContainer>: Parseable<'a, I, T, Error>,
   Directives<S, ArgumentsContainer>: Parseable<'a, I, T, Error>,
   SelectionSet<S, IdentsContainer, TypeContainer, ArgumentsContainer, DirectivesContainer>:
     Parseable<'a, I, T, Error>,

@@ -111,7 +111,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
   where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
-    Error: InvalidFragmentTypePath<Path = Path<Ident, PathSegmentContainer>> + 'a,
+    Error: InvalidFragmentTypePath + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     PathSeparator: Parseable<'a, I, T, Error>,
     LAngle: Parseable<'a, I, T, Error> + 'a,
@@ -126,7 +126,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
       .then(TypeGenerics::parser_with(type_parser).or_not())
       .try_map_with(|(path, generics), exa| {
         if "on".equivalent(&path) {
-          Err(Error::invalid_fragment_type_path(exa.span(), path))
+          Err(Error::invalid_fragment_type_path(exa.span()))
         } else {
           Ok(Self::new(exa.span(), path, generics))
         }
@@ -144,7 +144,7 @@ where
   LAngle: Parseable<'a, I, T, Error> + 'a,
   RAngle: Parseable<'a, I, T, Error> + 'a,
   Type: Parseable<'a, I, T, Error>,
-  Error: InvalidFragmentTypePath<Path = Path<Ident, PathSegmentContainer>>,
+  Error: InvalidFragmentTypePath,
   str: cmp::Equivalent<Path<Ident, PathSegmentContainer>>,
 {
   #[inline]

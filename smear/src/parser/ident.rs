@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman, sdl_display::DisplaySDL
 };
 
 /// An identifier.
@@ -92,5 +92,15 @@ where
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.value.fmt(f)
+  }
+}
+
+impl<S> Equivalent<Ident<S>> for str
+where
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn equivalent(&self, other: &Ident<S>) -> bool {
+    self.equivalent(other.source_ref())
   }
 }

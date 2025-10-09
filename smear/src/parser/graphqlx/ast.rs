@@ -30,6 +30,7 @@ mod punctuator;
 mod raw;
 mod ty;
 mod value;
+mod operation_type;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;

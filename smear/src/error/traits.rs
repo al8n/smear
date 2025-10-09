@@ -111,9 +111,6 @@ pub trait UnclosedBracketError {
 
 /// An error which can occur when parsing a fragment path
 pub trait InvalidFragmentTypePath {
-  /// The fragment path type
-  type Path;
-
   /// Creates a new error indicating that an invalid fragment path.
-  fn invalid_fragment_type_path(span: Span, path: Self::Path) -> Self;
+  fn invalid_fragment_type_path(span: Span) -> Self;
 }
