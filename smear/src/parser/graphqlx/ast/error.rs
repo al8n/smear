@@ -1,11 +1,14 @@
 use crate::{
   error::{
-    InvalidFragmentTypePath, ParseVariableValueError, UnclosedBraceError, UnclosedBracketError, UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError
+    InvalidFragmentTypePath, ParseVariableValueError, UnclosedBraceError, UnclosedBracketError,
+    UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
+    UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
+    UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
   },
   hints::{
     EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
     ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
-  }, scaffold::Path,
+  },
 };
 use logosky::{
   Token,
@@ -223,7 +226,6 @@ where
     <AstTokenError<'a, S> as UnclosedBracketError>::unclosed_bracket(span).into()
   }
 }
-
 
 impl<'a, S> InvalidFragmentTypePath for AstTokenError<'a, S>
 where

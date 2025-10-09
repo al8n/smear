@@ -1,7 +1,8 @@
 use core::fmt::Display;
 
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman, sdl_display::DisplaySDL
+  AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman,
+  sdl_display::DisplaySDL,
 };
 
 /// An identifier.

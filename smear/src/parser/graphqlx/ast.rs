@@ -10,6 +10,7 @@ use crate::{
   parser::ident::Ident,
 };
 
+// pub use default::*;
 pub use directive::*;
 pub use fragment::*;
 pub use import::*;
@@ -18,6 +19,7 @@ pub use raw::*;
 pub use ty::*;
 pub use value::*;
 
+// mod default;
 mod directive;
 mod error;
 mod fragment;
@@ -28,9 +30,9 @@ mod location;
 mod path;
 mod punctuator;
 mod raw;
+mod operation_type;
 mod ty;
 mod value;
-mod operation_type;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
