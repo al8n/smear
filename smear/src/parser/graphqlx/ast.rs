@@ -10,16 +10,15 @@ use crate::{
   parser::ident::Ident,
 };
 
-// pub use default::*;
+pub use default::*;
 pub use directive::*;
 pub use fragment::*;
 pub use import::*;
 pub use path::*;
-pub use raw::*;
 pub use ty::*;
 pub use value::*;
 
-// mod default;
+mod default;
 mod directive;
 mod error;
 mod fragment;
@@ -27,10 +26,9 @@ mod ident;
 mod import;
 mod keyword;
 mod location;
+mod operation_type;
 mod path;
 mod punctuator;
-mod raw;
-mod operation_type;
 mod ty;
 mod value;
 

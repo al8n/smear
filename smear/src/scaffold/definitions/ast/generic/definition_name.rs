@@ -74,9 +74,9 @@ impl<Ident, Type, Container> DefinitionName<Ident, Type, Container> {
     &self.span
   }
 
-  /// Returns the identifier of the definition name.
+  /// Returns the name of the definition.
   #[inline]
-  pub const fn ident(&self) -> &Ident {
+  pub const fn name(&self) -> &Ident {
     &self.ident
   }
 

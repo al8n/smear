@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{container::Container as ChumskyContainer, extra::ParserExtra, prelude::*},
+  chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -13,196 +13,37 @@ use crate::{
 
 use super::*;
 
-type DirectiveDefinitionAlias<
-  S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
-  IdentsContainer = DefaultIdentsContainer<S>,
-  TypeContainer = DefaultTypeContainer<S>,
-  TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
-  PredicatesContainer = DefaultWherePredicatesContainer<
-    S,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-  >,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
-> = scaffold::DirectiveDefinition<
-  DefinitionName<S, ParametersContainer>,
-  ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>,
-  And<
-    DirectiveLocations<Location, LocationsContainer>,
-    Option<WhereClause<S, IdentsContainer, TypeContainer, TypePathsContainer, PredicatesContainer>>,
-  >,
+type DirectiveDefinitionAlias<S> = scaffold::DirectiveDefinition<
+  DefinitionName<S>,
+  ArgumentsDefinition<S>,
+  And<DirectiveLocations<Location>, Option<WhereClause<S>>>,
 >;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct DirectiveDefinition<
-  S,
-  ParametersContainer = DefaultDefinitionTypeParamsContainer<S>,
-  IdentsContainer = DefaultIdentsContainer<S>,
-  TypeContainer = DefaultTypeContainer<S>,
-  TypePathsContainer = DefaultTypePathsContainer<S, IdentsContainer, TypeContainer>,
-  PredicatesContainer = DefaultWherePredicatesContainer<
-    S,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-  >,
-  ArgumentsContainer = DefaultConstArgumentsContainer<S>,
-  DirectivesContainer = DefaultConstDirectivesContainer<S, ArgumentsContainer>,
-  InputValuesContainer = DefaultInputValuesContainer<S, ArgumentsContainer, DirectivesContainer>,
-  LocationsContainer = DefaultLocationsContainer,
->(
-  DirectiveDefinitionAlias<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >,
-);
+pub struct DirectiveDefinition<S>(DirectiveDefinitionAlias<S>);
 
-impl<
-  S,
-  ParametersContainer,
-  IdentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  PredicatesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  LocationsContainer,
-> AsSpan<Span>
-  for DirectiveDefinition<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >
-where
-  ParametersContainer: ChumskyContainer<DefinitionTypeParam<S>>,
-  IdentsContainer: ChumskyContainer<Ident<S>>,
-  TypeContainer: ChumskyContainer<Type<S>>,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident<S>, IdentsContainer, TypeContainer>>,
-  PredicatesContainer:
-    ChumskyContainer<WherePredicate<S, IdentsContainer, TypeContainer, TypePathsContainer>>,
-  ArgumentsContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  DirectivesContainer: ChumskyContainer<Directive<S, ArgumentsContainer>>,
-  InputValuesContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  LocationsContainer: ChumskyContainer<Location>,
-{
+impl<S> AsSpan<Span> for DirectiveDefinition<S> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<
-  S,
-  ParametersContainer,
-  IdentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  PredicatesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  LocationsContainer,
-> IntoSpan<Span>
-  for DirectiveDefinition<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >
-where
-  ParametersContainer: ChumskyContainer<DefinitionTypeParam<S>>,
-  IdentsContainer: ChumskyContainer<Ident<S>>,
-  TypeContainer: ChumskyContainer<Type<S>>,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident<S>, IdentsContainer, TypeContainer>>,
-  PredicatesContainer:
-    ChumskyContainer<WherePredicate<S, IdentsContainer, TypeContainer, TypePathsContainer>>,
-  ArgumentsContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  DirectivesContainer: ChumskyContainer<Directive<S, ArgumentsContainer>>,
-  InputValuesContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  LocationsContainer: ChumskyContainer<Location>,
-{
+impl<S> IntoSpan<Span> for DirectiveDefinition<S> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<
-  S,
-  ParametersContainer,
-  IdentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  PredicatesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  LocationsContainer,
-> IntoComponents
-  for DirectiveDefinition<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >
-where
-  ParametersContainer: ChumskyContainer<DefinitionTypeParam<S>>,
-  IdentsContainer: ChumskyContainer<Ident<S>>,
-  TypeContainer: ChumskyContainer<Type<S>>,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident<S>, IdentsContainer, TypeContainer>>,
-  PredicatesContainer:
-    ChumskyContainer<WherePredicate<S, IdentsContainer, TypeContainer, TypePathsContainer>>,
-  ArgumentsContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  DirectivesContainer: ChumskyContainer<Directive<S, ArgumentsContainer>>,
-  InputValuesContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  LocationsContainer: ChumskyContainer<Location>,
-{
+impl<S> IntoComponents for DirectiveDefinition<S> {
   type Components = (
     Span,
-    DefinitionName<S, ParametersContainer>,
-    Option<ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>>,
+    DefinitionName<S>,
+    Option<ArgumentsDefinition<S>>,
     bool,
-    DirectiveLocations<Location, LocationsContainer>,
-    Option<WhereClause<S, IdentsContainer, TypeContainer, TypePathsContainer, PredicatesContainer>>,
+    DirectiveLocations<Location>,
+    Option<WhereClause<S>>,
   );
 
   #[inline]
@@ -213,44 +54,7 @@ where
   }
 }
 
-impl<
-  S,
-  ParametersContainer,
-  IdentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  PredicatesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  LocationsContainer,
->
-  DirectiveDefinition<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >
-where
-  ParametersContainer: ChumskyContainer<DefinitionTypeParam<S>>,
-  IdentsContainer: ChumskyContainer<Ident<S>>,
-  TypeContainer: ChumskyContainer<Type<S>>,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident<S>, IdentsContainer, TypeContainer>>,
-  PredicatesContainer:
-    ChumskyContainer<WherePredicate<S, IdentsContainer, TypeContainer, TypePathsContainer>>,
-  ArgumentsContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  DirectivesContainer: ChumskyContainer<Directive<S, ArgumentsContainer>>,
-  InputValuesContainer:
-    ChumskyContainer<InputValueDefinition<S, ArgumentsContainer, DirectivesContainer>>,
-  LocationsContainer: ChumskyContainer<Location>,
-{
+impl<S> DirectiveDefinition<S> {
   /// Returns the span of the directive definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -259,16 +63,13 @@ where
 
   /// Returns the name of the directive definition.
   #[inline]
-  pub const fn name(&self) -> &DefinitionName<S, ParametersContainer> {
+  pub const fn name(&self) -> &DefinitionName<S> {
     self.0.name()
   }
 
   /// Returns the arguments definition of the directive definition, if any.
   #[inline]
-  pub const fn arguments_definition(
-    &self,
-  ) -> Option<&ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>>
-  {
+  pub const fn arguments_definition(&self) -> Option<&ArgumentsDefinition<S>> {
     self.0.arguments_definition()
   }
 
@@ -280,60 +81,27 @@ where
 
   /// Returns the where clause of the directive definition, if any.
   #[inline]
-  pub const fn where_clause(
-    &self,
-  ) -> Option<
-    &WhereClause<S, IdentsContainer, TypeContainer, TypePathsContainer, PredicatesContainer>,
-  > {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
     self.0.locations().second().as_ref()
   }
 
   /// Returns the directive locations of the directive definition.
   #[inline]
-  pub const fn locations(&self) -> &DirectiveLocations<Location, LocationsContainer> {
+  pub const fn locations(&self) -> &DirectiveLocations<Location> {
     self.0.locations().first()
   }
 }
 
-impl<
-  'a,
-  S,
-  ParametersContainer,
-  IdentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  PredicatesContainer,
-  ArgumentsContainer,
-  DirectivesContainer,
-  InputValuesContainer,
-  LocationsContainer,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for DirectiveDefinition<
-    S,
-    ParametersContainer,
-    IdentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    PredicatesContainer,
-    ArgumentsContainer,
-    DirectivesContainer,
-    InputValuesContainer,
-    LocationsContainer,
-  >
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for DirectiveDefinition<S>
 where
   At: Parseable<'a, I, T, Error>,
   keywords::Directive: Parseable<'a, I, T, Error>,
   keywords::On: Parseable<'a, I, T, Error>,
   keywords::Repeatable: Parseable<'a, I, T, Error>,
-  DirectiveLocations<Location, LocationsContainer>: Parseable<'a, I, T, Error>,
-  WhereClause<S, IdentsContainer, TypeContainer, TypePathsContainer, PredicatesContainer>:
-    Parseable<'a, I, T, Error>,
-  DefinitionName<S, ParametersContainer>: Parseable<'a, I, T, Error>,
-  ArgumentsDefinition<S, ArgumentsContainer, DirectivesContainer, InputValuesContainer>:
-    Parseable<'a, I, T, Error>,
+  DirectiveLocations<Location>: Parseable<'a, I, T, Error>,
+  WhereClause<S>: Parseable<'a, I, T, Error>,
+  DefinitionName<S>: Parseable<'a, I, T, Error>,
+  ArgumentsDefinition<S>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

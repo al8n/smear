@@ -90,7 +90,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
 
   /// Returns `true` if the type is required (non-nullable).
   #[inline]
-  pub const fn is_required(&self) -> bool {
+  pub const fn required(&self) -> bool {
     self.required
   }
 

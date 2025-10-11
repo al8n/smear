@@ -17,7 +17,6 @@ cst = ["std"]
 graphql = []
 graphqlx = []
 
-
 bytes = ["dep:bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "logosky/bstr"]
 hipstr = ["dep:hipstr", "logosky/hipstr"]
@@ -27,7 +26,7 @@ derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
 thiserror.workspace = true
-logosky.workspace = true
+logosky = { workspace = true, features = ["either"] }
 
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 hipstr = { version = "0.8", default-features = false, optional = true }

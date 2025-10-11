@@ -9,12 +9,14 @@ use logosky::{
 use super::error::{Error, Errors, Extra};
 use crate::lexer::graphql::ast::{AstToken, AstTokenChar, AstTokenKind};
 
+pub use default::*;
 pub use fragment::*;
 pub use name::*;
-pub use raw::*;
 pub use ty::*;
+pub use type_system::*;
 pub use value::*;
 
+mod default;
 mod error;
 mod fragment;
 mod keyword;
@@ -22,8 +24,8 @@ mod location;
 mod name;
 mod operation_type;
 mod punctuator;
-mod raw;
 mod ty;
+mod type_system;
 mod value;
 
 /// The token stream type used for the AST parser implementation.

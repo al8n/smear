@@ -12,7 +12,6 @@ use crate::punctuator::PathSeparator;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Path<Ident, Container = Vec<Ident>> {
   span: Span,
-  fqp: bool,
   segments: Container,
   _s: PhantomData<Ident>,
 }
@@ -32,30 +31,23 @@ impl<Ident, Container> IntoSpan<Span> for Path<Ident, Container> {
 }
 
 impl<Ident, Container> IntoComponents for Path<Ident, Container> {
-  type Components = (Span, bool, Container);
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.fqp, self.segments)
+    (self.span, self.segments)
   }
 }
 
 impl<Ident, Container> Path<Ident, Container> {
   /// Creates a new path from the given segments.
   #[inline]
-  const fn new(span: Span, fqp: bool, segments: Container) -> Self {
+  const fn new(span: Span, segments: Container) -> Self {
     Self {
       span,
-      fqp,
       segments,
       _s: PhantomData,
     }
-  }
-
-  /// Returns whether the path is fully qualified (starts with `::`).
-  #[inline]
-  pub const fn is_fully_qualified(&self) -> bool {
-    self.fqp
   }
 
   /// Returns the segments of the path.
@@ -93,15 +85,11 @@ impl<Ident, Container> Path<Ident, Container> {
     IP: Parser<'a, I, Ident, E> + Clone,
     Container: chumsky::container::Container<Ident>,
   {
-    PathSeparator::parser()
-      .or_not()
-      .then(
-        ident_parser
-          .separated_by(PathSeparator::parser())
-          .at_least(1)
-          .collect(),
-      )
-      .map_with(|(sep, segments), exa| Self::new(exa.span(), sep.is_some(), segments))
+    ident_parser
+      .separated_by(PathSeparator::parser())
+      .at_least(1)
+      .collect()
+      .map_with(|segments, exa| Self::new(exa.span(), segments))
   }
 }
 
@@ -131,16 +119,7 @@ where
 {
   #[inline]
   fn equivalent(&self, other: &Path<Ident, Container>) -> bool {
-    // 1) leading `::` must match the path's FQP flag
-    let self_fqp = self.starts_with("::");
-    if self_fqp != other.is_fully_qualified() {
-      return false;
-    }
-
-    // 2) strip the leading `::` (if any)
-    let body = if self_fqp { &self[2..] } else { self };
-
-    let mut parts = body.split("::");
+    let mut parts = self.split("::");
     let mut segs = other.as_slice().iter();
 
     loop {
