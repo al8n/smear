@@ -36,6 +36,17 @@ pub enum Unclosed {
   Brace,
 }
 
+/// Invalid enum value name
+#[derive(Debug, Copy, Clone, IsVariant)]
+pub enum InvalidEnumValue {
+  /// Enum value is `true`
+  True,
+  /// Enum value is `false`
+  False,
+  /// Enum value is `null`
+  Null,
+}
+
 /// The data of a parser error.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -51,7 +62,7 @@ pub enum ErrorData<S, T, TK, Char = char, StateError = ()> {
   FloatOverflow(S),
   /// An enum value is invalid.
   #[from(skip)]
-  InvalidEnumValue(S),
+  InvalidEnumValue(InvalidEnumValue),
   /// A boolean value is invalid.
   #[from(skip)]
   InvalidBooleanValue(S),
@@ -261,7 +272,7 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
 
   /// Creates an invalid enum value error.
   #[inline]
-  pub const fn invalid_enum_value(value: S, span: Span) -> Self {
+  pub const fn invalid_enum_value(value: InvalidEnumValue, span: Span) -> Self {
     Self::new(span, ErrorData::InvalidEnumValue(value))
   }
 

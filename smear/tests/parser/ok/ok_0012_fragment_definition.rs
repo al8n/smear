@@ -89,6 +89,6 @@ fn graphqlx_fragment_definition() {
     let argument = arguments.arguments().first().unwrap();
     assert_eq!(argument.name(), "size");
     let value = argument.value();
-    assert_eq!(value.unwrap_int_ref().source().unwrap_decimal(), "50");
+    assert_eq!(value.unwrap_int_ref().value().unwrap_decimal(), "50");
   }
 }

@@ -43,7 +43,7 @@ impl<Ident, Container> IntoComponents for Path<Ident, Container> {
 impl<Ident, Container> Path<Ident, Container> {
   /// Creates a new path from the given segments.
   #[inline]
-  const fn new(span: Span, segments: Container, fqdp: bool) -> Self {
+  pub(crate) const fn new(span: Span, segments: Container, fqdp: bool) -> Self {
     Self {
       span,
       segments,

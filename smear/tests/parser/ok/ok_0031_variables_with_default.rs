@@ -76,13 +76,13 @@ fn graphqlx_variables_with_default() {
     assert_eq!(ty.path(), "Int");
 
     let default_value = variable_definition.default_value().unwrap();
-    assert_eq!(default_value.value().unwrap_int_ref().source().unwrap_decimal(), "5");
+    assert_eq!(default_value.value().unwrap_int_ref().value_ref().unwrap_decimal(), "5");
   }
 
   {
     let variable_definition = variable_definitions.next().unwrap();
     assert_eq!(
-      variable_definition.variable().name().source(),
+      variable_definition.variable().name(),
       "config"
     );
     let ty = variable_definition.ty().unwrap_path_ref();

@@ -128,7 +128,7 @@ fn graphqlx_values() {
       let arg = arg_iter.next().unwrap();
       assert_eq!(arg.name(), "id");
       let value = arg.value();
-      assert_eq!(value.unwrap_int_ref().source().unwrap_decimal(), "4");
+      assert_eq!(value.unwrap_int_ref().value().unwrap_decimal(), "4");
     }
     {
       let arg = arg_iter.next().unwrap();
@@ -158,7 +158,7 @@ fn graphqlx_values() {
       }
       {
         let second = &items[1];
-        assert_eq!(second.unwrap_float_ref().source().unwrap_decimal(), "1.34");
+        assert_eq!(second.unwrap_float_ref().value_ref().unwrap_decimal(), "1.34");
       }
     }
     {

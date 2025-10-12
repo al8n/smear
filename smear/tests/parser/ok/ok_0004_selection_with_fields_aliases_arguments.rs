@@ -138,5 +138,5 @@ fn graphqlx_selection_with_fields_aliases_arguments() {
 
   let arg1 = &fave_snack_args.arguments()[0];
   assert_eq!(arg1.name(), "quantity");
-  assert_eq!(arg1.value().unwrap_int_ref().source().unwrap_decimal(), "4");
+  assert_eq!(arg1.value().unwrap_int_ref().value().unwrap_decimal(), "4");
 }

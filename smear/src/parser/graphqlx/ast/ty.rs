@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoSpan, Span},
 };
 
-use std::{boxed::Box, rc::Rc, sync::Arc};
+use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 use crate::{
   parser::ident::Ident,
@@ -23,6 +23,13 @@ pub type ArcTypeGenerics<S> = scaffold::generic::TypeGenerics<ArcType<S>>;
 
 pub type RcDefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>>;
 pub type RcTypeGenerics<S> = scaffold::generic::TypeGenerics<RcType<S>>;
+
+impl<S> From<Ident<S>> for Path<S> {
+  #[inline]
+  fn from(ident: Ident<S>) -> Self {
+    Self::new(*ident.span(), Vec::from_iter([ident]), false)
+  }
+}
 
 macro_rules! ty {
   ($(

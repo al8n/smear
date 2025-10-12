@@ -300,7 +300,8 @@ where
       UnionTypeExtension::parser::<E>().map(Self::Union),
       EnumTypeExtension::parser::<E>().map(Self::Enum),
       InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
-    )).boxed()
+    ))
+    .boxed()
   }
 }
 

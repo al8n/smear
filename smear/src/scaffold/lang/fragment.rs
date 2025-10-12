@@ -8,6 +8,128 @@ use logosky::{
 
 use crate::{keywords::On, punctuator::Spread};
 
+/// Represents a fragment name with the special restriction that it cannot be "on".
+///
+/// In GraphQL, fragment names are regular identifiers with one exception: they cannot
+/// be the keyword "on" since this would create ambiguity with type conditions.
+/// This type ensures this constraint is enforced at the parser level.
+///
+/// ## Examples
+///
+/// ```text
+/// # Valid fragment names
+/// UserFragment
+/// productInfo
+/// SearchResultFields
+///
+/// # Invalid fragment name (would be rejected)
+/// on  # This is reserved for type conditions
+/// ```
+///
+/// ## Grammar
+///
+/// ```text
+/// FragmentName : Name but not `on`
+/// ```
+///
+/// Spec: [Fragment Name](https://spec.graphql.org/draft/#FragmentName)
+#[derive(Debug, Clone, Copy)]
+pub struct FragmentName<S> {
+  span: Span,
+  value: S,
+}
+
+impl<S> PartialEq<S> for FragmentName<S>
+where
+  S: PartialEq,
+{
+  #[inline]
+  fn eq(&self, other: &S) -> bool {
+    self.source_ref().eq(other)
+  }
+}
+
+impl<S> AsSpan<Span> for FragmentName<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for FragmentName<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.span
+  }
+}
+
+impl<S> IntoComponents for FragmentName<S> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    (self.span, self.value)
+  }
+}
+
+impl<S> FragmentName<S> {
+  /// Creates a new fragment name.
+  #[inline]
+  pub const fn new(span: Span, value: S) -> Self {
+    Self { span, value }
+  }
+
+  /// Returns a reference to the span covering the fragment name.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns a reference to the underlying source value.
+  #[inline]
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.value
+  }
+
+  /// Returns a reference to the underlying source value.
+  #[inline]
+  pub const fn source_ref(&self) -> &S {
+    &self.value
+  }
+}
+
+impl<S> core::fmt::Display for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    DisplayHuman::fmt(self.source_ref(), f)
+  }
+}
+
+impl<S> core::ops::Deref for FragmentName<S> {
+  type Target = S;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    self.source_ref()
+  }
+}
+
+impl<S> DisplaySDL for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
 /// Represents a type condition used in GraphQL fragments.
 ///
 /// A type condition specifies which type a fragment applies to, using the `on` keyword

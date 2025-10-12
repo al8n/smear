@@ -3,6 +3,8 @@ use crate::scaffold::{
   self, DirectiveLocations, ImplementInterfaces, Location, OperationType, UnionMemberTypes,
 };
 
+pub use scaffold::FragmentName;
+
 pub type Described<T, S> = scaffold::Described<T, StringValue<S>>;
 
 /// The default container type used for arguments in the AST.

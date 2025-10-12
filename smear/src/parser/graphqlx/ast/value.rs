@@ -33,7 +33,7 @@ macro_rules! atom_parser {
           () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
           () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
           () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-          _ => Self::Enum(EnumValue::new(span, name)),
+          _ => Self::Enum(EnumValue::new(super::ty::Path::from(Ident::new(span, name)))),
         }
       },
       Lexed::Token(Spanned { span, data: AstToken::LitInt(val) }) => {
@@ -264,6 +264,43 @@ where
       let list_value_parser = scaffold::List::parser_with(parser.clone()).map(Self::List);
       let set_value_parser = scaffold::Set::parser_with(parser.clone()).map(Self::Set);
       let map_value_parser = scaffold::Map::parser_with(parser.clone(), parser).map(Self::Map);
+
+      // logosky::chumsky::prelude::custom::<_, AstTokenStream<'a, S>, Self, E>(|inp| {
+      //   let before = inp.cursor();
+      //   inp.
+      //   match inp.next() {
+      //     Some(lexed) => match lexed {
+      //       Lexed::Token(Spanned {
+      //         span,
+      //         data: AstToken::Identifier(name),
+      //       }) => {
+      //         match () {
+      //           () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+      //           () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+      //           () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+      //           // _ => Self::Enum(EnumValue::new(span, name)),
+      //         }
+      //       }
+      //       Lexed::Token(Spanned {
+      //         span,
+      //         data: AstToken::LitInt(val),
+      //       }) => Self::Int(IntValue::new(span, val)),
+      //       Lexed::Token(Spanned {
+      //         span,
+      //         data: AstToken::LitFloat(val),
+      //       }) => Self::Float(FloatValue::new(span, val)),
+      //       Lexed::Token(Spanned {
+      //         span,
+      //         data: AstToken::LitInlineStr(raw),
+      //       }) => Self::String(StringValue::new(span, raw.into())),
+      //       Lexed::Token(Spanned {
+      //         span,
+      //         data: AstToken::LitBlockStr(raw),
+      //       }) => Self::String(StringValue::new(span, raw.into())),
+      //     },
+      //     found => Err(Simple::new(found.map(Into::into), inp.span_since(&before))),
+      //   }
+      // });
 
       choice((
         atom_parser!(),

@@ -194,7 +194,7 @@ fn graphqlx_selection_with_fragment_spread() {
     assert_eq!(n.name().source(), "N");
     let value = n.value();
     assert!(value.is_int());
-    assert_eq!(value.unwrap_int_ref().source().unwrap_decimal(), "0");
+    assert_eq!(value.unwrap_int_ref().value().unwrap_decimal(), "0");
 
     let sanon = anon.selection_set();
     assert_eq!(sanon.selections().len(), 1);
