@@ -13,37 +13,16 @@ use crate::{
   scaffold::{self, ListType, MapType, SetType},
 };
 
-use super::{DefaultIdentsContainer, DefaultTypeContainer};
+pub type Path<S> = scaffold::Path<Ident<S>>;
+pub type TypePath<S> = scaffold::generic::TypePath<Ident<S>, Type<S>>;
+pub type DefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>>;
+pub type TypeGenerics<S> = scaffold::generic::TypeGenerics<Type<S>>;
 
-pub type TypePath<
-  S,
-  PathSegmentContainer = DefaultIdentsContainer<S>,
-  TypeContainer = DefaultTypeContainer<S>,
-> = scaffold::generic::TypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
-pub type DefinitionTypePath<
-  S,
-  PathSegmentContainer = DefaultIdentsContainer<S>,
-  TypeContainer = DefaultTypeContainer<S>,
-> = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>, PathSegmentContainer, TypeContainer>;
-pub type TypeGenerics<S, TypeContainer = DefaultTypeContainer<S>> =
-  scaffold::generic::TypeGenerics<Type<S>, TypeContainer>;
+pub type ArcDefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>>;
+pub type ArcTypeGenerics<S> = scaffold::generic::TypeGenerics<ArcType<S>>;
 
-pub type ArcDefinitionTypePath<
-  S,
-  PathSegmentContainer = DefaultIdentsContainer<S>,
-  TypeContainer = Vec<ArcType<S>>,
-> =
-  scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>, PathSegmentContainer, TypeContainer>;
-pub type ArcTypeGenerics<S, TypeContainer = Vec<ArcType<S>>> =
-  scaffold::generic::TypeGenerics<ArcType<S>, TypeContainer>;
-
-pub type RcDefinitionTypePath<
-  S,
-  PathSegmentContainer = DefaultIdentsContainer<S>,
-  TypeContainer = Vec<RcType<S>>,
-> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>, PathSegmentContainer, TypeContainer>;
-pub type RcTypeGenerics<S, TypeContainer = Vec<RcType<S>>> =
-  scaffold::generic::TypeGenerics<RcType<S>, TypeContainer>;
+pub type RcDefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>>;
+pub type RcTypeGenerics<S> = scaffold::generic::TypeGenerics<RcType<S>>;
 
 macro_rules! ty {
   ($(

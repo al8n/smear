@@ -150,7 +150,8 @@ where
       UnionTypeDefinition::parser::<E>().map(Self::Union),
       EnumTypeDefinition::parser::<E>().map(Self::Enum),
       InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
-    )).boxed()
+    ))
+    .boxed()
   }
 }
 

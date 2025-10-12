@@ -64,7 +64,7 @@ fn graphlx_object_type_definition() {
 
   let definition = DescribedObjectTypeDefinition::<&str>::parse_str(ALL)
   .unwrap();
-  assert_eq!(definition.name().name().source(), "Person");
+  assert_eq!(definition.name().source(), "Person");
   assert_eq!(
     definition.description().unwrap().source().trim_matches('"'),
     "description of type"
@@ -78,8 +78,8 @@ fn graphlx_object_type_definition() {
   );
 
   let fields = definition.fields_definition().unwrap();
-  assert_eq!(fields.target().field_definitions().len(), 3);
-  let mut fields = fields.target().field_definitions().iter();
+  assert_eq!(fields.field_definitions().len(), 3);
+  let mut fields = fields.field_definitions().iter();
 
   {
     let name = fields.next().unwrap();

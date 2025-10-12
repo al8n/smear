@@ -1,8 +1,31 @@
 use super::*;
 use crate::{
   parser::ident::Ident,
-  scaffold::{self, ImplementInterfaces, Location, OperationType, Path},
+  scaffold::{self, Location, OperationType, Path},
 };
+
+pub use directive::*;
+pub use fragment::*;
+pub use input_object_type::*;
+pub use interface_type::*;
+pub use object_type::*;
+pub use operation_definition::*;
+pub use union_type::*;
+
+mod directive;
+mod fragment;
+
+mod fields_definition;
+mod input_fields_definition;
+mod input_object_type;
+mod interface_type;
+mod object_type;
+mod operation_definition;
+mod union_type;
+
+type ExtensionName<S> = scaffold::generic::ExtensionName<Ident<S>>;
+type DefinitionName<S> = scaffold::generic::DefinitionName<Ident<S>, Type<S>>;
+type ExecutableDefinitionName<S> = scaffold::generic::ExecutableDefinitionName<Ident<S>>;
 
 pub type Described<T, S> = scaffold::Described<T, StringValue<S>>;
 
@@ -24,14 +47,12 @@ pub type WhereClause<S> = scaffold::generic::WhereClause<Ident<S>, Type<S>>;
 
 pub type ExtensionTypeParam<S> = scaffold::generic::ExtensionTypeParam<Ident<S>>;
 
-pub type ExtensionTypeGenerics<S, Container = DefaultVec<ExtensionTypeParam<S>>> =
-  scaffold::generic::ExtensionTypeGenerics<Ident<S>, Container>;
-
-pub type ExtensionName<S> = scaffold::generic::ExtensionName<Ident<S>>;
-pub type DefinitionName<S> = scaffold::generic::DefinitionName<Ident<S>, Type<S>>;
-pub type ExecutableDefinitionName<S> = scaffold::generic::ExecutableDefinitionName<Ident<S>>;
+pub type ExtensionTypeGenerics<S> = scaffold::generic::ExtensionTypeGenerics<Ident<S>>;
+pub type DefinitionTypeGenerics<S> = scaffold::generic::DefinitionTypeGenerics<Ident<S>, Type<S>>;
 pub type ExecutableDefinitionTypeGenerics<S> =
   scaffold::generic::ExecutableDefinitionTypeGenerics<Ident<S>>;
+
+pub type ImplementInterfaces<S> = scaffold::ImplementInterfaces<TypePath<S>>;
 
 /// The default container type used for arguments in the AST.
 pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
@@ -124,82 +145,20 @@ pub type InputValueDefinition<S> = Described<
   S,
 >;
 
-pub type InputFieldsDefinition<S> = scaffold::generic::Constrained<
-  Ident<S>,
-  Type<S>,
-  scaffold::InputFieldsDefinition<InputValueDefinition<S>>,
->;
+pub type InputFieldsDefinition<S> = scaffold::InputFieldsDefinition<InputValueDefinition<S>>;
 
 pub type FieldDefinition<S> = Described<
   scaffold::FieldDefinition<Ident<S>, ArgumentsDefinition<S>, Type<S>, ConstDirectives<S>>,
   S,
 >;
 
-pub type FieldsDefinition<S> =
-  scaffold::generic::Constrained<Ident<S>, Type<S>, scaffold::FieldsDefinition<FieldDefinition<S>>>;
-
-pub type InputObjectTypeDefinition<S> = scaffold::InputObjectTypeDefinition<
-  DefinitionName<S>,
-  ConstDirectives<S>,
-  InputFieldsDefinition<S>,
->;
-
-pub type DescribedInputObjectTypeDefinition<S> = Described<InputObjectTypeDefinition<S>, S>;
-
-pub type InputObjectTypeExtension<S> = scaffold::InputObjectTypeExtension<
-  ExtensionName<S>,
-  ConstDirectives<S>,
-  InputFieldsDefinition<S>,
->;
+pub type FieldsDefinition<S> = scaffold::FieldsDefinition<FieldDefinition<S>>;
 
 pub type ScalarTypeDefinition<S> = scaffold::ScalarTypeDefinition<Ident<S>, ConstDirectives<S>>;
 
 pub type DescribedScalarTypeDefinition<S> = Described<ScalarTypeDefinition<S>, S>;
 
 pub type ScalarTypeExtension<S> = scaffold::ScalarTypeExtension<Ident<S>, ConstDirectives<S>>;
-
-pub type ObjectTypeDefinition<S> = scaffold::ObjectTypeDefinition<
-  DefinitionName<S>,
-  ImplementInterfaces<TypePath<S>>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
->;
-
-pub type DescribedObjectTypeDefinition<S> = Described<ObjectTypeDefinition<S>, S>;
-
-pub type ObjectTypeExtension<S> = scaffold::ObjectTypeExtension<
-  ExtensionName<S>,
-  ImplementInterfaces<TypePath<S>>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
->;
-
-pub type InterfaceTypeDefinition<S> = scaffold::InterfaceTypeDefinition<
-  DefinitionName<S>,
-  ImplementInterfaces<TypePath<S>>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
->;
-
-pub type DescribedInterfaceTypeDefinition<S> = Described<InterfaceTypeDefinition<S>, S>;
-
-pub type InterfaceTypeExtension<S> = scaffold::InterfaceTypeExtension<
-  ExtensionName<S>,
-  ImplementInterfaces<TypePath<S>>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
->;
-
-pub type UnionMemberTypes<S> =
-  scaffold::generic::Constrained<Ident<S>, Type<S>, scaffold::UnionMemberTypes<TypePath<S>>>;
-
-pub type UnionTypeDefinition<S> =
-  scaffold::UnionTypeDefinition<DefinitionName<S>, ConstDirectives<S>, UnionMemberTypes<S>>;
-
-pub type DescribedUnionTypeDefinition<S> = Described<UnionTypeDefinition<S>, S>;
-
-pub type UnionTypeExtension<S> =
-  scaffold::UnionTypeExtension<ExtensionName<S>, ConstDirectives<S>, UnionMemberTypes<S>>;
 
 pub type EnumValueDefinition<S> =
   Described<scaffold::EnumValueDefinition<Ident<S>, ConstDirectives<S>>, S>;
@@ -214,21 +173,7 @@ pub type DescribedEnumTypeDefinition<S> = Described<EnumTypeDefinition<S>, S>;
 pub type EnumTypeExtension<S> =
   scaffold::EnumTypeExtension<Path<Ident<S>>, ConstDirectives<S>, EnumValuesDefinition<S>>;
 
-pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
-  DefinitionName<S>,
-  OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  SelectionSet<S>,
->;
-
-pub type OperationDefinition<S> = scaffold::OperationDefinition<
-  DefinitionName<S>,
-  OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  SelectionSet<S>,
->;
+pub type UnionMemberTypes<S> = scaffold::UnionMemberTypes<TypePath<S>>;
 
 pub type RootOperationTypeDefinition<S> =
   scaffold::RootOperationTypeDefinition<TypePath<S>, OperationType>;
@@ -274,6 +219,9 @@ pub type TypeSystemDefinitionOrExtension<S> = scaffold::TypeSystemDefinitionOrEx
   DescribedTypeSystemDefinition<S>,
   TypeSystemExtension<S>,
 >;
+
+pub type OperationDefinition<S> =
+  scaffold::OperationDefinition<NamedOperationDefinition<S>, SelectionSet<S>>;
 
 pub type ExecutableDefinition<S> =
   scaffold::ExecutableDefinition<OperationDefinition<S>, FragmentDefinition<S>>;

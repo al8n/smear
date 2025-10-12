@@ -184,13 +184,8 @@ pub type NamedOperationDefinition<S> = scaffold::NamedOperationDefinition<
   SelectionSet<S>,
 >;
 
-pub type OperationDefinition<S> = scaffold::OperationDefinition<
-  Name<S>,
-  OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  SelectionSet<S>,
->;
+pub type OperationDefinition<S> =
+  scaffold::OperationDefinition<NamedOperationDefinition<S>, SelectionSet<S>>;
 
 pub type RootOperationTypeDefinition<S> =
   scaffold::RootOperationTypeDefinition<Name<S>, OperationType>;

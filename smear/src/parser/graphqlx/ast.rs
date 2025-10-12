@@ -11,23 +11,17 @@ use crate::{
 };
 
 pub use default::*;
-pub use directive::*;
-pub use fragment::*;
 pub use import::*;
-pub use path::*;
 pub use ty::*;
 pub use value::*;
 
 mod default;
-mod directive;
 mod error;
-mod fragment;
 mod ident;
 mod import;
 mod keyword;
 mod location;
 mod operation_type;
-mod path;
 mod punctuator;
 mod ty;
 mod value;
