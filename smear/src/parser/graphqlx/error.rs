@@ -264,6 +264,12 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     Self::new(span, ErrorData::Lexer(err))
   }
 
+  /// Creates an unexpected end of input error.
+  #[inline]
+  pub const fn unexpected_end_of_input(span: Span) -> Self {
+    Self::new(span, ErrorData::EndOfInput)
+  }
+
   /// Creates an invalid fragment type path error.
   #[inline]
   pub const fn invalid_fragment_type_path(span: Span) -> Self {

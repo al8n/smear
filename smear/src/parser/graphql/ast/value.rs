@@ -1,6 +1,6 @@
 use crate::{lexer::graphql::ast::AstLexerErrors, scaffold};
 
-use super::{AstToken, AstTokenErrors, AstTokenStream, DefaultVec, Name};
+use super::{AstToken, AstTokenErrors, AstTokenStream, AstTokenError, DefaultVec, Name};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
@@ -140,6 +140,63 @@ where
       let object_value_parser =
         scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
       let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
+
+      let all = custom::<_, AstTokenStream<'_, S>, Self, E>(|inp| {
+        let before = inp.cursor();
+
+        match inp.next() {
+          Some(tok) => match tok {
+            Lexed::Error(err) => {
+              inp.save();
+              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+            }
+            Lexed::Token(Spanned {
+              span,
+              data: token,
+            }) => {
+              let output = match token {
+                AstToken::Ampersand => todo!(),
+                AstToken::At => todo!(),
+                AstToken::RBrace => todo!(),
+                AstToken::RBracket => todo!(),
+                AstToken::RParen => todo!(),
+                AstToken::Colon => todo!(),
+                AstToken::Dollar => todo!(),
+                AstToken::Equal => todo!(),
+                AstToken::Bang => todo!(),
+                AstToken::LParen => todo!(),
+                AstToken::Pipe => todo!(),
+                AstToken::Spread => todo!(),
+                AstToken::LBrace => todo!(),
+                AstToken::LBracket => todo!(),
+                AstToken::Identifier(name) => {
+                  match () {
+                    () if "true".equivalent(&name) => {
+                      Self::Boolean(BooleanValue::new(span, true))
+                    }
+                    () if "false".equivalent(&name) => {
+                      Self::Boolean(BooleanValue::new(span, false))
+                    }
+                    () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+                    _ => Self::Enum(EnumValue::new(span, name)),
+                  }
+                },
+                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
+              };
+
+              inp.save();
+              Ok(output)
+            },
+          },
+          None => {
+            Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into())
+          },
+        }
+      });
+
       choice((
         atom_parser!(),
         select! {

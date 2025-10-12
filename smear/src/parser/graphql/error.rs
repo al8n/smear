@@ -286,6 +286,12 @@ impl<S, T, TK, Char, StateError> Error<S, T, TK, Char, StateError> {
     Self::new(span, ErrorData::UnknownOperationType(value))
   }
 
+  /// Creates an unexpected end of input error.
+  #[inline]
+  pub const fn unexpected_end_of_input(span: Span) -> Self {
+    Self::new(span, ErrorData::EndOfInput)
+  }
+
   /// Returns the span of the error.
   #[inline]
   pub const fn span(&self) -> Span {
