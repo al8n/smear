@@ -206,15 +206,6 @@ pub type TypeSystemDefinition<S> =
 
 pub type DescribedTypeSystemDefinition<S> = Described<TypeSystemDefinition<S>, S>;
 
-pub type TypeExtension<S> = scaffold::TypeExtension<
-  ScalarTypeExtension<S>,
-  ObjectTypeExtension<S>,
-  InterfaceTypeExtension<S>,
-  UnionTypeExtension<S>,
-  EnumTypeExtension<S>,
-  InputObjectTypeExtension<S>,
->;
-
 pub type TypeSystemExtension<S> =
   scaffold::TypeSystemExtension<TypeExtension<S>, SchemaExtension<S>>;
 

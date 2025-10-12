@@ -63,8 +63,14 @@ impl<S> DirectiveDefinition<S> {
 
   /// Returns the name of the directive definition.
   #[inline]
-  pub const fn name(&self) -> &DefinitionName<S> {
-    self.0.name()
+  pub const fn name(&self) -> &Ident<S> {
+    self.0.name().name()
+  }
+
+  /// Returns the type generics of the directive definition.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+    self.0.name().generics()
   }
 
   /// Returns the arguments definition of the directive definition, if any.

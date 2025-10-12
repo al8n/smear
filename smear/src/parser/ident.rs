@@ -96,6 +96,46 @@ where
   }
 }
 
+impl<S> PartialEq<str> for Ident<S>
+where
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &str) -> bool {
+    other.equivalent(&self.value)
+  }
+}
+
+impl<S> PartialEq<Ident<S>> for str
+where
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &Ident<S>) -> bool {
+    self.equivalent(&other.value)
+  }
+}
+
+impl<S> PartialEq<[u8]> for Ident<S>
+where
+  [u8]: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &[u8]) -> bool {
+    other.equivalent(&self.value)
+  }
+}
+
+impl<S> PartialEq<Ident<S>> for [u8]
+where
+  [u8]: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &Ident<S>) -> bool {
+    self.equivalent(&other.value)
+  }
+}
+
 impl<S> Equivalent<Ident<S>> for str
 where
   str: Equivalent<S>,
@@ -103,5 +143,25 @@ where
   #[inline]
   fn equivalent(&self, other: &Ident<S>) -> bool {
     self.equivalent(other.source_ref())
+  }
+}
+
+impl<S> Equivalent<Ident<S>> for [u8]
+where
+  [u8]: Equivalent<S>,
+{
+  #[inline]
+  fn equivalent(&self, other: &Ident<S>) -> bool {
+    self.equivalent(other.source_ref())
+  }
+}
+
+impl<S> Equivalent<[u8]> for Ident<S>
+where
+  [u8]: Equivalent<S>,
+{
+  #[inline]
+  fn equivalent(&self, other: &[u8]) -> bool {
+    other.equivalent(self.source_ref())
   }
 }

@@ -134,3 +134,82 @@ where
     NamedOperationDefinitionAlias::parser::<E>().map(Self)
   }
 }
+
+type RootOperationTypeDefinitionAlias<S> =
+  scaffold::RootOperationTypeDefinition<TypePath<S>, OperationType>;
+
+#[derive(Debug, Clone, From, Into)]
+pub struct RootOperationTypeDefinition<S>(RootOperationTypeDefinitionAlias<S>);
+
+impl<S> AsSpan<Span> for RootOperationTypeDefinition<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S> IntoSpan<Span> for RootOperationTypeDefinition<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S> IntoComponents for RootOperationTypeDefinition<S> {
+  type Components = (
+    Span,
+    OperationType,
+    super::ty::Path<S>,
+    Option<TypeGenerics<S>>,
+  );
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    let (span, operation_type, name) = self.0.into_components();
+    let (_, path, generics) = name.into_components();
+    (span, operation_type, path, generics)
+  }
+}
+
+impl<S> RootOperationTypeDefinition<S> {
+  /// Returns the operation type (e.g., Query, Mutation, Subscription).
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    self.0.span()
+  }
+
+  /// Returns the operation type (e.g., Query, Mutation, Subscription).
+  #[inline]
+  pub const fn operation_type(&self) -> &OperationType {
+    self.0.operation_type()
+  }
+
+  /// Returns the path of the root operation type definition.
+  #[inline]
+  pub const fn path(&self) -> &super::ty::Path<S> {
+    self.0.name().path()
+  }
+
+  /// Returns the optional type generics of the root operation type definition.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+    self.0.name().type_generics()
+  }
+}
+
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for RootOperationTypeDefinition<S>
+where
+  RootOperationTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: Token<'a>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    RootOperationTypeDefinitionAlias::parser::<E>().map(Self)
+  }
+}

@@ -1,9 +1,10 @@
-use smear::parser::graphql::ast::{FragmentDefinition, ParseStr};
 
 const ALL: &str = include_str!("../../fixtures/parser/ok/0012_fragment_definition.graphql");
 
 #[test]
 fn fragment_definition() {
+  use smear::parser::graphql::ast::{FragmentDefinition, ParseStr};
+
   let definition = FragmentDefinition::<&str>::parse_str(ALL)
   .unwrap();
   assert_eq!(definition.name().source(), "friendFields");
@@ -43,5 +44,51 @@ fn fragment_definition() {
     assert_eq!(argument.name().source(), "size");
     let value = argument.value();
     assert_eq!(value.unwrap_int_ref().source(), "50");
+  }
+}
+
+#[test]
+fn graphqlx_fragment_definition() {
+  use smear::parser::graphqlx::ast::{FragmentDefinition, ParseStr};
+
+  let definition = FragmentDefinition::<&str>::parse_str(ALL)
+  .unwrap();
+  assert_eq!(definition.name(), "friendFields");
+
+  let directives = definition.directives().cloned().unwrap();
+  assert_eq!(directives.directives().len(), 1);
+  let directive = directives.directives().first().unwrap();
+  assert_eq!(directive.name(), "example");
+  assert!(directive.arguments().is_none());
+
+  let type_condition = definition.type_condition();
+  assert_eq!(type_condition.path(), "User");
+  let selection_set = definition.selection_set();
+  assert_eq!(selection_set.selections().len(), 3);
+  let mut fields = selection_set.clone().into_selections().into_iter();
+
+  {
+    let id = fields.next().unwrap().unwrap_field();
+    assert_eq!(id.name(), "id");
+    assert!(id.selection_set().is_none());
+  }
+
+  {
+    let name = fields.next().unwrap().unwrap_field();
+    assert_eq!(name.name(), "name");
+    assert!(name.selection_set().is_none());
+  }
+
+  {
+    let profile_pic = fields.next().unwrap().unwrap_field();
+    assert_eq!(profile_pic.name(), "profilePic");
+    assert!(profile_pic.selection_set().is_none());
+
+    let arguments = profile_pic.arguments().cloned().unwrap();
+    assert_eq!(arguments.arguments().len(), 1);
+    let argument = arguments.arguments().first().unwrap();
+    assert_eq!(argument.name(), "size");
+    let value = argument.value();
+    assert_eq!(value.unwrap_int_ref().source().unwrap_decimal(), "50");
   }
 }

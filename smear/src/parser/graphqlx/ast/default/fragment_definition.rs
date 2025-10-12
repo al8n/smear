@@ -13,17 +13,80 @@ use crate::{
 
 use super::*;
 
-pub type TypeCondition<S> = scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, Type<S>>>;
-pub type RcTypeCondition<S> =
-  scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, RcType<S>>>;
-pub type ArcTypeCondition<S> =
-  scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, ArcType<S>>>;
+type TypeConditionAlias<S, Type> =
+  scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, Type>>;
+pub type RcTypeCondition<S> = TypeCondition<S, RcType<S>>;
+pub type ArcTypeCondition<S> = TypeCondition<S, ArcType<S>>;
 
 pub type FragmentTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, Type<S>>;
-
 pub type FragmentRcTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, RcType<S>>;
-
 pub type FragmentArcTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, ArcType<S>>;
+
+#[derive(Debug, Clone, From, Into)]
+pub struct TypeCondition<S, Ty = Type<S>>(TypeConditionAlias<S, Ty>);
+
+impl<S, Type> AsSpan<Span> for TypeCondition<S, Type> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S, Type> IntoSpan<Span> for TypeCondition<S, Type> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S, Type> IntoComponents for TypeCondition<S, Type> {
+  type Components = (Span, scaffold::generic::TypePath<Ident<S>, Type>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
+  }
+}
+
+impl<S, Type> TypeCondition<S, Type> {
+  /// Returns a reference to the span covering the entire type condition.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    self.0.span()
+  }
+
+  /// Returns the path of the type condition.
+  #[inline]
+  pub const fn path(&self) -> &super::ty::Path<S> {
+    self.0.name().path()
+  }
+
+  /// Returns the type generics of the type condition, if any.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Type>> {
+    self.0.name().type_generics()
+  }
+}
+
+impl<'a, S, Type, I, T, Error> Parseable<'a, I, T, Error> for TypeCondition<S, Type>
+where
+  TypeConditionAlias<S, Type>: Parseable<'a, I, T, Error>,
+  T: Token<'a>,
+  I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+  Error: 'a,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    scaffold::TypeCondition::parser().map(Self)
+  }
+}
 
 type FragmentDefinitionAlias<S> = scaffold::FragmentDefinition<
   And<Option<ExecutableDefinitionTypeGenerics<S>>, ExecutableDefinitionName<S>>,
@@ -87,14 +150,20 @@ impl<S> FragmentDefinition<S> {
 
   /// Returns the impl generics of the fragment definition, if any.
   #[inline]
-  pub const fn generics(&self) -> Option<&ExecutableDefinitionTypeGenerics<S>> {
+  pub const fn impl_generics(&self) -> Option<&ExecutableDefinitionTypeGenerics<S>> {
     self.0.name().first().as_ref()
   }
 
   /// Returns a reference to the name of the fragment definition.
   #[inline]
-  pub const fn name(&self) -> &ExecutableDefinitionName<S> {
-    self.0.name().second()
+  pub const fn name(&self) -> &Ident<S> {
+    self.0.name().second().ident()
+  }
+
+  /// Returns a reference to the name of the fragment definition.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&ExecutableDefinitionTypeGenerics<S>> {
+    self.0.name().second().generics()
   }
 
   /// Returns a reference to the type condition of the fragment definition.

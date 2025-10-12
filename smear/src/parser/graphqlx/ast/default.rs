@@ -1,11 +1,13 @@
 use super::*;
+
 use crate::{
   parser::ident::Ident,
   scaffold::{self, Location, OperationType, Path},
 };
 
 pub use directive::*;
-pub use fragment::*;
+pub use field::*;
+pub use fragment_definition::*;
 pub use input_object_type::*;
 pub use interface_type::*;
 pub use object_type::*;
@@ -13,8 +15,9 @@ pub use operation_definition::*;
 pub use union_type::*;
 
 mod directive;
-mod fragment;
+mod fragment_definition;
 
+mod field;
 mod fields_definition;
 mod input_fields_definition;
 mod input_object_type;
@@ -94,39 +97,7 @@ pub type DefaultVariablesContainer<S> = Vec<DescribedVariableDefinition<S>>;
 /// The default container type used for fields in the AST.
 pub type DefaultFieldsContainer<S> = Vec<FieldDefinition<S>>;
 
-pub type FragmentSpread<S> = scaffold::FragmentSpread<FragmentTypePath<S>, Directives<S>>;
-
-pub type InlineFragment<S> =
-  scaffold::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
-
-pub type Selection<S> = scaffold::StandardSelection<
-  Alias<S>,
-  Ident<S>,
-  FragmentTypePath<S>,
-  TypeCondition<S>,
-  Arguments<S>,
-  Directives<S>,
->;
-
-pub type SelectionSet<S> = scaffold::StandardSelectionSet<
-  Alias<S>,
-  Ident<S>,
-  FragmentTypePath<S>,
-  TypeCondition<S>,
-  Arguments<S>,
-  Directives<S>,
->;
-
 pub type Alias<S> = scaffold::Alias<Ident<S>>;
-
-pub type Field<S> = scaffold::StandardField<
-  Alias<S>,
-  Ident<S>,
-  FragmentTypePath<S>,
-  TypeCondition<S>,
-  Arguments<S>,
-  Directives<S>,
->;
 
 pub type ArgumentsDefinition<S> = scaffold::ArgumentsDefinition<InputValueDefinition<S>>;
 
@@ -174,9 +145,6 @@ pub type EnumTypeExtension<S> =
   scaffold::EnumTypeExtension<Path<Ident<S>>, ConstDirectives<S>, EnumValuesDefinition<S>>;
 
 pub type UnionMemberTypes<S> = scaffold::UnionMemberTypes<TypePath<S>>;
-
-pub type RootOperationTypeDefinition<S> =
-  scaffold::RootOperationTypeDefinition<TypePath<S>, OperationType>;
 
 pub type RootOperationTypesDefinition<S> =
   scaffold::RootOperationTypesDefinition<RootOperationTypeDefinition<S>>;

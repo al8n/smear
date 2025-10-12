@@ -3,7 +3,7 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman,
-    sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree,
+    sdl_display::DisplaySDL,
   },
 };
 
@@ -172,39 +172,5 @@ where
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     self.value.fmt(f)
-  }
-}
-
-impl<S> DisplaySyntaxTree for FragmentName<S>
-where
-  S: DisplayHuman,
-{
-  #[inline]
-  fn fmt(
-    &self,
-    level: usize,
-    indent: usize,
-    f: &mut core::fmt::Formatter<'_>,
-  ) -> core::fmt::Result {
-    let mut padding = level * indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(
-      f,
-      "- FRAGMENT_NAME@{}..{}",
-      self.span.start(),
-      self.span.end()
-    )?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    writeln!(f, "- NAME@{}..{}", self.span.start(), self.span.end())?;
-    padding += indent;
-    write!(f, "{:indent$}", "", indent = padding)?;
-    write!(
-      f,
-      "- IDENT@{}..{} \"{}\"",
-      self.span.start(),
-      self.span.end(),
-      self.value.display(),
-    )
   }
 }

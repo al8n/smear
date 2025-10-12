@@ -90,3 +90,87 @@ where
     ))
   }
 }
+
+/// A GraphQL type extension.
+#[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeExtension<S> {
+  /// The scalar type extension.
+  Scalar(ScalarTypeExtension<S>),
+  /// The object type extension.
+  Object(ObjectTypeExtension<S>),
+  /// The interface type extension.
+  Interface(InterfaceTypeExtension<S>),
+  /// The union type extension.
+  Union(UnionTypeExtension<S>),
+  /// The enum type extension.
+  Enum(EnumTypeExtension<S>),
+  /// The input object type extension.
+  InputObject(InputObjectTypeExtension<S>),
+}
+
+impl<S> AsSpan<Span> for TypeExtension<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S> IntoSpan<Span> for TypeExtension<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Scalar(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+      Self::Interface(v) => v.into_span(),
+      Self::Union(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::InputObject(v) => v.into_span(),
+    }
+  }
+}
+
+impl<S> TypeExtension<S> {
+  /// Returns the span of the type extension.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Scalar(v) => v.span(),
+      Self::Object(v) => v.span(),
+      Self::Interface(v) => v.span(),
+      Self::Union(v) => v.span(),
+      Self::Enum(v) => v.span(),
+      Self::InputObject(v) => v.span(),
+    }
+  }
+}
+
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for TypeExtension<S>
+where
+  ScalarTypeExtension<S>: Parseable<'a, I, T, Error>,
+  ObjectTypeExtension<S>: Parseable<'a, I, T, Error>,
+  InterfaceTypeExtension<S>: Parseable<'a, I, T, Error>,
+  UnionTypeExtension<S>: Parseable<'a, I, T, Error>,
+  EnumTypeExtension<S>: Parseable<'a, I, T, Error>,
+  InputObjectTypeExtension<S>: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: Token<'a>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    choice((
+      ScalarTypeExtension::parser::<E>().map(Self::Scalar),
+      ObjectTypeExtension::parser::<E>().map(Self::Object),
+      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
+      UnionTypeExtension::parser::<E>().map(Self::Union),
+      EnumTypeExtension::parser::<E>().map(Self::Enum),
+      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
+    ))
+  }
+}
