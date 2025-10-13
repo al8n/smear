@@ -126,7 +126,6 @@ pub enum AstTokenKind {
   Float,
   InlineString,
   BlockString,
-  String,
   Dollar,
   LParen,
   RParen,

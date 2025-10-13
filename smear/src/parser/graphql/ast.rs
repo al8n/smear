@@ -6,7 +6,10 @@ use logosky::{
   utils::{Span, recursion_tracker::RecursionLimitExceeded},
 };
 
-use super::error::{Error, Errors, Extra};
+use super::{
+  Expectation,
+  error::{Error, Errors, Extra},
+};
 use crate::lexer::graphql::ast::{AstToken, AstTokenChar, AstTokenKind};
 
 pub use default::*;
@@ -28,17 +31,45 @@ mod ty;
 mod type_system;
 mod value;
 
+impl From<AstTokenKind> for Expectation {
+  #[inline]
+  fn from(kind: AstTokenKind) -> Self {
+    match kind {
+      AstTokenKind::Identifier => Self::Name,
+      AstTokenKind::InlineString => Self::InlineString,
+      AstTokenKind::BlockString => Self::BlockString,
+      AstTokenKind::Dollar => Self::Dollar,
+      AstTokenKind::At => Self::At,
+      AstTokenKind::Ampersand => Self::Ampersand,
+      AstTokenKind::Spread => Self::Spread,
+      AstTokenKind::Pipe => Self::Pipe,
+      AstTokenKind::Equal => Self::Equal,
+      AstTokenKind::Colon => Self::Colon,
+      AstTokenKind::Bang => Self::Bang,
+      AstTokenKind::LBrace => Self::LBrace,
+      AstTokenKind::RBrace => Self::RBrace,
+      AstTokenKind::LBracket => Self::LBracket,
+      AstTokenKind::RBracket => Self::RBracket,
+      AstTokenKind::LParen => Self::LParen,
+      AstTokenKind::RParen => Self::RParen,
+      AstTokenKind::Int => Self::IntValue,
+      AstTokenKind::Float => Self::FloatValue,
+      AstTokenKind::Boolean => Self::BooleanValue,
+    }
+  }
+}
+
 /// The token stream type used for the AST parser implementation.
 pub type AstTokenStream<'a, S> = logosky::TokenStream<'a, AstToken<S>>;
 /// The parser extra type used for the AST parser implementation.
 pub type AstParserExtra<'a, S> =
-  Extra<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Extra<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The error type used for the AST parser implementation.
 pub type AstTokenError<'a, S> =
-  Error<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Error<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The errors type used for the AST parser implementation.
 pub type AstTokenErrors<'a, S> =
-  Errors<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Errors<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;

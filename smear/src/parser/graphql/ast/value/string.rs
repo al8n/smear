@@ -4,7 +4,7 @@ use logosky::{
   utils::Span,
 };
 
-use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
+use crate::lexer::graphql::ast::AstLexerErrors;
 
 use super::super::*;
 
@@ -29,7 +29,7 @@ where
         Ok(match tok {
           AstToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
           AstToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
-          tok => return Err(Error::unexpected_token(tok, AstTokenKind::String, span).into()),
+          tok => return Err(Error::unexpected_token(tok, Expectation::StringValue, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -55,7 +55,7 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           AstToken::LitInlineStr(raw) => InlineStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, AstTokenKind::InlineString, span).into()),
+          tok => return Err(Error::unexpected_token(tok, Expectation::InlineString, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -81,7 +81,7 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           AstToken::LitBlockStr(raw) => BlockStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, AstTokenKind::BlockString, span).into()),
+          tok => return Err(Error::unexpected_token(tok, Expectation::BlockString, span).into()),
         })
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

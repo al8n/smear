@@ -1,10 +1,17 @@
-use crate::{lexer::graphql::ast::AstLexerErrors, scaffold};
+use crate::{
+  error::{UnclosedBraceError as _, UnclosedBracketError},
+  lexer::graphql::ast::AstLexerErrors,
+  punctuator::{RBrace, RBracket},
+  scaffold,
+};
 
-use super::{AstToken, AstTokenErrors, AstTokenStream, AstTokenError, DefaultVec, Name};
+use super::{
+  AstToken, AstTokenError, AstTokenErrors, AstTokenStream, DefaultVec, Expectation, Name,
+};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*, select},
+  chumsky::{Parser, extra::ParserExtra, prelude::*},
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
@@ -25,37 +32,16 @@ mod int;
 mod null_value;
 mod string;
 
-macro_rules! atom_parser {
-  () => {{
-    select! {
-      Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
-        match () {
-          () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
-          () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
-          () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-          _ => Self::Enum(EnumValue::new(span, name)),
-        }
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitInt(val) }) => {
-        Self::Int(IntValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitFloat(val) }) => {
-        Self::Float(FloatValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-      Lexed::Token(Spanned { span, data: AstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-    }
-  }};
-}
-
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
 pub type Object<S, Container = DefaultVec<InputValue<S>>> =
   scaffold::Object<Name<S>, InputValue<S>, Container>;
+pub type ObjectField<S> = scaffold::ObjectField<Name<S>, InputValue<S>>;
 
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::List<ConstInputValue<S>, Container>;
 pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Object<Name<S>, ConstInputValue<S>, Container>;
+pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
 
 /// GraphQL Input Value
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
@@ -122,6 +108,8 @@ where
   AstToken<S>: Token<'a>,
   <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
   <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
@@ -137,77 +125,106 @@ where
     AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      let object_value_parser =
-        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
-
-      let all = custom::<_, AstTokenStream<'_, S>, Self, E>(|inp| {
+      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
         let before = inp.cursor();
 
         match inp.next() {
+          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
               inp.save();
               Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
             }
-            Lexed::Token(Spanned {
-              span,
-              data: token,
-            }) => {
+            Lexed::Token(Spanned { span, data: token }) => {
               let output = match token {
-                AstToken::Ampersand => todo!(),
-                AstToken::At => todo!(),
-                AstToken::RBrace => todo!(),
-                AstToken::RBracket => todo!(),
-                AstToken::RParen => todo!(),
-                AstToken::Colon => todo!(),
-                AstToken::Dollar => todo!(),
-                AstToken::Equal => todo!(),
-                AstToken::Bang => todo!(),
-                AstToken::LParen => todo!(),
-                AstToken::Pipe => todo!(),
-                AstToken::Spread => todo!(),
-                AstToken::LBrace => todo!(),
-                AstToken::LBracket => todo!(),
-                AstToken::Identifier(name) => {
-                  match () {
-                    () if "true".equivalent(&name) => {
-                      Self::Boolean(BooleanValue::new(span, true))
-                    }
-                    () if "false".equivalent(&name) => {
-                      Self::Boolean(BooleanValue::new(span, false))
-                    }
-                    () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-                    _ => Self::Enum(EnumValue::new(span, name)),
-                  }
-                },
                 AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
                 AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
                 AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
                 AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::Identifier(name) => match () {
+                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+                  _ => Self::Enum(EnumValue::new(span, name)),
+                },
+                AstToken::Dollar => {
+                  let current_cursor = inp.cursor();
+                  let name = match inp.next() {
+                    Some(Lexed::Token(Spanned {
+                      span,
+                      data: AstToken::Identifier(name),
+                    })) => Name::new(span, name),
+                    Some(Lexed::Token(Spanned { span, data })) => {
+                      inp.save();
+                      return Err(
+                        AstTokenError::unexpected_token(data, Expectation::Name, span).into(),
+                      );
+                    }
+                    Some(Lexed::Error(err)) => {
+                      inp.save();
+                      return Err(
+                        AstTokenError::from_lexer_errors(err, inp.span_since(&current_cursor))
+                          .into(),
+                      );
+                    }
+                    None => {
+                      inp.save();
+                      return Err(
+                        AstTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
+                          .into(),
+                      );
+                    }
+                  };
+                  Self::Variable(VariableValue::new(inp.span_since(&before), name))
+                }
+                AstToken::LBrace => {
+                  let (fields, rbrace) = inp.parse(
+                    ObjectField::<S>::parser_with(Name::<S>::parser(), parser.clone())
+                      .repeated()
+                      .collect()
+                      .then(RBrace::parser().or_not()),
+                  )?;
+                  inp.save();
+                  return match rbrace {
+                    Some(_) => Ok(Self::Object(scaffold::Object::new(
+                      inp.span_since(&before),
+                      fields,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                  };
+                }
+                AstToken::LBracket => {
+                  let (elements, rbracket) = inp.parse(
+                    parser
+                      .clone()
+                      .repeated()
+                      .collect()
+                      .then(RBracket::parser().or_not()),
+                  )?;
+                  inp.save();
+
+                  return match rbracket {
+                    Some(_) => Ok(Self::List(scaffold::List::new(
+                      inp.span_since(&before),
+                      elements,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                  };
+                }
+                tok => {
+                  inp.save();
+                  return Err(
+                    AstTokenError::unexpected_token(tok, Expectation::InputValue, span).into(),
+                  );
+                }
               };
 
               inp.save();
               Ok(output)
-            },
-          },
-          None => {
-            Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into())
+            }
           },
         }
-      });
-
-      choice((
-        atom_parser!(),
-        select! {
-          Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
-        }
-        .then(Name::parser::<E>())
-        .map(|(span, name)| VariableValue::new(span.with_end(name.span().end()), name))
-        .map(Self::Variable),
-        list_value_parser,
-        object_value_parser,
-      ))
+      })
     })
   }
 }
@@ -273,6 +290,8 @@ where
   AstToken<S>: Token<'a>,
   <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
   <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
@@ -288,11 +307,76 @@ where
     AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      let object_value_parser =
-        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
+      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
+        let before = inp.cursor();
 
-      choice((atom_parser!(), object_value_parser, list_value_parser))
+        match inp.next() {
+          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          Some(tok) => match tok {
+            Lexed::Error(err) => {
+              inp.save();
+              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+            }
+            Lexed::Token(Spanned { span, data: token }) => {
+              let output = match token {
+                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::Identifier(name) => match () {
+                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+                  _ => Self::Enum(EnumValue::new(span, name)),
+                },
+                AstToken::LBrace => {
+                  let (fields, rbrace) = inp.parse(
+                    ConstObjectField::<S>::parser_with(Name::<S>::parser(), parser.clone())
+                      .repeated()
+                      .collect()
+                      .then(RBrace::parser().or_not()),
+                  )?;
+                  inp.save();
+                  return match rbrace {
+                    Some(_) => Ok(Self::Object(scaffold::Object::new(
+                      inp.span_since(&before),
+                      fields,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                  };
+                }
+                AstToken::LBracket => {
+                  let (elements, rbracket) = inp.parse(
+                    parser
+                      .clone()
+                      .repeated()
+                      .collect()
+                      .then(RBracket::parser().or_not()),
+                  )?;
+                  inp.save();
+
+                  return match rbracket {
+                    Some(_) => Ok(Self::List(scaffold::List::new(
+                      inp.span_since(&before),
+                      elements,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                  };
+                }
+                tok => {
+                  inp.save();
+                  return Err(
+                    AstTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into(),
+                  );
+                }
+              };
+
+              inp.save();
+              Ok(output)
+            }
+          },
+        }
+      })
     })
   }
 }

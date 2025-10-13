@@ -4,8 +4,8 @@ use logosky::{
   utils::Span,
 };
 
-use super::{AstToken, AstTokenErrors, AstTokenStream, Error};
-use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
+use super::{AstToken, AstTokenErrors, AstTokenStream, Error, Expectation};
+use crate::lexer::graphql::ast::AstLexerErrors;
 
 /// A GraphQL name identifier.
 ///
@@ -78,7 +78,7 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           AstToken::Identifier(name) => Ok(Name::new(span, name)),
-          tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, Expectation::Name, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

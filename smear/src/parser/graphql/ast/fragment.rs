@@ -38,7 +38,7 @@ where
               Ok(FragmentName::new(span, name))
             }
           }
-          tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, Expectation::FragmentName, span).into()),
         }
       }
       Lexed::Error(err) => Err(AstTokenError::from_lexer_errors(err, span).into()),

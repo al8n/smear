@@ -4,7 +4,7 @@ use logosky::{
   utils::{Span, cmp::Equivalent},
 };
 
-use crate::lexer::graphql::ast::{AstLexerErrors, AstTokenKind};
+use crate::lexer::graphql::ast::AstLexerErrors;
 
 use super::super::*;
 
@@ -37,7 +37,7 @@ where
             }
             _ => Ok(EnumValue::new(span, name)),
           },
-          tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(tok, Expectation::EnumValue, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
