@@ -1,0 +1,6 @@
+import { User, Post } from "./types.graphqlx"
+
+type Query {
+  user: User
+  post: Post
+}

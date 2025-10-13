@@ -1,0 +1,14 @@
+"Nested map values"
+
+input AdvancedConfig {
+  database: <
+    String! => <String! => String!>!
+  >! = map {
+    "host" => "localhost"
+    "port" => "5432"
+    "credentials" => map {
+      "username" => "admin"
+      "password" => "secret"
+    }
+  }
+}

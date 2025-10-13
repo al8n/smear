@@ -12,8 +12,18 @@ type UnionTypeDefinitionAlias<S> =
 type UnionTypeExtensionAlias<S> =
   scaffold::UnionTypeExtension<ExtensionName<S>, ConstDirectives<S>, UnionMemberTypes<S>>;
 
+/// A union type definition with an optional description.
+///
+/// ## Grammar
+///
+/// ```text
+/// DescribedUnionTypeDefinition : Description? UnionTypeDefinition
+/// ```
 pub type DescribedUnionTypeDefinition<S> = Described<UnionTypeDefinition<S>, S>;
 
+/// Union member types with an optional where clause.
+///
+/// Groups the union member types with their associated generic constraints.
 #[derive(Debug, Clone, From, Into)]
 pub(super) struct UnionMemberTypes<S> {
   where_clause: Option<WhereClause<S>>,
@@ -66,6 +76,21 @@ where
   }
 }
 
+/// A GraphQLx union type definition.
+///
+/// Represents a union of multiple object types, where a field can return
+/// any one of the union's member types. Supports generic type parameters
+/// and where clauses for type constraints.
+///
+/// ## Grammar
+///
+/// ```text
+/// UnionTypeDefinition :
+///   union Name TypeGenerics? Directives? UnionMemberTypes? WhereClause?
+///
+/// UnionMemberTypes :
+///   = |? TypePath (| TypePath)*
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct UnionTypeDefinition<S>(UnionTypeDefinitionAlias<S>);
 
@@ -157,6 +182,18 @@ where
   }
 }
 
+/// A GraphQLx union type extension.
+///
+/// Extends an existing union type by adding directives or additional
+/// member types. Supports generic type parameters.
+///
+/// ## Grammar
+///
+/// ```text
+/// UnionTypeExtension :
+///   extend union Path TypeGenerics? Directives WhereClause?
+///   extend union Path TypeGenerics? UnionMemberTypes WhereClause?
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct UnionTypeExtension<S>(UnionTypeExtensionAlias<S>);
 

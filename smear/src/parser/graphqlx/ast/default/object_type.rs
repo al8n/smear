@@ -20,8 +20,27 @@ type ObjectTypeExtensionAlias<S> = scaffold::ObjectTypeExtension<
   FieldsDefinition<S>,
 >;
 
+/// An object type definition with an optional description.
+///
+/// ## Grammar
+///
+/// ```text
+/// DescribedObjectTypeDefinition : Description? ObjectTypeDefinition
+/// ```
 pub type DescribedObjectTypeDefinition<S> = Described<ObjectTypeDefinition<S>, S>;
 
+/// A GraphQLx object type definition.
+///
+/// Represents a concrete type that defines a set of named fields and can
+/// implement one or more interfaces. Supports generic type parameters and
+/// where clauses for type constraints.
+///
+/// ## Grammar
+///
+/// ```text
+/// ObjectTypeDefinition :
+///   type Name TypeGenerics? ImplementsInterfaces? Directives? WhereClause? FieldsDefinition?
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct ObjectTypeDefinition<S>(ObjectTypeDefinitionAlias<S>);
 
@@ -139,6 +158,19 @@ where
   }
 }
 
+/// A GraphQLx object type extension.
+///
+/// Extends an existing object type by adding directives, implementing
+/// additional interfaces, or adding fields. Supports generic type parameters.
+///
+/// ## Grammar
+///
+/// ```text
+/// ObjectTypeExtension :
+///   extend type Path TypeGenerics? ImplementsInterfaces? Directives
+///   extend type Path TypeGenerics? ImplementsInterfaces? WhereClause? FieldsDefinition
+///   extend type Path TypeGenerics? ImplementsInterfaces
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct ObjectTypeExtension<S>(ObjectTypeExtensionAlias<S>);
 

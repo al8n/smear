@@ -1,0 +1,12 @@
+"Type with where clause constraint"
+
+type Repository<T>
+  where T: Node
+{
+  items: [T!]!
+  count: Int
+}
+
+interface Node {
+  id: ID!
+}

@@ -1,0 +1,16 @@
+"Fat arrow operator in map values"
+
+input Config {
+  routes: <String! => String!> = map {
+    "/home" => "HomePage"
+    "/about" => "AboutPage"
+    "/contact" => "ContactPage"
+  }
+
+  handlers: <String! => <Int! => String!>!>! = map {
+    "error" => map {
+      404 => "NotFoundHandler"
+      500 => "ServerErrorHandler"
+    }
+  }
+}

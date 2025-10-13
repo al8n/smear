@@ -1,0 +1,11 @@
+type Box<T> {
+  value: T
+}
+
+extend type Box<T> {
+  metadata: String
+}
+
+extend type Box<String> {
+  length: Int
+}

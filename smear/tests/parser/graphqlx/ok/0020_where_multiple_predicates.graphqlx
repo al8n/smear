@@ -1,0 +1,22 @@
+"Type with where clause having multiple predicates"
+
+type Container<T, U>
+  where
+    T: Node & Timestamped
+    U: Serializable
+{
+  primary: T
+  secondary: U
+}
+
+interface Node {
+  id: ID!
+}
+
+interface Timestamped {
+  createdAt: String
+}
+
+interface Serializable {
+  serialize: String
+}

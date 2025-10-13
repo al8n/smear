@@ -1,0 +1,9 @@
+"Union type with path types"
+
+union SearchResult<I> = user::Profile<I> | blog::Post<I> | meida::Image<I>
+where
+  I: ID
+
+interface ID {
+  id: String!
+}

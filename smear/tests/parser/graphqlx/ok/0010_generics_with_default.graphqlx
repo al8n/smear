@@ -1,0 +1,12 @@
+"Type with generic parameter and default value"
+
+type Response<T = String> {
+  data: T
+  error: String
+  status: Int
+}
+
+type Query {
+  defaultResponse: Response
+  intResponse: Response<Int>
+}

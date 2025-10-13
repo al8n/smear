@@ -1,0 +1,8 @@
+"Map value in input type"
+
+input ConfigInput {
+  settings: <String! => String!>! = map {
+    "theme" => "dark"
+    "locale" => "en-US"
+  }
+}

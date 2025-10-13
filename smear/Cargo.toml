@@ -13,9 +13,11 @@ default = ["std", "smallvec", "graphql", "graphqlx"]
 alloc = []
 std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
+unstable = []
+
 cst = ["std"]
 graphql = []
-graphqlx = []
+graphqlx = ["unstable"]
 
 bytes = ["dep:bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "logosky/bstr"]

@@ -18,8 +18,26 @@ type InputObjectTypeExtensionAlias<S> = scaffold::InputObjectTypeExtension<
   InputFieldsDefinition<S>,
 >;
 
+/// An input object type definition with an optional description.
+///
+/// ## Grammar
+///
+/// ```text
+/// DescribedInputObjectTypeDefinition : Description? InputObjectTypeDefinition
+/// ```
 pub type DescribedInputObjectTypeDefinition<S> = Described<InputObjectTypeDefinition<S>, S>;
 
+/// A GraphQLx input object type definition.
+///
+/// Represents an input object type used for complex input values in mutations
+/// and queries. Supports generic type parameters and where clauses.
+///
+/// ## Grammar
+///
+/// ```text
+/// InputObjectTypeDefinition :
+///   input Name TypeGenerics? Directives? WhereClause? InputFieldsDefinition?
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InputObjectTypeDefinition<S>(InputObjectTypeDefinitionAlias<S>);
 
@@ -123,6 +141,18 @@ where
   }
 }
 
+/// A GraphQLx input object type extension.
+///
+/// Extends an existing input object type by adding directives or additional
+/// input fields. Supports generic type parameters.
+///
+/// ## Grammar
+///
+/// ```text
+/// InputObjectTypeExtension :
+///   extend input Path TypeGenerics? Directives
+///   extend input Path TypeGenerics? WhereClause? InputFieldsDefinition
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InputObjectTypeExtension<S>(InputObjectTypeExtensionAlias<S>);
 

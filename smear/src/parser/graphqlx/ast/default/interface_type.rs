@@ -20,8 +20,27 @@ type InterfaceTypeExtensionAlias<S> = scaffold::InterfaceTypeExtension<
   FieldsDefinition<S>,
 >;
 
+/// An interface type definition with an optional description.
+///
+/// ## Grammar
+///
+/// ```text
+/// DescribedInterfaceTypeDefinition : Description? InterfaceTypeDefinition
+/// ```
 pub type DescribedInterfaceTypeDefinition<S> = Described<InterfaceTypeDefinition<S>, S>;
 
+/// A GraphQLx interface type definition.
+///
+/// Represents an abstract type that defines a set of fields which object
+/// types can implement. Supports generic type parameters, interface
+/// inheritance, and where clauses.
+///
+/// ## Grammar
+///
+/// ```text
+/// InterfaceTypeDefinition :
+///   interface Name TypeGenerics? ImplementsInterfaces? Directives? WhereClause? FieldsDefinition?
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InterfaceTypeDefinition<S>(InterfaceTypeDefinitionAlias<S>);
 
@@ -74,37 +93,37 @@ impl<S> IntoComponents for InterfaceTypeDefinition<S> {
 }
 
 impl<S> InterfaceTypeDefinition<S> {
-  /// Returns the span of the object type definition.
+  /// Returns the span of the interface type definition.
   #[inline]
   pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
-  /// Returns the name of the object type definition.
+  /// Returns the name of the interface type definition.
   #[inline]
   pub const fn name(&self) -> &Ident<S> {
     self.0.name().name()
   }
 
-  /// Returns the type generics of the object type definition, if any.
+  /// Returns the type generics of the interface type definition, if any.
   #[inline]
   pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
     self.0.name().generics()
   }
 
-  /// Returns the implemented interfaces of the object type definition, if any.
+  /// Returns the implemented interfaces of the interface type definition, if any.
   #[inline]
   pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
     self.0.implements()
   }
 
-  /// Returns the directives of the object type definition, if any.
+  /// Returns the directives of the interface type definition, if any.
   #[inline]
   pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
     self.0.directives()
   }
 
-  /// Returns the where clause of the object type definition, if any.
+  /// Returns the where clause of the interface type definition, if any.
   #[inline]
   pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
     match self.0.fields_definition() {
@@ -113,7 +132,7 @@ impl<S> InterfaceTypeDefinition<S> {
     }
   }
 
-  /// Returns the fields definition of the object type definition.
+  /// Returns the fields definition of the interface type definition.
   #[inline]
   pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
     match self.0.fields_definition() {
@@ -139,6 +158,19 @@ where
   }
 }
 
+/// A GraphQLx interface type extension.
+///
+/// Extends an existing interface type by adding directives, implementing
+/// additional interfaces, or adding fields. Supports generic type parameters.
+///
+/// ## Grammar
+///
+/// ```text
+/// InterfaceTypeExtension :
+///   extend interface Path TypeGenerics? ImplementsInterfaces? Directives
+///   extend interface Path TypeGenerics? ImplementsInterfaces? WhereClause? FieldsDefinition
+///   extend interface Path TypeGenerics? ImplementsInterfaces
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InterfaceTypeExtension<S>(InterfaceTypeExtensionAlias<S>);
 
@@ -209,37 +241,37 @@ impl<S> IntoComponents for InterfaceTypeExtension<S> {
 }
 
 impl<S> InterfaceTypeExtension<S> {
-  /// Returns the span of the object type extension.
+  /// Returns the span of the interface type extension.
   #[inline]
   pub const fn span(&self) -> &Span {
     self.0.span()
   }
 
-  /// Returns the path of the object type extension.
+  /// Returns the path of the interface type extension.
   #[inline]
   pub const fn path(&self) -> &Path<S> {
     self.0.name().path()
   }
 
-  /// Returns the generics of the object type extension, if any.
+  /// Returns the generics of the interface type extension, if any.
   #[inline]
   pub const fn type_generics(&self) -> Option<&ExtensionTypeGenerics<S>> {
     self.0.name().generics()
   }
 
-  /// Returns the implemented interfaces of the object type extension, if any.
+  /// Returns the implemented interfaces of the interface type extension, if any.
   #[inline]
   pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
     self.0.implements()
   }
 
-  /// Returns the directives of the object type extension, if any.
+  /// Returns the directives of the interface type extension, if any.
   #[inline]
   pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
     self.0.directives()
   }
 
-  /// Returns the where clause of the object type extension, if any.
+  /// Returns the where clause of the interface type extension, if any.
   #[inline]
   pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
     match self.0.fields_definition() {
@@ -248,7 +280,7 @@ impl<S> InterfaceTypeExtension<S> {
     }
   }
 
-  /// Returns the fields definition of the object type extension, if any.
+  /// Returns the fields definition of the interface type extension, if any.
   #[inline]
   pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
     match self.0.fields_definition() {

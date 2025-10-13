@@ -19,6 +19,18 @@ type DirectiveDefinitionAlias<S> = scaffold::DirectiveDefinition<
   And<DirectiveLocations<Location>, Option<WhereClause<S>>>,
 >;
 
+/// A GraphQLx directive definition.
+///
+/// Defines a custom directive that can be applied to various locations
+/// in a GraphQL schema or query. Directives provide a way to describe
+/// additional metadata or execution behavior.
+///
+/// ## Grammar
+///
+/// ```text
+/// DirectiveDefinition :
+///   Description? directive @ Name TypeGenerics? ArgumentsDefinition? repeatable? on DirectiveLocations WhereClause?
+/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct DirectiveDefinition<S>(DirectiveDefinitionAlias<S>);
 

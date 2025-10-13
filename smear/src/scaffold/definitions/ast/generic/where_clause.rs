@@ -286,6 +286,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
       .ignore_then(
         WherePredicate::parser_with(ident_parser, type_parser)
           .repeated()
+          .at_least(1)
           .collect(),
       )
       .map_with(|predicates, exa| Self::new(exa.span(), predicates))

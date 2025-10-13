@@ -1,0 +1,11 @@
+"Type with generic parameters"
+
+type Container<T> {
+  value: T
+  count: Int
+}
+
+type Query {
+  stringContainer: Container<String!>
+  intContainer: Container<Int>
+}

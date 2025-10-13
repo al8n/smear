@@ -1,0 +1,7 @@
+"Using path types for namespaced types"
+
+type Query {
+  user: user::Profile
+  post: blog::Post
+}
+
