@@ -18,7 +18,7 @@ impl<S> Ident<S> {
   /// The span represents the location of the identifier in the source text,
   /// and the value is the actual source text.
   #[inline]
-  pub const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 

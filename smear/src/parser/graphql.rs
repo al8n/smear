@@ -58,6 +58,8 @@ pub enum Expectation {
   OperationName,
   /// An directive location was expected.
   DirectiveLocation,
+  /// Either a fragment spread or an inline fragment was expected.
+  FragmentSpreadOrInlineFragment,
   /// A number was expected.
   IntValue,
   /// A boolean was expected.

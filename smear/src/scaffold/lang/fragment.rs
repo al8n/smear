@@ -73,9 +73,8 @@ impl<S> IntoComponents for FragmentName<S> {
 }
 
 impl<S> FragmentName<S> {
-  /// Creates a new fragment name.
   #[inline]
-  pub const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 
@@ -158,6 +157,10 @@ pub struct TypeCondition<Name> {
 }
 
 impl<Name> TypeCondition<Name> {
+  pub(crate) const fn new(span: Span, name: Name) -> Self {
+    Self { span, name }
+  }
+
   /// Returns a reference to the span covering the entire type condition.
   ///
   /// The span includes both the `on` keyword and the type name.
@@ -323,6 +326,15 @@ impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, D
 }
 
 impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
+  #[inline]
+  pub(crate) const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+    }
+  }
+
   /// Returns a reference to the span covering the entire fragment spread.
   ///
   /// The span includes the ellipsis (`...`), fragment name, and any directives.
@@ -504,6 +516,20 @@ impl<TypeCondition, Directives, SelectionSet> IntoComponents
 impl<TypeCondition, Directives, SelectionSet>
   InlineFragment<TypeCondition, Directives, SelectionSet>
 {
+  pub(crate) const fn new(
+    span: Span,
+    type_condition: Option<TypeCondition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      span,
+      type_condition,
+      directives,
+      selection_set,
+    }
+  }
+
   /// Returns a reference to the span covering the entire inline fragment.
   ///
   /// The span includes the ellipsis, type condition (if present), directives,
