@@ -48,39 +48,7 @@ pub type DefaultVariablesContainer<S> = Vec<DescribedVariableDefinition<S>>;
 /// The default container type used for fields in the AST.
 pub type DefaultFieldsContainer<S> = Vec<FieldDefinition<S>>;
 
-// pub type FragmentSpread<S> = scaffold::FragmentSpread<FragmentName<S>, Directives<S>>;
-
-// pub type InlineFragment<S> =
-//   scaffold::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
-
-// pub type Selection<S> = scaffold::StandardSelection<
-//   Alias<S>,
-//   Name<S>,
-//   FragmentName<S>,
-//   TypeCondition<S>,
-//   Arguments<S>,
-//   Directives<S>,
-// >;
-
-// pub type SelectionSet<S> = scaffold::StandardSelectionSet<
-//   Alias<S>,
-//   Name<S>,
-//   FragmentName<S>,
-//   TypeCondition<S>,
-//   Arguments<S>,
-//   Directives<S>,
-// >;
-
 pub type Alias<S> = scaffold::Alias<Name<S>>;
-
-// pub type Field<S> = scaffold::StandardField<
-//   Alias<S>,
-//   Name<S>,
-//   FragmentName<S>,
-//   TypeCondition<S>,
-//   Arguments<S>,
-//   Directives<S>,
-// >;
 
 pub type ArgumentsDefinition<S> = scaffold::ArgumentsDefinition<InputValueDefinition<S>>;
 

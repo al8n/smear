@@ -1,4 +1,8 @@
-use crate::lexer::graphql::ast::AstLexerErrors;
+use crate::{
+  error::UnclosedBraceError,
+  lexer::graphql::ast::AstLexerErrors,
+  punctuator::{At, RBrace},
+};
 
 use super::*;
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
@@ -75,11 +79,7 @@ where
       )
       .map(Field::from);
 
-      // let inline_p = InlineFragment::parser_with(selection_set.clone()).map(Self::InlineFragment);
-      // let spread_p = FragmentSpread::parser().map(Self::FragmentSpread);
-      // choice((field_p.map(Self::Field), spread_p, inline_p))
-
-      field_p.map(Self::Field).or(fragment_parser(selection_set))
+      field_p.map(Self::Field).or(fragment_parser(selection))
     })
   }
 }
@@ -194,18 +194,9 @@ where
     recursive(|field_parser| {
       // Inner fixpoint: build a `Selection<S>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
-        // StandardSelectionSet needs a `Selection` parser
-        let selection_set = SelectionSet::parser_with(selection.clone());
-
-        // let spread = FragmentSpread::parser().map(|fs| Selection::FragmentSpread(fs));
-
-        // let inline =
-        //   InlineFragment::parser_with(selection_set.clone()).map(|f| Selection::InlineFragment(f));
-        // choice((field_parser.map(Selection::Field), spread, inline))
-
         field_parser
           .map(Selection::Field)
-          .or(fragment_parser(selection_set))
+          .or(fragment_parser(selection))
       });
 
       // Pass the selection parser to the selection set
@@ -218,14 +209,17 @@ where
 }
 
 fn fragment_parser<'a, S, E>(
-  selection_set: impl Parser<'a, AstTokenStream<'a, S>, SelectionSet<S>, E> + Clone,
+  selection_parser: impl Parser<'a, AstTokenStream<'a, S>, Selection<S>, E> + Clone + 'a,
 ) -> impl Parser<'a, AstTokenStream<'a, S>, Selection<S>, E> + Clone
 where
   AstToken<S>: Token<'a>,
   <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
   <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  Directive<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
   Directives<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  At: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
   S: 'a,
   E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
@@ -247,7 +241,6 @@ where
       Some(Lexed::Token(Spanned { span, data: token })) => {
         match token {
           AstToken::Spread => {
-            let ckp = inp.save();
             let current_cursor = inp.cursor();
 
             match inp.next() {
@@ -278,9 +271,9 @@ where
                     let ((name, directives), selection_set) = inp.parse(
                       Name::<S>::parser()
                         .then(Directives::parser().or_not())
-                        .then(selection_set.clone()),
+                        .then(SelectionSet::parser_with(selection_parser.clone())),
                     )?;
-                    let tc = TypeCondition::new(fragment_span, name);
+                    let tc = TypeCondition::new((fragment_span.start()..name.span().end()).into(), name);
                     Ok(Selection::InlineFragment(InlineFragment::new(
                       inp.span_since(&before),
                       Some(tc),
@@ -289,19 +282,38 @@ where
                     )))
                   }
                   AstToken::LBrace => {
-                    inp.rewind(ckp);
-                    let selection_set = inp.parse(selection_set.clone())?;
-                    Ok(Selection::InlineFragment(InlineFragment::new(
-                      inp.span_since(&before),
-                      None,
-                      None,
-                      selection_set,
-                    )))
+                    let (selection, rbrace) = inp.parse(
+                      selection_parser
+                        .clone()
+                        .repeated()
+                        .at_least(1)
+                        .collect()
+                        .then(RBrace::parser().or_not()),
+                    )?;
+
+                    match rbrace {
+                      None => Err(AstTokenError::unclosed_brace(inp.span_since(&before)).into()),
+                      Some(_) => {
+                        let span = inp.span_since(&before);
+                        Ok(Selection::InlineFragment(InlineFragment::new(
+                          span,
+                          None,
+                          None,
+                          SelectionSet::new(span, selection),
+                        )))
+                      }
+                    }
                   }
                   AstToken::At => {
-                    inp.rewind(ckp);
-                    let (directives, selection_set) =
-                      inp.parse(Directives::parser().then(selection_set.clone()))?;
+                    let (directives, selection_set) = inp.parse(
+                      Name::<S>::parser::<E>()
+                        .then(Arguments::parser().or_not())
+                        .map_with(|(name, args), exa| Directive::new(exa.span(), name, args))
+                        .separated_by(At::parser())
+                        .collect()
+                        .map_with(|directives, exa| Directives::new(exa.span(), directives))
+                        .then(SelectionSet::parser_with(selection_parser.clone())),
+                    )?;
                     Ok(Selection::InlineFragment(InlineFragment::new(
                       inp.span_since(&before),
                       None,

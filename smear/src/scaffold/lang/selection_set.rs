@@ -111,6 +111,14 @@ impl<Selection, Container> IntoComponents for SelectionSet<Selection, Container>
 }
 
 impl<Selection, Container> SelectionSet<Selection, Container> {
+  pub(crate) const fn new(span: Span, selections: Container) -> Self {
+    Self {
+      span,
+      selections,
+      _marker: PhantomData,
+    }
+  }
+
   /// Returns a reference to the span covering the entire selection set.
   ///
   /// The span includes the opening brace, all selections, and the closing brace.
