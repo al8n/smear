@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0037_operation_type_definition_with_inline_fragment.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0037_operation_type_definition_with_inline_fragment.graphql");
 
 #[test]
 fn operation_type_definition_with_inline_fragment() {

@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0012_fragment_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0012_fragment_definition.graphql");
 
 #[test]
 fn fragment_definition() {

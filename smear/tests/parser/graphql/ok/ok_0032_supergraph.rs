@@ -1,6 +1,6 @@
 
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0032_supergraph.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0032_supergraph.graphql");
 
 #[test]
 fn supergraph() {

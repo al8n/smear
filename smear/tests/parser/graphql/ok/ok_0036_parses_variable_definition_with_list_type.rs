@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0036_parses_variable_definition_with_list_type.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0036_parses_variable_definition_with_list_type.graphql");
 
 #[test]
 fn parses_variable_definition_with_list_type() {

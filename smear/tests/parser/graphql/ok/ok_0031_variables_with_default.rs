@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0031_variables_with_default.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0031_variables_with_default.graphql");
 
 #[test]
 fn variables_with_default() {

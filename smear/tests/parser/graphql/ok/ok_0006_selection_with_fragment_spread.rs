@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0006_selection_with_fragment_spread.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0006_selection_with_fragment_spread.graphql");
 
 #[test]
 fn selection_with_fragment_spread() {

@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0039_variable_with_directives.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0039_variable_with_directives.graphql");
 
 #[test]
 fn variable_with_directives() {

@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0040_type_token_order.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0040_type_token_order.graphql");
 
 #[test]
 fn type_token_order() {

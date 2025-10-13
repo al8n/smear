@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0034_query_shorthand_followed_by_fragment_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0034_query_shorthand_followed_by_fragment_definition.graphql");
 
 #[test]
 fn query_shorthand_followed_by_fragment_definition() {

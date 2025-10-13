@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0011_enum_type_extension.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0011_enum_type_extension.graphql");
 
 #[test]
 fn enum_type_extension() {

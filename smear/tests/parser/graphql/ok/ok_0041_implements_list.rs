@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0041_implements_list.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0041_implements_list.graphql");
 
 #[test]
 fn implements_list() {

@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0025_schema_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0025_schema_definition.graphql");
 
 #[test]
 fn schema_definition() {

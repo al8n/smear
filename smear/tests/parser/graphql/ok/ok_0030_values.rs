@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0030_values.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0030_values.graphql");
 
 #[test]
 fn values() {

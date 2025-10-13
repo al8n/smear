@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0005_selection_with_inline_fragments.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0005_selection_with_inline_fragments.graphql");
 
 #[test]
 fn selection_with_inline_fragment() {

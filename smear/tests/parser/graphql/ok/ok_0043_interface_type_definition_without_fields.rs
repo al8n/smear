@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0043_interface_type_definition_without_fields.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0043_interface_type_definition_without_fields.graphql");
 
 #[test]
 fn interface_type_definition_without_fields() {

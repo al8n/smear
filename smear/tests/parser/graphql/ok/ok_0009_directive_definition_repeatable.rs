@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0009_directive_definition_repeatable.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0009_directive_definition_repeatable.graphql");
 
 #[test]
 fn directive_definition_repeatable() {

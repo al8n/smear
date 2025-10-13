@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0038_wrapped_named_types.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0038_wrapped_named_types.graphql");
 
 #[test]
 fn wrapped_named_types() {

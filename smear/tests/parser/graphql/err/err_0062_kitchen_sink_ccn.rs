@@ -1,7 +1,7 @@
 use smear::parser::graphql::ast::{Document, ParseStr};
 
 
-const ALL: &str = include_str!("../../../fixtures/parser/err/0062_kitchen_sink_ccn.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/err/0062_kitchen_sink_ccn.graphql");
 
 
 #[test]

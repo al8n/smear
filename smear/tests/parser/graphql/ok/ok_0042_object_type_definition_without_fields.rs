@@ -1,6 +1,6 @@
 
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0042_object_type_definition_without_fields.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0042_object_type_definition_without_fields.graphql");
 
 #[test]
 fn object_type_definition_without_fields() {

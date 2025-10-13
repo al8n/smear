@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0014_input_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0014_input_definition.graphql");
 
 #[test]
 fn input_object_definition() {

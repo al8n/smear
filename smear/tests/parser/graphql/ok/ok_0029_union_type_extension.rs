@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0029_union_type_extension.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0029_union_type_extension.graphql");
 
 #[test]
 fn union_type_extension() {

@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0024_scalar_extension.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0024_scalar_extension.graphql");
 
 #[test]
 fn scalar_type_extension() {

@@ -1,6 +1,6 @@
 
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0035_query_with_variables.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0035_query_with_variables.graphql");
 
 #[test]
 fn query_with_variables() {

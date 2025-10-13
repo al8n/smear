@@ -1,4 +1,4 @@
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0033_directive_on_argument_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0033_directive_on_argument_definition.graphql");
 
 #[test]
 fn directive_on_argument_definition() {

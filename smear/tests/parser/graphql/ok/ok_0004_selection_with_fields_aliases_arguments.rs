@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0004_selection_with_fields_aliases_arguments.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0004_selection_with_fields_aliases_arguments.graphql");
 
 #[test]
 fn selection_with_fields_aliases_arguments() {

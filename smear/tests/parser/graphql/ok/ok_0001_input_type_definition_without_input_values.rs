@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0001_input_type_definition_without_input_values.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0001_input_type_definition_without_input_values.graphql");
 
 #[test]
 fn input_object_type_definition_without_input_values() {

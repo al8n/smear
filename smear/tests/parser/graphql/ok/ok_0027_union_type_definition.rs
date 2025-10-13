@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0027_union_type_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0027_union_type_definition.graphql");
 
 #[test]
 fn union_type_definition() {

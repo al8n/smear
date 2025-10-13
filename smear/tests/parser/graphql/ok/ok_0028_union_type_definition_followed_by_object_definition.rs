@@ -1,6 +1,6 @@
 
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0028_union_type_definition_followed_by_object_definition.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0028_union_type_definition_followed_by_object_definition.graphql");
 
 #[test]
 fn union_type_definition_followed_by_object_definition() {

@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0022_operation_type_definition_with_arguments_and_directives.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0022_operation_type_definition_with_arguments_and_directives.graphql");
 
 #[test]
 fn operation_type_definition_with_arguments_and_directives() {

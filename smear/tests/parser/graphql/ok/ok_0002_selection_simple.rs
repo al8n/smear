@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0002_selection_simple.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0002_selection_simple.graphql");
 
 #[test]
 fn selection_simple() {

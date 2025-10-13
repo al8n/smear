@@ -1,5 +1,5 @@
 
-const ALL: &str = include_str!("../../../fixtures/parser/ok/0008_directive_definition_with_arguments.graphql");
+const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0008_directive_definition_with_arguments.graphql");
 
 const ARGS_INPUT: &str = r###"(isTreat: Boolean, treatKind: String)"###;
 
