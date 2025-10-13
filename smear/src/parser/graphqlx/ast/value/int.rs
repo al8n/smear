@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::lexer::graphqlx::ast::{AstLexerErrors, AstTokenKind, LitInt};
+use crate::lexer::graphqlx::ast::{AstLexerErrors, LitInt};
 
 use super::super::*;
 
@@ -82,7 +82,7 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           AstToken::LitInt(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, AstTokenKind::Int, span).into()),
+          tok => Err(Error::unexpected_token(tok, Expectation::IntValue, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

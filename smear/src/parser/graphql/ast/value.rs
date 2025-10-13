@@ -1,5 +1,6 @@
 use crate::{
   error::{UnclosedBraceError as _, UnclosedBracketError},
+  hints::VariableValueHint,
   lexer::graphql::ast::AstLexerErrors,
   punctuator::{RBrace, RBracket},
   scaffold,
@@ -132,7 +133,6 @@ where
           None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              inp.save();
               Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
@@ -155,23 +155,23 @@ where
                       data: AstToken::Identifier(name),
                     })) => Name::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
-                      inp.save();
                       return Err(
                         AstTokenError::unexpected_token(data, Expectation::Name, span).into(),
                       );
                     }
                     Some(Lexed::Error(err)) => {
-                      inp.save();
                       return Err(
                         AstTokenError::from_lexer_errors(err, inp.span_since(&current_cursor))
                           .into(),
                       );
                     }
                     None => {
-                      inp.save();
                       return Err(
-                        AstTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
-                          .into(),
+                        AstTokenError::unexpected_end_of_variable_value(
+                          VariableValueHint::Name,
+                          inp.span_since(&before),
+                        )
+                        .into(),
                       );
                     }
                   };
@@ -184,7 +184,6 @@ where
                       .collect()
                       .then(RBrace::parser().or_not()),
                   )?;
-                  inp.save();
                   return match rbrace {
                     Some(_) => Ok(Self::Object(scaffold::Object::new(
                       inp.span_since(&before),
@@ -201,7 +200,6 @@ where
                       .collect()
                       .then(RBracket::parser().or_not()),
                   )?;
-                  inp.save();
 
                   return match rbracket {
                     Some(_) => Ok(Self::List(scaffold::List::new(
@@ -212,14 +210,12 @@ where
                   };
                 }
                 tok => {
-                  inp.save();
                   return Err(
                     AstTokenError::unexpected_token(tok, Expectation::InputValue, span).into(),
                   );
                 }
               };
 
-              inp.save();
               Ok(output)
             }
           },
@@ -314,7 +310,6 @@ where
           None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              inp.save();
               Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
@@ -336,7 +331,6 @@ where
                       .collect()
                       .then(RBrace::parser().or_not()),
                   )?;
-                  inp.save();
                   return match rbrace {
                     Some(_) => Ok(Self::Object(scaffold::Object::new(
                       inp.span_since(&before),
@@ -353,7 +347,6 @@ where
                       .collect()
                       .then(RBracket::parser().or_not()),
                   )?;
-                  inp.save();
 
                   return match rbracket {
                     Some(_) => Ok(Self::List(scaffold::List::new(
@@ -364,14 +357,12 @@ where
                   };
                 }
                 tok => {
-                  inp.save();
                   return Err(
                     AstTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into(),
                   );
                 }
               };
 
-              inp.save();
               Ok(output)
             }
           },

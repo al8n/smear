@@ -72,12 +72,9 @@ where
     recursive(|selection| {
       let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone());
 
-      let field_p = scaffold::Field::parser_with(
-        Arguments::parser(),
-        Directives::parser(),
-        selection_set.clone(),
-      )
-      .map(Field::from);
+      let field_p =
+        scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
+          .map(Field::from);
 
       field_p.map(Self::Field).or(fragment_parser(selection))
     })
@@ -230,6 +227,7 @@ where
     >,
   AstTokenErrors<'a, S>: 'a,
 {
+  let selection_set = SelectionSet::parser_with(selection_parser.clone());
   custom(move |inp| {
     let before = inp.cursor();
 
@@ -271,9 +269,10 @@ where
                     let ((name, directives), selection_set) = inp.parse(
                       Name::<S>::parser()
                         .then(Directives::parser().or_not())
-                        .then(SelectionSet::parser_with(selection_parser.clone())),
+                        .then(selection_set.clone()),
                     )?;
-                    let tc = TypeCondition::new((fragment_span.start()..name.span().end()).into(), name);
+                    let tc =
+                      TypeCondition::new((fragment_span.start()..name.span().end()).into(), name);
                     Ok(Selection::InlineFragment(InlineFragment::new(
                       inp.span_since(&before),
                       Some(tc),
@@ -312,7 +311,7 @@ where
                         .separated_by(At::parser())
                         .collect()
                         .map_with(|directives, exa| Directives::new(exa.span(), directives))
-                        .then(SelectionSet::parser_with(selection_parser.clone())),
+                        .then(selection_set.clone()),
                     )?;
                     Ok(Selection::InlineFragment(InlineFragment::new(
                       inp.span_since(&before),

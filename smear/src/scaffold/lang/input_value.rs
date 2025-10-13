@@ -7,7 +7,7 @@ use logosky::{
 use crate::punctuator::Equal;
 
 pub use list::List;
-pub use map::Map;
+pub use map::{Map, MapEntry};
 pub use object::*;
 pub use set::Set;
 
