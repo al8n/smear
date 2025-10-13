@@ -58,7 +58,7 @@ fn graphqlx_directive_on_argument_definition() {
   let directives = argument.directives().unwrap().directives();
   assert_eq!(directives.len(), 1);
   let directive = &directives[0];
-  assert_eq!(directive.name(), "deprecated");
+  assert_eq!(directive.path(), "deprecated");
   let arguments = directive.arguments().unwrap().arguments();
   assert_eq!(arguments.len(), 1);
   let argument = &arguments[0];

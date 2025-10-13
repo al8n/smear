@@ -120,7 +120,7 @@ fn graphqlx_operation_type_definition() {
         let directives = another_cat.directives().cloned().unwrap();
         assert_eq!(directives.directives().len(), 1);
         let directive = directives.directives().first().unwrap();
-        assert_eq!(directive.name(), "deprecated");
+        assert_eq!(directive.path(), "deprecated");
         assert!(directive.arguments().is_none());
         assert!(another_cat.selection_set().is_none());
       }

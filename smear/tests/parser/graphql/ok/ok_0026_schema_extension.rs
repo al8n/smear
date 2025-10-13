@@ -46,13 +46,13 @@ fn graphqlx_schema_extension() {
 
   {
     let skip = directives.next().unwrap();
-    assert_eq!(skip.name().source(), "skip");
+    assert_eq!(skip.path(), "skip");
     assert!(skip.arguments().is_none());
   }
 
   {
     let example = directives.next().unwrap();
-    assert_eq!(example.name().source(), "example");
+    assert_eq!(example.path(), "example");
     assert!(example.arguments().is_none());
   }
 

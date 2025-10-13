@@ -47,7 +47,7 @@ fn graphqlx_enum_type_extension() {
   let directives = extension.directives().cloned().unwrap();
   assert_eq!(directives.directives().len(), 1);
   let directive = directives.directives().first().unwrap();
-  assert_eq!(directive.name(), "example");
+  assert_eq!(directive.path(), "example");
   assert!(directive.arguments().is_none());
 
   let variants = extension.enum_values_definition().unwrap();

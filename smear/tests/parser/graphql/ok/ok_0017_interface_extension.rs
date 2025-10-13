@@ -39,7 +39,7 @@ fn graphqlx_interface_object_extension() {
   let directives = extension.directives().unwrap();
   assert_eq!(directives.directives().len(), 1);
   let directive = directives.directives().first().unwrap();
-  assert_eq!(directive.name(), "skip");
+  assert_eq!(directive.path(), "skip");
 
   let fields = extension.fields_definition().unwrap();
   assert_eq!(fields.field_definitions().len(), 1);

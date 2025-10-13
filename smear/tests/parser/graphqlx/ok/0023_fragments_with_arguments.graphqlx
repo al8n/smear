@@ -1,9 +1,9 @@
 "Complex fragment definitions with arguments, generics, inline fragments, and spreads"
 
-fragment<T> UserFields<T>($includeEmail: Boolean! = true, $limit: Int) on User<T> {
+fragment<T> UserFields<T> on User<T> {
   id
   name
-  email @include(if: $includeEmail)
+  email
   data
   posts(first: $limit) {
     id
@@ -61,10 +61,7 @@ query GetUserData<T>($userId: ID!, $includePrivate: Boolean = false) {
   }
 }
 
-fragment<T> NodeFragment<T>(
-  $depth: Int = 1
-  $includeMetadata: Boolean!
-) on Node<T>
+fragment<T> NodeFragment<T> on Node<T>
   where T: Timestamped & Serializable
 {
   id
@@ -75,11 +72,11 @@ fragment<T> NodeFragment<T>(
   ... on Document<T> {
     title
     content(maxLength: 1000)
-    metadata @include(if: $includeMetadata) {
+    metadata {
       tags
       category
     }
-    versions(last: $depth) {
+    versions(last: 10) {
       version
       timestamp
     }

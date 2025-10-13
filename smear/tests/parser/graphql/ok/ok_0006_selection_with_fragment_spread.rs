@@ -150,7 +150,7 @@ fn graphqlx_selection_with_fragment_spread() {
       .expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let deprecated = directives.directives().first().unwrap();
-    assert_eq!(deprecated.name().source(), "deprecated");
+    assert_eq!(deprecated.path(), "deprecated");
   }
 
   {
@@ -168,7 +168,7 @@ fn graphqlx_selection_with_fragment_spread() {
     let directives = nap.directives().expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let provides = directives.directives().first().unwrap();
-    assert_eq!(provides.name().source(), "provides");
+    assert_eq!(provides.path(), "provides");
     let args = provides.arguments().expect("should have arguments");
     assert_eq!(args.arguments().len(), 1);
     let duration = args.arguments().first().unwrap();
@@ -187,7 +187,7 @@ fn graphqlx_selection_with_fragment_spread() {
     let directives = anon.directives().expect("should have directives");
     assert_eq!(directives.directives().len(), 1);
     let j = directives.directives().first().unwrap();
-    assert_eq!(j.name().source(), "J");
+    assert_eq!(j.path(), "J");
     let args = j.arguments().expect("should have arguments");
     assert_eq!(args.arguments().len(), 1);
     let n = args.arguments().first().unwrap();

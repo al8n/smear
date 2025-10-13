@@ -30,7 +30,7 @@ fn graphqlx_scalar_type_extension() {
   let mut directives = directives.directives().iter();
   {
     let deprecated = directives.next().unwrap();
-    assert_eq!(deprecated.name(), "deprecated");
+    assert_eq!(deprecated.path(), "deprecated");
     assert!(deprecated.arguments().is_none());
   }
 }

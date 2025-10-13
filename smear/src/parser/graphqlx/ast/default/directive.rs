@@ -19,6 +19,149 @@ type DirectiveDefinitionAlias<S> = scaffold::DirectiveDefinition<
   And<DirectiveLocations<Location>, Option<WhereClause<S>>>,
 >;
 
+type DirectiveAlias<S> = scaffold::Directive<TypePath<S>, Arguments<S>>;
+
+type ConstDirectiveAlias<S> = scaffold::Directive<TypePath<S>, ConstArguments<S>>;
+
+/// A GraphQLx directive.
+#[derive(Debug, Clone, From, Into)]
+pub struct Directive<S>(DirectiveAlias<S>);
+
+impl<S> AsSpan<Span> for Directive<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S> IntoSpan<Span> for Directive<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S> IntoComponents for Directive<S> {
+  type Components = (Span, TypePath<S>, Option<Arguments<S>>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
+  }
+}
+
+impl<S> Directive<S> {
+  /// Returns the span of the directive.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    self.0.span()
+  }
+
+  /// Returns the path of the directive.
+  #[inline]
+  pub const fn path(&self) -> &super::ty::Path<S> {
+    self.0.name().path()
+  }
+
+  /// Returns the type generics of the directive path, if any.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+    self.0.name().type_generics()
+  }
+
+  /// Returns the arguments of the directive, if any.
+  #[inline]
+  pub const fn arguments(&self) -> Option<&Arguments<S>> {
+    self.0.arguments()
+  }
+}
+
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for Directive<S>
+where
+  DirectiveAlias<S>: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    DirectiveAlias::<S>::parser().map(Self)
+  }
+}
+
+#[derive(Debug, Clone, From, Into)]
+pub struct ConstDirective<S>(ConstDirectiveAlias<S>);
+
+impl<S> AsSpan<Span> for ConstDirective<S> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S> IntoSpan<Span> for ConstDirective<S> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S> IntoComponents for ConstDirective<S> {
+  type Components = (Span, TypePath<S>, Option<ConstArguments<S>>);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
+  }
+}
+
+impl<S> ConstDirective<S> {
+  /// Returns the span of the const directive.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    self.0.span()
+  }
+
+  /// Returns the path of the const directive.
+  #[inline]
+  pub const fn path(&self) -> &super::ty::Path<S> {
+    self.0.name().path()
+  }
+
+  /// Returns the type generics of the const directive path, if any.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+    self.0.name().type_generics()
+  }
+
+  /// Returns the const arguments of the const directive, if any.
+  #[inline]
+  pub const fn arguments(&self) -> Option<&ConstArguments<S>> {
+    self.0.arguments()
+  }
+}
+
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for ConstDirective<S>
+where
+  ConstDirectiveAlias<S>: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    ConstDirectiveAlias::<S>::parser().map(Self)
+  }
+}
+
 /// A GraphQLx directive definition.
 ///
 /// Defines a custom directive that can be applied to various locations

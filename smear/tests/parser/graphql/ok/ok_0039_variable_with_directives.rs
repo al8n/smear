@@ -84,7 +84,7 @@ fn graphqlx_variable_with_directives() {
     let directives = variable_definition.directives().unwrap().directives();
     assert_eq!(directives.len(), 1);
     let directive = &directives[0];
-    assert_eq!(directive.name(), "deprecated");
+    assert_eq!(directive.path(), "deprecated");
   }
   {
     let variable_definition = iter.next().unwrap();
@@ -106,7 +106,7 @@ fn graphqlx_variable_with_directives() {
     let directives = variable_definition.directives().unwrap().directives();
     assert_eq!(directives.len(), 1);
     let directive = &directives[0];
-    assert_eq!(directive.name(), "tag");
+    assert_eq!(directive.path(), "tag");
     let arguments = directive.arguments().unwrap().arguments();
     assert_eq!(arguments.len(), 1);
     let argument = &arguments[0];

@@ -2,7 +2,7 @@ use super::*;
 
 use crate::{
   parser::ident::Ident,
-  scaffold::{self, Location, OperationType, Path},
+  scaffold::{self, OperationType, Path},
 };
 
 pub use directive::*;
@@ -32,16 +32,6 @@ type ExecutableDefinitionName<S> = scaffold::generic::ExecutableDefinitionName<I
 
 pub type Described<T, S> = scaffold::Described<T, StringValue<S>>;
 
-/// The default path segments container type used in the AST.
-pub type DefaultIdentsContainer<S> = DefaultVec<Ident<S>>;
-
-/// The default type container type used in the AST.
-pub type DefaultTypeContainer<S> = DefaultVec<Type<S>>;
-/// The default definition type params container type used in the AST.
-pub type DefaultDefinitionTypeParamsContainer<S> = DefaultVec<DefinitionTypeParam<S>>;
-/// The default extension type params container type used in the AST.
-pub type DefaultExtensionTypeParamsContainer<S> = DefaultVec<ExtensionTypeParam<S>>;
-
 pub type DefinitionTypeParam<S> = scaffold::generic::DefinitionTypeParam<Ident<S>, Type<S>>;
 
 pub type WherePredicate<S> = scaffold::generic::WherePredicate<Ident<S>, Type<S>>;
@@ -57,15 +47,6 @@ pub type ExecutableDefinitionTypeGenerics<S> =
 
 pub type ImplementInterfaces<S> = scaffold::ImplementInterfaces<TypePath<S>>;
 
-/// The default container type used for arguments in the AST.
-pub type DefaultArgumentsContainer<S> = DefaultVec<Argument<S>>;
-/// The default container type used for directives in the AST.
-pub type DefaultDirectivesContainer<S> = DefaultVec<Directive<S>>;
-/// The default container type used for const arguments in the AST.
-pub type DefaultConstArgumentsContainer<S> = DefaultVec<ConstArgument<S>>;
-/// The default container type used for const directives in the AST.
-pub type DefaultConstDirectivesContainer<S> = Vec<ConstDirective<S>>;
-
 pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
 pub type Argument<S> = scaffold::Argument<Ident<S>, InputValue<S>>;
 pub type Arguments<S> = scaffold::Arguments<Argument<S>>;
@@ -73,29 +54,8 @@ pub type Arguments<S> = scaffold::Arguments<Argument<S>>;
 pub type ConstArgument<S> = scaffold::Argument<Ident<S>, ConstInputValue<S>>;
 pub type ConstArguments<S> = scaffold::Arguments<ConstArgument<S>>;
 
-pub type Directive<S> = scaffold::Directive<Ident<S>, Arguments<S>>;
 pub type Directives<S> = scaffold::Directives<Directive<S>>;
-
-pub type ConstDirective<S> = scaffold::Directive<Ident<S>, ConstArguments<S>>;
 pub type ConstDirectives<S> = scaffold::Directives<ConstDirective<S>>;
-
-/// The default container type used for input values in the AST.
-pub type DefaultInputValuesContainer<S> = Vec<InputValueDefinition<S>>;
-/// The default container type used for enum values in the AST.
-pub type DefaultEnumValuesContainer<S> = Vec<EnumValueDefinition<S>>;
-/// The default container type used for type paths in the AST.
-pub type DefaultTypePathsContainer<S> = DefaultVec<TypePath<S>>;
-/// The default where predicates container type used in the AST.
-pub type DefaultWherePredicatesContainer<S> = DefaultVec<WherePredicate<S>>;
-
-/// The default container type used for locations in the AST.
-pub type DefaultLocationsContainer = DefaultVec<Location>;
-/// The default container type used for root operation types in the AST.
-pub type DefaultRootOperationTypesContainer<S> = DefaultVec<RootOperationTypeDefinition<S>>;
-/// The default container type used for variable definitions in the AST.
-pub type DefaultVariablesContainer<S> = Vec<DescribedVariableDefinition<S>>;
-/// The default container type used for fields in the AST.
-pub type DefaultFieldsContainer<S> = Vec<FieldDefinition<S>>;
 
 pub type Alias<S> = scaffold::Alias<Ident<S>>;
 

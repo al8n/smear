@@ -113,13 +113,13 @@ fn graphqlx_operation_type_definition_with_arguments_and_directives() {
 
     {
       let deprecated = directives.next().unwrap();
-      assert_eq!(deprecated.name(), "deprecated");
+      assert_eq!(deprecated.path(), "deprecated");
       assert!(deprecated.arguments().is_none());
     }
 
     {
       let unused = directives.next().unwrap();
-      assert_eq!(unused.name(), "unused");
+      assert_eq!(unused.path(), "unused");
       assert!(unused.arguments().is_none());
     }
   }
