@@ -1,29 +1,8 @@
 use criterion::*;
 
-const QUERY: &str = include_str!("../tests/fixtures/queries/inline_fragment.graphql");
+include!("./utils.rs");
 
-fn apollo_parser_parse_query(query: &str) {
-  let parser = apollo_parser::Parser::new(query);
-  let _tree = parser.parse();
-}
-
-fn smear_parser_parse_query(query: &str) {
-  use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
-
-  let _operation = ExecutableDocument::<&str>::parse_str(query).unwrap();
-}
-
-fn graphql_parser_parse_query(query: &str) {
-  let _document = graphql_parser::parse_query::<&str>(query).unwrap();
-}
-
-fn async_graphql_parser_parse_query(query: &str) {
-  let _document = async_graphql_parser::parse_query(query).unwrap();
-}
-
-fn cynic_parser_parse_query(query: &str) {
-  let _document = cynic_parser::parse_executable_document(query).unwrap();
-}
+const QUERY: &str = include_str!("../tests/fixtures/executables/inline_fragment.graphql");
 
 fn bench_apollo_parser_inline_fragment(c: &mut Criterion) {
   c.bench_function("apollo-parser/inline_fragment", move |b| {
