@@ -5,7 +5,7 @@ use logosky::utils::{
 
 use core::fmt::Display;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IntValue<S> {
   span: Span,
   value: S,

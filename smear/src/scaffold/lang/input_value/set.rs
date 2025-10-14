@@ -8,7 +8,7 @@ use crate::error::UnclosedBraceError;
 
 use crate::{
   keywords,
-  punctuator::{LAngle, RAngle},
+  punctuator::{LBrace, RBrace},
 };
 
 use core::marker::PhantomData;
@@ -64,7 +64,7 @@ pub struct Set<Value, Container = Vec<Value>> {
 impl<Value, Container> Set<Value, Container> {
   /// Creates a new set literal with the given span and values.
   #[inline]
-  const fn new(span: Span, values: Container) -> Self {
+  pub(crate) const fn new(span: Span, values: Container) -> Self {
     Self {
       span,
       values,
@@ -111,14 +111,14 @@ impl<Value, Container> Set<Value, Container> {
     E: ParserExtra<'src, I, Error = Error> + 'src,
     VP: Parser<'src, I, Value, E> + Clone + 'src,
     Container: chumsky::container::Container<Value>,
-    LAngle: Parseable<'src, I, T, Error>,
-    RAngle: Parseable<'src, I, T, Error>,
+    LBrace: Parseable<'src, I, T, Error>,
+    RBrace: Parseable<'src, I, T, Error>,
     keywords::Set: Parseable<'src, I, T, Error>,
   {
     keywords::Set::parser()
-      .then(LAngle::parser())
+      .then(LBrace::parser())
       .ignore_then(value_parser.repeated().collect())
-      .then(RAngle::parser().or_not())
+      .then(RBrace::parser().or_not())
       .try_map(move |(values, r), span| match r {
         Some(_) => Ok(Set::new(span, values)),
         None => Err(Error::unclosed_brace(span)),
@@ -154,8 +154,8 @@ where
   Error: UnclosedBraceError + 'a,
   Value: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<Value>,
-  LAngle: Parseable<'a, I, T, Error>,
-  RAngle: Parseable<'a, I, T, Error>,
+  LBrace: Parseable<'a, I, T, Error>,
+  RBrace: Parseable<'a, I, T, Error>,
   keywords::Set: Parseable<'a, I, T, Error>,
 {
   #[inline]

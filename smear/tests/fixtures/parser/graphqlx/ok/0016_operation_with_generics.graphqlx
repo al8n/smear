@@ -1,0 +1,14 @@
+"Query operation with generic fragment"
+
+query GetData<T> {
+  items {
+    ...ItemFragment<T>
+  }
+}
+
+fragment<T> ItemFragment<T> on Item<T> {
+  id
+  data
+}
+
+

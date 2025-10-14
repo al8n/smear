@@ -53,13 +53,6 @@ pub(super) trait TestToken<'a>: Token<'a> + Eq + Copy + core::fmt::Debug {
   {
     TestLexer::new(source)
   }
-
-  fn test_lexer_with_extras(
-    source: &'a <Self::Logos as Logos<'a>>::Source,
-    extras: <Self::Logos as Logos<'a>>::Extras,
-  ) -> TestLexer<'a, Self> {
-    TestLexer::with_extras(source, extras)
-  }
 }
 
 pub(super) struct TestLexer<'a, T: Token<'a>> {
@@ -95,15 +88,6 @@ impl<'a, T: TestToken<'a>> TestLexer<'a, T> {
   {
     Self {
       inner: Lexer::new(source),
-    }
-  }
-
-  pub fn with_extras(
-    source: &'a <T::Logos as Logos<'a>>::Source,
-    extras: <T::Logos as Logos<'a>>::Extras,
-  ) -> Self {
-    Self {
-      inner: Lexer::with_extras(source, extras),
     }
   }
 

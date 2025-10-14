@@ -1,0 +1,1 @@
+import { User, Post } from "./types.graphqlx"

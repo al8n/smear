@@ -13,10 +13,11 @@ default = ["std", "smallvec", "graphql", "graphqlx"]
 alloc = []
 std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
+unstable = []
+
 cst = ["std"]
 graphql = []
-graphqlx = []
-
+graphqlx = ["unstable"]
 
 bytes = ["dep:bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "logosky/bstr"]
@@ -27,7 +28,7 @@ derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
 thiserror.workspace = true
-logosky.workspace = true
+logosky = { workspace = true, features = ["either"] }
 
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 hipstr = { version = "0.8", default-features = false, optional = true }

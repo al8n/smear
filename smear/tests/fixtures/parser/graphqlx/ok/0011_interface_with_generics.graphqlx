@@ -1,0 +1,17 @@
+"Interface with generic parameters"
+
+interface Collection<T> {
+  items: [T!]!
+  total: Int
+}
+
+type UserCollection implements Collection<User> {
+  items: [User!]!
+  total: Int
+  activeCount: Int
+}
+
+type User {
+  id: ID!
+  name: String
+}

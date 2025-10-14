@@ -7,32 +7,60 @@ use logosky::{
 use super::error::{Error, Errors, Extra};
 use crate::{
   lexer::graphqlx::ast::{AstToken, AstTokenChar, AstTokenKind},
-  parser::ident::Ident,
+  parser::{graphqlx::Expectation, ident::Ident},
 };
 
-// pub use default::*;
-pub use directive::*;
-pub use fragment::*;
+pub use default::*;
 pub use import::*;
-pub use path::*;
-pub use raw::*;
 pub use ty::*;
 pub use value::*;
 
-// mod default;
-mod directive;
+mod default;
 mod error;
-mod fragment;
 mod ident;
 mod import;
 mod keyword;
 mod location;
-mod path;
-mod punctuator;
-mod raw;
 mod operation_type;
+mod punctuator;
 mod ty;
 mod value;
+
+impl From<AstTokenKind> for Expectation {
+  #[inline]
+  fn from(kind: AstTokenKind) -> Self {
+    match kind {
+      AstTokenKind::Identifier => Self::Identifier,
+      AstTokenKind::InlineString => Self::InlineString,
+      AstTokenKind::BlockString => Self::BlockString,
+      AstTokenKind::Dollar => Self::Dollar,
+      AstTokenKind::At => Self::At,
+      AstTokenKind::Ampersand => Self::Ampersand,
+      AstTokenKind::Spread => Self::Spread,
+      AstTokenKind::Pipe => Self::Pipe,
+      AstTokenKind::Equal => Self::Equal,
+      AstTokenKind::Colon => Self::Colon,
+      AstTokenKind::Bang => Self::Bang,
+      AstTokenKind::LBrace => Self::LBrace,
+      AstTokenKind::RBrace => Self::RBrace,
+      AstTokenKind::LBracket => Self::LBracket,
+      AstTokenKind::RBracket => Self::RBracket,
+      AstTokenKind::LParen => Self::LParen,
+      AstTokenKind::RParen => Self::RParen,
+      AstTokenKind::Int => Self::IntValue,
+      AstTokenKind::Float => Self::FloatValue,
+      AstTokenKind::Boolean => Self::BooleanValue,
+      AstTokenKind::String => Self::StringValue,
+      AstTokenKind::FatArrow => Self::FatArrow,
+      AstTokenKind::LAngle => Self::LAngle,
+      AstTokenKind::RAngle => Self::RAngle,
+      AstTokenKind::Asterisk => Self::Asterisk,
+      AstTokenKind::Plus => Self::Plus,
+      AstTokenKind::Minus => Self::Minus,
+      AstTokenKind::PathSeparator => Self::PathSeparator,
+    }
+  }
+}
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
@@ -41,13 +69,13 @@ pub type DefaultVec<T> = Vec<T>;
 pub type AstTokenStream<'a, S> = logosky::TokenStream<'a, AstToken<S>>;
 /// The parser extra type used for the AST parser implementation.
 pub type AstParserExtra<'a, S> =
-  Extra<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Extra<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The error type used for the AST parser implementation.
 pub type AstTokenError<'a, S> =
-  Error<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Error<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The errors type used for the AST parser implementation.
 pub type AstTokenErrors<'a, S> =
-  Errors<S, AstToken<S>, AstTokenKind, AstTokenChar<'a, S>, RecursionLimitExceeded>;
+  Errors<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 
 /// Parse a value of type `T` from a string slice using the AST token.
 pub trait ParseStr<'a> {

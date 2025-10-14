@@ -25,7 +25,7 @@ where
   fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
     Self::unexpected_token(
       AstToken::Identifier(name.into_components().1),
-      AstTokenKind::Dollar,
+      Expectation::Dollar,
       span,
     )
   }

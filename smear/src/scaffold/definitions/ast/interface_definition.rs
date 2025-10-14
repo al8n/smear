@@ -36,11 +36,11 @@ impl<Name, Container> ImplementInterfaces<Name, Container> {
 
   /// Returns a slice of the implemented interfaces.
   #[inline]
-  pub fn as_slice(&self) -> &[Name]
+  pub fn interfaces_slice(&self) -> &[Name]
   where
     Container: AsRef<[Name]>,
   {
-    self.interfaces.as_ref()
+    self.interfaces().as_ref()
   }
 }
 

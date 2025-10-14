@@ -37,7 +37,7 @@ macro_rules! keyword_parser {
                 } else {
                   Err(Error::unexpected_keyword(name, $kw, span).into())
                 },
-                tok => Err(Error::unexpected_token(tok, AstTokenKind::Identifier, span).into()),
+                tok => Err(Error::unexpected_token(tok, Expectation::Keyword($kw), span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

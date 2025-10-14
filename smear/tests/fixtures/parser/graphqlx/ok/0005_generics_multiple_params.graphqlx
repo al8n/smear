@@ -1,0 +1,17 @@
+"Type with multiple generic parameters"
+
+type Pair<K, V> {
+  key: K
+  value: V
+}
+
+type Triple<A, B, C> {
+  first: A
+  second: B
+  third: C
+}
+
+type Query {
+  config: Pair<String!, Int!>!
+  data: Triple<String, Int, Boolean>
+}

@@ -549,11 +549,11 @@ impl<Location, Container> DirectiveLocations<Location, Container> {
 
   /// Returns a slice of the directive locations.
   #[inline]
-  pub fn as_slice(&self) -> &[Location]
+  pub fn locations_slice(&self) -> &[Location]
   where
     Container: AsRef<[Location]>,
   {
-    self.locations.as_ref()
+    self.locations().as_ref()
   }
 }
 

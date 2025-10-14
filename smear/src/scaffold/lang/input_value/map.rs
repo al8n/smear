@@ -8,7 +8,7 @@ use crate::error::UnclosedBraceError;
 
 use crate::{
   keywords,
-  punctuator::{FatArrow, LAngle, RAngle},
+  punctuator::{FatArrow, LBrace, RBrace},
 };
 
 use core::marker::PhantomData;
@@ -163,7 +163,7 @@ pub struct Map<Key, Value, Container = Vec<MapEntry<Key, Value>>> {
 impl<Key, Value, Container> Map<Key, Value, Container> {
   /// Creates a new map literal with the given span and entries.
   #[inline]
-  const fn new(span: Span, entries: Container) -> Self {
+  pub(crate) const fn new(span: Span, entries: Container) -> Self {
     Self {
       span,
       entries,
@@ -187,6 +187,15 @@ impl<Key, Value, Container> Map<Key, Value, Container> {
   #[inline]
   pub const fn entries(&self) -> &Container {
     &self.entries
+  }
+
+  /// Returns the entries as a slice, if the container supports it.
+  #[inline]
+  pub fn entries_slice(&self) -> &[MapEntry<Key, Value>]
+  where
+    Container: AsRef<[MapEntry<Key, Value>]>,
+  {
+    self.entries().as_ref()
   }
 
   /// Creates a parser for GraphQLx map literals with customizable value parsing.
@@ -214,17 +223,17 @@ impl<Key, Value, Container> Map<Key, Value, Container> {
     Container: chumsky::container::Container<MapEntry<Key, Value>>,
     FatArrow: Parseable<'src, I, T, Error>,
     keywords::Map: Parseable<'src, I, T, Error>,
-    LAngle: Parseable<'src, I, T, Error>,
-    RAngle: Parseable<'src, I, T, Error>,
+    LBrace: Parseable<'src, I, T, Error>,
+    RBrace: Parseable<'src, I, T, Error>,
   {
     keywords::Map::parser()
-      .then(LAngle::parser())
+      .then(LBrace::parser())
       .ignore_then(
         MapEntry::parser_with(key_parser, value_parser)
           .repeated()
           .collect(),
       )
-      .then(RAngle::parser().or_not())
+      .then(RBrace::parser().or_not())
       .try_map(move |(entries, r), span| match r {
         Some(_) => Ok(Map::new(span, entries)),
         None => Err(Error::unclosed_brace(span)),
@@ -262,8 +271,8 @@ where
   Key: Parseable<'a, I, T, Error> + 'a,
   Value: Parseable<'a, I, T, Error> + 'a,
   Container: chumsky::container::Container<MapEntry<Key, Value>> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
+  LBrace: Parseable<'a, I, T, Error> + 'a,
+  RBrace: Parseable<'a, I, T, Error> + 'a,
   FatArrow: Parseable<'a, I, T, Error> + 'a,
   keywords::Map: Parseable<'a, I, T, Error> + 'a,
 {

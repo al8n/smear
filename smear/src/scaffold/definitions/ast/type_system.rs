@@ -151,6 +151,7 @@ where
       EnumTypeDefinition::parser::<E>().map(Self::Enum),
       InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
     ))
+    .boxed()
   }
 }
 
@@ -300,6 +301,7 @@ where
       EnumTypeExtension::parser::<E>().map(Self::Enum),
       InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
     ))
+    .boxed()
   }
 }
 
@@ -676,5 +678,203 @@ where
     Definition::parser::<E>()
       .map(Self::Definition)
       .or(Extension::parser::<E>().map(Self::Extension))
+  }
+}
+
+/// Type system definition or extension for GraphQL specification.
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum ImportOrTypeSystemDefinitionOrExtension<Import, Definition, Extension> {
+  /// An import.
+  Import(Import),
+  /// A type system definition.
+  Definition(Definition),
+  /// A type system extension.
+  Extension(Extension),
+}
+
+impl<Import, Definition, Extension> AsSpan<Span>
+  for ImportOrTypeSystemDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: AsSpan<Span>,
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Import(i) => i.as_span(),
+      Self::Definition(d) => d.as_span(),
+      Self::Extension(e) => e.as_span(),
+    }
+  }
+}
+
+impl<Import, Definition, Extension> IntoSpan<Span>
+  for ImportOrTypeSystemDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: IntoSpan<Span>,
+  Definition: IntoSpan<Span>,
+  Extension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Import(i) => i.into_span(),
+      Self::Definition(d) => d.into_span(),
+      Self::Extension(e) => e.into_span(),
+    }
+  }
+}
+
+impl<'a, Import, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
+  for ImportOrTypeSystemDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: Parseable<'a, I, T, Error>,
+  Definition: Parseable<'a, I, T, Error>,
+  Extension: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    choice((
+      Import::parser::<E>().map(Self::Import),
+      Definition::parser::<E>().map(Self::Definition),
+      Extension::parser::<E>().map(Self::Extension),
+    ))
+  }
+}
+
+/// Executable definition for GraphQL specification.
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum ImportOrExecutableDefinition<Import, Executable> {
+  /// An import definition.
+  Import(Import),
+  /// An executable definition.
+  Executable(Executable),
+}
+
+impl<Import, Executable> AsSpan<Span> for ImportOrExecutableDefinition<Import, Executable>
+where
+  Import: AsSpan<Span>,
+  Executable: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Import(i) => i.as_span(),
+      Self::Executable(e) => e.as_span(),
+    }
+  }
+}
+
+impl<Import, Executable> IntoSpan<Span> for ImportOrExecutableDefinition<Import, Executable>
+where
+  Import: IntoSpan<Span>,
+  Executable: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Import(i) => i.into_span(),
+      Self::Executable(e) => e.into_span(),
+    }
+  }
+}
+
+impl<'a, Import, Executable, I, T, Error> Parseable<'a, I, T, Error>
+  for ImportOrExecutableDefinition<Import, Executable>
+where
+  Import: Parseable<'a, I, T, Error>,
+  Executable: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    Import::parser::<E>()
+      .map(Self::Import)
+      .or(Executable::parser::<E>().map(Self::Executable))
+  }
+}
+
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum ImportOrDefinitionOrExtension<Import, Definition, Extension> {
+  Import(Import),
+  Definition(Definition),
+  Extension(Extension),
+}
+
+impl<Import, Definition, Extension> AsSpan<Span>
+  for ImportOrDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: AsSpan<Span>,
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Definition(d) => d.as_span(),
+      Self::Extension(e) => e.as_span(),
+      Self::Import(i) => i.as_span(),
+    }
+  }
+}
+
+impl<Import, Definition, Extension> IntoSpan<Span>
+  for ImportOrDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: IntoSpan<Span>,
+  Definition: IntoSpan<Span>,
+  Extension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Import(i) => i.into_span(),
+      Self::Definition(d) => d.into_span(),
+      Self::Extension(e) => e.into_span(),
+    }
+  }
+}
+
+impl<'a, Import, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
+  for ImportOrDefinitionOrExtension<Import, Definition, Extension>
+where
+  Import: Parseable<'a, I, T, Error>,
+  Definition: Parseable<'a, I, T, Error>,
+  Extension: Parseable<'a, I, T, Error>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  where
+    Self: Sized + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+  {
+    choice((
+      Import::parser::<E>().map(Self::Import),
+      Definition::parser::<E>().map(Self::Definition),
+      Extension::parser::<E>().map(Self::Extension),
+    ))
   }
 }

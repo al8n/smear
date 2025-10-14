@@ -163,10 +163,77 @@ macro_rules! impl_common_traits {
 
 mod string_lexer;
 
-/// The lexers for standard GraphQL
+/// Lexers for standard GraphQL (draft specification).
+///
+/// This module provides zero-copy tokenization for GraphQL source text. All tokens
+/// reference spans in the original source, avoiding unnecessary allocations.
+///
+/// # Token Types
+///
+/// The GraphQL lexer recognizes:
+/// - **Identifiers**: Names for types, fields, arguments, etc.
+/// - **Literals**: Integers, floats, strings (inline and block), booleans, null
+/// - **Punctuators**: `(`, `)`, `{`, `}`, `[`, `]`, `:`, `=`, `@`, `$`, `!`, `|`, `&`, `,`
+/// - **Keywords**: `query`, `mutation`, `subscription`, `fragment`, `type`, `interface`, etc.
+///
+/// # Source Types
+///
+/// The lexer is generic over source type `S`:
+/// - `&str`: Most common, UTF-8 validated
+/// - `&[u8]`: For binary sources, can be converted to `&str` when needed
+/// - `bytes::Bytes`: For shared ownership (requires `bytes` feature)
+///
+/// # Modules
+///
+/// - [`ast`](graphql::ast): AST token definitions for standard GraphQL
+/// - [`error`](graphql::error): Lexer-specific error types
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphql::ast::AstToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { user { id } }";
+/// let tokens = TokenStream::<AstToken<&str>>::new(source);
+/// for token in tokens {
+///   // Process each token...
+/// }
+/// ```
 pub mod graphql;
 
-/// The lexers for GraphQL extension.
+/// Lexers for GraphQLX (extended GraphQL).
+///
+/// This module extends the standard GraphQL lexer with additional tokens for GraphQLX
+/// features like generics, imports, map types, and namespacing.
+///
+/// # Additional Token Types
+///
+/// Beyond standard GraphQL tokens, GraphQLX adds:
+/// - **Path separator**: `::` for namespaced types
+/// - **Angle brackets**: `<`, `>` for generics
+/// - **Fat arrow**: `=>` for map types
+/// - **Additional keywords**: `import`, `from`, `as`, `where`, `map`
+/// - **Asterisk**: `*` for wildcard imports
+///
+/// # Modules
+///
+/// - [`ast`](graphqlx::ast): AST token definitions for GraphQLX
+/// - [`error`](graphqlx::error): Lexer-specific error types
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphqlx::ast::AstToken;
+/// use logosky::TokenStream;
+///
+/// let source = "import { User } from \"./types.graphqlx\"";
+/// let tokens = TokenStream::<AstToken<&str>>::new(source);
+/// ```
+///
+/// # Note
+///
+/// GraphQLX requires the `unstable` feature flag.
 pub mod graphqlx;
 
 mod handlers;

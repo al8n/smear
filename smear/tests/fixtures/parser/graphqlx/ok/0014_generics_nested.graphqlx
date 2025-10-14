@@ -1,0 +1,17 @@
+"Nested generic types"
+
+type Result<T> {
+  value: T
+  success: Boolean
+}
+
+type Query {
+  userResult: Result<User>
+  listResult: Result<[User!]!>
+  optionalResult: Result<User>
+}
+
+type User {
+  id: ID!
+  name: String
+}

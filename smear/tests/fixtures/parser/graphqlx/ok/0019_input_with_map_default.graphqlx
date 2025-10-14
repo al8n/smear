@@ -1,0 +1,6 @@
+"Input type with map default value"
+
+input CreateUserInput {
+  name: String!
+  preferences: <String! => String!>!
+}

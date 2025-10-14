@@ -1,0 +1,17 @@
+"Type with where clause having multiple bounds"
+
+type Storage<T>
+  where T: Node & Timestamped
+{
+  data: T
+  metadata: String
+}
+
+interface Node {
+  id: ID!
+}
+
+interface Timestamped {
+  createdAt: String
+  updatedAt: String
+}

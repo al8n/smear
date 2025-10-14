@@ -63,7 +63,7 @@ impl<Name, Container> UnionMemberTypes<Name, Container> {
   where
     Container: AsRef<[Name]>,
   {
-    self.members.as_ref()
+    self.members().as_ref()
   }
 }
 

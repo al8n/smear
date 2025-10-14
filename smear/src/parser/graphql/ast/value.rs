@@ -1,10 +1,18 @@
-use crate::{lexer::graphql::ast::AstLexerErrors, scaffold};
+use crate::{
+  error::{UnclosedBraceError as _, UnclosedBracketError},
+  hints::VariableValueHint,
+  lexer::graphql::ast::AstLexerErrors,
+  punctuator::{RBrace, RBracket},
+  scaffold,
+};
 
-use super::{AstToken, AstTokenErrors, AstTokenStream, DefaultVec, Name};
+use super::{
+  AstToken, AstTokenError, AstTokenErrors, AstTokenStream, DefaultVec, Expectation, Name,
+};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*, select},
+  chumsky::{Parser, extra::ParserExtra, prelude::*},
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
@@ -25,60 +33,70 @@ mod int;
 mod null_value;
 mod string;
 
-macro_rules! atom_parser {
-  () => {{
-    select! {
-      Lexed::Token(Spanned { span, data: AstToken::Identifier(name) }) => {
-        match () {
-          () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
-          () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
-          () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-          _ => Self::Enum(EnumValue::new(span, name)),
-        }
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitInt(val) }) => {
-        Self::Int(IntValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitFloat(val) }) => {
-        Self::Float(FloatValue::new(span, val))
-      },
-      Lexed::Token(Spanned { span, data: AstToken::LitInlineStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-      Lexed::Token(Spanned { span, data: AstToken::LitBlockStr(raw) }) => Self::String(StringValue::new(span, raw.into())),
-    }
-  }};
-}
-
+/// List value in GraphQL (can contain variables).
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+
+/// Object value in GraphQL (can contain variables).
 pub type Object<S, Container = DefaultVec<InputValue<S>>> =
   scaffold::Object<Name<S>, InputValue<S>, Container>;
 
+/// Object field in GraphQL (can contain variables).
+pub type ObjectField<S> = scaffold::ObjectField<Name<S>, InputValue<S>>;
+
+/// Constant list value in GraphQL (no variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::List<ConstInputValue<S>, Container>;
+
+/// Constant object value in GraphQL (no variables).
 pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Object<Name<S>, ConstInputValue<S>, Container>;
 
-/// GraphQL Input Value
+/// Constant object field in GraphQL (no variables).
+pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
+
+/// GraphQL input value (executable context).
+///
+/// Represents a value that can be provided as an argument or input field value in
+/// GraphQL operations. Input values in executable contexts **can contain variables**
+/// (prefixed with `$`).
+///
+/// This enum covers all valid GraphQL value literals plus variable references:
+/// - Scalar values: boolean, string, float, int, enum, null
+/// - Complex values: list and object
+/// - Variables: `$variableName`
+///
+/// # Variants
+///
+/// - `Variable`: A variable reference (e.g., `$userId`)
+/// - `Boolean`: `true` or `false`
+/// - `String`: String literals (inline or block)
+/// - `Float`: Floating-point numbers
+/// - `Int`: Integer numbers
+/// - `Enum`: Enum value names
+/// - `Null`: The `null` literal
+/// - `List`: Array of values `[value1, value2, ...]`
+/// - `Object`: Object with field-value pairs `{ field1: value1, field2: value2 }`
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S> {
-  /// GraphQL Variable
+  /// Variable reference (e.g., `$userId`).
   Variable(VariableValue<S>),
-  /// GraphQL Boolean
+  /// Boolean value (`true` or `false`).
   Boolean(BooleanValue),
-  /// GraphQL String
+  /// String value (inline or block string).
   String(StringValue<S>),
-  /// GraphQL Float
+  /// Floating-point number.
   Float(FloatValue<S>),
-  /// GraphQL Int
+  /// Integer number.
   Int(IntValue<S>),
-  /// GraphQL Enum
+  /// Enum value name.
   Enum(EnumValue<S>),
-  /// GraphQL Null
+  /// The `null` literal.
   Null(NullValue<S>),
-  /// GraphQL List
+  /// List of values.
   List(scaffold::List<InputValue<S>>),
-  /// GraphQL Object
+  /// Object value with named fields.
   Object(scaffold::Object<Name<S>, InputValue<S>>),
 }
 
@@ -122,6 +140,8 @@ where
   AstToken<S>: Token<'a>,
   <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
   <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
@@ -137,44 +157,146 @@ where
     AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      let object_value_parser =
-        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
-      choice((
-        atom_parser!(),
-        select! {
-          Lexed::Token(Spanned { span, data: AstToken::Dollar }) => span,
+      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
+        let before = inp.cursor();
+
+        match inp.next() {
+          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          Some(tok) => match tok {
+            Lexed::Error(err) => {
+              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+            }
+            Lexed::Token(Spanned { span, data: token }) => {
+              let output = match token {
+                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::Identifier(name) => match () {
+                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+                  _ => Self::Enum(EnumValue::new(span, name)),
+                },
+                AstToken::Dollar => {
+                  let current_cursor = inp.cursor();
+                  let name = match inp.next() {
+                    Some(Lexed::Token(Spanned {
+                      span,
+                      data: AstToken::Identifier(name),
+                    })) => Name::new(span, name),
+                    Some(Lexed::Token(Spanned { span, data })) => {
+                      return Err(
+                        AstTokenError::unexpected_token(data, Expectation::Name, span).into(),
+                      );
+                    }
+                    Some(Lexed::Error(err)) => {
+                      return Err(
+                        AstTokenError::from_lexer_errors(err, inp.span_since(&current_cursor))
+                          .into(),
+                      );
+                    }
+                    None => {
+                      return Err(
+                        AstTokenError::unexpected_end_of_variable_value(
+                          VariableValueHint::Name,
+                          inp.span_since(&before),
+                        )
+                        .into(),
+                      );
+                    }
+                  };
+                  Self::Variable(VariableValue::new(inp.span_since(&before), name))
+                }
+                AstToken::LBrace => {
+                  let (fields, rbrace) = inp.parse(
+                    ObjectField::<S>::parser_with(Name::<S>::parser(), parser.clone())
+                      .repeated()
+                      .collect()
+                      .then(RBrace::parser().or_not()),
+                  )?;
+                  return match rbrace {
+                    Some(_) => Ok(Self::Object(scaffold::Object::new(
+                      inp.span_since(&before),
+                      fields,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                  };
+                }
+                AstToken::LBracket => {
+                  let (elements, rbracket) = inp.parse(
+                    parser
+                      .clone()
+                      .repeated()
+                      .collect()
+                      .then(RBracket::parser().or_not()),
+                  )?;
+
+                  return match rbracket {
+                    Some(_) => Ok(Self::List(scaffold::List::new(
+                      inp.span_since(&before),
+                      elements,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                  };
+                }
+                tok => {
+                  return Err(
+                    AstTokenError::unexpected_token(tok, Expectation::InputValue, span).into(),
+                  );
+                }
+              };
+
+              Ok(output)
+            }
+          },
         }
-        .then(Name::parser::<E>())
-        .map(|(span, name)| VariableValue::new(span.with_end(name.span().end()), name))
-        .map(Self::Variable),
-        list_value_parser,
-        object_value_parser,
-      ))
+      })
     })
   }
 }
 
-/// GraphQL Const Input Value
+/// GraphQL constant input value (schema context).
+///
+/// Represents a value that can be used in schema definitions (type system). Constant values
+/// **cannot contain variables** - they must be literal values known at schema definition time.
+///
+/// This is used for:
+/// - Default values for input fields and arguments
+/// - Directive arguments in schema definitions
+/// - Any value in type system definitions
+///
+/// The set of allowed values is the same as `InputValue`, except variables are not permitted.
+///
+/// # Variants
+///
+/// - `Boolean`: `true` or `false`
+/// - `String`: String literals (inline or block)
+/// - `Float`: Floating-point numbers
+/// - `Int`: Integer numbers
+/// - `Enum`: Enum value names
+/// - `Null`: The `null` literal
+/// - `List`: Array of constant values
+/// - `Object`: Object with field-value pairs (all values must be constant)
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
-  /// GraphQL Boolean value
+  /// Boolean value (`true` or `false`).
   Boolean(BooleanValue),
-  /// GraphQL String value
+  /// String value (inline or block string).
   String(StringValue<S>),
-  /// GraphQL Float value
+  /// Floating-point number.
   Float(FloatValue<S>),
-  /// GraphQL Int value
+  /// Integer number.
   Int(IntValue<S>),
-  /// GraphQL Enum value
+  /// Enum value name.
   Enum(EnumValue<S>),
-  /// GraphQL Null value
+  /// The `null` literal.
   Null(NullValue<S>),
-  /// GraphQL List value
+  /// List of constant values.
   List(scaffold::List<ConstInputValue<S>>),
-  /// GraphQL Object value
+  /// Object value with named fields (all values must be constant).
   Object(scaffold::Object<Name<S>, ConstInputValue<S>>),
 }
 
@@ -216,6 +338,8 @@ where
   AstToken<S>: Token<'a>,
   <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
   <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
@@ -231,11 +355,71 @@ where
     AstTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      let object_value_parser =
-        scaffold::Object::parser_with(Name::<S>::parser(), parser.clone()).map(Self::Object);
-      let list_value_parser = scaffold::List::parser_with(parser).map(Self::List);
+      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
+        let before = inp.cursor();
 
-      choice((atom_parser!(), object_value_parser, list_value_parser))
+        match inp.next() {
+          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          Some(tok) => match tok {
+            Lexed::Error(err) => {
+              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+            }
+            Lexed::Token(Spanned { span, data: token }) => {
+              let output = match token {
+                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
+                AstToken::Identifier(name) => match () {
+                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
+                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
+                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
+                  _ => Self::Enum(EnumValue::new(span, name)),
+                },
+                AstToken::LBrace => {
+                  let (fields, rbrace) = inp.parse(
+                    ConstObjectField::<S>::parser_with(Name::<S>::parser(), parser.clone())
+                      .repeated()
+                      .collect()
+                      .then(RBrace::parser().or_not()),
+                  )?;
+                  return match rbrace {
+                    Some(_) => Ok(Self::Object(scaffold::Object::new(
+                      inp.span_since(&before),
+                      fields,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                  };
+                }
+                AstToken::LBracket => {
+                  let (elements, rbracket) = inp.parse(
+                    parser
+                      .clone()
+                      .repeated()
+                      .collect()
+                      .then(RBracket::parser().or_not()),
+                  )?;
+
+                  return match rbracket {
+                    Some(_) => Ok(Self::List(scaffold::List::new(
+                      inp.span_since(&before),
+                      elements,
+                    ))),
+                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                  };
+                }
+                tok => {
+                  return Err(
+                    AstTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into(),
+                  );
+                }
+              };
+
+              Ok(output)
+            }
+          },
+        }
+      })
     })
   }
 }

@@ -27,7 +27,7 @@ macro_rules! punctuator_parser {
               let (span, tok) = tok.into_components();
               match tok {
                 AstToken::$name => Ok($name::new(span)),
-                tok => Err(Error::unexpected_token(tok, AstTokenKind::$name, span).into()),
+                tok => Err(Error::unexpected_token(tok, Expectation::$name, span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -40,6 +40,7 @@ macro_rules! punctuator_parser {
 
 punctuator_parser! {
   At,
+  Asterisk,
   Ampersand,
   Bang,
   Colon,

@@ -1,4 +1,4 @@
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
@@ -342,10 +342,10 @@ where
 /// ```
 ///
 /// Spec: [OperationDefinition](https://spec.graphql.org/draft/#OperationDefinition)
-#[derive(Debug, Clone, IsVariant, From, Unwrap, TryUnwrap)]
+#[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet> {
+pub enum OperationDefinition<NamedOperationTypeDefinition, SelectionSet> {
   /// Named operation with full metadata
   ///
   /// ## Examples
@@ -379,9 +379,7 @@ pub enum OperationDefinition<Name, OperationType, VariablesDefinition, Directive
   ///   }
   /// }
   /// ```
-  Named(
-    NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>,
-  ),
+  Named(NamedOperationTypeDefinition),
   /// Shorthand query operation (selection set only)
   ///
   /// ## Examples
@@ -429,10 +427,11 @@ pub enum OperationDefinition<Name, OperationType, VariablesDefinition, Directive
   Shorthand(SelectionSet),
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsSpan<Span>
-  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<NamedOperationTypeDefinition, SelectionSet> AsSpan<Span>
+  for OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
 where
   SelectionSet: AsSpan<Span>,
+  NamedOperationTypeDefinition: AsSpan<Span>,
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -443,10 +442,11 @@ where
   }
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoSpan<Span>
-  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<NamedOperationTypeDefinition, SelectionSet> IntoSpan<Span>
+  for OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
 where
   SelectionSet: IntoSpan<Span>,
+  NamedOperationTypeDefinition: IntoSpan<Span>,
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -457,18 +457,15 @@ where
   }
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
-  OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<NamedOperationTypeDefinition, SelectionSet>
+  OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
 {
   /// Creates a parser for operation definitions.
   ///
   /// Handles both named and shorthand operation forms with proper precedence.
   #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, OP, VP, DP, SP>(
-    name_parser: NP,
-    operation_type_parser: OP,
-    variable_definitions_parser: VP,
-    directives_parser: DP,
+  pub fn parser_with<'src, I, T, Error, E, NP, SP>(
+    named_operation_type_parser: NP,
     selection_set_parser: SP,
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
@@ -476,34 +473,19 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
     I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
+    NP: Parser<'src, I, NamedOperationTypeDefinition, E> + Clone,
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
-    choice((
-      NamedOperationDefinition::parser_with(
-        name_parser,
-        operation_type_parser,
-        variable_definitions_parser,
-        directives_parser,
-        selection_set_parser.clone(),
-      )
-      .map(Self::Named),
-      selection_set_parser.map(Self::Shorthand),
-    ))
+    named_operation_type_parser
+      .map(Self::Named)
+      .or(selection_set_parser.map(Self::Shorthand))
   }
 }
 
-impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for OperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<'a, NamedOperationTypeDefinition, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
+  for OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
 where
-  Name: Parseable<'a, I, T, Error>,
-  OperationType: Parseable<'a, I, T, Error>,
-  VariablesDefinition: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
+  NamedOperationTypeDefinition: Parseable<'a, I, T, Error>,
   SelectionSet: Parseable<'a, I, T, Error>,
 {
   #[inline]
@@ -516,10 +498,7 @@ where
     Error: 'a,
   {
     Self::parser_with(
-      Name::parser(),
-      OperationType::parser(),
-      VariablesDefinition::parser(),
-      Directives::parser(),
+      NamedOperationTypeDefinition::parser(),
       SelectionSet::parser(),
     )
   }

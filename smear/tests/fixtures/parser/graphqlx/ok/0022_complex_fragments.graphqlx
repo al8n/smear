@@ -1,0 +1,106 @@
+fragment<T> UserFields<T> on User<T> {
+  id
+  name
+  email
+  data
+}
+
+fragment<K, V> ConnectionFields<K, V> on Connection<K, V> {
+  edges {
+    node {
+      key
+      value
+    }
+    cursor
+  }
+  pageInfo {
+    hasNextPage
+    hasPreviousPage
+  }
+}
+
+query GetUserData<T> {
+  user {
+    ...UserFields<T>
+
+    ... on PremiumUser {
+      subscriptionLevel
+      features
+    }
+
+    ... on AdminUser {
+      permissions
+      role
+    }
+
+    profile {
+      ... on PublicProfile {
+        displayName
+        avatar
+      }
+      ... on PrivateProfile {
+        settings
+      }
+    }
+  }
+
+  connections {
+    ...ConnectionFields<String, Int>
+  }
+}
+
+fragment<T> NodeFragment<T> on Node<T>
+  where T: Timestamped & Serializable
+{
+  id
+  createdAt
+  updatedAt
+  data
+
+  ... on Document<T> {
+    title
+    content
+  }
+
+  ... on Media<T> {
+    url
+    metadata
+  }
+}
+
+query ComplexQuery<T, U> {
+  items {
+    ...NodeFragment<T>
+
+    ... {
+      typename: __typename
+      inlineField
+    }
+
+    related {
+      ...NodeFragment<U>
+    }
+  }
+}
+
+fragment NestedFragmentSpread on Post {
+  id
+  title
+  author {
+    ...UserFields<String>
+    posts {
+      ...PostPreview
+    }
+  }
+}
+
+fragment PostPreview on Post {
+  id
+  title
+  excerpt
+
+  ... on PublishedPost {
+    publishedAt
+    views
+  }
+}
