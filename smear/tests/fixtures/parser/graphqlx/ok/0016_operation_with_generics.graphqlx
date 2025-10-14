@@ -11,7 +11,4 @@ fragment<T> ItemFragment<T> on Item<T> {
   data
 }
 
-type Item<T> {
-  id: ID!
-  data: T
-}
+

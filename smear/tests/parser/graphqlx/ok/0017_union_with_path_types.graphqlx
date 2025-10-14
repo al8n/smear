@@ -1,3 +1,0 @@
-"Union type with path types"
-
-union SearchResult = user::Profile | blog::Post | meida::Image

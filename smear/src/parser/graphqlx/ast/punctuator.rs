@@ -40,6 +40,7 @@ macro_rules! punctuator_parser {
 
 punctuator_parser! {
   At,
+  Asterisk,
   Ampersand,
   Bang,
   Colon,

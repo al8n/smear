@@ -33,39 +33,70 @@ mod int;
 mod null_value;
 mod string;
 
+/// List value in GraphQL (can contain variables).
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+
+/// Object value in GraphQL (can contain variables).
 pub type Object<S, Container = DefaultVec<InputValue<S>>> =
   scaffold::Object<Name<S>, InputValue<S>, Container>;
+
+/// Object field in GraphQL (can contain variables).
 pub type ObjectField<S> = scaffold::ObjectField<Name<S>, InputValue<S>>;
 
+/// Constant list value in GraphQL (no variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::List<ConstInputValue<S>, Container>;
+
+/// Constant object value in GraphQL (no variables).
 pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Object<Name<S>, ConstInputValue<S>, Container>;
+
+/// Constant object field in GraphQL (no variables).
 pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
 
-/// GraphQL Input Value
+/// GraphQL input value (executable context).
+///
+/// Represents a value that can be provided as an argument or input field value in
+/// GraphQL operations. Input values in executable contexts **can contain variables**
+/// (prefixed with `$`).
+///
+/// This enum covers all valid GraphQL value literals plus variable references:
+/// - Scalar values: boolean, string, float, int, enum, null
+/// - Complex values: list and object
+/// - Variables: `$variableName`
+///
+/// # Variants
+///
+/// - `Variable`: A variable reference (e.g., `$userId`)
+/// - `Boolean`: `true` or `false`
+/// - `String`: String literals (inline or block)
+/// - `Float`: Floating-point numbers
+/// - `Int`: Integer numbers
+/// - `Enum`: Enum value names
+/// - `Null`: The `null` literal
+/// - `List`: Array of values `[value1, value2, ...]`
+/// - `Object`: Object with field-value pairs `{ field1: value1, field2: value2 }`
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S> {
-  /// GraphQL Variable
+  /// Variable reference (e.g., `$userId`).
   Variable(VariableValue<S>),
-  /// GraphQL Boolean
+  /// Boolean value (`true` or `false`).
   Boolean(BooleanValue),
-  /// GraphQL String
+  /// String value (inline or block string).
   String(StringValue<S>),
-  /// GraphQL Float
+  /// Floating-point number.
   Float(FloatValue<S>),
-  /// GraphQL Int
+  /// Integer number.
   Int(IntValue<S>),
-  /// GraphQL Enum
+  /// Enum value name.
   Enum(EnumValue<S>),
-  /// GraphQL Null
+  /// The `null` literal.
   Null(NullValue<S>),
-  /// GraphQL List
+  /// List of values.
   List(scaffold::List<InputValue<S>>),
-  /// GraphQL Object
+  /// Object value with named fields.
   Object(scaffold::Object<Name<S>, InputValue<S>>),
 }
 
@@ -225,26 +256,47 @@ where
   }
 }
 
-/// GraphQL Const Input Value
+/// GraphQL constant input value (schema context).
+///
+/// Represents a value that can be used in schema definitions (type system). Constant values
+/// **cannot contain variables** - they must be literal values known at schema definition time.
+///
+/// This is used for:
+/// - Default values for input fields and arguments
+/// - Directive arguments in schema definitions
+/// - Any value in type system definitions
+///
+/// The set of allowed values is the same as `InputValue`, except variables are not permitted.
+///
+/// # Variants
+///
+/// - `Boolean`: `true` or `false`
+/// - `String`: String literals (inline or block)
+/// - `Float`: Floating-point numbers
+/// - `Int`: Integer numbers
+/// - `Enum`: Enum value names
+/// - `Null`: The `null` literal
+/// - `List`: Array of constant values
+/// - `Object`: Object with field-value pairs (all values must be constant)
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
-  /// GraphQL Boolean value
+  /// Boolean value (`true` or `false`).
   Boolean(BooleanValue),
-  /// GraphQL String value
+  /// String value (inline or block string).
   String(StringValue<S>),
-  /// GraphQL Float value
+  /// Floating-point number.
   Float(FloatValue<S>),
-  /// GraphQL Int value
+  /// Integer number.
   Int(IntValue<S>),
-  /// GraphQL Enum value
+  /// Enum value name.
   Enum(EnumValue<S>),
-  /// GraphQL Null value
+  /// The `null` literal.
   Null(NullValue<S>),
-  /// GraphQL List value
+  /// List of constant values.
   List(scaffold::List<ConstInputValue<S>>),
-  /// GraphQL Object value
+  /// Object value with named fields (all values must be constant).
   Object(scaffold::Object<Name<S>, ConstInputValue<S>>),
 }
 

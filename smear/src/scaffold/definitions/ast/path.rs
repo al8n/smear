@@ -66,11 +66,11 @@ impl<Ident, Container> Path<Ident, Container> {
 
   /// Returns the slice of the segments of the path.
   #[inline]
-  pub fn as_slice(&self) -> &[Ident]
+  pub fn segments_slice(&self) -> &[Ident]
   where
     Container: AsRef<[Ident]>,
   {
-    self.segments.as_ref()
+    self.segments().as_ref()
   }
 
   /// Returns the span of the path.
@@ -164,7 +164,7 @@ where
 
     // 3) iterate segments without allocating
     let mut parts = body.split("::");
-    let mut segs = other.as_slice().iter();
+    let mut segs = other.segments_slice().iter();
 
     loop {
       match (parts.next(), segs.next()) {
@@ -192,7 +192,7 @@ where
       f.write_str("::")?;
     }
     let mut first = true;
-    for segment in self.as_slice() {
+    for segment in self.segments_slice() {
       if !first {
         f.write_str("::")?;
       }

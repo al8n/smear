@@ -18,8 +18,7 @@ use crate::{
 /// ```text
 /// NamedSpecifier : Name (as Path)?
 /// ```
-pub type NamedSpecifier<S, Container = Vec<Ident<S>>> =
-  scaffold::NamedSpecifier<Ident<S>, Path<Ident<S>, Container>>;
+pub type NamedSpecifier<S> = scaffold::NamedSpecifier<Ident<S>, Path<Ident<S>>>;
 
 /// A wildcard import specifier, optionally with an alias.
 ///
@@ -30,8 +29,7 @@ pub type NamedSpecifier<S, Container = Vec<Ident<S>>> =
 /// ```text
 /// WildcardSpecifier : * (as Path)?
 /// ```
-pub type WildcardSpecifier<S, Container = Vec<Ident<S>>> =
-  scaffold::WildcardSpecifier<Ident<S>, Container>;
+pub type WildcardSpecifier<S> = scaffold::WildcardSpecifier<Ident<S>>;
 
 /// An import member, which can be either a named or wildcard specifier.
 ///
@@ -42,8 +40,7 @@ pub type WildcardSpecifier<S, Container = Vec<Ident<S>>> =
 ///   - NamedSpecifier
 ///   - WildcardSpecifier
 /// ```
-pub type ImportMember<S, Container = Vec<Ident<S>>> =
-  scaffold::ImportMember<Ident<S>, Path<Ident<S>, Container>>;
+pub type ImportMember<S> = scaffold::ImportMember<Ident<S>>;
 
 /// An import list containing multiple import members enclosed in braces.
 ///
@@ -52,15 +49,9 @@ pub type ImportMember<S, Container = Vec<Ident<S>>> =
 /// ```text
 /// ImportList : { ImportMember+ }
 /// ```
-pub type ImportList<
-  S,
-  PathContainer = Vec<Ident<S>>,
-  MemberContainer = Vec<ImportMember<Ident<S>, Vec<Ident<S>>>>,
-> = scaffold::ImportList<
-  Ident<S>,
-  Path<Ident<S>, PathContainer>,
-  ImportMember<Ident<S>, MemberContainer>,
->;
+pub type ImportList<S> = scaffold::ImportList<Ident<S>>;
+
+pub type ImportClause<S> = scaffold::ImportClause<Ident<S>>;
 
 /// A complete GraphQLx import definition.
 ///
@@ -76,13 +67,4 @@ pub type ImportList<
 ///   - ImportList
 ///   - WildcardSpecifier
 /// ```
-pub type ImportDefinition<
-  S,
-  PathContainer = Vec<Ident<S>>,
-  MemberContainer = Vec<ImportMember<Ident<S>, Vec<Ident<S>>>>,
-> = scaffold::ImportDefinition<
-  Ident<S>,
-  InlineStringValue<S>,
-  PathContainer,
-  ImportMember<Ident<S>, MemberContainer>,
->;
+pub type ImportDefinition<S> = scaffold::ImportDefinition<Ident<S>, InlineStringValue<S>>;

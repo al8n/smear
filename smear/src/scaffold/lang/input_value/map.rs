@@ -189,6 +189,15 @@ impl<Key, Value, Container> Map<Key, Value, Container> {
     &self.entries
   }
 
+  /// Returns the entries as a slice, if the container supports it.
+  #[inline]
+  pub fn entries_slice(&self) -> &[MapEntry<Key, Value>]
+  where
+    Container: AsRef<[MapEntry<Key, Value>]>,
+  {
+    self.entries().as_ref()
+  }
+
   /// Creates a parser for GraphQLx map literals with customizable value parsing.
   ///
   /// This parser handles the complete map syntax including brackets and

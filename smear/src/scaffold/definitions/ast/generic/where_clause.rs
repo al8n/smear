@@ -101,7 +101,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
   where
     Container: AsRef<[TypePath<Ident, Type>]>,
   {
-    self.bounds.as_ref()
+    self.bounds().as_ref()
   }
 
   /// Returns a parser for the where predicate.

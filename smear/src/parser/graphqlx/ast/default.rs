@@ -148,13 +148,22 @@ pub type TypeSystemDefinitionOrExtension<S> = scaffold::TypeSystemDefinitionOrEx
   TypeSystemExtension<S>,
 >;
 
+pub type ImportOrTypeSystemDefinitionOrExtension<S> =
+  scaffold::ImportOrTypeSystemDefinitionOrExtension<
+    ImportDefinition<S>,
+    DescribedTypeSystemDefinition<S>,
+    TypeSystemExtension<S>,
+  >;
+
 pub type OperationDefinition<S> =
   scaffold::OperationDefinition<NamedOperationDefinition<S>, SelectionSet<S>>;
 
 pub type ExecutableDefinition<S> =
   scaffold::ExecutableDefinition<OperationDefinition<S>, FragmentDefinition<S>>;
-
 pub type DescribedExecutableDefinition<S> = Described<ExecutableDefinition<S>, S>;
+
+pub type ImportOrExecutableDefinition<S> =
+  scaffold::ImportOrExecutableDefinition<ImportDefinition<S>, DescribedExecutableDefinition<S>>;
 
 pub type Definition<S> = scaffold::Definition<TypeSystemDefinition<S>, ExecutableDefinition<S>>;
 
@@ -163,8 +172,14 @@ pub type DescribedDefinition<S> = Described<Definition<S>, S>;
 pub type DefinitionOrExtension<S> =
   scaffold::DefinitionOrExtension<DescribedDefinition<S>, TypeSystemExtension<S>>;
 
-pub type TypeSystemDocument<S> = scaffold::Document<TypeSystemDefinitionOrExtension<S>>;
+pub type ImportOrDefinitionOrExtension<S> = scaffold::ImportOrDefinitionOrExtension<
+  ImportDefinition<S>,
+  DescribedDefinition<S>,
+  TypeSystemExtension<S>,
+>;
 
-pub type ExecutableDocument<S> = scaffold::Document<DescribedExecutableDefinition<S>>;
+pub type TypeSystemDocument<S> = scaffold::Document<ImportOrTypeSystemDefinitionOrExtension<S>>;
 
-pub type Document<S> = scaffold::Document<DefinitionOrExtension<S>>;
+pub type ExecutableDocument<S> = scaffold::Document<ImportOrExecutableDefinition<S>>;
+
+pub type Document<S> = scaffold::Document<ImportOrDefinitionOrExtension<S>>;

@@ -106,7 +106,27 @@ where
   }
 }
 
+impl<S> PartialEq<&str> for Ident<S>
+where
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &&str) -> bool {
+    other.equivalent(&self.value)
+  }
+}
+
 impl<S> PartialEq<Ident<S>> for str
+where
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn eq(&self, other: &Ident<S>) -> bool {
+    self.equivalent(&other.value)
+  }
+}
+
+impl<S> PartialEq<Ident<S>> for &str
 where
   str: Equivalent<S>,
 {

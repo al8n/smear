@@ -68,7 +68,7 @@ impl<Ident, Container> ExecutableDefinitionTypeGenerics<Ident, Container> {
 
   /// Returns the mutable parameters of the type generics.
   #[inline]
-  pub fn params_slice(&mut self) -> &[Ident]
+  pub fn params_slice(&self) -> &[Ident]
   where
     Container: AsRef<[Ident]>,
   {

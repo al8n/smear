@@ -151,11 +151,11 @@ impl<Ident, Container> ExtensionTypeGenerics<Ident, Container> {
 
   /// Returns the mutable parameters of the type generics.
   #[inline]
-  pub fn params_slice(&mut self) -> &[ExtensionTypeParam<Ident>]
+  pub fn params_slice(&self) -> &[ExtensionTypeParam<Ident>]
   where
     Container: AsRef<[ExtensionTypeParam<Ident>]>,
   {
-    self.params.as_ref()
+    self.params().as_ref()
   }
 
   /// Returns a parser for the extension type generics.

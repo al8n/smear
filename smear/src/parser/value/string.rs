@@ -13,6 +13,20 @@ pub struct StringValue<S> {
   lit: LitStr<S>,
 }
 
+impl<S: AsRef<str>> AsRef<str> for StringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &str {
+    self.lit.source_ref().as_ref()
+  }
+}
+
+impl<S: AsRef<[u8]>> AsRef<[u8]> for StringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &[u8] {
+    self.lit.source_ref().as_ref()
+  }
+}
+
 impl<S> AsSpan<Span> for StringValue<S> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -72,6 +86,15 @@ impl<S> StringValue<S> {
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
   }
+
+  /// Returns the content of the string.
+  #[inline]
+  pub fn content(&self) -> &str
+  where
+    S: AsRef<str>,
+  {
+    self.lit.source_ref().as_ref().trim_matches('"')
+  }
 }
 
 impl<S> DisplaySDL for StringValue<S>
@@ -89,6 +112,20 @@ where
 pub struct InlineStringValue<S> {
   span: Span,
   lit: LitInlineStr<S>,
+}
+
+impl<S: AsRef<str>> AsRef<str> for InlineStringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &str {
+    self.lit.source_ref().as_ref()
+  }
+}
+
+impl<S: AsRef<[u8]>> AsRef<[u8]> for InlineStringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &[u8] {
+    self.lit.source_ref().as_ref()
+  }
 }
 
 impl<S> AsSpan<Span> for InlineStringValue<S> {
@@ -150,6 +187,15 @@ impl<S> InlineStringValue<S> {
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
   }
+
+  /// Returns the content of the inline string.
+  #[inline]
+  pub fn content(&self) -> &str
+  where
+    S: AsRef<str>,
+  {
+    self.lit.source_ref().as_ref().trim_matches('"')
+  }
 }
 
 impl<S> DisplaySDL for InlineStringValue<S>
@@ -167,6 +213,20 @@ where
 pub struct BlockStringValue<S> {
   span: Span,
   lit: LitBlockStr<S>,
+}
+
+impl<S: AsRef<str>> AsRef<str> for BlockStringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &str {
+    self.lit.source_ref().as_ref()
+  }
+}
+
+impl<S: AsRef<[u8]>> AsRef<[u8]> for BlockStringValue<S> {
+  #[inline]
+  fn as_ref(&self) -> &[u8] {
+    self.lit.source_ref().as_ref()
+  }
 }
 
 impl<S> AsSpan<Span> for BlockStringValue<S> {
@@ -227,6 +287,15 @@ impl<S> BlockStringValue<S> {
   #[inline(always)]
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
+  }
+
+  /// Returns the content of the block string.
+  #[inline]
+  pub fn content(&self) -> &str
+  where
+    S: AsRef<str>,
+  {
+    self.lit.source_ref().as_ref().trim_matches('"')
   }
 }
 

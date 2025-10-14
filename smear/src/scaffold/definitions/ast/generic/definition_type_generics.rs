@@ -176,11 +176,11 @@ impl<Ident, Type, Container> DefinitionTypeGenerics<Ident, Type, Container> {
 
   /// Returns the mutable parameters of the type generics.
   #[inline]
-  pub fn params_slice(&mut self) -> &[DefinitionTypeParam<Ident, Type>]
+  pub fn params_slice(&self) -> &[DefinitionTypeParam<Ident, Type>]
   where
     Container: AsRef<[DefinitionTypeParam<Ident, Type>]>,
   {
-    self.params.as_ref()
+    self.params().as_ref()
   }
 
   /// Returns a parser for the definition type generics.

@@ -1,5 +1,1 @@
 import * from "./types.graphqlx"
-
-type Query {
-  getData: JSON
-}

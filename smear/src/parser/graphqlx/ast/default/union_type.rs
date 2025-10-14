@@ -155,6 +155,12 @@ impl<S> UnionTypeDefinition<S> {
     }
   }
 
+  /// Returns the optional generics of the union type definition.
+  #[inline]
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+    self.0.name().generics()
+  }
+
   /// Returns the optional where clause of the union type definition.
   #[inline]
   pub const fn where_clause(&self) -> Option<&WhereClause<S>> {

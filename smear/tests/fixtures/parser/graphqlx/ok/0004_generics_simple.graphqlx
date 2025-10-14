@@ -6,6 +6,6 @@ type Container<T> {
 }
 
 type Query {
-  stringContainer: Container<String!>
+  stringContainer: Container<String!>!
   intContainer: Container<Int>
 }

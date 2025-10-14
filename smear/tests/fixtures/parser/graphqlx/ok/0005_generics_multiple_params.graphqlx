@@ -12,6 +12,6 @@ type Triple<A, B, C> {
 }
 
 type Query {
-  config: Pair<String!, Int!>
+  config: Pair<String!, Int!>!
   data: Triple<String, Int, Boolean>
 }

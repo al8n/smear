@@ -71,6 +71,7 @@ fn graphqlx_query_shorthand_followed_by_fragment_definition() {
     let query = iter
       .next()
       .unwrap()
+      .unwrap_executable_ref()
       .unwrap_operation_ref()
       .unwrap_shorthand_ref();
     let selections = query.selections();
@@ -84,6 +85,7 @@ fn graphqlx_query_shorthand_followed_by_fragment_definition() {
     let definition = iter
       .next()
       .unwrap()
+      .unwrap_executable_ref()
       .unwrap_fragment_ref();
     assert_eq!(definition.name().source(), "friendFields");
     let type_condition = definition.type_condition();

@@ -1,6 +1,1 @@
 import { User as UserType, Post as BlogPost } from "./types.graphqlx"
-
-type Query {
-  user: UserType
-  post: BlogPost
-}

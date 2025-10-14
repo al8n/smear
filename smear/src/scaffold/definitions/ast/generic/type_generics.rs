@@ -80,11 +80,11 @@ impl<Type, Container> TypeGenerics<Type, Container> {
 
   /// Returns the mutable parameters of the type generics.
   #[inline]
-  pub fn params_slice(&mut self) -> &[Type]
+  pub fn params_slice(&self) -> &[Type]
   where
     Container: AsRef<[Type]>,
   {
-    self.params.as_ref()
+    self.params().as_ref()
   }
 
   /// Returns a parser for the type generics.

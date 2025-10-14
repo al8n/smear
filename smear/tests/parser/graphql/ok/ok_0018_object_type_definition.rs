@@ -73,7 +73,7 @@ fn graphlx_object_type_definition() {
   let impls = definition.implements().unwrap();
   let ifs = impls.interfaces();
   assert_eq!(
-    ifs[0].path().as_slice()[0].source(),
+    ifs[0].path().segments_slice()[0].source(),
     "Human"
   );
 
@@ -90,7 +90,7 @@ fn graphlx_object_type_definition() {
     );
     let ty = name.ty().unwrap_path_ref();
 
-    assert_eq!(ty.path().as_slice()[0].source(), "String");
+    assert_eq!(ty.path().segments_slice()[0].source(), "String");
     assert!(!ty.required());
   }
 
@@ -99,7 +99,7 @@ fn graphlx_object_type_definition() {
     assert_eq!(age.name().source(), "age");
     let ty = age.ty().unwrap_path_ref();
 
-    assert_eq!(ty.path().as_slice()[0].source(), "Int");
+    assert_eq!(ty.path().segments_slice()[0].source(), "Int");
     assert!(!ty.required());
   }
 
@@ -108,7 +108,7 @@ fn graphlx_object_type_definition() {
     assert_eq!(picture.name().source(), "picture");
     let ty = picture.ty().unwrap_path_ref();
 
-    assert_eq!(ty.path().as_slice()[0].source(), "Url");
+    assert_eq!(ty.path().segments_slice()[0].source(), "Url");
     assert!(!ty.required());
   }
 }
