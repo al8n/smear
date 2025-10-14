@@ -4,7 +4,7 @@ include!("./utils.rs");
 
 const QUERY: &str = "query ExampleQuery($topProductsFirst: Int) {\n  me { \n    id\n  }\n  topProducts(first:  $topProductsFirst) {\n    name\n    price\n    inStock\n weight\n test test test test test test test test test test test test }\n}";
 
-const ALIAS: &str = include_str!("testdata/alias.graphql");
+const ALIAS: &str = include_str!("../tests/fixtures/executables/alias.graphql");
 
 fn bench_apollo_query_parser(c: &mut Criterion) {
   c.bench_function("apollo-parser/query_parser", move |b| {

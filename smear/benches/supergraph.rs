@@ -2,7 +2,7 @@ use criterion::*;
 
 include!("./utils.rs");
 
-const SCHEMA: &str = include_str!("testdata/supergraph.graphql");
+const SCHEMA: &str = include_str!("../tests/fixtures/schemas/supergraph.graphql");
 
 fn bench_apollo_parser_parse_supergraph(c: &mut Criterion) {
   c.bench_function("apollo-parser/supergraph_parser", move |b| {

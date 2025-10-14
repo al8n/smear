@@ -1,4 +1,3 @@
-
 pub fn apollo_parser_parse_schema(schema: &str) {
   let parser = apollo_parser::Parser::new(schema);
   let _tree = parser.parse();
@@ -22,14 +21,13 @@ pub fn cynic_parser_parse_schema(schema: &str) {
   let _document = cynic_parser::parse_type_system_document(schema).unwrap();
 }
 
-
 pub fn apollo_parser_parse_query(schema: &str) {
   let parser = apollo_parser::Parser::new(schema);
   let _tree = parser.parse();
 }
 
 pub fn smear_parser_parse_query(schema: &str) {
-  use smear::parser::graphql::ast::{ParseStr, ExecutableDocument};
+  use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
 
   let _document = ExecutableDocument::<&str>::parse_str(schema).unwrap();
 }
