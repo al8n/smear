@@ -1,7 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::{
   human_display::DisplayHuman,
-  sdl_display::{DisplayCompact, DisplayPretty, DisplaySDL},
+  sdl_display::{DisplayCompact, DisplayPretty},
 };
 
 use super::LitPlainStr;

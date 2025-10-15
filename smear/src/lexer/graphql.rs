@@ -4,6 +4,9 @@ pub mod error;
 /// Abstract syntax tree (AST) lexers for GraphQL
 pub mod ast;
 
+/// Concrete syntax tree (CST) lexers for GraphQL
+pub mod cst;
+
 mod handlers;
 
 #[cfg(test)]

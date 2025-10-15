@@ -6,11 +6,14 @@ use logosky::{
 };
 
 use super::{
-  handlers::{str::*, unterminated_spread_operator},
-  string_lexer::*,
+  super::{LitBlockStr, LitInlineStr},
+  error,
 };
 
-use crate::error::{self, *};
+
+use crate::error::*;
+
+mod token;
 
 #[cfg(test)]
 mod tests;
@@ -112,7 +115,7 @@ fn tt_hook<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) -> Result<(), LexerError> {
 /// The token kind for lossless lexing.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
-pub enum TokenKind {
+pub enum CstTokenKind {
   Ampersand,
   At,
   RBrace,
