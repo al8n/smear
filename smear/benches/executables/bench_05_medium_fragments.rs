@@ -2,7 +2,8 @@ use criterion::*;
 
 include!("../utils.rs");
 
-const QUERY: &str = include_str!("../../tests/fixtures/executables/bench_05_medium_fragments.graphql");
+const QUERY: &str =
+  include_str!("../../tests/fixtures/executables/bench_05_medium_fragments.graphql");
 
 fn bench_apollo_parser_bench_05_medium_fragments(c: &mut Criterion) {
   c.bench_function(

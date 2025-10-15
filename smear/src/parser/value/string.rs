@@ -1,5 +1,7 @@
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span,
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
 };
 
 use core::fmt::Display;
@@ -50,16 +52,6 @@ impl<S> IntoComponents for StringValue<S> {
   }
 }
 
-impl<S> Display for StringValue<S>
-where
-  S: DisplayHuman,
-{
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
-  }
-}
-
 impl<S> StringValue<S> {
   #[inline(always)]
   pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
@@ -97,7 +89,7 @@ impl<S> StringValue<S> {
   }
 }
 
-impl<S> DisplaySDL for StringValue<S>
+impl<S> Display for StringValue<S>
 where
   S: DisplayHuman,
 {
@@ -157,7 +149,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
@@ -198,13 +190,15 @@ impl<S> InlineStringValue<S> {
   }
 }
 
-impl<S> DisplaySDL for InlineStringValue<S>
+impl<S> DisplayCompact for InlineStringValue<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    core::fmt::Display::fmt(&self, f)
   }
 }
 
@@ -258,7 +252,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
@@ -299,12 +293,14 @@ impl<S> BlockStringValue<S> {
   }
 }
 
-impl<S> DisplaySDL for BlockStringValue<S>
+impl<S> DisplayPretty for BlockStringValue<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     DisplayHuman::fmt(self.source_ref(), f)
   }
 }

@@ -2,7 +2,8 @@ use criterion::*;
 
 include!("../utils.rs");
 
-const QUERY: &str = include_str!("../../tests/fixtures/executables/bench_07_large_deep_nesting.graphql");
+const QUERY: &str =
+  include_str!("../../tests/fixtures/executables/bench_07_large_deep_nesting.graphql");
 
 fn bench_apollo_parser_bench_07_large_deep_nesting(c: &mut Criterion) {
   c.bench_function(

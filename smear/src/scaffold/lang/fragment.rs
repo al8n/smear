@@ -2,7 +2,9 @@ use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
 
@@ -119,13 +121,27 @@ impl<S> core::ops::Deref for FragmentName<S> {
   }
 }
 
-impl<S> DisplaySDL for FragmentName<S>
+impl<S> DisplayCompact for FragmentName<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.value.fmt(f)
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    core::fmt::Display::fmt(self, f)
+  }
+}
+
+impl<S> DisplayPretty for FragmentName<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
   }
 }
 
@@ -241,13 +257,37 @@ where
   }
 }
 
-impl<Name> DisplaySDL for TypeCondition<Name>
+impl<Name> core::fmt::Display for TypeCondition<Name>
 where
-  Name: DisplaySDL,
+  Name: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "on {}", self.name.display())
+  }
+}
+
+impl<Name> DisplayCompact for TypeCondition<Name>
+where
+  Name: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl<Name> DisplayPretty for TypeCondition<Name>
+where
+  Name: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
   }
 }
 
@@ -257,7 +297,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "on {}", self.name.display())
+    core::fmt::Display::fmt(self, f)
   }
 }
 

@@ -3,7 +3,10 @@ use core::marker::PhantomData;
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
+  utils::{
+    AsSpan, IntoComponents, IntoSpan, Span,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
 
 use crate::{
@@ -76,40 +79,36 @@ where
   }
 }
 
-impl<Name, Container> DisplaySDL for ImplementInterfaces<Name, Container>
+impl<Name, Container> DisplayCompact for ImplementInterfaces<Name, Container>
 where
   Container: AsRef<[Name]>,
-  Name: DisplaySDL,
+  Name: DisplayCompact,
 {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let interfaces = self.interfaces().as_ref();
-
-    for (i, interface) in interfaces.iter().enumerate() {
-      if i == 0 {
-        write!(f, " {}", interface.display())?;
-        continue;
-      }
-      write!(f, " & {}", interface.display())?;
-    }
-    Ok(())
-  }
+  type Options = Name::Options;
 
   #[inline]
-  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let interfaces = self.interfaces().as_ref();
 
     for interface in interfaces.iter() {
-      write!(f, "&{}", interface.display())?;
+      write!(f, "&{}", interface.display(opts))?;
     }
     Ok(())
   }
+}
+
+impl<Name, Container> DisplayPretty for ImplementInterfaces<Name, Container>
+where
+  Container: AsRef<[Name]>,
+  Name: DisplayPretty,
+{
+  type Options = Name::Options;
 
   #[inline]
-  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let interfaces = self.interfaces().as_ref();
     for interface in interfaces.iter() {
-      writeln!(f, "\t& {}", interface.display())?;
+      writeln!(f, "\t& {}", interface.display(opts))?;
     }
     Ok(())
   }

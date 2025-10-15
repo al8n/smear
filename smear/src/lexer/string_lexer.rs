@@ -1,7 +1,10 @@
 use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   logos::Lexer,
-  utils::{human_display::DisplayHuman, sdl_display::DisplaySDL},
+  utils::{
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty, DisplaySDL},
+  },
 };
 
 pub use block::{LitBlockStr, LitComplexBlockStr};
@@ -16,12 +19,26 @@ variant_type!(
   pub struct LitPlainStr {}
 );
 
-impl<S> DisplaySDL for LitPlainStr<S>
+impl<S> DisplayCompact for LitPlainStr<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.source_ref().fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for LitPlainStr<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     self.source_ref().fmt(f)
   }
 }

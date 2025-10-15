@@ -12,10 +12,9 @@ fn bench_apollo_parser_parse_nft(c: &mut Criterion) {
 }
 
 fn bench_smear_parser_parse_nft(c: &mut Criterion) {
-  c.bench_function(
-    "smear: tests/fixtures/schemas/nft.graphql",
-    move |b| b.iter(|| smear_parser_parse_schema(SCHEMA)),
-  );
+  c.bench_function("smear: tests/fixtures/schemas/nft.graphql", move |b| {
+    b.iter(|| smear_parser_parse_schema(SCHEMA))
+  });
 }
 
 fn bench_graphql_parser_parse_nft(c: &mut Criterion) {

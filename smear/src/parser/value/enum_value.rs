@@ -1,5 +1,7 @@
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span,
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
 };
 
 use core::fmt::Display;
@@ -85,12 +87,26 @@ impl<S> EnumValue<S> {
   }
 }
 
-impl<S> DisplaySDL for EnumValue<S>
+impl<S> DisplayCompact for EnumValue<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.source_ref().fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for EnumValue<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     self.source_ref().fmt(f)
   }
 }

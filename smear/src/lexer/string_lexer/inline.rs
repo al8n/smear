@@ -1,5 +1,8 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{human_display::DisplayHuman, sdl_display::DisplaySDL};
+use logosky::utils::{
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty, DisplaySDL},
+};
 
 use super::LitPlainStr;
 use std::borrow::Cow;
@@ -22,12 +25,26 @@ variant_type!(
   }
 );
 
-impl<S> DisplaySDL for LitComplexInlineStr<S>
+impl<S> DisplayCompact for LitComplexInlineStr<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.source_ref().fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for LitComplexInlineStr<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     self.source_ref().fmt(f)
   }
 }
