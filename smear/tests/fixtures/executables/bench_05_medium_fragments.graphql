@@ -1,0 +1,22 @@
+query GetUserProfile($id: ID!) {
+  user(id: $id) {
+    ...UserInfo
+    posts {
+      ...PostInfo
+    }
+  }
+}
+
+fragment UserInfo on User {
+  id
+  name
+  email
+  avatar
+}
+
+fragment PostInfo on Post {
+  id
+  title
+  publishedAt
+  likes
+}

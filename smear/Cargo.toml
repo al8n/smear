@@ -45,6 +45,11 @@ paste = "1"
 
 # Schema benchmarks
 [[bench]]
+name = "simple_object"
+path = "benches/schemas/simple_object.rs"
+harness = false
+
+[[bench]]
 name = "apollo_studio"
 path = "benches/schemas/apollo_studio.rs"
 harness = false
@@ -79,198 +84,104 @@ name = "supergraph"
 path = "benches/schemas/supergraph.rs"
 harness = false
 
+[[bench]]
+name = "minimal_schema"
+path = "benches/schemas/minimal.rs"
+harness = false
+
+[[bench]]
+name = "nft_schema"
+path = "benches/schemas/nft.rs"
+harness = false
+
+[[bench]]
+name = "uniswap_v2_schema"
+path = "benches/schemas/uniswap_v2_schema.rs"
+harness = false
+
+[[bench]]
+name = "lido_schema"
+path = "benches/schemas/lido_schema.rs"
+harness = false
+
+[[bench]]
+name = "schema_yield"
+path = "benches/schemas/schema_yield.rs"
+harness = false
+
+[[bench]]
+name = "curve_finance_schema"
+path = "benches/schemas/curve_finance_schema.rs"
+harness = false
+
+[[bench]]
+name = "liquity_schema"
+path = "benches/schemas/liquity_schema.rs"
+harness = false
+
+[[bench]]
+name = "makerdao_schema"
+path = "benches/schemas/makerdao_schema.rs"
+harness = false
+
+[[bench]]
+name = "schema_lending"
+path = "benches/schemas/schema_lending.rs"
+harness = false
+
+[[bench]]
+name = "gmx_schema"
+path = "benches/schemas/gmx_schema.rs"
+harness = false
+
 # Executable benchmarks
+# Representative benchmark queries (tiny to huge, simple to complex)
 [[bench]]
-name = "directive_args_multiline"
-path = "benches/executables/directive_args_multiline.rs"
+name = "bench_01_tiny_simple"
+path = "benches/executables/bench_01_tiny_simple.rs"
 harness = false
 
 [[bench]]
-name = "directive_args"
-path = "benches/executables/directive_args.rs"
+name = "bench_02_small_simple"
+path = "benches/executables/bench_02_small_simple.rs"
 harness = false
 
 [[bench]]
-name = "fragment_spread"
-path = "benches/executables/fragment_spread.rs"
+name = "bench_03_small_variables"
+path = "benches/executables/bench_03_small_variables.rs"
 harness = false
 
 [[bench]]
-name = "fragment"
-path = "benches/executables/fragment.rs"
+name = "bench_04_medium_nested"
+path = "benches/executables/bench_04_medium_nested.rs"
 harness = false
 
 [[bench]]
-name = "inline_fragment_dir"
-path = "benches/executables/inline_fragment_dir.rs"
+name = "bench_05_medium_fragments"
+path = "benches/executables/bench_05_medium_fragments.rs"
 harness = false
 
 [[bench]]
-name = "inline_fragment"
-path = "benches/executables/inline_fragment.rs"
+name = "bench_06_large_complex"
+path = "benches/executables/bench_06_large_complex.rs"
 harness = false
 
 [[bench]]
-name = "kitchen_sink_canonical"
-path = "benches/executables/kitchen_sink_canonical.rs"
+name = "bench_07_large_deep_nesting"
+path = "benches/executables/bench_07_large_deep_nesting.rs"
 harness = false
 
 [[bench]]
-name = "kitchen_sink_list"
-path = "benches/executables/kitchen_sink_list.rs"
+name = "bench_08_many_fields"
+path = "benches/executables/bench_08_many_fields.rs"
 harness = false
 
 [[bench]]
-name = "kitchen_sink"
-path = "benches/executables/kitchen_sink.rs"
+name = "bench_09_many_aliases"
+path = "benches/executables/bench_09_many_aliases.rs"
 harness = false
 
 [[bench]]
-name = "many_alias"
-path = "benches/executables/many_alias.rs"
-harness = false
-
-[[bench]]
-name = "minimal_mutation"
-path = "benches/executables/minimal_mutation.rs"
-harness = false
-
-[[bench]]
-name = "minimal_query"
-path = "benches/executables/minimal_query.rs"
-harness = false
-
-[[bench]]
-name = "minimal"
-path = "benches/executables/minimal.rs"
-harness = false
-
-[[bench]]
-name = "multiline_string"
-path = "benches/executables/multiline_string.rs"
-harness = false
-
-[[bench]]
-name = "mutation_directive"
-path = "benches/executables/mutation_directive.rs"
-harness = false
-
-[[bench]]
-name = "mutation_nameless_vars"
-path = "benches/executables/mutation_nameless_vars.rs"
-harness = false
-
-[[bench]]
-name = "named_query"
-path = "benches/executables/named_query.rs"
-harness = false
-
-[[bench]]
-name = "nested_selection"
-path = "benches/executables/nested_selection.rs"
-harness = false
-
-[[bench]]
-name = "query_aliases"
-path = "benches/executables/query_aliases.rs"
-harness = false
-
-[[bench]]
-name = "query_arguments_multiline"
-path = "benches/executables/query_arguments_multiline.rs"
-harness = false
-
-[[bench]]
-name = "query_arguments"
-path = "benches/executables/query_arguments.rs"
-harness = false
-
-[[bench]]
-name = "query_array_argument_multiline"
-path = "benches/executables/query_array_argument_multiline.rs"
-harness = false
-
-[[bench]]
-name = "query_directive"
-path = "benches/executables/query_directive.rs"
-harness = false
-
-[[bench]]
-name = "query_list_argument"
-path = "benches/executables/query_list_argument.rs"
-harness = false
-
-[[bench]]
-name = "query_nameless_vars_multiple_fields_canonical"
-path = "benches/executables/query_nameless_vars_multiple_fields_canonical.rs"
-harness = false
-
-[[bench]]
-name = "query_nameless_vars"
-path = "benches/executables/query_nameless_vars.rs"
-harness = false
-
-[[bench]]
-name = "query_object_argument_multiline"
-path = "benches/executables/query_object_argument_multiline.rs"
-harness = false
-
-[[bench]]
-name = "query_object_argument"
-path = "benches/executables/query_object_argument.rs"
-harness = false
-
-[[bench]]
-name = "query_var_default_float"
-path = "benches/executables/query_var_default_float.rs"
-harness = false
-
-[[bench]]
-name = "query_var_default_list"
-path = "benches/executables/query_var_default_list.rs"
-harness = false
-
-[[bench]]
-name = "query_var_default_object"
-path = "benches/executables/query_var_default_object.rs"
-harness = false
-
-[[bench]]
-name = "query_var_default_string"
-path = "benches/executables/query_var_default_string.rs"
-harness = false
-
-[[bench]]
-name = "query_var_defaults"
-path = "benches/executables/query_var_defaults.rs"
-harness = false
-
-[[bench]]
-name = "query_vars"
-path = "benches/executables/query_vars.rs"
-harness = false
-
-[[bench]]
-name = "query"
-path = "benches/executables/query.rs"
-harness = false
-
-[[bench]]
-name = "string_literal"
-path = "benches/executables/string_literal.rs"
-harness = false
-
-[[bench]]
-name = "subscription_directive"
-path = "benches/executables/subscription_directive.rs"
-harness = false
-
-[[bench]]
-name = "triple_quoted_literal"
-path = "benches/executables/triple_quoted_literal.rs"
-harness = false
-
-[[bench]]
-name = "variable_directive"
-path = "benches/executables/variable_directive.rs"
+name = "bench_10_huge_comprehensive"
+path = "benches/executables/bench_10_huge_comprehensive.rs"
 harness = false

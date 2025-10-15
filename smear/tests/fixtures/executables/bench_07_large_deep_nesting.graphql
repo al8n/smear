@@ -1,0 +1,43 @@
+query DeepNesting {
+  level1 {
+    id
+    name
+    level2 {
+      id
+      name
+      level3 {
+        id
+        name
+        level4 {
+          id
+          name
+          level5 {
+            id
+            name
+            level6 {
+              id
+              name
+              level7 {
+                id
+                name
+                level8 {
+                  id
+                  name
+                  level9 {
+                    id
+                    name
+                    level10 {
+                      id
+                      name
+                      data
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

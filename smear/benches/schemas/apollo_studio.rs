@@ -32,11 +32,19 @@ fn bench_async_graphql_parser_parse_apollo_studio(c: &mut Criterion) {
   );
 }
 
+fn bench_cynic_parser_parse_apollo_studio(c: &mut Criterion) {
+  c.bench_function(
+    "cynic-parser: tests/fixtures/schemas/apollo-studio.graphql",
+    move |b| b.iter(|| cynic_parser_parse_schema(SCHEMA)),
+  );
+}
+
 criterion_group!(
   benches,
   bench_apollo_parser_parse_apollo_studio,
   bench_smear_parser_parse_apollo_studio,
   bench_graphql_parser_parse_apollo_studio,
   bench_async_graphql_parser_parse_apollo_studio,
+  bench_cynic_parser_parse_apollo_studio,
 );
 criterion_main!(benches);

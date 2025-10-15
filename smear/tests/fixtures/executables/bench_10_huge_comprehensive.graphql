@@ -1,0 +1,287 @@
+query HugeComprehensiveQuery(
+  $userId: ID!
+  $postFirst: Int = 20
+  $commentFirst: Int = 10
+  $productFirst: Int = 30
+  $categoryFirst: Int = 15
+  $tag: String
+  $minPrice: Float
+  $maxPrice: Float
+  $includeArchived: Boolean = false
+) {
+  currentUser: user(id: $userId) {
+    ...FullUserProfile
+    followers(first: $postFirst) {
+      ...UserConnection
+    }
+    following(first: $postFirst) {
+      ...UserConnection
+    }
+  }
+
+  recentPosts: posts(first: $postFirst, tag: $tag) @skip(if: $includeArchived) {
+    totalCount
+    edges {
+      cursor
+      node {
+        ...DetailedPost
+      }
+    }
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
+  }
+
+  trendingPosts: posts(first: $postFirst, orderBy: TRENDING) {
+    edges {
+      node {
+        ...DetailedPost
+      }
+    }
+  }
+
+  products(first: $productFirst, minPrice: $minPrice, maxPrice: $maxPrice) {
+    totalCount
+    edges {
+      node {
+        id
+        name
+        description
+        price
+        currency
+        inStock
+        ... on DigitalProduct {
+          downloadUrl
+          fileSize
+          format
+        }
+        ... on PhysicalProduct {
+          weight
+          dimensions {
+            length
+            width
+            height
+            unit
+          }
+          shippingInfo {
+            carrier
+            estimatedDays
+            cost
+          }
+        }
+        ... on SubscriptionProduct {
+          billingCycle
+          trialDays
+          features {
+            name
+            description
+          }
+        }
+        reviews(first: 5) {
+          averageRating
+          totalCount
+          edges {
+            node {
+              id
+              rating
+              title
+              comment
+              author {
+                ...BasicUser
+              }
+            }
+          }
+        }
+        categories {
+          ...CategoryInfo
+        }
+      }
+    }
+  }
+
+  categories(first: $categoryFirst) {
+    edges {
+      node {
+        ...CategoryInfo
+        subcategories {
+          ...CategoryInfo
+        }
+        featuredProducts(first: 5) {
+          id
+          name
+          price
+        }
+      }
+    }
+  }
+
+  marketplace {
+    stats {
+      totalUsers
+      totalProducts
+      totalSales
+      revenue
+    }
+    featured {
+      sellers(first: 10) {
+        id
+        name
+        rating
+        totalSales
+      }
+      products(first: 10) {
+        id
+        name
+        price
+      }
+    }
+  }
+}
+
+fragment FullUserProfile on User {
+  id
+  username
+  email
+  displayName
+  bio
+  avatar {
+    url
+    thumbnail
+  }
+  coverImage {
+    url
+  }
+  location {
+    city
+    country
+    coordinates {
+      latitude
+      longitude
+    }
+  }
+  social {
+    twitter
+    github
+    linkedin
+    website
+  }
+  stats {
+    postCount
+    followerCount
+    followingCount
+    likeCount
+  }
+  badges {
+    id
+    name
+    icon
+    earnedAt
+  }
+  preferences {
+    theme
+    language
+    notifications {
+      email
+      push
+      sms
+    }
+  }
+}
+
+fragment BasicUser on User {
+  id
+  username
+  displayName
+  avatar {
+    thumbnail
+  }
+}
+
+fragment UserConnection on UserConnection {
+  totalCount
+  edges {
+    cursor
+    node {
+      ...BasicUser
+    }
+  }
+  pageInfo {
+    hasNextPage
+    endCursor
+  }
+}
+
+fragment DetailedPost on Post {
+  id
+  title
+  content
+  excerpt
+  slug
+  publishedAt
+  updatedAt
+  author {
+    ...BasicUser
+  }
+  tags {
+    id
+    name
+    slug
+  }
+  categories {
+    id
+    name
+  }
+  media {
+    id
+    type
+    url
+    thumbnail
+    caption
+  }
+  stats {
+    viewCount
+    likeCount
+    commentCount
+    shareCount
+  }
+  comments(first: $commentFirst) {
+    totalCount
+    edges {
+      node {
+        id
+        text
+        createdAt
+        author {
+          ...BasicUser
+        }
+        replies(first: 3) {
+          totalCount
+          edges {
+            node {
+              id
+              text
+              author {
+                ...BasicUser
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment CategoryInfo on Category {
+  id
+  name
+  slug
+  description
+  image {
+    url
+    thumbnail
+  }
+  productCount
+}
