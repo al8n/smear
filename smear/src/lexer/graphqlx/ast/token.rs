@@ -140,7 +140,7 @@ macro_rules! token {
         #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix(lexer))]
         #[regex(
-          "-?(?&hex_frac)?(?&hex_exp)",
+          "-?(?&hex_frac)(?&hex_exp)",
           handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix
         )]
         #[regex("(?&hex)(?&hex_frac)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]

@@ -1,0 +1,1736 @@
+type Proxy @entity {
+  "Proxy ID is always '0' since it's a singleton entity."
+  id: ID!
+
+  "Current implementation is represented by a link to the current Exchange entity"
+  currentImplementation: Exchange
+
+  "List of all historical Exchange entities"
+  implementations: [Exchange!]! @derivedFrom(field: "proxy")
+
+  "Total amount of tokens supported"
+  tokenCount: BigInt!
+
+  "Total amount of blocks processed"
+  blockCount: BigInt!
+
+  "Total amount of transactions processed across all blocks"
+  transactionCount: BigInt!
+
+  "Total amount of Deposit transactions processed across all blocks"
+  depositCount: BigInt!
+
+  "Total amount of Withdrawal transactions processed across all blocks"
+  withdrawalCount: BigInt!
+
+  "Total amount of WithdrawalNFT transactions processed across all blocks"
+  withdrawalNFTCount: BigInt!
+
+  "Total amount of Transfer transactions processed across all blocks"
+  transferCount: BigInt!
+
+  "Total amount of TransferNFT transactions processed across all blocks"
+  transferNFTCount: BigInt!
+
+  "Total amount of Add transactions processed across all blocks"
+  addCount: BigInt!
+
+  "Total amount of Remove transactions processed across all blocks"
+  removeCount: BigInt!
+
+  "Total amount of OrderbookTrade transactions processed across all blocks"
+  orderbookTradeCount: BigInt!
+
+  "Total amount of Swap transactions processed across all blocks"
+  swapCount: BigInt!
+
+  "Total amount of TradeNFT transactions processed across all blocks"
+  tradeNFTCount: BigInt!
+
+  "Total amount of SwapNFT transactions processed across all blocks"
+  swapNFTCount: BigInt!
+
+  "Total amount of AccountUpdate transactions processed across all blocks"
+  accountUpdateCount: BigInt!
+
+  "Total amount of AMMUpdate transactions processed across all blocks"
+  ammUpdateCount: BigInt!
+
+  "Total amount of SignatureVerification transactions processed across all blocks"
+  signatureVerificationCount: BigInt!
+
+  "Total amount of NFT Mint transactions processed across all blocks"
+  nftMintCount: BigInt!
+
+  "Total amount of NFT Data transactions processed across all blocks"
+  nftDataCount: BigInt!
+
+  "Total amount of unique NFTs"
+  nftCount: BigInt!
+
+  "Total amount of unique User entities"
+  userCount: BigInt!
+
+  "Total amount of unique Pool entities"
+  poolCount: BigInt!
+}
+
+type Exchange @entity {
+  "Address of the exchange implementation"
+  id: ID!
+
+  "Proxy link. Used to generate derived array of implementations."
+  proxy: Proxy!
+
+  "List of all tokens supported during the time this Exchange was the current implementation"
+  tokens: [Token!]! @derivedFrom(field: "exchange")
+}
+
+type Token @entity {
+  "Internal ID of the token within Loopring"
+  id: ID!
+
+  "Internal ID of the token within loopring expressed as a number for ordering"
+  internalID: BigInt!
+
+  "Exchange active when the token was registered"
+  exchange: Exchange!
+
+  "Address of the token within the Ethereum network"
+  address: Bytes!
+
+  decimals: Int!
+
+  name: String!
+
+  symbol: String!
+
+  "Total traded volume for this token across all token pairs. Denominated in it's own currency"
+  tradedVolume: BigInt!
+
+  "Total traded volume for this token across all token pairs. Denominated in it's own currency"
+  tradedVolumeSwap: BigInt!
+
+  "Total traded volume for this token across all token pairs. Denominated in it's own currency"
+  tradedVolumeOrderbook: BigInt!
+
+  dailyEntities: [TokenDailyData!]! @derivedFrom(field: "token")
+  weeklyEntities: [TokenWeeklyData!]! @derivedFrom(field: "token")
+}
+
+type Pair @entity {
+  "ID is recreated following the next pattern to standardize pair IDs: <LOWEST Token ID>-<HIGHEST Token ID>"
+  id: ID!
+
+  "ID represented as a decimal number. Follows the same pattern but with a comma instead"
+  internalID: BigDecimal!
+
+  token0: Token!
+
+  token1: Token!
+
+  "Last price of Token 0. Denominated in Token 1"
+  token0Price: BigInt!
+
+  "Last price of Token 1. Denominated in Token 0"
+  token1Price: BigInt!
+
+  "Total traded volume of token0 within this pair. Includes both Swaps and Orderbook trades. Denominated in it's own currency"
+  tradedVolumeToken0: BigInt!
+
+  "Total traded volume of token1 within this pair. Includes both Swaps and Orderbook trades. Denominated in it's own currency"
+  tradedVolumeToken1: BigInt!
+
+  "Total traded volume of token0 within this pair exclusively on Swaps. Denominated in it's own currency"
+  tradedVolumeToken0Swap: BigInt!
+
+  "Total traded volume of token1 within this pair exclusively on Swaps. Denominated in it's own currency"
+  tradedVolumeToken1Swap: BigInt!
+
+  "Total traded volume of token0 within this pair exclusively on Orderbook trades. Denominated in it's own currency"
+  tradedVolumeToken0Orderbook: BigInt!
+
+  "Total traded volume of token1 within this pair exclusively on Orderbook trades. Denominated in it's own currency"
+  tradedVolumeToken1Orderbook: BigInt!
+
+  swaps: [Swap!]! @derivedFrom(field: "pair")
+  trades: [OrderbookTrade!]! @derivedFrom(field: "pair")
+
+  dailyEntities: [PairDailyData!]! @derivedFrom(field: "pair")
+  weeklyEntities: [PairWeeklyData!]! @derivedFrom(field: "pair")
+}
+
+type Block @entity {
+  id: ID!
+
+  "Same as ID but expressed as a BigInt so it can be used for sorting properly"
+  internalID: BigInt!
+
+  "Transaction hash for the L1 Transaction where the L2 Block was submitted"
+  txHash: String!
+
+  "Amount of gas limit used"
+  gasLimit: BigInt!
+
+  "Gas price for the L1 transaction"
+  gasPrice: BigInt!
+
+  "L1 Block height where the L2 Block was submitted"
+  height: BigInt!
+
+  "L1 Block timestamp when the L2 Block was submitted"
+  timestamp: BigInt!
+
+  "Hash of the L1 Block where the L2 block was submitted"
+  blockHash: String!
+
+  # Raw block data
+  "L2 Block type represented as an Integer"
+  blockType: Int!
+  "L2 Block size. Represents the maximum amount of L2 transactions that it could handle."
+  blockSize: Int!
+  "L2 Block version"
+  blockVersion: Int!
+  "Raw data for the L2 block. Represented as a Hex String."
+  data: String!
+  "L2 proof data"
+  proof: [BigInt!]!
+  storeBlockInfoOnchain: Boolean!
+  offchainData: Bytes!
+
+  # Parsed data from block
+  "Protocol fee applied to the 'taker' for L2 transactions within this block"
+  protocolFeeTakerBips: Int!
+  "Protocol fee applied to the 'maker' for L2 transactions within this block"
+  protocolFeeMakerBips: Int!
+  numConditionalTransactions: Int!
+  "Account ID for the operator of this L2 Block"
+  operatorAccountID: Int!
+
+  "Account entity for the operator of this L2 Block"
+  operatorAccount: Account!
+
+  "List of L2 Transactions for this L2 Block"
+  transactions: [Transaction!]! @derivedFrom(field: "block")
+
+  "Total amount of transactions processed on this block. Should coincide with the lenght of the transactions list"
+  transactionCount: BigInt!
+
+  "Total amount of Deposit transactions processed on this block"
+  depositCount: BigInt!
+
+  "Total amount of Withdrawal transactions processed on this block"
+  withdrawalCount: BigInt!
+
+  "Total amount of WithdrawalNFT transactions processed on this block"
+  withdrawalNFTCount: BigInt!
+
+  "Total amount of Transfer transactions processed on this block"
+  transferCount: BigInt!
+
+  "Total amount of Transfer transactions processed on this block"
+  transferNFTCount: BigInt!
+
+  "Total amount of Add transactions processed on this block"
+  addCount: BigInt!
+
+  "Total amount of Remove transactions processed on this block"
+  removeCount: BigInt!
+
+  "Total amount of OrderbookTrade transactions processed on this block"
+  orderbookTradeCount: BigInt!
+
+  "Total amount of Swap transactions processed on this block"
+  swapCount: BigInt!
+
+  "Total amount of TradeNFT transactions processed on this block"
+  tradeNFTCount: BigInt!
+
+  "Total amount of SwapNFT transactions processed on this block"
+  swapNFTCount: BigInt!
+
+  "Total amount of AccountUpdate transactions processed on this block"
+  accountUpdateCount: BigInt!
+
+  "Total amount of AMMUpdate transactions processed on this block"
+  ammUpdateCount: BigInt!
+
+  "Total amount of SignatureVerification transactions processed on this block"
+  signatureVerificationCount: BigInt!
+
+  "Total amount of NFT Mint transactions processed on this block"
+  nftMintCount: BigInt!
+
+  "Total amount of NFT Data transactions processed on this block"
+  nftDataCount: BigInt!
+}
+
+interface Account {
+  "Internal ID used in the L2 transactions. Users will be of type User and have an ID > 10000. Pools will be of type Pool and have an id < 10000. ProtocolAccount is a special account with ID 0 which handles all token balances generated by protocol fees."
+  id: ID!
+
+  "Same as ID but expressed as a BigInt for sorting purposes"
+  internalID: BigInt!
+
+  "Address linked to the account ID"
+  address: Bytes!
+
+  "List of all the balances for each specific token the account has interacted with"
+  balances: [AccountTokenBalance!]! @derivedFrom(field: "account")
+
+  "L2 transaction internalID where the account was first created and linked to an address. Useful for sorting and filtering purposes"
+  createdAt: BigDecimal!
+
+  "L2 transaction internalID that last updated the account entity. Useful for sorting and filtering purposes"
+  lastUpdatedAt: BigDecimal!
+
+  "L2 transaction where the account was first created and linked to an address"
+  createdAtTransaction: Transaction!
+
+  "L2 transaction that last updated the account entity"
+  lastUpdatedAtTransaction: Transaction!
+
+  "L2 transactions that involved this account"
+  transactions: [Transaction!]! @derivedFrom(field: "accounts")
+
+  "List of all the AccountNFTSlot entities that this account has. Those slots can be empty but will only exist if they held an NFT at some point."
+  slots: [AccountNFTSlot!]! @derivedFrom(field: "account")
+}
+
+type User implements Account @entity {
+  "Internal ID used in the L2 transactions"
+  id: ID!
+
+  "Same as ID but expressed as a BigInt for sorting purposes"
+  internalID: BigInt!
+
+  address: Bytes!
+
+  "String representing the public key for the User"
+  publicKey: String
+
+  balances: [AccountTokenBalance!]! @derivedFrom(field: "account")
+
+  "L2 transaction internalID where the account was first created and linked to an address. Useful for sorting and filtering purposes"
+  createdAt: BigDecimal!
+
+  "L2 transaction internalID that last updated the account entity. Useful for sorting and filtering purposes"
+  lastUpdatedAt: BigDecimal!
+
+  "L2 transaction where the account was first created and linked to an address"
+  createdAtTransaction: Transaction!
+
+  "L2 transaction that last updated the account entity"
+  lastUpdatedAtTransaction: Transaction!
+
+  "L2 transactions that involved this account"
+  transactions: [Transaction!]! @derivedFrom(field: "accounts")
+
+  "List of all the AccountNFTSlot entities that this account has. Those slots can be empty but will only exist if they held an NFT at some point."
+  slots: [AccountNFTSlot!]! @derivedFrom(field: "account")
+}
+
+type Pool implements Account @entity {
+  "Internal ID used in the L2 transactions"
+  id: ID!
+
+  "Same as ID but expressed as a BigInt for sorting purposes"
+  internalID: BigInt!
+
+  address: Bytes!
+
+  feeBipsAMM: Int
+
+  balances: [AccountTokenBalance!]! @derivedFrom(field: "account")
+
+  "L2 transaction internalID where the account was first created and linked to an address. Useful for sorting and filtering purposes"
+  createdAt: BigDecimal!
+
+  "L2 transaction internalID that last updated the account entity. Useful for sorting and filtering purposes"
+  lastUpdatedAt: BigDecimal!
+
+  "L2 transaction where the account was first created and linked to an address"
+  createdAtTransaction: Transaction!
+
+  "L2 transaction that last updated the account entity"
+  lastUpdatedAtTransaction: Transaction!
+
+  "L2 transactions that involved this account"
+  transactions: [Transaction!]! @derivedFrom(field: "accounts")
+
+  "List of all the AccountNFTSlot entities that this account has. Those slots can be empty but will only exist if they held an NFT at some point."
+  slots: [AccountNFTSlot!]! @derivedFrom(field: "account")
+}
+
+type ProtocolAccount implements Account @entity {
+  "ID is always 0 since there's only a single ProtocolAccount and uses the reserved id 0"
+  id: ID!
+
+  "Same as ID but expressed as a BigInt for sorting purposes"
+  internalID: BigInt!
+
+  address: Bytes!
+
+  balances: [AccountTokenBalance!]! @derivedFrom(field: "account")
+
+  "L2 transaction internalID where the account was first created and linked to an address. Useful for sorting and filtering purposes"
+  createdAt: BigDecimal!
+
+  "L2 transaction internalID that last updated the account entity. Useful for sorting and filtering purposes"
+  lastUpdatedAt: BigDecimal!
+
+  "L2 transaction where the account was first created and linked to an address"
+  createdAtTransaction: Transaction!
+
+  "L2 transaction that last updated the account entity"
+  lastUpdatedAtTransaction: Transaction!
+
+  "L2 transactions that involved this account"
+  transactions: [Transaction!]! @derivedFrom(field: "accounts")
+
+  "List of all the AccountNFTSlot entities that this account has. Those slots can be empty but will only exist if they held an NFT at some point."
+  slots: [AccountNFTSlot!]! @derivedFrom(field: "account")
+}
+
+type AccountTokenBalance @entity {
+  "ID is recreated following this pattern: <ACCOUNT ID>-<TOKEN ID>. Example: 10001-1"
+  id: ID!
+
+  balance: BigInt!
+
+  "Link to the Account entity. Can be a Pool or User entity"
+  account: Account!
+
+  "Link to the Token entity. Holds all details of the token itself."
+  token: Token!
+
+  transactions: [Transaction!]! @derivedFrom(field: "tokenBalances")
+
+  dailyData: [AccountTokenBalanceDailyData!]!
+    @derivedFrom(field: "accountTokenBalance")
+
+  weeklyData: [AccountTokenBalanceWeeklyData!]!
+    @derivedFrom(field: "accountTokenBalance")
+}
+
+type NonFungibleToken @entity {
+  "ID is the Poseidon hash reported by L2"
+  id: ID!
+
+  "L2 transaction internalID where the NFT was minted. Useful for sorting and filtering purposes"
+  mintedAt: BigDecimal!
+
+  "L2 transaction where the NFT was minted"
+  mintedAtTransaction: MintNFT!
+
+  minter: Account!
+
+  nftType: Int!
+
+  token: String!
+
+  creatorFeeBips: Int!
+
+  nftID: String!
+
+  "List of all the AccountNFTSlot where this NFT is currently active."
+  slots: [AccountNFTSlot!]! @derivedFrom(field: "nft")
+
+  "List of all the transactions that this particular NFT was a part of"
+  transactions: [TransactionNFT!]! @derivedFrom(field:"nfts")
+}
+
+type AccountNFTSlot @entity {
+  "ID is compounded from the account ID and the token ID used as an NFT slot."
+  id: ID!
+
+  "Owner of this slot"
+  account: Account!
+
+  "NonFungibleToken saved in this slot. Null if empty"
+  nft: NonFungibleToken
+
+  "Amount of copies of this NonFungibleToken saved in this slot."
+  balance: BigInt!
+
+  "L2 transaction internalID where the slot was first created. Useful for sorting and filtering purposes"
+  createdAt: BigDecimal!
+
+  "L2 transaction internalID that last updated the slot entity. Useful for sorting and filtering purposes"
+  lastUpdatedAt: BigDecimal!
+
+  "L2 transaction where the slot was first created"
+  createdAtTransaction: Transaction!
+
+  "L2 transaction that last updated the slot entity"
+  lastUpdatedAtTransaction: Transaction!
+
+  "List of all the transactions that this particular NFT was a part of"
+  transactions: [TransactionNFT!]! @derivedFrom(field: "slots")
+}
+
+enum TransactionType {
+  Deposit
+  Withdrawal
+  Transfer
+  Swap
+  OrderbookTrade
+  AccountUpdate
+  AmmUpdate
+  SignatureVerification
+  MintNFT
+  DataNFT
+  Add
+  Remove
+  TransferNFT
+  WithdrawalNFT
+  TradeNFT
+  SwapNFT
+}
+
+interface Transaction {
+  "All transactions IDs follow the same pattern: <BLOCK ID>-<TX INDEX>"
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  "Hex string representation of the encoded L2 data for this Transaction"
+  data: String!
+
+  "Link to the Block entity where this Transaction took place"
+  block: Block!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+interface TransactionNFT {
+  "All transactions IDs follow the same pattern: <BLOCK ID>-<TX INDEX>"
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  "Hex string representation of the encoded L2 data for this Transaction"
+  data: String!
+
+  "Link to the Block entity where this Transaction took place"
+  block: Block!
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type Deposit implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that deposited the tokens"
+  toAccount: Account!
+
+  "Token entity with information about the deposited token"
+  token: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Address string of the account that deposited"
+  to: String!
+  "[RAW L2 DATA] Account ID for the account that deposited"
+  toAccountID: Int!
+  "[RAW L2 DATA] Token ID of the deposited token"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount deposited"
+  amount: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type Withdrawal implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that withdrew the tokens"
+  fromAccount: Account!
+
+  "Token entity with information about the withdrawn token"
+  token: Token
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token
+
+  "Whether the withdrawal transaction is valid. Only type 3 withdrawals are invalid."
+  valid: Boolean!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Withdrawal type"
+  type: Int!
+  "[RAW L2 DATA] Address string of the account that withdrew"
+  from: String!
+  "[RAW L2 DATA] Account ID for the account that withdrew"
+  fromAccountID: Int!
+  "[RAW L2 DATA] Token ID of the withdrawn token"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount withdrawn"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] On-chain data hash"
+  onchainDataHash: String!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type WithdrawalNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that withdrew the tokens"
+  fromAccount: Account!
+
+  "Slot entity with information about the withdrawn NFT"
+  slot: AccountNFTSlot!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token
+
+  "Whether the withdrawal transaction is valid. Only type 3 withdrawals are invalid."
+  valid: Boolean!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Withdrawal type"
+  type: Int!
+  "[RAW L2 DATA] Address string of the account that withdrew"
+  from: String!
+  "[RAW L2 DATA] Account ID for the account that withdrew"
+  fromAccountID: Int!
+  "[RAW L2 DATA] Token ID of the withdrawn token"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount withdrawn"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] On-chain data hash"
+  onchainDataHash: String!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type Transfer implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that sent the tokens"
+  fromAccount: Account!
+
+  "Account entity that received the tokens"
+  toAccount: Account!
+
+  "Token entity with information about the token transfered"
+  token: Token!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Transfer type"
+  type: Int!
+  "[RAW L2 DATA] Account ID for the account that sent the tokens"
+  accountFromID: Int!
+  "[RAW L2 DATA] Account ID for the account that received the tokens"
+  accountToID: Int!
+  "[RAW L2 DATA] Token ID of the token transfered"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount transfered"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+  "[RAW L2 DATA] Address string of the account that sent the tokens"
+  from: String!
+  "[RAW L2 DATA] Address string of the account that received the tokens"
+  to: String!
+  "[RAW L2 DATA] Token ID of the token transfered. Mainly used for NFT transfers"
+  toTokenID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type TransferNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that sent the tokens"
+  fromAccount: Account!
+
+  "Account entity that received the tokens"
+  toAccount: Account!
+
+  "Slot entity from where the NFT is moved"
+  fromSlot: AccountNFTSlot!
+
+  "Slot entity to where the NFT is moved"
+  toSlot: AccountNFTSlot!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Transfer type"
+  type: Int!
+  "[RAW L2 DATA] Account ID for the account that sent the tokens"
+  accountFromID: Int!
+  "[RAW L2 DATA] Account ID for the account that received the tokens"
+  accountToID: Int!
+  "[RAW L2 DATA] Token ID of the token transfered"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount transfered"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+  "[RAW L2 DATA] Address string of the account that sent the tokens"
+  from: String!
+  "[RAW L2 DATA] Address string of the account that received the tokens"
+  to: String!
+  "[RAW L2 DATA] Token ID of the token transfered. Mainly used for NFT transfers"
+  toTokenID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type Add implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that triggered the addition of liquidity from the pool"
+  account: Account!
+
+  "Pool entity where the liquidity was added"
+  pool: Pool!
+
+  "Token entity with information about the token transfered"
+  token: Token!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Transfer type"
+  type: Int!
+  "[RAW L2 DATA] Account ID for the account that sent the tokens"
+  accountFromID: Int!
+  "[RAW L2 DATA] Account ID for the account that received the tokens"
+  accountToID: Int!
+  "[RAW L2 DATA] Token ID of the token transfered"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount transfered"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+  "[RAW L2 DATA] Address string of the account that sent the tokens"
+  from: String!
+  "[RAW L2 DATA] Address string of the account that received the tokens"
+  to: String!
+  "[RAW L2 DATA] Token ID of the token transfered. Mainly used for NFT transfers"
+  toTokenID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type Remove implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that triggered the removal of liquidity from the pool"
+  account: Account!
+
+  "Pool entity where the liquidity was removed"
+  pool: Pool!
+
+  "Token entity with information about the token transfered"
+  token: Token!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Transfer type"
+  type: Int!
+  "[RAW L2 DATA] Account ID for the account that sent the tokens"
+  accountFromID: Int!
+  "[RAW L2 DATA] Account ID for the account that received the tokens"
+  accountToID: Int!
+  "[RAW L2 DATA] Token ID of the token transfered"
+  tokenID: Int!
+  "[RAW L2 DATA] Amount transfered"
+  amount: BigInt!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] StorageID"
+  storageID: Int!
+  "[RAW L2 DATA] Address string of the account that sent the tokens"
+  from: String!
+  "[RAW L2 DATA] Address string of the account that received the tokens"
+  to: String!
+  "[RAW L2 DATA] Token ID of the token transfered. Mainly used for NFT transfers"
+  toTokenID: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type OrderbookTrade implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity A"
+  accountA: Account!
+  "Account entity B"
+  accountB: Account!
+
+  "Token A. Supplied by Account A"
+  tokenA: Token!
+  "Token B. Supplied by Account B"
+  tokenB: Token!
+
+  "Price for 1 unit of token A for this trade. Denominated in token B"
+  tokenAPrice: BigInt!
+  "Price for 1 unit of token B for this trade. Denominated in token A"
+  tokenBPrice: BigInt!
+
+  "Standardized Pair entity for this trade"
+  pair: Pair!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] StorageID for account A"
+  storageIdA: Int!
+  "[RAW L2 DATA] StorageID for account B"
+  storageIdB: Int!
+
+  "[RAW L2 DATA] Account ID of account A"
+  accountIdA: Int!
+  "[RAW L2 DATA] Account ID of account B"
+  accountIdB: Int!
+
+  "[RAW L2 DATA] Token ID of token sold by account A"
+  tokenIDAS: Int!
+  "[RAW L2 DATA] Token ID of token sold by account B"
+  tokenIDBS: Int!
+
+  "[RAW L2 DATA] Token ID of token bought by account A. Should coincide with tokenIDBS"
+  tokenIDAB: Int!
+  "[RAW L2 DATA] Token ID of token bought by account B. Should coincide with tokenIDAS"
+  tokenIDBB: Int!
+
+  "[RAW L2 DATA] Float encoded value for fillSA represented as an Int"
+  fFillSA: Int!
+  "[RAW L2 DATA] Float encoded value for fillSB represented as an Int"
+  fFillSB: Int!
+
+  "[RAW L2 DATA] Amount of token A sold by Account A"
+  fillSA: BigInt!
+  "[RAW L2 DATA] Amount of token B sold by Account B"
+  fillSB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  orderDataA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  orderDataB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  feeBipsHiA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  feeBipsHiB: BigInt!
+
+  "[RAW L2 DATA] Limit mask value for order A"
+  limitMaskA: BigInt!
+  "[RAW L2 DATA] Fee bips for order A"
+  feeBipsA: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order A"
+  fillAmountBorSA: Boolean!
+
+  "[RAW L2 DATA] Limit mask value for order B"
+  limitMaskB: BigInt!
+  "[RAW L2 DATA] Fee bips for order B"
+  feeBipsB: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order B"
+  fillAmountBorSB: Boolean!
+
+  "[RAW L2 DATA] Amount of token B bought by Account A"
+  fillBA: BigInt!
+  "[RAW L2 DATA] Amount of token A bought by Account B"
+  fillBB: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account A with Token B"
+  feeA: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account A"
+  protocolFeeA: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account B with token A"
+  feeB: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account B"
+  protocolFeeB: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type Swap implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account that swapped the tokens"
+  account: Account!
+  "AMM Pool that facilitated the swap"
+  pool: Pool!
+
+  "Token A. Supplied by Account A"
+  tokenA: Token!
+  "Token B. Supplied by Account B"
+  tokenB: Token!
+
+  "Price for 1 unit of token A for this trade. Denominated in token B"
+  tokenAPrice: BigInt!
+  "Price for 1 unit of token B for this trade. Denominated in token A"
+  tokenBPrice: BigInt!
+
+  "Standardized Pair entity for this trade"
+  pair: Pair!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] StorageID for account A"
+  storageIdA: Int!
+  "[RAW L2 DATA] StorageID for account B"
+  storageIdB: Int!
+
+  "[RAW L2 DATA] Account ID of account A"
+  accountIdA: Int!
+  "[RAW L2 DATA] Account ID of account B"
+  accountIdB: Int!
+
+  "[RAW L2 DATA] Token ID of token sold by account A"
+  tokenIDAS: Int!
+  "[RAW L2 DATA] Token ID of token sold by account B"
+  tokenIDBS: Int!
+
+  "[RAW L2 DATA] Token ID of token bought by account A. Should coincide with tokenIDBS"
+  tokenIDAB: Int!
+  "[RAW L2 DATA] Token ID of token bought by account B. Should coincide with tokenIDAS"
+  tokenIDBB: Int!
+
+  "[RAW L2 DATA] Float encoded value for fillSA represented as an Int"
+  fFillSA: Int!
+  "[RAW L2 DATA] Float encoded value for fillSB represented as an Int"
+  fFillSB: Int!
+
+  "[RAW L2 DATA] Amount of token A sold by Account A"
+  fillSA: BigInt!
+  "[RAW L2 DATA] Amount of token B sold by Account B"
+  fillSB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  orderDataA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  orderDataB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  feeBipsHiA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  feeBipsHiB: BigInt!
+
+  "[RAW L2 DATA] Limit mask value for order A"
+  limitMaskA: BigInt!
+  "[RAW L2 DATA] Fee bips for order A"
+  feeBipsA: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order A"
+  fillAmountBorSA: Boolean!
+
+  "[RAW L2 DATA] Limit mask value for order B"
+  limitMaskB: BigInt!
+  "[RAW L2 DATA] Fee bips for order B"
+  feeBipsB: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order B"
+  fillAmountBorSB: Boolean!
+
+  "[RAW L2 DATA] Amount of token B bought by Account A"
+  fillBA: BigInt!
+  "[RAW L2 DATA] Amount of token A bought by Account B"
+  fillBB: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account A with Token B"
+  feeA: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account A"
+  protocolFeeA: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account B with token A"
+  feeB: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account B"
+  protocolFeeB: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type TradeNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity that sold the NFT"
+  accountSeller: Account!
+  "Account entity that bought the NFT"
+  accountBuyer: Account!
+
+  "Original slot of the NFT being traded. Represents the slot where the NFT was stored for the seller"
+  slotSeller: AccountNFTSlot!
+  "Target slot of the NFT being traded. Represents the slot where the NFT is stored once transferred to the buyer"
+  slotBuyer: AccountNFTSlot!
+  "Token used to pay for the NFT and fees"
+  token: Token!
+
+  "Price paid for the NFT during this trade. Expressed as a BigInt. Denominated in units of token"
+  realizedNFTPrice: BigInt!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] StorageID for account A"
+  storageIdA: Int!
+  "[RAW L2 DATA] StorageID for account B"
+  storageIdB: Int!
+
+  "[RAW L2 DATA] Account ID of account A"
+  accountIdA: Int!
+  "[RAW L2 DATA] Account ID of account B"
+  accountIdB: Int!
+
+  "[RAW L2 DATA] Token ID of token sold by account A"
+  tokenIDAS: Int!
+  "[RAW L2 DATA] Token ID of token sold by account B"
+  tokenIDBS: Int!
+
+  "[RAW L2 DATA] Token ID of token bought by account A. Should coincide with tokenIDBS"
+  tokenIDAB: Int!
+  "[RAW L2 DATA] Token ID of token bought by account B. Should coincide with tokenIDAS"
+  tokenIDBB: Int!
+
+  "[RAW L2 DATA] Float encoded value for fillSA represented as an Int"
+  fFillSA: Int!
+  "[RAW L2 DATA] Float encoded value for fillSB represented as an Int"
+  fFillSB: Int!
+
+  "[RAW L2 DATA] Amount of token A sold by Account A"
+  fillSA: BigInt!
+  "[RAW L2 DATA] Amount of token B sold by Account B"
+  fillSB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  orderDataA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  orderDataB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  feeBipsHiA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  feeBipsHiB: BigInt!
+
+  "[RAW L2 DATA] Limit mask value for order A"
+  limitMaskA: BigInt!
+  "[RAW L2 DATA] Fee bips for order A"
+  feeBipsA: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order A"
+  fillAmountBorSA: Boolean!
+
+  "[RAW L2 DATA] Limit mask value for order B"
+  limitMaskB: BigInt!
+  "[RAW L2 DATA] Fee bips for order B"
+  feeBipsB: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order B"
+  fillAmountBorSB: Boolean!
+
+  "[RAW L2 DATA] Amount of token B bought by Account A"
+  fillBA: BigInt!
+  "[RAW L2 DATA] Amount of token A bought by Account B"
+  fillBB: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account A with Token B"
+  feeSeller: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account A"
+  protocolFeeSeller: BigInt!
+
+  "[RAW L2 DATA] Fee paid by Account B with token A"
+  feeBuyer: BigInt!
+  "[RAW L2 DATA] Protocol fees paid by Account B"
+  protocolFeeBuyer: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type SwapNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity A"
+  accountA: Account!
+  "Account entity B"
+  accountB: Account!
+
+  "Original slot of NFT A for Account A."
+  slotASeller: AccountNFTSlot!
+  "Original slot of NFT B for Account B."
+  slotBSeller: AccountNFTSlot!
+  "Target slot of NFT B for Account A."
+  slotABuyer: AccountNFTSlot!
+  "Target slot of NFT A for Account B."
+  slotBBuyer: AccountNFTSlot!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] StorageID for account A"
+  storageIdA: Int!
+  "[RAW L2 DATA] StorageID for account B"
+  storageIdB: Int!
+
+  "[RAW L2 DATA] Account ID of account A"
+  accountIdA: Int!
+  "[RAW L2 DATA] Account ID of account B"
+  accountIdB: Int!
+
+  "[RAW L2 DATA] Token ID of token sold by account A"
+  tokenIDAS: Int!
+  "[RAW L2 DATA] Token ID of token sold by account B"
+  tokenIDBS: Int!
+
+  "[RAW L2 DATA] Token ID of token bought by account A. Should coincide with tokenIDBS"
+  tokenIDAB: Int!
+  "[RAW L2 DATA] Token ID of token bought by account B. Should coincide with tokenIDAS"
+  tokenIDBB: Int!
+
+  "[RAW L2 DATA] Float encoded value for fillSA represented as an Int"
+  fFillSA: Int!
+  "[RAW L2 DATA] Float encoded value for fillSB represented as an Int"
+  fFillSB: Int!
+
+  "[RAW L2 DATA] Amount of token A sold by Account A"
+  fillSA: BigInt!
+  "[RAW L2 DATA] Amount of token B sold by Account B"
+  fillSB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  orderDataA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  orderDataB: BigInt!
+
+  "[RAW L2 DATA] Order data A"
+  feeBipsHiA: BigInt!
+  "[RAW L2 DATA] Order data B"
+  feeBipsHiB: BigInt!
+
+  "[RAW L2 DATA] Limit mask value for order A"
+  limitMaskA: BigInt!
+  "[RAW L2 DATA] Fee bips for order A"
+  feeBipsA: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order A"
+  fillAmountBorSA: Boolean!
+
+  "[RAW L2 DATA] Limit mask value for order B"
+  limitMaskB: BigInt!
+  "[RAW L2 DATA] Fee bips for order B"
+  feeBipsB: BigInt!
+  "[RAW L2 DATA] Is fill amount for buy or sell for order B"
+  fillAmountBorSB: Boolean!
+
+  "[RAW L2 DATA] Amount of token B bought by Account A"
+  fillBA: BigInt!
+  "[RAW L2 DATA] Amount of token A bought by Account B"
+  fillBB: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type AccountUpdate implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "User account entity updated in this transaction"
+  user: User!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Update type"
+  updateType: Int!
+  "[RAW L2 DATA] Address of the user account updated"
+  owner: String!
+  "[RAW L2 DATA] Account ID of the user account updated"
+  accountID: Int!
+  "[RAW L2 DATA] Token ID of token used to pay the operator fees"
+  feeTokenID: Int!
+  "[RAW L2 DATA] Fee amount paid"
+  fee: BigInt!
+  "[RAW L2 DATA] Updated public key for the account"
+  publicKey: String!
+  "[RAW L2 DATA] Nonce"
+  nonce: Int!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type AmmUpdate implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Pool account entity updated in this transaction"
+  pool: Pool!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Address of the pool account updated"
+  owner: String!
+  "[RAW L2 DATA] Account ID of the pool account updated"
+  accountID: Int!
+  tokenID: Int!
+  feeBips: Int!
+  tokenWeight: BigInt!
+  nonce: Int!
+  balance: BigInt!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type SignatureVerification implements Transaction @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  "Account entity updated in this transaction"
+  account: Account!
+
+  # Raw data parsed from the L2 data
+  "[RAW L2 DATA] Address of the account updated"
+  owner: String!
+  "[RAW L2 DATA] Account ID of the pool account updated"
+  accountID: Int!
+  "[RAW L2 DATA] Signature verification data"
+  verificationData: String!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+}
+
+type MintNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  receiverSlot: AccountNFTSlot!
+
+  minter: Account!
+
+  receiver: Account!
+
+  nft: NonFungibleToken!
+
+  "Token entity with information about the token used to pay the operator fees"
+  feeToken: Token!
+
+  # Raw L2 data extracted from the data string
+  type: Int!
+  minterAccountID: Int!
+  toTokenID: Int!
+  feeTokenID: Int!
+  fee: BigInt!
+  amount: BigInt!
+  storageID: Int
+  nftType: Int!
+  tokenAccountID: Int
+  nftID: String!
+  creatorFeeBips: Int!
+  toAccountID: Int
+  to: String
+  "Data from the NFTData transactions that follow the mint"
+  extraData: String
+  tokenAddress: String!
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+type DataNFT implements Transaction & TransactionNFT @entity {
+  id: ID!
+
+  "Explicit copy of __typename to make it usable when filtering"
+  typename: TransactionType!
+
+  "ID represented as a BigDecimal for sorting purposes"
+  internalID: BigDecimal!
+
+  data: String!
+
+  block: Block!
+
+  type: Int!
+  accountID: Int!
+  tokenID: Int!
+  nftID: String!
+  creatorFeeBips: Int!
+  nftType: Int!
+  minter: String
+  tokenAddress: String
+
+  tokenBalances: [AccountTokenBalance!]
+
+  accounts: [Account!]
+
+  nfts: [NonFungibleToken!]!
+
+  slots: [AccountNFTSlot!]!
+}
+
+# Daily data entities
+
+type PairDailyData @entity {
+  "The ID follows this pattern: <PAIR ID>-<DAY NUMBER>."
+  id: ID!
+
+  pair: Pair!
+
+  "Timestamp of the start of the day. Timezone -> UTC"
+  dayStart: BigInt!
+
+  "Timestamp of the end of the day. Timezone -> UTC"
+  dayEnd: BigInt!
+
+  "Day number is the amount of days since the start block of Loopring 3.6 (block 11149814)"
+  dayNumber: Int!
+
+  "Lowest price for token 0 during the time interval"
+  token0PriceLow: BigInt!
+
+  "Lowest price for token 1 during the time interval"
+  token1PriceLow: BigInt!
+
+  "Highest price for token 0 during the time interval"
+  token0PriceHigh: BigInt!
+
+  "Highest price for token 1 during the time interval"
+  token1PriceHigh: BigInt!
+
+  "Price for token 0 at the end of the time interval"
+  token0PriceClose: BigInt!
+
+  "Price for token 1 at the end of the time interval"
+  token1PriceClose: BigInt!
+
+  "Price for token 0 at the start of the time interval"
+  token0PriceOpen: BigInt!
+
+  "Price for token 1 at the start of the time interval"
+  token1PriceOpen: BigInt!
+
+  "Volume traded for the token0 of the pair. Includes both Swaps and Orderbook trades"
+  tradedVolumeToken0: BigInt!
+
+  "Volume traded for the token1 of the pair. Includes both Swaps and Orderbook trades"
+  tradedVolumeToken1: BigInt!
+
+  "Volume traded for the token0 of the pair exclusively on Swaps"
+  tradedVolumeToken0Swap: BigInt!
+
+  "Volume traded for the token1 of the pair exclusively on Swaps"
+  tradedVolumeToken1Swap: BigInt!
+
+  "Volume traded for the token0 of the pair exclusively on Orderbook trades"
+  tradedVolumeToken0Orderbook: BigInt!
+
+  "Volume traded for the token1 of the pair exclusively on Orderbook trades"
+  tradedVolumeToken1Orderbook: BigInt!
+}
+
+type TokenDailyData @entity {
+  "The ID follows this pattern: <TOKEN ID>-<DAY NUMBER>."
+  id: ID!
+
+  token: Token!
+
+  "Timestamp of the start of the day. Timezone -> UTC"
+  dayStart: BigInt!
+
+  "Timestamp of the end of the day. Timezone -> UTC"
+  dayEnd: BigInt!
+
+  "Day number is the amount of days since the start block of Loopring 3.6 (block 11149814)"
+  dayNumber: Int!
+
+  "Volume traded for the token. Includes both Swaps and Orderbook trades"
+  tradedVolume: BigInt!
+
+  "Volume traded for the token exclusively on Swaps"
+  tradedVolumeSwap: BigInt!
+
+  "Volume traded for the token exclusively on Orderbook trades"
+  tradedVolumeOrderbook: BigInt!
+}
+
+type AccountTokenBalanceDailyData @entity {
+  "The ID follows this pattern: <ACCOUNT TOKEN BALANCE ID>-<DAY NUMBER>."
+  id: ID!
+
+  "Timestamp of the start of the day. Timezone -> UTC"
+  dayStart: BigInt!
+
+  "Timestamp of the end of the day. Timezone -> UTC"
+  dayEnd: BigInt!
+
+  "Day number is the amount of days since the start block of Loopring 3.6 (block 11149814)"
+  dayNumber: Int!
+
+  "Latest value for balance for this AccountTokenBalance entity on this specific day. Coincides with balanceClose"
+  balance: BigInt!
+
+  "Balance for this AccountTokenBalance entity when it was created."
+  balanceOpen: BigInt!
+
+  "Last update of balance for this AccountTokenBalance entity on this specific day"
+  balanceClose: BigInt!
+
+  "Lowest balance for this AccountTokenBalance entity on this specific day"
+  balanceLow: BigInt!
+
+  "Highest balance for this AccountTokenBalance entity on this specific day"
+  balanceHigh: BigInt!
+
+  "Link to the Account entity. Can be a Pool or User entity"
+  account: Account!
+
+  "Link to the Token entity. Holds all details of the token itself."
+  token: Token!
+
+  "Link to the original AccountTokenBalance entity."
+  accountTokenBalance: AccountTokenBalance!
+}
+
+# Weekly data entities
+
+type PairWeeklyData @entity {
+  "The ID follows this pattern: <PAIR ID>-<WEEK NUMBER>."
+  id: ID!
+
+  pair: Pair!
+
+  "Timestamp of the start of the week. Timezone -> UTC"
+  weekStart: BigInt!
+
+  "Timestamp of the end of the week. Timezone -> UTC"
+  weekEnd: BigInt!
+
+  "Week number is the amount of weeks since the start block of Loopring 3.6 (block 11149814)"
+  weekNumber: Int!
+
+  "Lowest price for token 0 during the time interval"
+  token0PriceLow: BigInt!
+
+  "Lowest price for token 1 during the time interval"
+  token1PriceLow: BigInt!
+
+  "Highest price for token 0 during the time interval"
+  token0PriceHigh: BigInt!
+
+  "Highest price for token 1 during the time interval"
+  token1PriceHigh: BigInt!
+
+  "Price for token 0 at the end of the time interval"
+  token0PriceClose: BigInt!
+
+  "Price for token 1 at the end of the time interval"
+  token1PriceClose: BigInt!
+
+  "Price for token 0 at the start of the time interval"
+  token0PriceOpen: BigInt!
+
+  "Price for token 1 at the start of the time interval"
+  token1PriceOpen: BigInt!
+
+  "Volume traded for the token0 of the pair. Includes both Swaps and Orderbook trades"
+  tradedVolumeToken0: BigInt!
+
+  "Volume traded for the token1 of the pair. Includes both Swaps and Orderbook trades"
+  tradedVolumeToken1: BigInt!
+
+  "Volume traded for the token0 of the pair exclusively on Swaps"
+  tradedVolumeToken0Swap: BigInt!
+
+  "Volume traded for the token1 of the pair exclusively on Swaps"
+  tradedVolumeToken1Swap: BigInt!
+
+  "Volume traded for the token0 of the pair exclusively on Orderbook trades"
+  tradedVolumeToken0Orderbook: BigInt!
+
+  "Volume traded for the token1 of the pair exclusively on Orderbook trades"
+  tradedVolumeToken1Orderbook: BigInt!
+}
+
+type TokenWeeklyData @entity {
+  "The ID follows this pattern: <TOKEN ID>-<WEEK NUMBER>."
+  id: ID!
+
+  token: Token!
+
+  "Timestamp of the start of the week. Timezone -> UTC"
+  weekStart: BigInt!
+
+  "Timestamp of the end of the week. Timezone -> UTC"
+  weekEnd: BigInt!
+
+  "Week number is the amount of weeks since the start block of Loopring 3.6 (block 11149814)"
+  weekNumber: Int!
+
+  "Volume traded for the token. Includes both Swaps and Orderbook trades"
+  tradedVolume: BigInt!
+
+  "Volume traded for the token exclusively on Swaps"
+  tradedVolumeSwap: BigInt!
+
+  "Volume traded for the token exclusively on Orderbook trades"
+  tradedVolumeOrderbook: BigInt!
+}
+
+type AccountTokenBalanceWeeklyData @entity {
+  "The ID follows this pattern: <ACCOUNT TOKEN BALANCE ID>-<WEEK NUMBER>."
+  id: ID!
+
+  "Timestamp of the start of the week. Timezone -> UTC"
+  weekStart: BigInt!
+
+  "Timestamp of the end of the week. Timezone -> UTC"
+  weekEnd: BigInt!
+
+  "Week number is the amount of weeks since the start block of Loopring 3.6 (block 11149814)"
+  weekNumber: Int!
+
+  "Latest value for balance for this AccountTokenBalance entity on this specific week. Coincides with balanceClose"
+  balance: BigInt!
+
+  "Balance for this AccountTokenBalance entity when it was created."
+  balanceOpen: BigInt!
+
+  "Last update of balance for this AccountTokenBalance entity on this specific week"
+  balanceClose: BigInt!
+
+  "Lowest balance for this AccountTokenBalance entity on this specific week"
+  balanceLow: BigInt!
+
+  "Highest balance for this AccountTokenBalance entity on this specific week"
+  balanceHigh: BigInt!
+
+  "Link to the Account entity. Can be a Pool or User entity"
+  account: Account!
+
+  "Link to the Token entity. Holds all details of the token itself."
+  token: Token!
+
+  "Link to the original AccountTokenBalance entity."
+  accountTokenBalance: AccountTokenBalance!
+}

@@ -1,0 +1,252 @@
+enum EntityType {
+  "Fund Entity"
+  Fund
+
+  "Org Entity"
+  Org
+
+  "Unknown Entity, not yet fully supported by the subgraph."
+  Unknown
+}
+
+"An entity that is part of the Endaoment protocol."
+type NdaoEntity @entity {
+  "Contract address of the entity."
+  id: Bytes!
+
+  "The type of the entity."
+  entityType: EntityType!
+
+  "The EIN of the entity. Only applicable to Orgs."
+  ein: String
+
+  "Manager of the entity."
+  entityManager: Bytes!
+
+  "USDC Balance that has been formally recognized by the entity."
+  recognizedUsdcBalance: BigInt!
+
+  "Total amount of native ETH that was transferred to the entity."
+  totalEthReceived: BigInt!
+
+  """
+  Amount USDC that has been donated to this entity, after fees. Any recognized inbound asset transfer from addresses
+  outside the Endaoment protocol is considered a Donation.
+  """
+  totalUsdcDonationsReceived: BigInt!
+
+  "Amount of fees that have been collected from donations to this entity."
+  totalUsdcDonationFees: BigInt!
+
+  "Amount of USDC that has been granted to this entity, after fees. Any Fund -> Org transfer is considered a grant."
+  totalUsdcGrantsReceived: BigInt!
+
+  "Amount of fees that have been paid by grantors for grants to this entity."
+  totalUsdcGrantInFees: BigInt!
+
+  "Amount of USDC that has been donated or granted to this entity, after fees."
+  totalUsdcContributionsReceived: BigInt!
+
+  "Amount of fees that have been collected from donations or grants to this entity."
+  totalUsdcContributionFees: BigInt!
+
+  """
+  Amount of USDC that has been transferred to this entity. This includes only transfers that are not considered grants.
+  Example: (Org -> Org, Fund -> Fund, Org -> Fund)
+  """
+  totalUsdcTransfersReceived: BigInt!
+
+  "Amount of USDC that has been paid in fees for transfers to this entity."
+  totalUsdcTransferInFees: BigInt!
+
+  "Amount of USDC that has been migrated to this entity from Endaoment V1."
+  totalUsdcMigrated: BigInt!
+
+  "Amount of USDC that has been received by this entity using any Endaoment V2 Entity method, including V1 migration."
+  totalUsdcReceived: BigInt!
+
+  "Amount of USDC that has been paid in fee for all inbound USDC transactions to this entity."
+  totalUsdcReceivedFees: BigInt!
+
+  """
+  Amount of USDC that has been granted out to other Endaoment entities by this entity, net of fees.
+  Any Fund -> Org transfer is considered a grant.
+  """
+  totalUsdcGrantedOut: BigInt!
+
+  "Amount of fees that have been paid by this entity for grants to other Endaoment entities."
+  totalUsdcGrantedOutFees: BigInt!
+
+  """
+  Amount of USDC that has been transferred out of this entity, net of fees. This includes only transfers that are not
+  considered grants. Example: (Org -> Org, Fund -> Fund, Org -> Fund)
+  """
+  totalUsdcTransferredOut: BigInt!
+
+  "Amount of USDC that has been paid in fees for transfers out of this entity."
+  totalUsdcTransferredOutFees: BigInt!
+
+  "Amount of USDC that has been paid out to accounts or wallets owned by the entity outside the Endaoment Protocol."
+  totalUsdcPaidOut: BigInt!
+
+  "Amount of USDC that has been paid in fees for payouts from this entity"
+  totalUsdcPaidOutFees: BigInt!
+
+  """
+  Flag indicating whether the entity has been fully initialized with V1 migration data. For this to occur, the entity
+  must have emitted at least 1 event in 2 separate blocks.
+
+  Entities that are not fully initialized will account for migrated funds in its balance but not include them in the
+  following fields:
+  > * totalUsdcMigrated
+  > * totalUsdcReceived
+  """
+  initialized: Boolean!
+
+  """
+  USDC Balance that the entity has invested in Portfolios belonging to the Endaoment protocol.
+  > * This is the sum of all USDC invested in all portfolios and NOT the current USDC value of the portfolio shares.
+  > * Fees are included in the amount, since it tracks the entire sum sent to portfolio contracts.
+  > * When shares are redeemed, this amount is reduced proportionally to the amount of shares redeemed.
+  """
+  investedUsdc: BigInt!
+
+  "Positions owned by the entity in various portfolios."
+  positions: [PortfolioPosition!]! @derivedFrom(field: "entity")
+}
+
+"A position taken by an Endaoment entity in a portfolio approved by Endaoment"
+type PortfolioPosition @entity {
+  """
+  Id of the position, which is a concatenation of the portfolio address and the entity address.
+
+  Format: <0xPortfolio_address>|<0xEntity_address>
+  """
+  id: ID!
+
+  "Address of the entity that owns this position."
+  entity: NdaoEntity!
+
+  "Address of the portfolio that invested by the entity."
+  portfolio: Bytes!
+
+  "Shares of the portfolio that are owned by the entity."
+  shares: BigInt!
+
+  "Amount of USDC invested by the entity in the portfolio."
+  investedUsdc: BigInt!
+}
+
+"Entity representing the Endaoment Protocol Registry."
+type Registry @entity {
+  "ID of the registry, which is the constant string '1'"
+  id: String!
+
+  "Address of the Endaoment Registry contract."
+  address: Bytes!
+
+  "Owner of the Endaoment Registry contract."
+  owner: Bytes!
+
+  "Address of the Entity Factories approved on the registry."
+  entityFactories: [Bytes!]!
+
+  "Address of the swap wrappers approved on the registry."
+  swapWrappers: [Bytes!]!
+
+  "Address of the portfolios approved on the registry."
+  portfolios: [Bytes!]!
+}
+
+"Address that has a special authority in the Endaoment protocol."
+type AuthorityUser @entity {
+  "Address of the authority user."
+  id: Bytes!
+
+  "Roles of the authority user."
+  roles: [RoleUser!]! @derivedFrom(field: "user")
+}
+
+"Role assigned to an authority user."
+type RoleUser @entity {
+  """
+  Address of the role user.
+
+  Format: <user_address>|<role_id>
+  """
+  id: ID!
+
+  "User that has the role."
+  user: AuthorityUser!
+
+  "Role assigned to the user."
+  role: Role!
+}
+
+"Role that can invoke capabilities."
+type Role @entity {
+  "ID of the role - String representation of the role's integer id."
+  id: String!
+
+  "Users associated with the role."
+  users: [RoleUser!]! @derivedFrom(field: "role")
+
+  "Capabilities of the role."
+  capabilities: [RoleCapability!]! @derivedFrom(field: "role")
+}
+
+"Capability that can be invoked by a role."
+type RoleCapability @entity {
+  """
+  ID of the role capability.
+
+  Format: <role_id>|<capability_id>
+  """
+  id: ID!
+
+  "Role that can invoke the capability."
+  role: Role!
+
+  "Capability that can be invoked by the role."
+  capability: Capability!
+}
+
+"Capability that can be invoked publicly or via a role."
+type Capability @entity {
+  """
+  ID of the capability.
+  Format: <target>|<signature>
+  """
+  id: ID!
+
+  "Target of the capability."
+  target: Bytes!
+
+  "Signature that can be invoked on the target of the capability."
+  signature: Bytes!
+
+  "Indicates if the capability can be invoked by any address publicly."
+  isPublic: Boolean!
+
+  "Roles that can invoke the capability."
+  roles: [RoleCapability!]! @derivedFrom(field: "capability")
+}
+
+"""
+Helper metadata entity to track migration information of an NdaoEntity. Not meant to be queried directly, as the
+information here only useful for internal indexing logic. As soon as an entity is fully initialized, this entity
+is not longer updated.
+"""
+type NdaoEntityFirstIndexedBlock @entity {
+  # Contract address of the entity.
+  id: Bytes!
+
+  # Balance of the entity at the end of the first block it emitted and event.
+  endOfBlockBalance: BigInt!
+
+  # Number of the initial block that was processed.
+  blockNumber: BigInt!
+
+  # Balance delta due to events emitted in the initial block.
+  eventBalanceDelta: BigInt!
+}

@@ -112,6 +112,7 @@ fn parse_graphqlx_schemas() {
   for entry in dir {
     let entry = entry.expect("should be able to read directory entry");
     let path = entry.path();
+    
     if path.extension().and_then(|s| s.to_str()) == Some("graphql") {
       let content = fs::read_to_string(&path).expect("should be able to read file");
       let document = Document::<&str>::parse_str(&content).into_result();
@@ -120,7 +121,13 @@ fn parse_graphqlx_schemas() {
           let _ = doc.definitions();
         }
         Err(e) => {
-          println!("Source: {}", &content);
+          for errs in e.iter() {
+            for err in errs.iter() {
+              let span = err.span();
+              println!("span({span:?}): {}", &content[span.start()..span.end()]);
+            }
+          }
+
           panic!("Failed to parse {}: {:?}", path.display(), e);
         }
       }

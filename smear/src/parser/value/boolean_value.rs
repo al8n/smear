@@ -1,5 +1,8 @@
 use core::fmt::Display;
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL};
+use logosky::utils::{
+  AsSpan, IntoComponents, IntoSpan, Span,
+  sdl_display::{DisplayCompact, DisplayPretty},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanValue {
@@ -73,9 +76,20 @@ impl BooleanValue {
   }
 }
 
-impl DisplaySDL for BooleanValue {
+impl DisplayCompact for BooleanValue {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    write!(f, "{}", self.value())
+  }
+}
+
+impl DisplayPretty for BooleanValue {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     write!(f, "{}", self.value())
   }
 }

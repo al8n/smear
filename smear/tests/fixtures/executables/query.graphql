@@ -1,0 +1,1 @@
+query ExampleQuery($topProductsFirst: Int) { me { id }  topProducts(first:  $topProductsFirst) {    name    price    inStock weight test test test test test test test test test test test test }}

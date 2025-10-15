@@ -3,7 +3,10 @@ use core::marker::PhantomData;
 use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, sdl_display::DisplaySDL},
+  utils::{
+    AsSpan, IntoComponents, IntoSpan, Span,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
 
 use crate::{
@@ -99,40 +102,36 @@ where
   }
 }
 
-impl<Name, Container> DisplaySDL for UnionMemberTypes<Name, Container>
+impl<Name, Container> DisplayCompact for UnionMemberTypes<Name, Container>
 where
   Container: AsRef<[Name]>,
-  Name: DisplaySDL,
+  Name: DisplayCompact,
 {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let members = self.members().as_ref();
-
-    for (i, member) in members.iter().enumerate() {
-      if i == 0 {
-        write!(f, " {}", member.display())?;
-        continue;
-      }
-      write!(f, " | {}", member.display())?;
-    }
-    Ok(())
-  }
+  type Options = Name::Options;
 
   #[inline]
-  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let members = self.members().as_ref();
 
     for member in members.iter() {
-      write!(f, "|{}", member.display_compact())?;
+      write!(f, "|{}", member.display(opts))?;
     }
     Ok(())
   }
+}
+
+impl<Name, Container> DisplayPretty for UnionMemberTypes<Name, Container>
+where
+  Container: AsRef<[Name]>,
+  Name: DisplayPretty,
+{
+  type Options = Name::Options;
 
   #[inline]
-  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let members = self.members().as_ref();
     for member in members.iter() {
-      writeln!(f, "\t| {}", member.display_pretty())?;
+      writeln!(f, "\t| {}", member.display(opts))?;
     }
     Ok(())
   }

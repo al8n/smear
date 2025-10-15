@@ -4,7 +4,9 @@ use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{self, extra::ParserExtra, prelude::*},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
@@ -100,17 +102,35 @@ impl core::borrow::Borrow<str> for ExecutableDirectiveLocation {
   }
 }
 
-impl DisplaySDL for ExecutableDirectiveLocation {
+impl core::fmt::Display for ExecutableDirectiveLocation {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.as_str())
   }
 }
 
+impl DisplayCompact for ExecutableDirectiveLocation {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl DisplayPretty for ExecutableDirectiveLocation {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
+  }
+}
+
 impl DisplayHuman for ExecutableDirectiveLocation {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    core::fmt::Display::fmt(self, f)
   }
 }
 
@@ -284,17 +304,35 @@ impl core::borrow::Borrow<str> for TypeSystemDirectiveLocation {
   }
 }
 
-impl DisplaySDL for TypeSystemDirectiveLocation {
+impl core::fmt::Display for TypeSystemDirectiveLocation {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.as_str())
   }
 }
 
+impl DisplayCompact for TypeSystemDirectiveLocation {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl DisplayPretty for TypeSystemDirectiveLocation {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
+  }
+}
+
 impl DisplayHuman for TypeSystemDirectiveLocation {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    core::fmt::Display::fmt(self, f)
   }
 }
 
@@ -417,13 +455,31 @@ impl IntoSpan<Span> for Location {
   }
 }
 
-impl DisplaySDL for Location {
+impl core::fmt::Display for Location {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     match self {
-      Self::Executable(loc) => DisplaySDL::fmt(loc, f),
-      Self::TypeSystem(loc) => DisplaySDL::fmt(loc, f),
+      Self::Executable(loc) => core::fmt::Display::fmt(loc, f),
+      Self::TypeSystem(loc) => core::fmt::Display::fmt(loc, f),
     }
+  }
+}
+
+impl DisplayCompact for Location {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl DisplayPretty for Location {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
   }
 }
 
@@ -589,40 +645,37 @@ where
   }
 }
 
-impl<Location, Container> DisplaySDL for DirectiveLocations<Location, Container>
+impl<Location, Container> DisplayCompact for DirectiveLocations<Location, Container>
 where
   Container: AsRef<[Location]>,
-  Location: DisplaySDL,
+  Location: DisplayCompact,
 {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let locations = self.locations().as_ref();
-
-    for (i, location) in locations.iter().enumerate() {
-      if i == 0 {
-        write!(f, " {}", DisplaySDL::display(location))?;
-        continue;
-      }
-      write!(f, " | {}", DisplaySDL::display(location))?;
-    }
-    Ok(())
-  }
+  type Options = Location::Options;
 
   #[inline]
-  fn fmt_compact(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let locations = self.locations().as_ref();
 
     for location in locations.iter() {
-      write!(f, "|{}", DisplaySDL::display_compact(location))?;
+      write!(f, "|{}", location.display(opts))?;
     }
     Ok(())
   }
+}
+
+impl<Location, Container> DisplayPretty for DirectiveLocations<Location, Container>
+where
+  Container: AsRef<[Location]>,
+  Location: DisplayPretty,
+{
+  type Options = Location::Options;
 
   #[inline]
-  fn fmt_pretty(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, opts: &Self::Options) -> core::fmt::Result {
     let locations = self.locations().as_ref();
+
     for location in locations.iter() {
-      writeln!(f, "\t| {}", DisplaySDL::display_pretty(location))?;
+      writeln!(f, "\t| {}", location.display(opts))?;
     }
     Ok(())
   }

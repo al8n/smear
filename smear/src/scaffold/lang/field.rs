@@ -2,7 +2,9 @@ use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
     syntax_tree_display::DisplaySyntaxTree,
   },
 };
@@ -109,7 +111,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    write!(f, "{}:", self.name.display())
   }
 }
 
@@ -122,13 +124,37 @@ impl<Name> core::ops::Deref for Alias<Name> {
   }
 }
 
-impl<Name> DisplaySDL for Alias<Name>
+impl<Name> DisplayHuman for Alias<Name>
 where
   Name: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "{}:", self.name.display())
+    core::fmt::Display::fmt(self, f)
+  }
+}
+
+impl<Name> DisplayCompact for Alias<Name>
+where
+  Name: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl<Name> DisplayPretty for Alias<Name>
+where
+  Name: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
   }
 }
 

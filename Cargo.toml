@@ -17,7 +17,7 @@ bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
 chumsky = { version = "0.11", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
-logosky = { version = "*", path = "../logosky", default-features = false }
+logosky = { version = "0.1", default-features = false }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

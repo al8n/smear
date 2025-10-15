@@ -1,6 +1,8 @@
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::{
-  AsSpan, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoSpan, Span,
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
   syntax_tree_display::DisplaySyntaxTree,
 };
 
@@ -21,7 +23,7 @@ use crate::keywords::{Mutation, Query, Subscription};
 /// ```
 ///
 /// Spec: [Operation Type](https://spec.graphql.org/draft/#OperationType)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum OperationType {
@@ -30,6 +32,7 @@ pub enum OperationType {
   /// Query operations are the most fundamental operation type in GraphQL, designed for
   /// fetching data without causing side effects. They embody GraphQL's approach to
   /// declarative data fetching where clients specify exactly what data they need.
+  #[display("query")]
   Query(Query),
 
   /// Represents a GraphQL mutation operation for write operations and data modification.
@@ -37,6 +40,7 @@ pub enum OperationType {
   /// Mutation operations are designed for operations that modify server state, create
   /// or update data, or trigger side effects. They provide controlled, predictable
   /// mechanisms for changing data while maintaining GraphQL's type safety guarantees.
+  #[display("mutation")]
   Mutation(Mutation),
 
   /// Represents a GraphQL subscription operation for real-time streaming data.
@@ -45,6 +49,7 @@ pub enum OperationType {
   /// by establishing persistent connections that stream data updates over time. They
   /// extend GraphQL's request-response model to support event-driven architectures
   /// and real-time user experiences.
+  #[display("subscription")]
   Subscription(Subscription),
 }
 
@@ -111,21 +116,28 @@ impl OperationType {
   }
 }
 
-impl DisplaySDL for OperationType {
+impl DisplayCompact for OperationType {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    match self {
-      Self::Query(_) => write!(f, "query"),
-      Self::Mutation(_) => write!(f, "mutation"),
-      Self::Subscription(_) => write!(f, "subscription"),
-    }
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self, f)
+  }
+}
+
+impl DisplayPretty for OperationType {
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayCompact::fmt(self, f, &())
   }
 }
 
 impl DisplayHuman for OperationType {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    core::fmt::Display::fmt(self, f)
   }
 }
 

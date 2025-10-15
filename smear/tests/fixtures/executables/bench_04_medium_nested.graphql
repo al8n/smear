@@ -1,0 +1,20 @@
+query GetUserWithPosts($userId: ID!, $first: Int = 10) {
+  user(id: $userId) {
+    id
+    name
+    email
+    posts(first: $first) {
+      edges {
+        node {
+          id
+          title
+          content
+          author {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}

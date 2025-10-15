@@ -4,7 +4,9 @@ use logosky::{
   Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+    AsSpan, IntoComponents, IntoSpan, Span,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
 
@@ -55,7 +57,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplaySDL::fmt(self, f)
+    write!(f, "${}", self.name.display())
   }
 }
 
@@ -79,13 +81,27 @@ impl<Name> VariableValue<Name> {
   }
 }
 
-impl<Name> DisplaySDL for VariableValue<Name>
+impl<Name> DisplayCompact for VariableValue<Name>
 where
   Name: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    write!(f, "${}", self.name.display())
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    core::fmt::Display::fmt(self, f)
+  }
+}
+
+impl<Name> DisplayPretty for VariableValue<Name>
+where
+  Name: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    core::fmt::Display::fmt(self, f)
   }
 }
 

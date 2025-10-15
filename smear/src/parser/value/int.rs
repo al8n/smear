@@ -1,5 +1,7 @@
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span,
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
   syntax_tree_display::DisplaySyntaxTree,
 };
 
@@ -81,12 +83,26 @@ impl<S> IntValue<S> {
   }
 }
 
-impl<S> DisplaySDL for IntValue<S>
+impl<S> DisplayCompact for IntValue<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for IntValue<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     self.value.fmt(f)
   }
 }

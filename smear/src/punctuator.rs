@@ -125,9 +125,20 @@ macro_rules! punctuator {
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplaySDL for $name {
+        impl $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name {
+          type Options = ();
+
           #[inline]
-          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>, _: &Self::Options) -> ::core::fmt::Result {
+            ::core::fmt::Display::fmt(self, f)
+          }
+        }
+
+        impl $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name {
+          type Options = ();
+
+          #[inline]
+          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>, _: &Self::Options) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }

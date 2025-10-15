@@ -1,0 +1,82 @@
+query ComplexQuery($userId: ID!, $first: Int!, $tags: [String!], $minPrice: Float, $maxPrice: Float) {
+  user(id: $userId) {
+    id
+    name
+    email
+    profile {
+      bio
+      avatar
+      location {
+        city
+        country
+      }
+    }
+    posts(first: $first, tags: $tags) @include(if: true) {
+      edges {
+        cursor
+        node {
+          id
+          title
+          content
+          publishedAt
+          author {
+            id
+            name
+          }
+          comments(first: 5) {
+            totalCount
+            edges {
+              node {
+                id
+                text
+                author {
+                  name
+                }
+              }
+            }
+          }
+          tags {
+            id
+            name
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+    products(minPrice: $minPrice, maxPrice: $maxPrice) {
+      id
+      name
+      price
+      ... on DigitalProduct {
+        downloadUrl
+      }
+      ... on PhysicalProduct {
+        weight
+        dimensions {
+          length
+          width
+          height
+        }
+      }
+    }
+  }
+  categories {
+    id
+    name
+    products(first: 10) {
+      id
+      name
+    }
+  }
+}
+
+fragment ProductDetails on Product {
+  id
+  name
+  description
+  price
+  inStock
+}

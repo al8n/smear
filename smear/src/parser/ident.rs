@@ -1,8 +1,10 @@
 use core::fmt::Display;
 
 use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent, human_display::DisplayHuman,
-  sdl_display::DisplaySDL,
+  AsSpan, IntoComponents, IntoSpan, Span,
+  cmp::Equivalent,
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
 };
 
 /// An identifier.
@@ -86,12 +88,26 @@ impl<S> core::ops::Deref for Ident<S> {
   }
 }
 
-impl<S> DisplaySDL for Ident<S>
+impl<S> DisplayCompact for Ident<S>
 where
   S: DisplayHuman,
 {
+  type Options = ();
+
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.value.fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for Ident<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     self.value.fmt(f)
   }
 }
