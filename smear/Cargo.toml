@@ -7,7 +7,6 @@ homepage.workspace = true
 license.workspace = true
 description = "Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs."
 
-
 [features]
 default = ["std", "smallvec", "graphql", "graphqlx"]
 alloc = []
@@ -43,42 +42,235 @@ async-graphql-parser = "7"
 cynic-parser = "0.10"
 paste = "1"
 
+
+# Schema benchmarks
 [[bench]]
-name = "directive_args"
-path = "benches/directive_args.rs"
+name = "apollo_studio"
+path = "benches/schemas/apollo_studio.rs"
 harness = false
 
 [[bench]]
-name = "github"
-path = "benches/github_schema.rs"
+name = "github_schema"
+path = "benches/schemas/github_schema.rs"
 harness = false
 
 [[bench]]
-name = "inline_fragment"
-path = "benches/inline_fragment.rs"
+name = "gitlab_schema"
+path = "benches/schemas/gitlab_schema.rs"
 harness = false
 
 [[bench]]
-name = "kitchen_sink"
-path = "benches/kitchen_sink.rs"
+name = "kitchen_sink_canonical_schema"
+path = "benches/schemas/kitchen_sink_canonical.rs"
 harness = false
 
 [[bench]]
-name = "minimal"
-path = "benches/minimal.rs"
+name = "kitchen_sink_schema"
+path = "benches/schemas/kitchen_sink.rs"
 harness = false
 
 [[bench]]
-name = "query_vars"
-path = "benches/query_vars.rs"
-harness = false
-
-[[bench]]
-name = "query"
-path = "benches/query.rs"
+name = "schema_kitchen_sink"
+path = "benches/schemas/schema_kitchen_sink.rs"
 harness = false
 
 [[bench]]
 name = "supergraph"
-path = "benches/supergraph.rs"
+path = "benches/schemas/supergraph.rs"
+harness = false
+
+# Executable benchmarks
+[[bench]]
+name = "directive_args_multiline"
+path = "benches/executables/directive_args_multiline.rs"
+harness = false
+
+[[bench]]
+name = "directive_args"
+path = "benches/executables/directive_args.rs"
+harness = false
+
+[[bench]]
+name = "fragment_spread"
+path = "benches/executables/fragment_spread.rs"
+harness = false
+
+[[bench]]
+name = "fragment"
+path = "benches/executables/fragment.rs"
+harness = false
+
+[[bench]]
+name = "inline_fragment_dir"
+path = "benches/executables/inline_fragment_dir.rs"
+harness = false
+
+[[bench]]
+name = "inline_fragment"
+path = "benches/executables/inline_fragment.rs"
+harness = false
+
+[[bench]]
+name = "kitchen_sink_canonical"
+path = "benches/executables/kitchen_sink_canonical.rs"
+harness = false
+
+[[bench]]
+name = "kitchen_sink_list"
+path = "benches/executables/kitchen_sink_list.rs"
+harness = false
+
+[[bench]]
+name = "kitchen_sink"
+path = "benches/executables/kitchen_sink.rs"
+harness = false
+
+[[bench]]
+name = "many_alias"
+path = "benches/executables/many_alias.rs"
+harness = false
+
+[[bench]]
+name = "minimal_mutation"
+path = "benches/executables/minimal_mutation.rs"
+harness = false
+
+[[bench]]
+name = "minimal_query"
+path = "benches/executables/minimal_query.rs"
+harness = false
+
+[[bench]]
+name = "minimal"
+path = "benches/executables/minimal.rs"
+harness = false
+
+[[bench]]
+name = "multiline_string"
+path = "benches/executables/multiline_string.rs"
+harness = false
+
+[[bench]]
+name = "mutation_directive"
+path = "benches/executables/mutation_directive.rs"
+harness = false
+
+[[bench]]
+name = "mutation_nameless_vars"
+path = "benches/executables/mutation_nameless_vars.rs"
+harness = false
+
+[[bench]]
+name = "named_query"
+path = "benches/executables/named_query.rs"
+harness = false
+
+[[bench]]
+name = "nested_selection"
+path = "benches/executables/nested_selection.rs"
+harness = false
+
+[[bench]]
+name = "query_aliases"
+path = "benches/executables/query_aliases.rs"
+harness = false
+
+[[bench]]
+name = "query_arguments_multiline"
+path = "benches/executables/query_arguments_multiline.rs"
+harness = false
+
+[[bench]]
+name = "query_arguments"
+path = "benches/executables/query_arguments.rs"
+harness = false
+
+[[bench]]
+name = "query_array_argument_multiline"
+path = "benches/executables/query_array_argument_multiline.rs"
+harness = false
+
+[[bench]]
+name = "query_directive"
+path = "benches/executables/query_directive.rs"
+harness = false
+
+[[bench]]
+name = "query_list_argument"
+path = "benches/executables/query_list_argument.rs"
+harness = false
+
+[[bench]]
+name = "query_nameless_vars_multiple_fields_canonical"
+path = "benches/executables/query_nameless_vars_multiple_fields_canonical.rs"
+harness = false
+
+[[bench]]
+name = "query_nameless_vars"
+path = "benches/executables/query_nameless_vars.rs"
+harness = false
+
+[[bench]]
+name = "query_object_argument_multiline"
+path = "benches/executables/query_object_argument_multiline.rs"
+harness = false
+
+[[bench]]
+name = "query_object_argument"
+path = "benches/executables/query_object_argument.rs"
+harness = false
+
+[[bench]]
+name = "query_var_default_float"
+path = "benches/executables/query_var_default_float.rs"
+harness = false
+
+[[bench]]
+name = "query_var_default_list"
+path = "benches/executables/query_var_default_list.rs"
+harness = false
+
+[[bench]]
+name = "query_var_default_object"
+path = "benches/executables/query_var_default_object.rs"
+harness = false
+
+[[bench]]
+name = "query_var_default_string"
+path = "benches/executables/query_var_default_string.rs"
+harness = false
+
+[[bench]]
+name = "query_var_defaults"
+path = "benches/executables/query_var_defaults.rs"
+harness = false
+
+[[bench]]
+name = "query_vars"
+path = "benches/executables/query_vars.rs"
+harness = false
+
+[[bench]]
+name = "query"
+path = "benches/executables/query.rs"
+harness = false
+
+[[bench]]
+name = "string_literal"
+path = "benches/executables/string_literal.rs"
+harness = false
+
+[[bench]]
+name = "subscription_directive"
+path = "benches/executables/subscription_directive.rs"
+harness = false
+
+[[bench]]
+name = "triple_quoted_literal"
+path = "benches/executables/triple_quoted_literal.rs"
+harness = false
+
+[[bench]]
+name = "variable_directive"
+path = "benches/executables/variable_directive.rs"
 harness = false

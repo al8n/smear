@@ -1,0 +1,50 @@
+type MinePool @entity {
+    "id"
+    id: ID!
+    "timestamp"
+    timestamp: BigInt
+    "creator"
+    creator: Bytes
+    "mine pool address"
+    pool: Bytes!
+    "stake token"
+    stakeToken:Bytes
+    "isLptoken"
+    isLpToken: Boolean
+    "mineType"
+    platform:BigInt
+    "reward details"
+    rewardDetail:[RewardDetail!]! @derivedFrom(field: "minePool")
+    "updatedAt"
+    updatedAt:BigInt!
+}
+
+type RewardDetail @entity{
+    "id"
+    id: ID!
+    "minepool"
+    minePool: MinePool!
+    "rewardTokens"
+    token: Bytes!
+    "reward per block"
+    rewardPerBlock: BigInt!
+    "start block"
+    startBlock: BigInt!
+    "end block"
+    endBlock: BigInt!
+    "updatedAt"
+    updatedAt:BigInt!
+}
+
+type UserStake @entity{
+    "user - pool"
+    id: ID!
+    "user address"
+    user:Bytes!
+    "pool"
+    pool:Bytes!
+    "balance"
+    balance:BigInt!
+    "updatedAt"
+    updatedAt:BigInt!
+}

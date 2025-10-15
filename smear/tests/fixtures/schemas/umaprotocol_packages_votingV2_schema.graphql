@@ -1,0 +1,335 @@
+type Global @entity {
+  id: ID!
+
+  "List of all users addresses"
+  userAddresses: [String!]!
+
+  "Cumulative stake from all users"
+  cumulativeStake: BigDecimal!
+
+  "Emission rate per second"
+  emissionRate: BigDecimal!
+
+  "Annual Voting Token emission at current emission rate"
+  annualVotingTokenEmission: BigDecimal!
+
+  "Earnings percentage from staking over a 12-month period, exclusive of slashing and compound interest"
+  annualPercentageReturn: BigDecimal!
+
+  "Higher index to process among all users"
+  maxNextIndexToProcess: BigInt!
+
+  countNoVotes: BigInt!
+
+  countWrongVotes: BigInt!
+
+  countCorrectVotes: BigInt!
+
+  users: [User!] @derivedFrom(field: "global")
+}
+
+type User @entity {
+  "Utility entity that links data from a single ethereum address. Id of the entity is the ethereum address itself"
+  id: ID!
+
+  address: Bytes!
+
+  "Earnings percentage from staking over a 12-month period, exclusive of slashing and compound interest"
+  annualPercentageReturn: BigDecimal!
+
+  "Earnings from staking over a 12-month period, exclusive of slashing and compound interest"
+  annualReturn: BigDecimal!
+
+  "Number of price requests that this user has revealed a vote for, and therefore participated in as a voter"
+  countReveals: BigInt
+
+  countNoVotes: BigInt!
+
+  countWrongVotes: BigInt!
+
+  countCorrectVotes: BigInt!
+
+  voterStake: BigDecimal!
+
+  "Tracks the stake that user should have before the next price request is resolved"
+  voterCalculatedStake: BigDecimal!
+
+  "Voter pending unstake during cooling-off period"
+  voterPendingUnstake: BigDecimal!
+
+  "Total rewards withdrawn in voting token"
+  withdrawnRewards: BigDecimal!
+
+  "Total slashed applied to the user"
+  cumulativeSlash: BigDecimal!
+
+  "Total slash applied to the user in percentage compared to cumulativeStake"
+  cumulativeSlashPercentage: BigDecimal!
+
+  "Total calculated slashed applied to the user. Differs from cumulativeSlash when the user has updatedTrackers"
+  cumulativeCalculatedSlash: BigDecimal!
+
+  "Total calculated slash applied to the user in percentage compared to cumulativeStake"
+  cumulativeCalculatedSlashPercentage: BigDecimal!
+
+  "Next price request index to process during updateTrackers for this user"
+  nextIndexToProcess: BigInt
+
+  "Cumulative resulting stake of all the stakes and unstakes of the user but not including the slashing"
+  cumulativeStakeNoSlashing: BigDecimal!
+
+  votesCommited: [CommittedVote!]! @derivedFrom(field: "voter")
+
+  votesRevealed: [RevealedVote!]! @derivedFrom(field: "voter")
+
+  votesSlashed: [SlashedVote!]! @derivedFrom(field: "voter")
+
+  global: Global!
+}
+
+type Collateral @entity {
+  "Represents approved collateral that is whitelisted in the AddressWhitelist and whose fees are set in the Store. Id of the entity is its address"
+  id: ID!
+
+  decimals: Int!
+
+  name: String!
+
+  symbol: String!
+
+  "Is token currently whitelisted as collateral"
+  isOnWhitelist: Boolean!
+
+  finalFee: BigDecimal
+}
+
+type PriceIdentifier @entity {
+  id: ID!
+
+  "Depicts whether this PriceIdentifier is currently among the identifiers supported on the whitelist. Will only be false if it was removed from the whitelist."
+  isSupported: Boolean!
+
+  "List of all the PriceRequest entities related to this particular PriceIdentifier."
+  priceRequests: [PriceRequest!]! @derivedFrom(field: "identifier")
+}
+
+type PriceRequest @entity {
+  "ID is the PriceIdentifier ID + the timestamp"
+  id: ID!
+
+  "The price request resolved index"
+  resolvedPriceRequestIndex: BigInt
+
+  "Depicts whether the request has been resolved"
+  isResolved: Boolean!
+
+  "Depicts whether the request has been deleted after rolling too many rounds"
+  isDeleted: Boolean!
+
+  "Price resolved for this request"
+  price: BigInt
+
+  "Number of rounds that this request has been rolled"
+  rollCount: BigInt!
+
+  "PriceRequestRound entity corresponding to the last round of voting"
+  latestRound: PriceRequestRound
+
+  "Timestamp when the PriceRequest was requested"
+  time: BigInt!
+
+  "PriceIdentifier for the request"
+  identifier: PriceIdentifier!
+
+  ancillaryData: String
+
+  "Transaction where the creation of the request took place"
+  requestTransaction: Bytes
+
+  "Transaction where the resolution of the request took place"
+  resolutionTransaction: Bytes
+
+  "Timestamp when the resolution of the request took place"
+  resolutionTimestamp: BigInt
+
+  "Block number when the resolution of the request took place"
+  resolutionBlock: BigInt
+
+  "List of all the rounds involved in this PriceRequest"
+  rounds: [PriceRequestRound!]! @derivedFrom(field: "request")
+
+  "List of all the votes committed on this request"
+  committedVotes: [CommittedVote!]! @derivedFrom(field: "request")
+
+  "List of all the votes revealed on this request"
+  revealedVotes: [RevealedVote!]! @derivedFrom(field: "request")
+
+  "Is this request a governance action"
+  isGovernance: Boolean!
+}
+
+type PriceRequestRound @entity {
+  "ID is the PriceIdentifier ID + the timestamp + the roundId + ancillaryData (if available)"
+  id: ID!
+
+  request: PriceRequest!
+
+  identifier: PriceIdentifier!
+
+  ancillaryData: String
+
+  time: BigInt!
+
+  roundId: BigInt!
+
+  lastRevealTime: BigInt
+
+  "Total amount of users who voted on this round"
+  votersAmount: BigDecimal!
+
+  totalVotesRevealed: BigDecimal!
+
+  cumulativeStakeAtRound: BigDecimal
+
+  countNoVotes: BigInt!
+
+  countWrongVotes: BigInt!
+
+  countCorrectVotes: BigInt!
+
+  cumulativeCorrectVoteSlash: BigDecimal!
+
+  cumulativeWrongVoteSlash: BigDecimal!
+
+  cumulativeNoVoteSlash: BigDecimal!
+
+  "Ratio of the total supply of tokens that were weighted on this vote"
+  tokenVoteParticipationRatio: BigDecimal
+
+  "Percentage of the total supply of tokens that were weighted on this vote"
+  tokenVoteParticipationPercentage: BigDecimal
+
+  "minParticipationRequirement expressed exactly as in the contract"
+  minParticipationRequirement: BigDecimal
+
+  "minAgreementRequirement expressed exactly as in the contract"
+  minAgreementRequirement: BigDecimal
+
+  "SlashingLibrary address used for this round"
+  slashingLibrary: String
+
+  winnerGroup: VoterGroup
+
+  committedVotes: [CommittedVote!]! @derivedFrom(field: "round")
+
+  revealedVotes: [RevealedVote!]! @derivedFrom(field: "round")
+
+  groups: [VoterGroup!]! @derivedFrom(field: "round")
+}
+
+type VoterGroup @entity {
+  "Just a helper entity to group voters who voted the same price result. ID is composed of round ID + voted price"
+  id: ID!
+
+  price: BigInt!
+
+  round: PriceRequestRound!
+
+  votes: [RevealedVote!]! @derivedFrom(field: "group")
+
+  totalVoteAmount: BigDecimal!
+
+  votersAmount: BigDecimal!
+
+  won: Boolean!
+}
+
+type TransactionSlashedVotes @entity {
+  id: ID!
+
+  "List of all slashed votes in this transaction"
+  slashedVotesIDs: [String!]!
+
+  cumulativeTransactionSlashAmount: BigDecimal!
+
+  stakedAmount: BigDecimal
+
+  countNoVotes: BigInt!
+
+  countWrongVotes: BigInt!
+
+  countCorrectVotes: BigInt!
+
+  slashedVotes: [SlashedVote!] @derivedFrom(field: "transactionSlashedVotes")
+}
+
+type SlashedVote @entity {
+  id: ID!
+
+  request: PriceRequest!
+
+  voter: User!
+
+  slashAmount: BigDecimal!
+
+  voted: Boolean!
+
+  correctness: Boolean
+
+  staking: Boolean
+
+  resolutionTimestamp: BigInt
+
+  isGovernance: Boolean!
+
+  transactionSlashedVotes: TransactionSlashedVotes!
+}
+
+type CommittedVote @entity {
+  "Commited votes won't show the price until a reveal happens and a RevealedVote is created"
+  id: ID!
+
+  identifier: PriceIdentifier!
+
+  ancillaryData: String
+
+  request: PriceRequest!
+
+  time: BigInt!
+
+  round: PriceRequestRound!
+
+  voter: User!
+}
+
+type RevealedVote @entity {
+  id: ID!
+
+  identifier: PriceIdentifier!
+
+  ancillaryData: String
+
+  request: PriceRequest!
+
+  time: BigInt!
+
+  round: PriceRequestRound!
+
+  price: BigInt!
+
+  voter: User!
+
+  numTokens: BigInt!
+
+  group: VoterGroup!
+}
+
+type FinancialContract @entity {
+  "This entity represents a contract that can make price requests to the DVM. ID is address of the contract"
+  id: ID!
+
+  "Creator who registered this contract"
+  creator: Bytes!
+
+  registrationTimestamp: BigInt!
+}

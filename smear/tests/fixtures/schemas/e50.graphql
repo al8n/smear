@@ -1,0 +1,7 @@
+type StartWithExponentIdentifier {
+  e50: Duration
+  e75: Duration
+  e90: Duration
+  e95: Duration
+  e99: Duration
+}

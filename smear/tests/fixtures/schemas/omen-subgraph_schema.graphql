@@ -1,0 +1,408 @@
+type Question @entity {
+  id: ID!
+
+  templateId: BigInt!
+  data: String!
+  title: String
+  outcomes: [String!]
+  category: String
+  language: String
+
+  arbitrator: Bytes!
+  openingTimestamp: BigInt!
+  timeout: BigInt!
+
+  currentAnswer: Bytes
+  currentAnswerBond: BigInt
+  currentAnswerTimestamp: BigInt
+
+  arbitrationRequestedTimestamp: BigInt
+  arbitrationRequestedBy: String
+  isPendingArbitration: Boolean!
+  arbitrationOccurred: Boolean!
+
+  answerFinalizedTimestamp: BigInt
+
+  indexedFixedProductMarketMakers: [FixedProductMarketMaker!]!
+
+  conditions: [Condition!]! @derivedFrom(field: "question")
+  answers: [Answer!] @derivedFrom(field: "question")
+}
+
+type Answer @entity {
+  id: ID!
+  timestamp: BigInt!
+  answer: Bytes!
+  bondAggregate: BigInt!
+  question: Question!
+}
+
+type ScalarQuestionLink @entity {
+  id: ID!
+  conditionQuestionId: Bytes!
+  realityEthQuestionId: Bytes!
+  question: Question
+  scalarLow: BigInt!
+  scalarHigh: BigInt!
+}
+
+type Category @entity {
+  id: ID!
+  numConditions: Int!
+  numOpenConditions: Int!
+  numClosedConditions: Int!
+}
+
+type Condition @entity {
+  id: ID!
+  oracle: Bytes!
+  questionId: Bytes!
+  question: Question
+  outcomeSlotCount: Int!
+  resolutionTimestamp: BigInt
+  payouts: [BigDecimal!]
+  scalarLow: BigInt
+  scalarHigh: BigInt
+  fixedProductMarketMakers: [FixedProductMarketMaker!]!
+    @derivedFrom(field: "conditions")
+}
+
+type FixedProductMarketMaker @entity {
+  id: ID!
+
+  creator: Bytes!
+  creationTimestamp: BigInt!
+
+  collateralToken: Bytes!
+  conditions: [Condition!]!
+  fee: BigInt!
+
+  collateralVolume: BigInt!
+  scaledCollateralVolume: BigDecimal!
+  usdVolume: BigDecimal!
+  outcomeTokenAmounts: [BigInt!]!
+  outcomeTokenMarginalPrices: [BigDecimal!]
+  outcomeSlotCount: Int
+  liquidityMeasure: BigInt!
+  scaledLiquidityMeasure: BigDecimal!
+  usdLiquidityMeasure: BigDecimal!
+  liquidityParameter: BigInt!
+  scaledLiquidityParameter: BigDecimal!
+  usdLiquidityParameter: BigDecimal!
+
+  lastActiveDay: BigInt!
+  lastActiveHour: BigInt!
+  collateralVolumeBeforeLastActiveDayByHour: [BigInt!]!
+  usdVolumeBeforeLastActiveDayByHour: [BigDecimal!]!
+
+  runningDailyVolume: BigInt!
+  scaledRunningDailyVolume: BigDecimal!
+  usdRunningDailyVolume: BigDecimal!
+  lastActiveDayAndRunningDailyVolume: BigInt!
+  lastActiveDayAndScaledRunningDailyVolume: BigInt!
+
+  runningDailyVolumeByHour: [BigInt!]!
+  usdRunningDailyVolumeByHour: [BigDecimal!]!
+  sort24HourVolume0: BigDecimal!
+  sort24HourVolume1: BigDecimal!
+  sort24HourVolume2: BigDecimal!
+  sort24HourVolume3: BigDecimal!
+  sort24HourVolume4: BigDecimal!
+  sort24HourVolume5: BigDecimal!
+  sort24HourVolume6: BigDecimal!
+  sort24HourVolume7: BigDecimal!
+  sort24HourVolume8: BigDecimal!
+  sort24HourVolume9: BigDecimal!
+  sort24HourVolume10: BigDecimal!
+  sort24HourVolume11: BigDecimal!
+  sort24HourVolume12: BigDecimal!
+  sort24HourVolume13: BigDecimal!
+  sort24HourVolume14: BigDecimal!
+  sort24HourVolume15: BigDecimal!
+  sort24HourVolume16: BigDecimal!
+  sort24HourVolume17: BigDecimal!
+  sort24HourVolume18: BigDecimal!
+  sort24HourVolume19: BigDecimal!
+  sort24HourVolume20: BigDecimal!
+  sort24HourVolume21: BigDecimal!
+  sort24HourVolume22: BigDecimal!
+  sort24HourVolume23: BigDecimal!
+
+  indexedOnQuestion: Boolean!
+
+  curatedByDxDao: Boolean!
+
+  # copy of conditions' content if it is a 1-large array
+  condition: Condition
+  # lifted from condition
+  oracle: Bytes
+  question: Question
+  scalarLow: BigInt
+  scalarHigh: BigInt
+  # lifted from condition's question
+  templateId: BigInt
+  data: String
+  title: String
+  outcomes: [String!]
+  category: String
+  language: String
+  arbitrator: Bytes
+  openingTimestamp: BigInt
+  timeout: BigInt
+  # pushed from condition & question if this fpmm one of the first
+  resolutionTimestamp: BigInt
+  payouts: [BigDecimal!]
+  currentAnswer: Bytes
+  currentAnswerBond: BigInt
+  currentAnswerTimestamp: BigInt
+  isPendingArbitration: Boolean
+  arbitrationOccurred: Boolean
+  answerFinalizedTimestamp: BigInt
+
+  poolMembers: [FpmmPoolMembership!] @derivedFrom(field: "pool")
+  participants: [FpmmParticipation!] @derivedFrom(field: "fpmm")
+
+  # Generalized TCR fields (Kleros Curate Contract for market verification)
+  submissionIDs: [KlerosSubmission!]!
+  klerosTCRregistered: Boolean!
+
+  curatedByDxDaoOrKleros: Boolean!
+  factory: String!
+}
+
+type FpmmPoolMembership @entity {
+  id: ID!
+  pool: FixedProductMarketMaker!
+  funder: Account!
+  amount: BigInt!
+}
+
+type FpmmParticipation @entity {
+  id: ID!
+  fpmm: FixedProductMarketMaker!
+  participant: Account!
+
+  # lifted from fpmm
+  creationTimestamp: BigInt!
+  collateralToken: Bytes!
+  fee: BigInt!
+  title: String
+
+  # lifted from fpmm's condition's question
+  category: String
+  language: String
+  arbitrator: Bytes
+  openingTimestamp: BigInt
+  timeout: BigInt
+}
+
+enum TradeType {
+  Buy
+  Sell
+}
+
+enum LiquidityType {
+  Add
+  Remove
+}
+
+enum TransactionType {
+  Buy
+  Sell
+  Add
+  Remove
+}
+
+enum FpmmType {
+  Trade
+  Liquidity
+}
+
+type FpmmTrade @entity {
+  id: ID!
+  fpmm: FixedProductMarketMaker!
+
+  # lifted from fpmm
+  title: String
+  collateralToken: Bytes!
+  outcomeTokenMarginalPrice: BigDecimal!
+  oldOutcomeTokenMarginalPrice: BigDecimal!
+
+  type: TradeType!
+  creator: Account!
+  creationTimestamp: BigInt!
+  collateralAmount: BigInt!
+  collateralAmountUSD: BigDecimal!
+  feeAmount: BigInt!
+  outcomeIndex: BigInt!
+  outcomeTokensTraded: BigInt!
+  transactionHash: Bytes!
+}
+
+type FpmmLiquidity @entity {
+  id: ID!
+  fpmm: FixedProductMarketMaker!
+  type: LiquidityType!
+  outcomeTokenAmounts: [BigInt!]
+  collateralTokenAmount: BigInt!
+  additionalLiquidityParameter: BigInt!
+  funder: Account!
+  sharesAmount: BigInt!
+  collateralRemovedFromFeePool: BigInt
+  creationTimestamp: BigInt!
+  transactionHash: Bytes!
+  additionalSharesCost: BigInt!
+}
+
+type FpmmTransaction @entity {
+  id: ID!
+  fpmm: FixedProductMarketMaker!
+  user: Account!
+  fpmmType: FpmmType!
+  transactionType: TransactionType!
+  collateralTokenAmount: BigInt!
+  sharesOrPoolTokenAmount: BigInt!
+  creationTimestamp: BigInt!
+  transactionHash: Bytes!
+  additionalSharesCost: BigInt
+}
+
+type Account @entity {
+  id: ID!
+  tradeNonce: BigInt!
+  fpmmPoolMemberships: [FpmmPoolMembership!] @derivedFrom(field: "funder")
+  fpmmParticipations: [FpmmParticipation!] @derivedFrom(field: "participant")
+}
+
+type Token @entity {
+  id: ID!
+  scale: BigInt!
+  ethPerToken: BigDecimal
+  liquidity: BigInt
+  usdPerToken: BigDecimal
+}
+
+type RegisteredToken @entity {
+  id: ID!
+  address: Bytes!
+  decimals: Int!
+  name: String!
+  symbol: String!
+}
+
+type TokenList @entity {
+  id: ID!
+  listId: BigInt!
+  listName: String!
+  tokens: [RegisteredToken!]
+  activeTokenCount: BigInt!
+}
+
+type UniswapPair @entity {
+  id: ID!
+  token0: Token!
+  token1: Token!
+  reserve0: BigInt!
+  reserve1: BigInt!
+}
+
+type Global @entity {
+  # ID is empty string, this is a singleton
+  id: ID!
+  numConditions: Int!
+  numOpenConditions: Int!
+  numClosedConditions: Int!
+
+  usdPerEth: BigDecimal
+  usdVolume: BigDecimal!
+}
+
+enum KlerosStatus {
+  "The item is not registered on the TCR and there are no pending requests."
+  Absent
+  "The item is registered and there are no pending requests."
+  Registered
+  "The item is not registered on the TCR, but there is a pending registration request."
+  RegistrationRequested
+  "The item is registered on the TCR, but there is a pending removal request. These are sometimes also called removal requests."
+  ClearingRequested
+}
+
+type KlerosSubmission @entity {
+  id: ID!
+  status: KlerosStatus!
+  listAddress: String!
+  market: FixedProductMarketMaker!
+}
+
+type _Schema_
+  @fulltext(
+    name: "marketSearch"
+    language: en
+    algorithm: rank
+    include: [
+      { entity: "FixedProductMarketMaker", fields: [{ name: "title" }] }
+    ]
+  )
+
+# Staking rewards distribution factory
+type StakingRewardsFactory @entity {
+  # factory address
+  id: ID!
+  initializedCampaignsCount: Int!
+}
+
+# Liquidity mining campaign
+type LiquidityMiningCampaign @entity {
+  # campaign address
+  id: ID!
+  initialized: Boolean!
+  owner: Bytes!
+  startsAt: BigInt!
+  endsAt: BigInt!
+  duration: BigInt!
+  locked: Boolean!
+  fpmm: FixedProductMarketMaker!
+  rewardTokens: [Token!]!
+  rewardAmounts: [BigInt!]!
+  stakedAmount: BigInt!
+  deposits: [LMDeposit!]! @derivedFrom(field: "liquidityMiningCampaign")
+  withdrawals: [LMWithdrawal!]! @derivedFrom(field: "liquidityMiningCampaign")
+  claims: [LMClaim!]! @derivedFrom(field: "liquidityMiningCampaign")
+  recoveries: [LMRecovery!]! @derivedFrom(field: "liquidityMiningCampaign")
+}
+
+# Pool tokens depositing into liquidity mining contract
+type LMDeposit @entity {
+  id: ID!
+  user: Bytes!
+  timestamp: BigInt!
+  liquidityMiningCampaign: LiquidityMiningCampaign!
+  amount: BigInt!
+}
+
+# Pool tokens withdrawing from liquidity mining contract
+type LMWithdrawal @entity {
+  id: ID!
+  user: Bytes!
+  timestamp: BigInt!
+  liquidityMiningCampaign: LiquidityMiningCampaign!
+  amount: BigInt!
+}
+
+# Reward tokens claiming from liquidity mining contract
+type LMClaim @entity {
+  id: ID!
+  user: Bytes!
+  timestamp: BigInt!
+  liquidityMiningCampaign: LiquidityMiningCampaign!
+  amounts: [BigInt!]!
+}
+
+# Reward tokens recovery from distribution owner
+type LMRecovery @entity {
+  id: ID!
+  timestamp: BigInt!
+  liquidityMiningCampaign: LiquidityMiningCampaign!
+  amounts: [BigInt!]!
+}

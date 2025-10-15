@@ -1,0 +1,206 @@
+fragment MetricAll on Metric {
+  id
+  simple
+  exact
+  decimals
+}
+
+fragment TokenAll on Token {
+  id
+  address
+  decimals
+  name
+  symbol
+  totalBurned {
+    ...MetricAll
+  }
+  totalMinted {
+    ...MetricAll
+  }
+  totalSupply {
+    ...MetricAll
+  }
+  totalMints {
+    value
+  }
+  totalBurns {
+    value
+  }
+}
+
+fragment SavingsContractAll on SavingsContract {
+  id
+  address: id
+  automationEnabled
+  creditBalances(first: 5) {
+    account {
+      id
+    }
+    amount
+  }
+  dailyAPY
+  latestExchangeRate {
+    rate
+    timestamp
+  }
+  totalCredits {
+    ...MetricAll
+  }
+  cumulativeDeposited {
+    ...MetricAll
+  }
+  totalSavings {
+    ...MetricAll
+  }
+  totalDeposits {
+    value
+  }
+  totalWithdrawals {
+    value
+  }
+  depositTransactions(first: 5) {
+    id
+  }
+  withdrawTransactions(first: 5) {
+    id
+  }
+}
+
+fragment BassetAll on Basset {
+  id
+  address: id
+  isTransferFeeCharged
+  ratio
+  maxWeight
+  vaultBalance {
+    ...MetricAll
+  }
+  token {
+    ...TokenAll
+  }
+}
+
+fragment BasketAll on Basket {
+  id
+  bassets {
+    ...BassetAll
+  }
+  collateralisationRatio
+  failed
+  maxBassets
+  undergoingRecol
+}
+
+fragment MassetAll on Masset {
+  id
+  address: id
+  basket {
+    ...BasketAll
+  }
+  basketManager
+  feeRate
+  redemptionFeeRate
+  totalMints {
+    value
+  }
+  totalSwaps {
+    value
+  }
+  totalRedemptions {
+    value
+  }
+  totalRedeemMassets {
+    value
+  }
+  cumulativeMinted {
+    ...MetricAll
+  }
+  cumulativeSwapped {
+    ...MetricAll
+  }
+  cumulativeRedeemed {
+    ...MetricAll
+  }
+  cumulativeRedeemedMasset {
+    ...MetricAll
+  }
+  cumulativeFeesPaid {
+    ...MetricAll
+  }
+  token {
+    ...TokenAll
+  }
+  savingsContracts {
+    ...SavingsContractAll
+  }
+  swapTransactions(first: 5) {
+    id
+  }
+  paidFeeTransactions(first: 5) {
+    id
+  }
+  redeemMassetTransactions(first: 5) {
+    id
+  }
+  mintMultiTransactions(first: 5) {
+    id
+  }
+  mintSingleTransactions(first: 5) {
+    id
+  }
+  redeemTransactions(first: 5) {
+    id
+  }
+}
+
+fragment TransactionAll on Transaction {
+  ...on RedeemTransaction {
+    masset {
+      id
+    }
+    massetUnits
+    bassets
+    bassetsUnits
+    recipient
+  }
+  ...on RedeemMassetTransaction {
+    masset {
+      id
+    }
+    massetUnits
+    recipient
+  }
+  ...on MintMultiTransaction {
+    masset {
+      id
+    }
+    massetUnits
+  }
+  ...on MintSingleTransaction {
+    bassetUnits
+    masset {
+      id
+    }
+    massetUnits
+  }
+  ...on PaidFeeTransaction {
+    basset
+    bassetUnits
+    masset {
+      id
+    }
+    massetUnits
+  }
+  ...on SavingsContractDepositTransaction {
+    amount
+    savingsContract {
+      id
+    }
+  }
+  ...on SavingsContractWithdrawTransaction {
+    amount
+    savingsContract {
+      id
+    }
+  }
+}

@@ -1,0 +1,1674 @@
+#################################################
+# Enums
+#################################################
+
+enum ComptrollerStatus {
+  COMMITTED
+  DESTRUCTED
+  FREE
+  SIGNALLED
+}
+
+enum SharesChangeType {
+  SharesBought
+  SharesRedeemed
+  SharesTransferredIn
+  SharesTransferredOut
+  FeeSharesPaid
+  FeeSharesReceived
+  FeeSharesBurned
+  FeeSharesAllocationChanged
+  ProtocolFeePaid
+  ProtocolFeeBurnt
+}
+
+enum TradeType {
+  ADD_TRACKED_ASSETS
+  APPROVE_ASSETS
+  CLAIM_REWARDS
+  CLAIM_REWARDS_AND_REINVEST
+  CLAIM_REWARDS_AND_SWAP
+  LEND
+  LEND_AND_STAKE
+  REDEEM
+  REMOVE_TRACKED_ASSETS
+  STAKE
+  TAKE_ORDER
+  UNKNOWN
+  UNSTAKE
+  UNSTAKE_AND_REDEEM
+}
+
+enum PerformanceFeeType {
+  CRYSTALLIZATION_PERIOD
+  NO_CRYSTALLIZATION_PERIOD
+}
+
+#################################################
+# Network
+#################################################
+
+type Network @entity {
+  id: ID!
+  currentRelease: Release
+  vaults: Int!
+  managers: Int!
+  depositors: Int!
+  deposits: Int!
+
+  sharesTokenSymbol: String!
+  migrationTimelock: Int!
+  owner: Bytes!
+  nominatedOwner: Bytes
+
+  protocolFeeRate: BigDecimal!
+  mlnBurned: BigDecimal!
+
+  releases: [Release!]! @derivedFrom(field: "network")
+}
+
+type Release @entity {
+  id: ID!
+  current: Boolean!
+  open: Int!
+  close: Int
+  isLive: Boolean!
+
+  dustToleranceForAssetsInWeth: BigDecimal
+  dustToleranceForExternalPositionsInWeth: BigDecimal
+
+  network: Network!
+  vaults: [Vault!] @derivedFrom(field: "release")
+}
+
+type NetworkReleaseChanged implements Activity & NetworkActivity @entity {
+  id: ID!
+  timestamp: Int!
+  prevRelease: Release
+  nextRelease: Release!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type AssetAdded implements Activity & NetworkActivity @entity {
+  id: ID!
+  timestamp: Int!
+  asset: Asset!
+  release: Release!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type AssetRemoved implements Activity & NetworkActivity @entity {
+  id: ID!
+  timestamp: Int!
+  asset: Asset!
+  release: Release!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type RegisteredVaultCall @entity {
+  id: ID!
+  contract: Bytes!
+  selector: Bytes!
+  dataHash: Bytes!
+  registered: Boolean!
+  timestamp: Int!
+}
+
+type VaultCallRegisteredEvent implements Activity & NetworkActivity @entity {
+  id: ID!
+  timestamp: Int!
+  registeredVaultCall: RegisteredVaultCall!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultCallDeregisteredEvent implements Activity & NetworkActivity @entity {
+  id: ID!
+  timestamp: Int!
+  registeredVaultCall: RegisteredVaultCall!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Vault
+#################################################
+
+type Vault @entity {
+  id: ID!
+  counter: Int!
+  name: String!
+  symbol: String!
+  comptroller: Comptroller!
+  release: Release!
+  inception: Int!
+
+  creator: Account!
+  owner: Account!
+  nominatedOwner: Account
+  assetManagers: [Account!]!
+  migrator: Account
+
+  freelyTransferableShares: Boolean!
+  trackedAssets: [Asset!]!
+
+  depositCount: Int!
+  lastAssetUpdate: Int!
+
+  protocolFee: ProtocolFee
+  protocolFeeSharesPaid: [ProtocolFeePaid!]! @derivedFrom(field: "vault")
+  protocolFeeBurned: [ProtocolFeeBurned!]! @derivedFrom(field: "vault")
+
+  externalPositions: [ExternalPosition!]! @derivedFrom(field: "vault")
+
+  comptrollers: [Comptroller!]! @derivedFrom(field: "vault")
+  trades: [Trade!]! @derivedFrom(field: "vault")
+  deposits: [Deposit!]! @derivedFrom(field: "vault")
+  migrations: [Migration!]! @derivedFrom(field: "vault")
+  reconfigurations: [Reconfiguration!]! @derivedFrom(field: "vault")
+  sharesChanges: [SharesChange!]! @derivedFrom(field: "vault")
+
+  vaultActivity: [VaultActivity!]! @derivedFrom(field: "vault")
+}
+
+type Comptroller @entity {
+  id: ID!
+  vault: Vault
+  creator: Account!
+  release: Release!
+  status: ComptrollerStatus!
+  creation: Int!
+  activation: Int!
+  destruction: Int
+  denomination: Asset!
+  authUsers: [Account!]!
+  autoProtocolFeeSharesBuyback: Boolean!
+  gasRelayer: GasRelayer
+  sharesActionTimelock: BigInt!
+  fees: [Fee!]! @derivedFrom(field: "comptroller")
+  policies: [Policy!]! @derivedFrom(field: "comptroller")
+}
+
+type Migration @entity {
+  id: ID!
+  vault: Vault!
+  comptroller: Comptroller!
+  prevRelease: Release!
+  nextRelease: Release!
+  executableTimestamp: Int!
+  executed: Boolean!
+  executedTimestamp: Int
+  cancelled: Boolean!
+  cancelledTimestamp: Int
+}
+
+type Reconfiguration @entity {
+  id: ID!
+  vault: Vault!
+  comptroller: Comptroller!
+  release: Release!
+  executableTimestamp: Int!
+  executed: Boolean!
+  executedTimestamp: Int
+  cancelled: Boolean!
+  cancelledTimestamp: Int
+}
+
+type VaultCreated implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  creator: Account!
+  owner: Account!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultMigrationSignalled implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  migration: Migration!
+  nextComptroller: Comptroller!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultMigrationCancelled implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  migration: Migration!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultMigrationExecuted implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  migration: Migration!
+  nextComptroller: Comptroller!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultReconfigurationSignalled implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  reconfiguration: Reconfiguration!
+  nextComptroller: Comptroller!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultReconfigurationCancelled implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  reconfiguration: Reconfiguration!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultReconfigurationExecuted implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  reconfiguration: Reconfiguration!
+  nextComptroller: Comptroller!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultNominatedOwnerSet implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  nominatedOwner: Account!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultNominatedOwnerRemoved implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  nominatedOwner: Account!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type VaultOwnershipTransferred implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  prevOwner: Account!
+  nextOwner: Account!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type FreelyTransferableSharesSetEvent implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Account
+#################################################
+
+type Account @entity {
+  id: ID!
+
+  isOwner: Boolean!
+  isAuthUser: Boolean!
+  isAssetManager: Boolean!
+  isDepositor: Boolean!
+
+  ownerSince: Int!
+  authUserSince: Int!
+  assetManagerSince: Int!
+  depositorSince: Int!
+
+  ownerships: [Vault!]! @derivedFrom(field: "owner")
+  ownershipNominations: [Vault!]! @derivedFrom(field: "nominatedOwner")
+  authUserships: [Comptroller!]! @derivedFrom(field: "authUsers")
+  assetManagements: [Vault!]! @derivedFrom(field: "assetManagers")
+
+  deposits: [Deposit!]! @derivedFrom(field: "depositor")
+  sharesChanges: [SharesChange!]! @derivedFrom(field: "depositor")
+  depositorActivity: [DepositorActivity!]! @derivedFrom(field: "depositor")
+}
+
+#################################################
+# Deposit / Shares Changes
+#################################################
+
+type Deposit @entity {
+  id: ID!
+  since: Int!
+  vault: Vault!
+  depositor: Account!
+  shares: BigDecimal!
+
+  sharesChanges: [SharesChange!]! @derivedFrom(field: "deposit")
+}
+
+interface SharesChange {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  timestamp: Int!
+  shares: BigDecimal!
+}
+
+type SharesBoughtEvent implements Activity & VaultActivity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  depositAssetAmount: AssetAmount!
+  sharesIssued: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type SharesTransferEvent implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  from: Account!
+  to: Account!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type SharesTransferredOutEvent implements Activity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type SharesTransferredInEvent implements Activity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type SharesRedeemedEvent implements Activity & VaultActivity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  payoutAssetAmounts: [AssetAmount!]!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type FeeSharesPaidEvent implements Activity & VaultActivity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  fee: Fee
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type FeeSharesReceivedEvent implements Activity & VaultActivity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  fee: Fee
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type FeeSharesBurnedEvent implements Activity & VaultActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  fee: Fee
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type FeeSharesAllocationChangedEvent implements Activity & VaultActivity & DepositorActivity & SharesChange @entity {
+  id: ID!
+  vault: Vault!
+  sharesChangeType: SharesChangeType!
+  fee: Fee
+  depositor: Account!
+  deposit: Deposit!
+  shares: BigDecimal!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Fees
+#################################################
+
+interface Fee {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+}
+
+type EntranceRateBurnFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  rate: BigDecimal!
+  lastSettled: Int!
+}
+
+type EntranceRateDirectFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  rate: BigDecimal!
+  lastSettled: Int!
+  recipient: Account
+}
+
+type ExitRateBurnFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  inKindRate: BigDecimal!
+  specificAssetsRate: BigDecimal!
+  lastSettled: Int!
+}
+
+type ExitRateDirectFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  inKindRate: BigDecimal!
+  specificAssetsRate: BigDecimal!
+  lastSettled: Int!
+  recipient: Account
+}
+
+type ManagementFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  scaledPerSecondRate: BigInt!
+  lastSettled: Int!
+  activatedForMigratedFundAt: Int!
+  recipient: Account
+}
+
+type PerformanceFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  rate: BigDecimal!
+  period: Int!
+  activatedAt: Int!
+  lastPaid: Int!
+  lastSettled: Int!
+  highWaterMark: BigDecimal!
+  lastSharePrice: BigDecimal!
+  aggregateValueDue: BigDecimal!
+  sharesOutstanding: BigDecimal!
+  recipient: Account
+  performanceFeeType: PerformanceFeeType!
+}
+
+type MinSharesSupplyFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  settings: String!
+  lastSettled: Int!
+}
+
+type UnknownFee implements Fee @entity {
+  id: ID!
+  fee: Bytes!
+  feeType: FeeType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  lastSettled: Int!
+  settings: String!
+}
+
+enum FeeType {
+  EntranceRateBurn
+  EntranceRateDirect
+  ExitRateBurn
+  ExitRateDirect
+  Management
+  Performance
+  MinSharesSupply
+  Unknown
+}
+
+#################################################
+# Policies
+#################################################
+
+interface Policy {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+}
+
+type AdapterBlacklistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  adapters: [Bytes!]!
+}
+
+type AdapterWhitelistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  adapters: [Bytes!]!
+}
+
+type AllowedAdapterIncomingAssetsPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  addressLists: [AddressList!]!
+}
+
+type AllowedAdaptersPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  addressLists: [AddressList!]!
+}
+
+type AllowedAssetsForRedemptionPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  addressLists: [AddressList!]!
+}
+
+type AllowedDepositRecipientsPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  addressLists: [AddressList!]!
+}
+
+type AllowedAdaptersPerManagerPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  userAddressLists: [UserAddressList!]!
+}
+
+type AllowedExternalPositionTypesPerManagerPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  userUintLists: [UserUintList!]!
+}
+
+type AllowedExternalPositionTypesPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  externalPositionTypes: [BigInt!]!
+}
+
+type AllowedSharesTransferRecipientsPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  addressLists: [AddressList!]!
+}
+
+type AssetBlacklistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  assets: [Bytes!]!
+}
+
+type AssetWhitelistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  assets: [Bytes!]!
+}
+
+type BuySharesCallerWhitelistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  callers: [Bytes!]!
+  updatedAt: Int!
+}
+
+type CumulativeSlippageTolerancePolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  tolerance: BigDecimal!
+  cumulativeSlippage: BigDecimal!
+  lastSlippageTimestamp: Int!
+}
+
+type DepositorWhitelistPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  depositors: [Bytes!]!
+  updatedAt: Int!
+}
+
+type GuaranteedRedemptionPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  startTimestamp: Int!
+  duration: Int!
+}
+
+type MaxConcentrationPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  maxConcentration: BigDecimal!
+}
+
+type MinAssetBalancesPostRedemptionPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  assetBalances: [AssetBalance!]!
+  updatedAt: Int!
+}
+
+type MinMaxDepositPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+  minDepositAmount: BigDecimal!
+  maxDepositAmount: BigDecimal!
+  updatedAt: Int!
+}
+
+type OnlyRemoveDustExternalPositionPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+}
+
+type OnlyUntrackDustOrPricelessAssetsPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+}
+
+type UnknownPolicy implements Policy @entity {
+  id: ID!
+  policy: Bytes!
+  policyType: PolicyType!
+  comptroller: Comptroller!
+  createdAt: Int!
+  enabled: Boolean!
+  settings: String!
+}
+
+enum PolicyType {
+  AdapterBlacklist
+  AdapterWhitelist
+  AllowedAdapterIncomingAssets
+  AllowedAdapters
+  AllowedAdaptersPerManager
+  AllowedAssetsForRedemption
+  AllowedDepositRecipients
+  AllowedExternalPositionTypesPerManager
+  AllowedExternalPositionTypes
+  AllowedSharesTransferRecipients
+  AssetBlacklist
+  AssetWhitelist
+  BuySharesCallerWhitelist
+  CumulativeSlippageTolerance
+  DepositorWhitelist
+  GuaranteedRedemption
+  MaxConcentration
+  MinAssetBalancesPostRedemption
+  MinMaxDeposit
+  OnlyRemoveDustExternalPosition
+  OnlyUntrackDustOrPricelessAssets
+  Unknown
+}
+
+type PolicyEnabledForVault implements Activity & VaultActivity @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  policy: Policy!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type PolicyDisabledForVault implements Activity & VaultActivity @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  policy: Policy!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Uint Lists (for various policies)
+#################################################
+
+enum UintListUpdateType {
+  None
+  AddOnly
+  RemoveOnly
+  AddAndRemove
+}
+
+type UserUintList @entity {
+  id: ID!
+  userAddress: Bytes!
+  createdAt: Int!
+  updatedAt: Int!
+  uintLists: [UintList!]!
+}
+
+type UintList @entity {
+  id: ID!
+  description: String
+  createdAt: Int!
+  updatedAt: Int!
+  creator: Bytes!
+  owner: Bytes!
+  updateType: UintListUpdateType!
+  items: [BigInt!]!
+}
+
+#################################################
+# Address Lists (for various policies)
+#################################################
+
+type UserAddressList @entity {
+  id: ID!
+  userAddress: Bytes!
+  createdAt: Int!
+  updatedAt: Int!
+  addressLists: [AddressList!]!
+}
+
+type AddressList @entity {
+  id: ID!
+  description: String
+  createdAt: Int!
+  updatedAt: Int!
+  creator: Bytes!
+  owner: Bytes!
+  updateType: AddressListUpdateType!
+  items: [Bytes!]!
+}
+
+enum AddressListUpdateType {
+  None
+  AddOnly
+  RemoveOnly
+  AddAndRemove
+}
+
+#################################################
+# Trading
+#################################################
+
+type Trade implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  adapter: Bytes!
+  tradeType: TradeType!
+  incomingAssets: [Asset!]!
+  outgoingAssets: [Asset!]!
+  incomingAssetAmounts: [AssetAmount!]!
+  outgoingAssetAmounts: [AssetAmount!]!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# External Positions
+#################################################
+
+type ExternalPositionType @entity {
+  id: ID!
+  label: String!
+  externalPositions: [ExternalPosition!]! @derivedFrom(field: "type")
+}
+
+interface ExternalPosition {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+type ExternalPositionAddedEvent implements Activity & VaultActivity @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  externalPosition: ExternalPosition!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type ExternalPositionRemovedEvent implements Activity & VaultActivity @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  externalPosition: ExternalPosition!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+interface ExternalPositionChange {
+  id: ID!
+  externalPosition: ExternalPosition!
+}
+
+type CompoundDebtPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum CompoundDebtPositionChangeType {
+  AddCollateral
+  RemoveCollateral
+  Borrow
+  RepayBorrow
+  ClaimComp
+}
+
+type CompoundDebtPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  compoundDebtPositionChangeType: CompoundDebtPositionChangeType!
+  assetAmounts: [AssetAmount!]
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type AaveDebtPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum AaveDebtPositionChangeType {
+  AddCollateral
+  RemoveCollateral
+  Borrow
+  RepayBorrow
+  ClaimRewards
+}
+
+type AaveDebtPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  aaveDebtPositionChangeType: AaveDebtPositionChangeType!
+  assetAmounts: [AssetAmount!]
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+enum RepaymentTrackingType {
+  None
+  PrincipalFirst
+  InterestFirst
+}
+
+type ArbitraryLoanFixedInterestModule @entity {
+  id: ID!
+  externalPosition: ArbitraryLoanPosition!
+  scaledPerSecondRatePreMaturity: BigInt!
+  scaledPerSecondRatePostMaturity: BigInt!
+  maturity: Int!
+  repaymentTrackingType: RepaymentTrackingType!
+  faceValueIsPrincipalOnly: Boolean!
+  totalPrincipalRepaid: BigDecimal!
+  totalInterestCachedTimestamp: Int!
+  totalInterestCached: BigDecimal!
+}
+
+type ArbitraryLoanTotalNominalDeltaOracleModule @entity {
+  id: ID!
+  externalPosition: ArbitraryLoanPosition!
+  oracle: Bytes!
+  stalenessThreshold: Int!
+}
+
+enum ArbitraryLoanModuleType {
+  None
+  FixedInterest
+  TotalNominalDeltaOracle
+}
+
+type ArbitraryLoanPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  loanAsset: Asset
+  borrower: Bytes
+  accountingModule: Bytes
+  moduleType: ArbitraryLoanModuleType
+  fixedInterestModule: ArbitraryLoanFixedInterestModule @derivedFrom(field: "externalPosition")
+  totalNominalDeltaOracleModule: ArbitraryLoanTotalNominalDeltaOracleModule @derivedFrom(field: "externalPosition")
+  description: String!
+  borrowableAmount: BigDecimal!
+  totalBorrowed: BigDecimal!
+  totalRepaid: BigDecimal!
+  isClosed: Boolean!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum ArbitraryLoanPositionChangeType {
+  ConfigureLoan
+  UpdateBorrowableAmount
+  CallOnAccountingModule
+  Reconcile
+  CloseLoan
+}
+
+type ArbitraryLoanPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  arbitraryLoanPositionChangeType: ArbitraryLoanPositionChangeType!
+  assetAmounts: [AssetAmount!]
+  assets: [Asset!]
+  borrower: Bytes
+  accountingModule: Bytes
+  accountingModuleConfigData: Bytes
+  description: String
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type MapleLiquidityPool @entity {
+  id: ID!
+  liquidityAsset: Asset!
+  rewardsContract: Bytes
+}
+
+type MapleLiquidityPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  pools: [MapleLiquidityPool!]!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum MapleLiquidityPositionChangeType {
+  Lend
+  LendAndStake
+  IntendToRedeem
+  Redeem
+  Stake
+  Unstake
+  UnstakeAndRedeem
+  ClaimInterest
+  ClaimRewards
+}
+
+type MapleLiquidityPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  mapleLiquidityPositionChangeType: MapleLiquidityPositionChangeType!
+  pool: MapleLiquidityPool!
+  assetAmount: AssetAmount
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type LiquityDebtPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  collateralBalance: BigDecimal!
+  borrowedBalance: BigDecimal!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum LiquityDebtPositionChangeType {
+  OpenTrove
+  AddCollateral
+  RemoveCollateral
+  Borrow
+  Repay
+  CloseTrove
+}
+
+type LiquityDebtPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  liquityDebtPositionChangeType: LiquityDebtPositionChangeType!
+  incomingAssetAmounts: [AssetAmount!]!
+  lusdGasCompensationAssetAmount: AssetAmount
+  feeAssetAmount: AssetAmount
+  outgoingAssetAmount: AssetAmount
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type ConvexVotingPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  delegate: Bytes
+  lastWithdrawOrRelockTimestamp: Int!
+  claimedVotiumMerkleProofsHashes: [String!]!
+  locksCounter: Int!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum ConvexVotingPositionChangeType {
+  Lock
+  Relock
+  Withdraw
+  ClaimRewards
+  Delegate
+}
+
+type ConvexVotingPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  convexVotingPositionChangeType: ConvexVotingPositionChangeType!
+  assetAmounts: [AssetAmount!]
+  assets: [Asset!]
+  delegate: Bytes
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type TheGraphDelegationToIndexer @entity {
+  id: ID!
+  externalPosition: TheGraphDelegationPosition
+  indexer: Bytes!
+  shares: BigInt!
+  tokensLocked: BigDecimal!
+  tokensLockedUntil: Int!
+}
+
+type TheGraphDelegationPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  delegations: [TheGraphDelegationToIndexer!]! @derivedFrom(field: "externalPosition")
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+enum TheGraphDelegationPositionChangeType {
+  Delegate
+  Undelegate
+  Withdraw
+}
+
+type TheGraphDelegationPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  theGraphDelegationPositionChangeType: TheGraphDelegationPositionChangeType!
+  assetAmount: AssetAmount!
+  withdrewWhileUndelegatingAssetAmount: AssetAmount
+  feeAmount: AssetAmount
+  indexer: Bytes!
+  newIndexer: Bytes
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type UniswapV3LiquidityPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  nfts: [UniswapV3Nft!]! @derivedFrom(field: "externalPosition")
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+type UniswapV3Nft @entity {
+  id: ID!
+  externalPosition: UniswapV3LiquidityPosition
+  token0: Asset!
+  token1: Asset!
+  fee: BigDecimal!
+  tickLower: Int!
+  tickUpper: Int!
+  liquidity: BigInt!
+  poolAddress: Bytes!
+  tokenURI: String!
+}
+
+enum UniswapV3LiquidityPositionChangeType {
+  Mint
+  AddLiquidity
+  RemoveLiquidity
+  Collect
+  Purge
+}
+
+type UniswapV3LiquidityPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  uniswapV3LiquidityPositionChangeType: UniswapV3LiquidityPositionChangeType!
+  nft: UniswapV3Nft!
+  assetAmounts: [AssetAmount!]
+  liquidity: BigInt
+  poolLiquidity: BigInt!
+  sqrtPrice: BigInt!
+  currentTick: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type UnknownExternalPosition implements ExternalPosition @entity {
+  id: ID!
+  vault: Vault!
+  type: ExternalPositionType!
+  active: Boolean!
+  changes: [ExternalPositionChange!]! @derivedFrom(field: "externalPosition")
+}
+
+type UnknownExternalPositionChange implements Activity & VaultActivity & ExternalPositionChange @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  externalPosition: ExternalPosition!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Gas Relayer
+#################################################
+
+type GasRelayer @entity {
+  id: ID!
+  comptroller: Comptroller!
+  balance: BigDecimal!
+
+  deposited: [GasRelayerDeposited!]! @derivedFrom(field: "gasRelayer")
+  withdrawn: [GasRelayerWithdrawn!]! @derivedFrom(field: "gasRelayer")
+  transactions: [GasRelayerTransaction!]! @derivedFrom(field: "gasRelayer")
+}
+
+type GasRelayerDeposited implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  gasRelayer: GasRelayer!
+  gasRelayerAssetAmount: AssetAmount!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type GasRelayerWithdrawn implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  timestamp: Int!
+  gasRelayer: GasRelayer!
+  gasRelayerAssetAmount: AssetAmount!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type GasRelayerTransaction @entity {
+  id: ID!
+  gasRelayer: GasRelayer!
+  authorizer: Bytes!
+  invokedSelector: String!
+  successful: Boolean!
+}
+
+#################################################
+# Protocol Fees
+#################################################
+
+type ProtocolFee @entity {
+  id: ID!
+  vault: Vault!
+  feeTracker: Bytes!
+  rate: BigDecimal!
+  lastPaid: Int!
+}
+
+type ProtocolFeePaid implements Activity & VaultActivity & SharesChange @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  shares: BigDecimal!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type ProtocolFeeBurned implements Activity & VaultActivity & SharesChange @entity {
+  id: ID!
+  timestamp: Int!
+  vault: Vault!
+  shares: BigDecimal!
+  sharesChangeType: SharesChangeType!
+  depositor: Account!
+  deposit: Deposit!
+  mlnBurned: BigDecimal!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+#################################################
+# Assets and prices
+#################################################
+
+type Asset @entity {
+  id: ID!
+  name: String!
+  symbol: String!
+  decimals: Int!
+
+  # Vault references
+  trackingVaults: [Vault!]! @derivedFrom(field: "trackedAssets")
+}
+
+# AssetBalance is AssetAmount without currency values
+type AssetBalance @entity {
+  id: ID!
+  asset: Asset!
+  amount: BigDecimal!
+}
+
+type AssetAmount @entity {
+  id: ID!
+  asset: Asset!
+  amount: BigDecimal!
+  denominationAsset: Asset!
+  valueDenomination: BigDecimal!
+  valueAud: BigDecimal!
+  valueBtc: BigDecimal!
+  valueChf: BigDecimal!
+  valueEth: BigDecimal!
+  valueEur: BigDecimal!
+  valueGbp: BigDecimal!
+  valueJpy: BigDecimal!
+  valueUsd: BigDecimal!
+  timestamp: Int!
+}
+
+type AssetPrice @entity {
+  id: ID!
+  timestamp: Int!
+  asset: Asset!
+  price: BigDecimal!
+}
+
+type PricelessAssetTimelock implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  policy: Policy!
+  asset: Asset!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type PricelessAssetBypass implements Activity & VaultActivity @entity {
+  id: ID!
+  vault: Vault!
+  policy: Policy!
+  asset: Asset!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+type CurrencyPrice @entity {
+  id: ID!
+  timestamp: Int!
+  ethAud: BigDecimal!
+  ethBtc: BigDecimal!
+  ethChf: BigDecimal!
+  ethEur: BigDecimal!
+  ethGbp: BigDecimal!
+  ethJpy: BigDecimal!
+  ethUsd: BigDecimal!
+}
+
+#################################################
+# Activity interfaces
+#################################################
+
+enum ActivityCategory {
+  Network
+  Vault
+  Depositor
+}
+
+enum ActivityType {
+  DepositorShares
+  FeeShares
+  NetworkSettings
+  ProtocolFee
+  Trade
+  VaultSettings
+}
+
+interface Activity {
+  id: ID!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+interface NetworkActivity {
+  id: ID!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+}
+
+interface VaultActivity {
+  id: ID!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+  vault: Vault!
+}
+
+interface DepositorActivity {
+  id: ID!
+  timestamp: Int!
+  activityCounter: Int!
+  activityCategories: [ActivityCategory!]!
+  activityType: ActivityType!
+  vault: Vault!
+  depositor: Account!
+}
+
+#################################################
+# Counter
+#################################################
+
+type Counter @entity {
+  id: ID!
+  count: Int!
+}
+
+#################################################
+# Shares Splitter
+#################################################
+
+type SharesSplitter @entity {
+  id: ID!
+  creator: Account!
+  createdAt: Int!
+  userPercentages: [SharesSplitterUserPercentage!]! @derivedFrom(field: "sharesSplitter")
+  tokenClaims: [SharesSplitterTokenClaims!]! @derivedFrom(field: "sharesSplitter")
+  vaults: [Vault!]!
+}
+
+type SharesSplitterUserPercentage @entity {
+  id: ID!
+  sharesSplitter: SharesSplitter!
+  user: Account!
+  percentage: BigDecimal!
+}
+
+type SharesSplitterTokenClaims @entity {
+  id: ID!
+  sharesSplitter: SharesSplitter!
+  user: Account!
+  token: Bytes!
+  amount: BigDecimal!
+}
+
+#################################################
+# Convex Curve LP Staking Wrapper
+#################################################
+
+type ConvexCurveLpStakingWrapper @entity {
+  id: ID!
+  pid: Int!
+  lpToken: Asset!
+  timestamp: Int!
+}

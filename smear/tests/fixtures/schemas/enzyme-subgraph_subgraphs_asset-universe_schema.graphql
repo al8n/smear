@@ -1,0 +1,148 @@
+#################################################
+# Release
+#################################################
+
+"""
+A release.
+"""
+type Release @entity {
+  id: ID!
+  counter: Int!
+  changes: [RegistrationChange!]! @derivedFrom(field: "release")
+  registrations: [Registration!]! @derivedFrom(field: "release")
+}
+
+#################################################
+# Assets
+#################################################
+
+"""
+A registered asset.
+"""
+type Asset @entity {
+  id: ID!
+  """
+  The symbol of the asset.
+  """
+  symbol: String!
+  """
+  The name of the asset.
+  """
+  name: String!
+  """
+  The number of decimal places for this asset.
+  """
+  decimals: Int!
+  """
+  All registrations for this asset.
+  """
+  registrations: [Registration!]!
+  """
+  Incremental counter to enable safe scraping.
+  """
+  counter: Int!
+  """
+  A list of registration changes for this asset.
+  """
+  changes: [RegistrationChange!]! @derivedFrom(field: "asset")
+}
+
+#################################################
+# Asset registrations
+#################################################
+
+type Registration @entity {
+  id: ID!
+  """
+  The asset.
+  """
+  asset: Asset!
+  """
+  The release in which the asset was registered.
+  """
+  release: Release!
+  """
+  The release counter (used for ordering query results).
+  """
+  releaseCounter: Int!
+  """
+  Incremental counter to enable safe scraping.
+  """
+  counter: Int!
+  """
+  Timestamp when the registration was added.
+  """
+  added: Int!
+  """
+  Timestamp when the registration was updated.
+  """
+  updated: Int!
+  """
+  Flag if registration is currently active.
+  """
+  active: Boolean!
+  """
+  All changes related to the registration.
+  """
+  changes: [RegistrationChange!]! @derivedFrom(field: "registration")
+}
+
+#################################################
+# Asset registration changes
+#################################################
+
+enum RegistrationChangeType {
+  ADDED
+  REMOVED
+}
+
+type RegistrationChange @entity {
+  id: ID!
+  """
+  The type of the change.
+  """
+  change: RegistrationChangeType!
+  """
+  The release in which the asset was registered.
+  """
+  release: Release!
+  """
+  The affected asset.
+  """
+  asset: Asset!
+  """
+  The affected registration.
+  """
+  registration: Registration!
+  """
+  The timestamp when the change occurred.
+  """
+  timestamp: Int!
+  """
+  The block number in which the change occurred.
+  """
+  block: BigInt!
+  """
+  The transaction which caused the change.
+  """
+  transaction: Bytes!
+  """
+  Incremental counter to enable safe scraping.
+  """
+  counter: Int!
+}
+
+#################################################
+# Counter
+#################################################
+
+"""
+Generic counter entity to allow safe data scraping.
+"""
+type Counter @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  count: Int!
+}

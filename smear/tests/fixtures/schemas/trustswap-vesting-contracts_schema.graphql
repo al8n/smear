@@ -1,0 +1,22 @@
+type Claim @entity {
+  id: Bytes!
+  account: Bytes!
+  amount: BigInt!
+  vesting: Bytes!
+  timestamp: BigInt!
+}
+
+type Vesting @entity {
+  id: Bytes!
+  creator: Bytes! # address
+  vestingAddr: Bytes! # address
+  token: Bytes! # address
+  merkleRoot: Bytes! # bytes32
+  totalAmount: BigInt! # uint256
+  claimed: BigInt!
+  fee: BigInt! # uint256
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+

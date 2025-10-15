@@ -1,0 +1,326 @@
+"""
+A vault.
+"""
+type Vault @entity {
+  """
+  The address of the vault.
+  """
+  id: ID!
+  """
+  The total supply of shares.
+  """
+  supply: BigDecimal!
+  """
+  All deposits into the vault (including those that are currently at 0 shares).
+  """
+  deposits: [Deposit!]! @derivedFrom(field: "vault")
+  """
+  Incoming and outgoing transfers.
+  """
+  transfers: [Transfer!]! @derivedFrom(field: "vault")
+  """
+  Incoming transfers.
+  """
+  incoming: [IncomingTransfer!]! @derivedFrom(field: "vault")
+  """
+  Outgoing transfers.
+  """
+  outgoing: [OutgoingTransfer!]! @derivedFrom(field: "vault")
+}
+
+"""
+A depositor (owner of shares).
+"""
+type Depositor @entity {
+  """
+  The address of the vault.
+  """
+  id: ID!
+  """
+  All deposits of the depositor (including those that are currently at 0 shares).
+  """
+  deposits: [Deposit!]! @derivedFrom(field: "depositor")
+  """
+  Incoming and outgoing transfers.
+  """
+  transfers: [Transfer!]! @derivedFrom(field: "depositor")
+  """
+  Incoming transfers.
+  """
+  incoming: [IncomingTransfer!]! @derivedFrom(field: "depositor")
+  """
+  Outgoing transfers.
+  """
+  outgoing: [OutgoingTransfer!]! @derivedFrom(field: "depositor")
+}
+
+"""
+A deposit (shares count held by a depositor).
+"""
+type Deposit @entity {
+  id: ID!
+  """
+  The owner of the shares.
+  """
+  depositor: Depositor!
+  """
+  The vault the shares belong to.
+  """
+  vault: Vault!
+  """
+  The current share count of the depositor.
+  """
+  shares: BigDecimal!
+  """
+  Incoming and outgoing transfers.
+  """
+  transfers: [Transfer!]! @derivedFrom(field: "deposit")
+  """
+  Incoming transfers.
+  """
+  incoming: [IncomingTransfer!]! @derivedFrom(field: "deposit")
+  """
+  Incoming transfers.
+  """
+  outgoing: [OutgoingTransfer!]! @derivedFrom(field: "deposit")
+}
+
+"""
+The transfer direction (incoming or outgoing).
+"""
+enum TransferType {
+  INCOMING
+  OUTGOING
+}
+
+"""
+Shared interface for incoming and outgoing transfers.
+"""
+interface Transfer {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  counter: Int!
+  """
+  The time at which the transfer occurred.
+  """
+  timestamp: Int!
+  """
+  The block number at which the transfer occurred.
+  """
+  block: BigInt!
+  """
+  The transfer direction (incoming or outgoing).
+  """
+  type: TransferType!
+  """
+  The transferred vault shares.
+  """
+  vault: Vault!
+  """
+  The affected deposit.
+  """
+  deposit: Deposit!
+  """
+  The affected depositor.
+  """
+  depositor: Depositor!
+  """
+  The transferred amount.
+  """
+  amount: BigDecimal!
+  """
+  The share count after the transfer.
+  """
+  shares: BigDecimal!
+  """
+  The total supply of shares at the time of the transfer.
+  """
+  supply: BigDecimal!
+  """
+  The transaction hash.
+  """
+  transaction: Bytes!
+}
+
+"""
+Outgoing transfers (transfers where an asset leaves a vault).
+"""
+type OutgoingTransfer implements Transfer @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  counter: Int!
+  """
+  The time at which the transfer occurred.
+  """
+  timestamp: Int!
+  """
+  The block number at which the transfer occurred.
+  """
+  block: BigInt!
+  """
+  The transfer direction (incoming or outgoing).
+  """
+  type: TransferType!
+  """
+  The transferred vault shares.
+  """
+  vault: Vault!
+  """
+  The affected deposit.
+  """
+  deposit: Deposit!
+  """
+  The affected depositor (sender).
+  """
+  depositor: Depositor!
+  """
+  The recipient of the transfer. If this is not set then the recipient was the zero address (burn).
+  """
+  recipient: Depositor
+  """
+  The transferred amount.
+  """
+  amount: BigDecimal!
+  """
+  The share count after the transfer.
+  """
+  shares: BigDecimal!
+  """
+  The total supply of shares at the time of the transfer.
+  """
+  supply: BigDecimal!
+  """
+  The transaction hash.
+  """
+  transaction: Bytes!
+}
+
+"""
+Incoming transfers (transfers where an asset enters a vault).
+"""
+type IncomingTransfer implements Transfer @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  counter: Int!
+  """
+  The time at which the transfer occurred.
+  """
+  timestamp: Int!
+  """
+  The block number at which the transfer occurred.
+  """
+  block: BigInt!
+  """
+  The transfer direction (incoming or outgoing).
+  """
+  type: TransferType!
+  """
+  The transferred vault shares.
+  """
+  vault: Vault!
+  """
+  The affected deposit.
+  """
+  deposit: Deposit!
+  """
+  The affected depositor (recipient).
+  """
+  depositor: Depositor!
+  """
+  The sender of the transfer. If this is not set then the sender was the zero address (mint).
+  """
+  sender: Depositor
+  """
+  The transferred amount.
+  """
+  amount: BigDecimal!
+  """
+  The share count after the transfer.
+  """
+  shares: BigDecimal!
+  """
+  The total supply of shares at the time of the transfer.
+  """
+  supply: BigDecimal!
+  """
+  The transaction hash.
+  """
+  transaction: Bytes!
+}
+
+#################################################
+# Metrics
+#################################################
+
+type DepositMetric @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  counter: Int!
+  """
+  The block number at which the share count change was recorded.
+  """
+  block: BigInt!
+  """
+  The block timestamp at which the share count change was recorded.
+  """
+  timestamp: Int!
+  """
+  The transferred vault shares.
+  """
+  depositor: Bytes!
+  """
+  The transferred vault shares.
+  """
+  vault: Bytes!
+  """
+  The share count.
+  """
+  shares: BigDecimal!
+}
+
+type SupplyMetric @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  counter: Int!
+  """
+  The block number at which the supply change was recorded.
+  """
+  block: BigInt!
+  """
+  The block timestamp at which the supply change was recorded.
+  """
+  timestamp: Int!
+  """
+  The transferred vault shares.
+  """
+  vault: Bytes!
+  """
+  The total supply of shares at this metric recording.
+  """
+  supply: BigDecimal!
+}
+
+#################################################
+# Counter
+#################################################
+
+"""
+Generic counter entity to allow safe data scraping.
+"""
+type Counter @entity {
+  id: ID!
+  """
+  Strictly incremental counter for data scraping.
+  """
+  count: Int!
+}
