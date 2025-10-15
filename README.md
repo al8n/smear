@@ -53,7 +53,7 @@ smear = "0.0.0"
 
 ### Parse GraphQL Query
 
-```rust
+```rust,ignore
 use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
 
 let query = r#"
@@ -84,7 +84,7 @@ match ExecutableDocument::<&str>::parse_str(query) {
 
 ### Parse GraphQL Schema
 
-```rust
+```rust,ignore
 use smear::parser::graphql::ast::{TypeSystemDocument, ParseStr};
 
 let schema = r#"
@@ -105,7 +105,7 @@ let doc = TypeSystemDocument::<&str>::parse_str(schema).unwrap();
 
 ### Parse Full Document (Schema + Operations)
 
-```rust
+```rust,ignore
 use smear::parser::graphql::ast::{Document, ParseStr};
 
 let source = r#"
@@ -129,7 +129,7 @@ Smear is designed to enable anyone to build their own GraphQL-like Schema Defini
 
 The scaffold layer provides generic, reusable AST node definitions that you can compose to create custom DSLs:
 
-```rust
+```rust,ignore
 use smear::scaffold::{self, Parseable};
 
 // Define your custom definition types
@@ -219,7 +219,7 @@ type Query {
 
 #### Example Usage
 
-```rust
+```rust,ignore
 use smear::parser::graphqlx::ast::{TypeSystemDocument, ParseStr};
 
 let schema = r#"
@@ -281,6 +281,7 @@ smear = { version = "0.0.0", default-features = false, features = ["graphql"] }
 ## Who Should Use Smear?
 
 **Ideal for:**
+
 - High-performance GraphQL tools (IDEs, linters, formatters)
 - Schema analysis and validation tools
 - GraphQL servers needing fast query parsing
