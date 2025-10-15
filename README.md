@@ -24,235 +24,99 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ### Key Features
 
-- **Blazing Fast**: ~40% faster than apollo-parser on complex queries
-- **Zero-Copy Architecture**: All source references are slices into the original input
-- **Draft Spec Implementation**: Implements the GraphQL draft specification
-- **Source Type Flexibility**: Generic over `&str`, `&[u8]`, `bytes::Bytes`, and more
-- **Build Your Own DSL**: Scaffold architecture and reusable combinators for creating custom GraphQL-like languages
-- **GraphQLX Extensions**: Built-in support for generics, imports, map types, and namespacing
-- **no_std Support**: Works in embedded and WASM environments
+- **Thread-Safe & Concurrent**: AST is `Send + Sync` when using thread-safe source types, enabling parallel schema compilation and batched query processing across multiple threads
+- **True Zero-Copy**: All tokens and AST nodes hold slices into the original source—no string allocations, minimal memory footprint, maximum performance
+- **Both AST & CST**: Choose Abstract Syntax Trees for fast execution or Concrete Syntax Trees (lossless) for tooling that preserves formatting
+- **Generic Over Source Types**: Works seamlessly with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom source types
+- **Highly Customizable**: Three-layer scaffold architecture with reusable combinators for building custom GraphQL-like DSLs
+- **Draft Spec Compliant**: Fully implements the GraphQL draft specification with comprehensive error reporting
+- **GraphQLX Included**: Extended dialect with generics, imports, map types, namespacing, and type paths
+- **`no_std` Compatible**: Works in embedded environments and WASM with optional `alloc` support
 
-### Performance
+## Why Smear Over Other Rust GraphQL Parsers?
 
-Benchmark results (parsing complex GraphQL query):
+Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like apollo-parser, graphql-parser, async-graphql-parser, and cynic-parser:
 
-| Parser | Time | Relative |
-|--------|------|----------|
-| **Smear** | **~15.4 µs** | **Baseline** |
-| apollo-parser | ~25.7 µs | +66% slower |
-| graphql-parser | ~23 µs | +49% slower |
+### Thread-Safe AST by Design
 
-## Quick Start
+Smear's AST is **generic over the source type** `S`. This means when you use a `Send + Sync + 'static` source type (like `bytes::Bytes`, or `hipstr::{HipStr, HipByt}`), the entire AST automatically becomes `Send + Sync + 'static`:
 
-Add Smear to your `Cargo.toml`:
+This unlocks powerful real-world capabilities:
 
-```toml
-[dependencies]
-smear = "0.0.0"
-```
+**For Schemas (TypeSystemDocument)**:
 
-### Parse GraphQL Query
+- **Parallel schema compilation**: Parse and validate multiple schema files concurrently
+- **Concurrent schema analysis**: Run multiple linters/validators on the same schema in parallel
+- **Zero-copy schema sharing**: Share parsed schemas across worker threads in GraphQL servers
 
-```rust,ignore
+**For Queries (ExecutableDocument)**:
+
+- **Batched query processing**: Parse a batch of queries, then spawn a task/thread for each query to handle them in parallel
+- **Concurrent request handling**: Multi-threaded GraphQL servers can parse incoming queries on different threads simultaneously
+- **Parallel query analysis**: Run validation, complexity analysis, and cost calculation concurrently
+
+### Source Type Flexibility
+
+Choose the source type that fits your use case:
+
+- `&str` - Borrowed strings for single-threaded performance
+- `&[u8]` - Byte slices for binary protocols
+- `bytes::Bytes`, `hipstr::{HipStr, HipByt}` - Cheap cloning with Arc-backed storage for concurrent processing
+
+### Designed for DSL Creation
+
+The three-layer scaffold architecture provides reusable generic AST node definitions, making it straightforward to build custom GraphQL-like domain-specific languages. GraphQLX (included) demonstrates this by adding generics, imports, type paths, and namespacing to GraphQL.
+
+### Both AST and CST Support
+
+Unlike other Rust GraphQL parsers that only provide either AST (Abstract Syntax Tree) or CST (Concrete Syntax Tree), smear supports **both**:
+
+**AST (Abstract Syntax Tree)** - For performance-critical execution:
+
+- Ignores whitespace and comments
+- Optimized for GraphQL servers and query execution
+- Minimal memory footprint
+- Fast parsing and traversal
+
+**CST (Concrete/Lossless Syntax Tree)** - For tooling that preserves formatting:
+
+- Preserves all source information including comments and whitespace
+- Essential for linters, formatters, and refactoring tools
+- Enables accurate source-to-source transformations
+- IDE features like "go to definition" with precise locations
+
+```rust
+// AST for servers - fast execution
 use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
+let doc = ExecutableDocument::<&str>::parse_str(query)?;
 
-let query = r#"
-  query GetUser($id: ID!) {
-    user(id: $id) {
-      id
-      name
-      email
-    }
-  }
-"#;
-
-match ExecutableDocument::<&str>::parse_str(query) {
-  Ok((doc, _errors)) => {
-    // Successfully parsed!
-    for def in doc.definitions() {
-      // Process operation definitions...
-    }
-  }
-  Err(errors) => {
-    // Handle parse errors
-    for error in errors {
-      eprintln!("Parse error: {:?}", error);
-    }
-  }
-}
+// CST for tooling - preserves formatting
+use smear::lexer::graphql::cst::CstToken;
+use logosky::TokenStream;
+let tokens = TokenStream::<CstToken>::new(source);
+// Access comments, whitespace, exact formatting
 ```
 
-### Parse GraphQL Schema
-
-```rust,ignore
-use smear::parser::graphql::ast::{TypeSystemDocument, ParseStr};
-
-let schema = r#"
-  type User {
-    id: ID!
-    name: String!
-    email: String
-  }
-
-  type Query {
-    user(id: ID!): User
-    users: [User!]!
-  }
-"#;
-
-let doc = TypeSystemDocument::<&str>::parse_str(schema).unwrap();
-```
-
-### Parse Full Document (Schema + Operations)
-
-```rust,ignore
-use smear::parser::graphql::ast::{Document, ParseStr};
-
-let source = r#"
-  type Query {
-    hello: String
-  }
-
-  query {
-    hello
-  }
-"#;
-
-let doc = Document::<&str>::parse_str(source).unwrap();
-```
-
-## Building Custom GraphQL-like DSLs
-
-Smear is designed to enable anyone to build their own GraphQL-like Schema Definition Languages using its reusable parser combinators and scaffold architecture.
-
-### Using the Scaffold Architecture
-
-The scaffold layer provides generic, reusable AST node definitions that you can compose to create custom DSLs:
-
-```rust,ignore
-use smear::scaffold::{self, Parseable};
-
-// Define your custom definition types
-#[derive(Debug)]
-enum MyDefinition {
-  Standard(scaffold::TypeDefinition</* ... */>),
-  Custom(MyCustomNode),
-}
-
-// Implement the Parseable trait
-impl Parseable for MyDefinition {
-  fn parser<E>() -> impl Parser</* ... */> {
-    // Your custom parser logic using combinators
-  }
-}
-
-// Use the standard Document with your custom definitions
-type MyDocument = scaffold::Document<MyDefinition>;
-```
-
-### GraphQLX: A Built-in Extended DSL
-
-Smear includes **GraphQLX** as a demonstration of building an extended GraphQL-like DSL. Enable it with the `unstable` feature:
-
-```toml
-[dependencies]
-smear = { version = "0.0.0", features = ["unstable"] }
-```
-
-GraphQLX adds powerful features inspired by modern type systems:
-
-#### Imports
-
-```graphqlx
-import { User, Post } from "./types.graphqlx"
-import * as models from "./models.graphqlx"
-```
-
-#### Generics
-
-```graphqlx
-type Container<T> {
-  value: T
-  count: Int
-}
-
-type Query {
-  stringContainer: Container<String!>!
-}
-```
-
-#### Where Clauses
-
-```graphqlx
-type Repository<T>
-  where T: Node
-{
-  items: [T!]!
-  count: Int
-}
-
-interface Node {
-  id: ID!
-}
-```
-
-#### Map Types
-
-```graphqlx
-input ConfigInput {
-  settings: <String! => String!>! = map {
-    "theme" => "dark"
-    "locale" => "en-US"
-  }
-}
-```
-
-#### Path Types (Namespacing)
-
-```graphqlx
-type Query {
-  user: user::Profile
-  post: blog::Post
-  admin: ::admin::Account  # Fully qualified
-}
-```
-
-#### Example Usage
-
-```rust,ignore
-use smear::parser::graphqlx::ast::{TypeSystemDocument, ParseStr};
-
-let schema = r#"
-  import { Node } from "./interfaces.graphqlx"
-
-  type Container<T> where T: Node {
-    items: [T!]!
-    count: Int!
-  }
-
-  type Query {
-    users: Container<user::Profile>!
-  }
-"#;
-
-let doc = TypeSystemDocument::<&str>::parse_str(schema).unwrap();
-```
+This makes smear suitable for **both GraphQL servers** (using AST for performance) **and development tools** (using CST for accurate code manipulation).
 
 ## Architecture
 
 Smear follows a three-layer architecture designed for maximum reusability:
 
 ### Layer 1: Lexer (Tokenization)
+
 - Converts source code into zero-copy tokens
 - Supports both GraphQL and GraphQLX tokens
 - Generic over source type (`&str`, `&[u8]`, etc.)
 
-### Layer 2: Parser (AST Construction)
-- Uses parser combinators to build Abstract Syntax Trees
+### Layer 2: Parser (AST or CST Construction)
+
+- Uses parser combinators to build Abstract Syntax Trees or Concrete Syntax Trees
 - Provides traits: `ParseStr`, `ParseBytesSlice`, `ParseBytes`
 - Efficient error recovery and reporting
 
 ### Layer 3: Scaffold (Reusable Structures)
+
 - Generic, reusable AST node definitions
 - The foundation for building custom DSLs
 - Shared between GraphQL and GraphQLX
@@ -264,19 +128,12 @@ Smear follows a three-layer architecture designed for maximum reusability:
 | `std` | Standard library support | ✓ |
 | `alloc` | Allocation support for `no_std` | |
 | `graphql` | Standard GraphQL parser | ✓ |
-| `graphqlx` | Extended GraphQL parser (example DSL) | ✓ |
+| `graphqlx` | Extended GraphQL parser | ✓ |
 | `unstable` | Unstable features (required for GraphQLX) | |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
-| `hipstr` | Support `hipstr::HipStr` source type | |
-
-### Minimal Setup
-
-```toml
-[dependencies]
-smear = { version = "0.0.0", default-features = false, features = ["graphql"] }
-```
+| `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
 
 ## Who Should Use Smear?
 
@@ -287,11 +144,6 @@ smear = { version = "0.0.0", default-features = false, features = ["graphql"] }
 - GraphQL servers needing fast query parsing
 - **Building custom GraphQL-like DSLs for domain-specific use cases**
 - Research projects exploring advanced type systems
-
-## Documentation
-
-- [API Documentation](https://docs.rs/smear)
-- [Crates.io](https://crates.io/crates/smear)
 
 ## Contributing
 
@@ -316,8 +168,3 @@ shall be dual licensed as above, without any additional terms or conditions.
 [CI-url]: https://github.com/al8n/smear/actions/workflows/ci.yml
 [doc-url]: https://docs.rs/smear
 [crates-url]: https://crates.io/smear
-[license-url]: https://opensource.org/licenses/Apache-2.0
-[rustc-url]: https://github.com/rust-lang/rust/blob/master/RELEASES.md
-[license-apache-url]: https://opensource.org/licenses/Apache-2.0
-[license-mit-url]: https://opensource.org/licenses/MIT
-[rustc-image]: https://img.shields.io/badge/rustc-1.52.0--nightly%2B-orange.svg?style=for-the-badge&logo=Rust
