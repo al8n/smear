@@ -1,4 +1,4 @@
-use crate::{lexer::graphqlx::ast::SyntacticLexerErrors, punctuator::*};
+use crate::{lexer::graphqlx::syntactic::SyntacticLexerErrors, punctuator::*};
 use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},

@@ -226,7 +226,7 @@ pub mod graphql;
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphqlx::ast::AstToken;
+/// use smear::lexer::graphqlx::syntactic::AstToken;
 /// use logosky::TokenStream;
 ///
 /// let source = "import { User } from \"./types.graphqlx\"";

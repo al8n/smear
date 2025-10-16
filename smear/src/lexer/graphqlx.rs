@@ -5,11 +5,14 @@ use logosky::utils::human_display::DisplayHuman;
 pub mod error;
 
 /// Abstract syntax tree (AST) lexers for GraphQLx
-pub mod ast;
+pub mod syntactic {
+  pub use super::ast::*;
+}
 
 /// Concrete syntax tree (CST) lexers for GraphQLx
 pub mod lossless;
 
+mod ast;
 mod handlers;
 
 // #[cfg(test)]

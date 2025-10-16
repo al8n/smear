@@ -5,7 +5,7 @@ use logosky::{
 };
 
 use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenStream};
-use crate::lexer::graphqlx::ast::SyntacticLexerErrors;
+use crate::lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
 /// A GraphQLx identifier.
 ///

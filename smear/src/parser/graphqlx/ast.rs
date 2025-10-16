@@ -8,7 +8,7 @@ use logosky::{
 
 use super::error::{Error, Errors, Extra};
 use crate::{
-  lexer::graphqlx::ast::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind},
+  lexer::graphqlx::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind},
   parser::{graphqlx::Expectation, ident::Ident},
 };
 
