@@ -1,14 +1,11 @@
 use crate::{
-  keywords::On,
-  punctuator::{LBrace, RBrace, Spread},
+  keywords::On, lexer::graphqlx::syntactic::SyntacticLexerErrors, punctuator::{At, LBrace, RBrace, Spread}
 };
 
 use super::{ty::Path, *};
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  Lexed, Logos, Parseable, Source, Token, Tokenizer, chumsky::{extra::ParserExtra, prelude::*}, utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent}
 };
 
 type FragmentSpreadAlias<S> = scaffold::FragmentSpread<FragmentTypePath<S>, Directives<S>>;
@@ -47,6 +44,15 @@ impl<S> IntoComponents for FragmentSpread<S> {
 }
 
 impl<S> FragmentSpread<S> {
+  #[inline]
+  pub(super) const fn new(
+    span: Span,
+    name: FragmentTypePath<S>,
+    directives: Option<Directives<S>>,
+  ) -> Self {
+    Self(FragmentSpreadAlias::new(span, name, directives))
+  }
+
   /// Returns the span of the fragment spread.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -124,6 +130,16 @@ impl<S> IntoComponents for InlineFragment<S> {
 }
 
 impl<S> InlineFragment<S> {
+  #[inline]
+  pub(super) const fn new(
+    span: Span,
+    type_condition: Option<TypeCondition<S>>,
+    directives: Option<Directives<S>>,
+    selection_set: SelectionSet<S>,
+  ) -> Self {
+    Self(InlineFragmentAlias::new(span, type_condition, directives, selection_set))
+  }
+
   /// Returns the span of the inline fragment.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -227,18 +243,21 @@ where
     Error: 'a,
   {
     recursive(|selection| {
-      let selsetion_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone());
+      let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone()).boxed();
 
       let field_p = scaffold::Field::parser_with(
         Arguments::parser(),
         Directives::parser(),
-        selsetion_set.clone(),
+        selection_set.clone(),
       )
-      .map(Field::from);
+      .map(Field::from)
+      .boxed();
 
-      let inline_p = InlineFragment::parser_with(selsetion_set.clone()).map(Self::InlineFragment);
+      let inline_p = InlineFragment::parser_with(selection_set.clone())
+        .map(Self::InlineFragment)
+        .boxed();
 
-      let spread_p = FragmentSpread::parser().map(Self::FragmentSpread);
+      let spread_p = FragmentSpread::parser().map(Self::FragmentSpread).boxed();
 
       choice((field_p.map(Self::Field), spread_p, inline_p))
     })
@@ -373,4 +392,149 @@ where
         .map(Self)
     })
   }
+}
+
+fn fragment_parser<'a, S, E>(
+  selection_parser: impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone + 'a,
+) -> impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone
+where
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directive<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  At:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  str: Equivalent<S>,
+  S: 'a,
+  E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+  SyntacticTokenStream<'a, S>: Tokenizer<
+      'a,
+      SyntacticToken<S>,
+      Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+    >,
+  SyntacticTokenErrors<'a, S>: 'a,
+{
+  let selection_set = SelectionSet::parser_with(selection_parser.clone());
+  custom(move |inp| {
+    let before = inp.cursor();
+
+    match inp.next() {
+      None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+      Some(Lexed::Error(errs)) => {
+        Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+      }
+      Some(Lexed::Token(Spanned { span, data: token })) => {
+        match token {
+          SyntacticToken::Spread => {
+            let current_cursor = inp.cursor();
+
+            match inp.next() {
+              None => Err(
+                SyntacticTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
+                  .into(),
+              ),
+              Some(Lexed::Error(errs)) => Err(
+                SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&current_cursor))
+                  .into(),
+              ),
+              Some(Lexed::Token(Spanned {
+                span: fragment_span,
+                data: fragment_token,
+              })) => {
+                match fragment_token {
+                  SyntacticToken::Identifier(name) => {
+                    // if we do not have on, then it's a fragment spread
+                    if !"on".equivalent(&name) {
+                      let directives = inp.parse(Directives::parser().or_not())?;
+
+                      return Ok(Selection::FragmentSpread(FragmentSpread::new(
+                        inp.span_since(&before),
+                        FragmentTypePath::new(fragment_span, name),
+                        directives,
+                      )));
+                    }
+
+                    // otherwise, it's an inline fragment with type condition
+                    let ((name, directives), selection_set) = inp.parse(
+                      TypePath::<S>::parser()
+                        .then(Directives::parser().or_not())
+                        .then(selection_set.clone()),
+                    )?;
+                    let tc =
+                      TypeCondition::new((fragment_span.start()..name.span().end()).into(), name);
+                    Ok(Selection::InlineFragment(InlineFragment::new(
+                      inp.span_since(&before),
+                      Some(tc),
+                      directives,
+                      selection_set,
+                    )))
+                  }
+                  SyntacticToken::LBrace => {
+                    let (selection, rbrace) = inp.parse(
+                      selection_parser
+                        .clone()
+                        .repeated()
+                        .at_least(1)
+                        .collect()
+                        .then(RBrace::parser().or_not()),
+                    )?;
+
+                    match rbrace {
+                      None => {
+                        Err(SyntacticTokenError::unclosed_brace(inp.span_since(&before)).into())
+                      }
+                      Some(_) => {
+                        let span = inp.span_since(&before);
+                        Ok(Selection::InlineFragment(InlineFragment::new(
+                          span,
+                          None,
+                          None,
+                          SelectionSet::new(span, selection),
+                        )))
+                      }
+                    }
+                  }
+                  SyntacticToken::At => {
+                    let (directives, selection_set) = inp.parse(
+                      TypePath::<S>::parser::<E>()
+                        .then(Arguments::parser().or_not())
+                        .map_with(|(name, args), exa| Directive::new(exa.span(), name, args))
+                        .separated_by(At::parser())
+                        .collect()
+                        .map_with(|directives, exa| Directives::new(exa.span(), directives))
+                        .then(selection_set.clone()),
+                    )?;
+                    Ok(Selection::InlineFragment(InlineFragment::new(
+                      inp.span_since(&before),
+                      None,
+                      Some(directives),
+                      selection_set,
+                    )))
+                  }
+                  token => Err(
+                    SyntacticTokenError::unexpected_token(
+                      token,
+                      Expectation::FragmentSpreadOrInlineFragment,
+                      fragment_span,
+                    )
+                    .into(),
+                  ),
+                }
+              }
+            }
+          }
+          token => {
+            Err(SyntacticTokenError::unexpected_token(token, Expectation::Spread, span).into())
+          }
+        }
+      }
+    }
+  })
 }

@@ -74,7 +74,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   /// Creates a new path from the given segments.
   #[inline]
-  const fn new(
+  pub(super) const fn new(
     span: Span,
     path: Path<Ident, PathSegmentContainer>,
     generics: Option<TypeGenerics<Type, TypeContainer>>,
