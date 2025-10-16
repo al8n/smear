@@ -16,18 +16,72 @@ mod tests;
 mod slice;
 mod str;
 
-/// The char type used for the AST token.
+/// The char type used for the syntactic token.
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on AST [`Token`].
+/// The error data type for lexing based on syntactic [`Token`].
 pub type SyntacticLexerErrorData<'a, S> =
   error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// The error type for lexing based on AST [`Token`].
+/// The error type for lexing based on syntactic [`Token`].
 pub type SyntacticLexerError<'a, S> =
   error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// A collection of errors of AST [`Token`].
+/// A collection of errors for syntactic [`Token`].
 pub type SyntacticLexerErrors<'a, S> =
   error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
+/// A syntactic token for GraphQL lexing that only includes syntactically significant tokens.
+///
+/// This token type is optimized for high-performance parsing by **excluding trivia** (whitespace,
+/// comments, and commas). It provides minimal memory footprint and fast lexing, making it ideal
+/// for GraphQL servers, query execution, and other performance-critical applications.
+///
+/// # Ignored Tokens (Trivia)
+///
+/// The following tokens are automatically skipped during lexing and will NOT appear in the token stream:
+/// - **Whitespace**: spaces, tabs, newlines, carriage returns
+/// - **Comments**: `# ...` (from `#` to end of line)
+/// - **Commas**: `,`
+/// - **Byte Order Mark (BOM)**: `\u{FEFF}`
+///
+/// These trivia tokens are defined by the lexer's skip pattern and are discarded during tokenization.
+///
+/// # Use Cases
+///
+/// - **GraphQL servers**: Fast query parsing without formatting overhead
+/// - **Query execution**: Minimal token stream for performance-critical paths
+/// - **Schema compilation**: Efficient type system parsing
+/// - **Production systems**: Where formatting preservation is not required
+///
+/// # Comparison with [`LosslessToken`](super::lossless::LosslessToken)
+///
+/// | Feature | `SyntacticToken` | [`LosslessToken`](super::lossless::LosslessToken) |
+/// |---------|------------------|----------------------------------------------|
+/// | Whitespace | ❌ Skipped | ✅ Preserved |
+/// | Comments | ❌ Skipped | ✅ Preserved |
+/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Performance | ⚡ Fast | 🐢 Slower |
+/// | Memory | 💾 Minimal | 💾 Higher |
+/// | Use case | Servers, execution | Formatters, linters, IDEs |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphql::syntactic::SyntacticToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { user { id } }";
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+///
+/// // Only syntactically significant tokens appear in the stream:
+/// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
+/// // (whitespace is automatically skipped)
+/// ```
+///
+/// # Generic Over Source Type
+///
+/// `SyntacticToken<S>` is generic over the source type `S`, allowing zero-copy parsing:
+/// - `SyntacticToken<&str>` - For borrowed string sources
+/// - `SyntacticToken<&[u8]>` - For byte slice sources
+/// - `SyntacticToken<bytes::Bytes>` - For shared ownership with cheap cloning
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -117,7 +171,11 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
-/// The token kind for
+/// The kind of a [`SyntacticToken`], without the associated source data.
+///
+/// This enum represents the type of a token without carrying the actual source slice,
+/// making it useful for pattern matching and token classification without dealing with
+/// the generic source type parameter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 #[non_exhaustive]

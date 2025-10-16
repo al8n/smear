@@ -24,11 +24,70 @@ pub type LosslessLexerErrorData<'a, S> =
 /// The error type for lexing based on lossless [`Token`].
 pub type LosslessLexerError<'a, S> =
   error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// A collection of errors of lossless [`Token`].
+/// A collection of errors for lossless [`Token`].
 pub type LosslessLexerErrors<'a, S> =
   error::LexerErrors<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 
-/// A lossless token for GraphQLx lexing, preserving all characters including ignored tokens.
+/// A lossless token for GraphQLx lexing that preserves all source information including trivia.
+///
+/// This token type provides **complete fidelity** to the original source code by preserving
+/// all characters including whitespace, comments, and formatting. This makes it essential for
+/// developer tools that need to maintain or manipulate source code without losing information.
+///
+/// # Preserved Trivia Tokens
+///
+/// Unlike [`SyntacticToken`](super::ast::SyntacticToken), `LosslessToken` includes variants for all trivia:
+/// - **Whitespace**: [`Space`](LosslessToken::Space), [`Tab`](LosslessToken::Tab), [`Newline`](LosslessToken::Newline), [`CarriageReturn`](LosslessToken::CarriageReturn), [`CarriageReturnAndNewline`](LosslessToken::CarriageReturnAndNewline)
+/// - **Comments**: [`Comment`](LosslessToken::Comment) - preserves `# ...` comments with their content
+/// - **Commas**: [`Comma`](LosslessToken::Comma)
+/// - **Byte Order Mark**: [`Bom`](LosslessToken::Bom) - preserves `\u{FEFF}` characters
+///
+/// # Use Cases
+///
+/// - **Code formatters**: Preserve and reformat source code while maintaining structure
+/// - **Linters**: Analyze code style including whitespace and comment conventions
+/// - **IDEs**: Provide accurate "go to definition", refactoring, and code navigation
+/// - **Documentation tools**: Extract and preserve comments for documentation generation
+/// - **Source-to-source transformations**: Modify code while preserving unrelated formatting
+/// - **Syntax highlighters**: Distinguish between code and comments for visual presentation
+///
+/// # Comparison with [`SyntacticToken`](super::ast::SyntacticToken)
+///
+/// | Feature | [`SyntacticToken`](super::ast::SyntacticToken) | `LosslessToken` |
+/// |---------|------------------|-----------------|
+/// | Whitespace | ❌ Skipped | ✅ Preserved |
+/// | Comments | ❌ Skipped | ✅ Preserved |
+/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Performance | ⚡ Fast | 🐢 Slower |
+/// | Memory | 💾 Minimal | 💾 Higher |
+/// | Use case | Servers, execution | Formatters, linters, IDEs |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphqlx::lossless::LosslessToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { # comment\n  user { id }\n}";
+/// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+///
+/// // ALL tokens appear in the stream, including:
+/// // Identifier("query"), Space, LBrace, Space, Comment("# comment"),
+/// // Newline, Space, Space, Identifier("user"), Space, LBrace, ...
+/// ```
+///
+/// # Generic Over Source Type
+///
+/// `LosslessToken<S>` is generic over the source type `S`, allowing zero-copy parsing:
+/// - `LosslessToken<&str>` - For borrowed string sources
+/// - `LosslessToken<&[u8]>` - For byte slice sources
+/// - `LosslessToken<bytes::Bytes>` - For shared ownership with cheap cloning
+///
+/// # Building Concrete Syntax Trees (CST)
+///
+/// When you need to preserve all source information in your parse tree, use `LosslessToken`
+/// as the token type for your parser. This enables building a **Concrete Syntax Tree** (CST)
+/// that maintains complete fidelity to the original source.
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -163,7 +222,11 @@ impl<S> From<&LosslessToken<S>> for LosslessTokenKind {
   }
 }
 
-/// The token kind for
+/// The kind of a [`LosslessToken`], without the associated source data.
+///
+/// This enum represents the type of a token without carrying the actual source slice,
+/// making it useful for pattern matching and token classification without dealing with
+/// the generic source type parameter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
