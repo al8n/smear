@@ -625,12 +625,9 @@ impl<TypeCondition, Directives, SelectionSet>
       .ignore_then(type_condition_parser.or_not())
       .then(directives_parser.or_not())
       .then(selection_set_parser)
-      .map_with(|((type_condition, directives), selection_set), exa| Self::new(
-        exa.span(),
-        type_condition,
-        directives,
-        selection_set,
-      ))
+      .map_with(|((type_condition, directives), selection_set), exa| {
+        Self::new(exa.span(), type_condition, directives, selection_set)
+      })
   }
 }
 
