@@ -59,7 +59,6 @@ pub type SyntacticLexerErrors<'a, S> =
 /// | Comments | ❌ Skipped | ✅ Preserved |
 /// | Commas | ❌ Skipped | ✅ Preserved |
 /// | Performance | ⚡ Fast | 🐢 Slower |
-/// | Memory | 💾 Minimal | 💾 Higher |
 /// | Use case | Servers, execution | Formatters, linters, IDEs |
 ///
 /// # Example
