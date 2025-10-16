@@ -25,20 +25,7 @@ pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
 where
   T: Logos<'a, Extras = Tracker>,
 {
-  lexer.extras.increase_recursion();
-  lexer.extras.increase_token();
-  lexer
-    .extras
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
-}
-
-#[inline(always)]
-pub(super) fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
-where
-  T: Logos<'a, Extras = Tracker>,
-{
-  lexer.extras.increase_token();
+  handlers::increase_recursion_depth_and_token(lexer)
 }
 
 #[inline(always)]
@@ -49,16 +36,7 @@ pub(super) fn tt_hook_and_then<'a, C, T, O>(
 where
   T: Logos<'a, Extras = Tracker>,
 {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
+  handlers::tt_hook_and_then(lexer, f)
 }
 
 #[allow(clippy::result_large_err)]
@@ -70,18 +48,7 @@ pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
 where
   T: Logos<'a, Extras = Tracker>,
 {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| {
-      error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())).into()
-    })
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
+  handlers::tt_hook_and_then_into_errors(lexer, f)
 }
 
 #[inline(always)]
@@ -92,15 +59,7 @@ pub(super) fn tt_hook_map<'a, C, T, O>(
 where
   T: Logos<'a, Extras = Tracker>,
 {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
-    .map(|_| {
-      increase_token(lexer);
-      f(lexer)
-    })
+  handlers::tt_hook_map(lexer, f)
 }
 
 #[inline(always)]
@@ -110,14 +69,7 @@ pub(super) fn tt_hook<'a, C, T>(
 where
   T: Logos<'a, Extras = Tracker>,
 {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
-    .inspect(|_| {
-      increase_token(lexer);
-    })
+  handlers::tt_hook(lexer)
 }
 
 #[inline(always)]
@@ -127,12 +79,7 @@ pub(super) fn increase_recursion_depth<'a, C, T>(
 where
   T: Logos<'a, Extras = RecursionLimiter>,
 {
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
+  handlers::increase_recursion_depth(lexer)
 }
 
 #[inline(always)]

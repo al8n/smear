@@ -10,7 +10,8 @@ macro_rules! token {
           error::{LexerErrors, LexerError, DecimalError, FloatError},
           handlers::{
             self,
-            tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
+            tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors,
+            increase_recursion_depth_and_token,
           },
           cst::{CstToken, CstTokenKind},
         }, handlers::*, LitBlockStr, LitInlineStr, SealedWrapper,},
