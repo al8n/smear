@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, string::String};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::human_display::DisplayHuman;
@@ -189,7 +189,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
 
         // Fast-return for empty result.
         if keep_start >= keep_end {
-          return std::borrow::Cow::Owned(std::string::String::new());
+          return std::borrow::Cow::Owned(String::new());
         }
 
         // Write one logical line body:
@@ -237,7 +237,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
         }
 
         // Iterate logical lines of `inner`, honoring CR, LF, or CRLF.
-        let mut out = std::string::String::with_capacity(cap);
+        let mut out = String::with_capacity(cap);
         let mut i = 0usize;
         let bytes = inner.as_bytes();
         let mut line_idx = 0usize;
