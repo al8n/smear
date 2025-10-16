@@ -12,7 +12,7 @@ macro_rules! token {
             self,
             tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
           },
-          cst::{LosslessToken, LosslessTokenKind},
+          lossless::{LosslessToken, LosslessTokenKind},
           LitInt, LitFloat,
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };

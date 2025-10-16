@@ -8,7 +8,7 @@ pub mod error;
 pub mod ast;
 
 /// Concrete syntax tree (CST) lexers for GraphQLx
-pub mod cst;
+pub mod lossless;
 
 mod handlers;
 
