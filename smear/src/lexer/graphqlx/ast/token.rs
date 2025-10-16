@@ -9,7 +9,7 @@ macro_rules! token {
         lexer::{graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
-          ast::{AstToken, AstTokenKind, LitInt, LitFloat},
+          ast::{SyntacticToken, SyntacticTokenKind, LitInt, LitFloat},
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
 
@@ -17,8 +17,8 @@ macro_rules! token {
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for AstToken<$slice> {
-        type Kind = AstTokenKind;
+      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for SyntacticToken<$slice> {
+        type Kind = SyntacticTokenKind;
         type Char = $char;
         type Logos = Token $(<$lt>)?;
 
@@ -174,7 +174,7 @@ macro_rules! token {
         LitBlockStr(LitBlockStr<$slice>),
       }
 
-      impl$(<$lt>)? From<Token $(<$lt>)?> for AstToken<$slice> {
+      impl$(<$lt>)? From<Token $(<$lt>)?> for SyntacticToken<$slice> {
         #[inline(always)]
         fn from(value: Token $(<$lt>)?) -> Self {
           match value {

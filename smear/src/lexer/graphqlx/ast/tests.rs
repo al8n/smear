@@ -7,9 +7,9 @@
 //   graphql::tests::{self, TestToken},
 // };
 
-// type StrAstToken<'a> = AstToken<&'a str>;
+// type StrSyntacticToken<'a> = SyntacticToken<&'a str>;
 
-// impl<'a> TestToken<'a> for AstToken<&'a str> {
+// impl<'a> TestToken<'a> for SyntacticToken<&'a str> {
 //   #[inline]
 //   fn is_ignored(&self) -> bool {
 //     false
@@ -49,119 +49,119 @@
 
 // #[test]
 // fn test_unexpected_character() {
-//   tests::test_unexpected_character::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unexpected_character::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unknown_character() {
-//   tests::test_unknown_character::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unknown_character::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_number_leading_zero() {
-//   tests::test_number_leading_zero::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_number_leading_zero::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_int_leading_zeros_then_check_suffix() {
-//   tests::test_int_leading_zeros_then_check_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_int_leading_zeros_then_check_suffix::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_float_leading_zeros_and_other() {
-//   tests::test_float_leading_zeros_and_other::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_float_leading_zeros_and_other::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_invalid_number_suffix() {
-//   tests::test_invalid_number_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_invalid_number_suffix::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_missing_integer_part() {
-//   tests::test_missing_integer_part::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_missing_integer_part::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_missing_integer_part_and_invalid_suffix() {
-//   tests::test_missing_integer_part_and_invalid_suffix::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_missing_integer_part_and_invalid_suffix::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_float_eof() {
-//   tests::test_unexpected_float_eof::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unexpected_float_eof::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_number_lexme() {
-//   tests::test_unexpected_number_lexme::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unexpected_number_lexme::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_integer_ok() {
-//   tests::test_integer_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_integer_ok::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_float_ok() {
-//   tests::test_float_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_float_ok::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_inline_string_ok() {
-//   tests::test_inline_string_ok::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_inline_string_ok::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unterminated_inline_string() {
-//   tests::test_unterminated_inline_string::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unterminated_inline_string::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_incomplete_unicode_and_eof() {
-//   tests::test_incomplete_unicode_and_eof::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_incomplete_unicode_and_eof::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_line_terminator() {
-//   tests::test_unexpected_line_terminator::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unexpected_line_terminator::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_escaped() {
-//   tests::test_unexpected_escaped::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unexpected_escaped::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_surrogate_pair() {
-//   tests::test_surrogate_pair::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_surrogate_pair::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_invalid_surrogate_pair() {
-//   tests::test_invalid_surrogate_pair::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_invalid_surrogate_pair::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_unterminated_block_string() {
-//   tests::test_unterminated_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_unterminated_block_string::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_block_string_literal() {
-//   tests::test_surrogate_pair_in_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_surrogate_pair_in_block_string::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_escape_triple_quote_block_string() {
-//   tests::test_escape_triple_quote_block_string::<StrAstToken<'_>, RecursionLimitExceeded>();
+//   tests::test_escape_triple_quote_block_string::<StrSyntacticToken<'_>, RecursionLimitExceeded>();
 // }
 
 // #[test]
 // fn test_bom_lexing() {
 //   let input = "\u{feff}";
 
-//   let mut lexer = TokenStream::<StrAstToken<'_>>::new(input).into_iter();
+//   let mut lexer = TokenStream::<StrSyntacticToken<'_>>::new(input).into_iter();
 
 //   assert_eq!(lexer.next(), None);
 // }
@@ -172,7 +172,7 @@
 //   let field = "a {".repeat(depth) + &"}".repeat(depth);
 //   let query = field.replace("{}", "{b}").to_string();
 
-//   let lexer = TokenStream::<StrAstToken<'_>>::with_state(
+//   let lexer = TokenStream::<StrSyntacticToken<'_>>::with_state(
 //     query.as_str(),
 //     RecursionLimiter::with_limitation(depth - 1),
 //   );

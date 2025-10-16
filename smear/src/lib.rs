@@ -105,11 +105,11 @@ pub mod scaffold;
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphql::ast::AstToken;
+/// use smear::lexer::graphql::ast::SyntacticToken;
 /// use logosky::TokenStream;
 ///
 /// let source = "query { user { id name } }";
-/// let tokens = TokenStream::<AstToken<&str>>::new(source);
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
 /// // Process tokens...
 /// ```
 pub mod lexer;

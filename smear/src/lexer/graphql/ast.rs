@@ -17,16 +17,16 @@ mod slice;
 mod str;
 
 /// The char type used for the AST token.
-pub type AstTokenChar<'a, S> = <AstToken<S> as Token<'a>>::Char;
+pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
 /// The error data type for lexing based on AST [`Token`].
 pub type AstLexerErrorData<'a, S> =
-  error::LexerErrorData<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+  error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 /// The error type for lexing based on AST [`Token`].
 pub type AstLexerError<'a, S> =
-  error::LexerError<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+  error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 /// A collection of errors of AST [`Token`].
 pub type AstLexerErrors<'a, S> =
-  error::LexerErrors<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+  error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
@@ -34,7 +34,7 @@ pub type AstLexerErrors<'a, S> =
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum AstToken<S> {
+pub enum SyntacticToken<S> {
   /// Ampersand `&` token
   Ampersand,
   /// At `@` token
@@ -75,44 +75,44 @@ pub enum AstToken<S> {
   LitBlockStr(LitBlockStr<S>),
 }
 
-impl<S> AstToken<S> {
+impl<S> SyntacticToken<S> {
   /// Returns the kind of the token.
   #[inline]
-  pub const fn kind(&self) -> AstTokenKind {
+  pub const fn kind(&self) -> SyntacticTokenKind {
     match self {
-      Self::Identifier(_) => AstTokenKind::Identifier,
-      Self::LitInt(_) => AstTokenKind::Int,
-      Self::LitFloat(_) => AstTokenKind::Float,
-      Self::LitInlineStr(_) => AstTokenKind::InlineString,
-      Self::LitBlockStr(_) => AstTokenKind::BlockString,
-      Self::Dollar => AstTokenKind::Dollar,
-      Self::LParen => AstTokenKind::LParen,
-      Self::RParen => AstTokenKind::RParen,
-      Self::Spread => AstTokenKind::Spread,
-      Self::Colon => AstTokenKind::Colon,
-      Self::Equal => AstTokenKind::Equal,
-      Self::At => AstTokenKind::At,
-      Self::LBracket => AstTokenKind::LBracket,
-      Self::RBracket => AstTokenKind::RBracket,
-      Self::LBrace => AstTokenKind::LBrace,
-      Self::RBrace => AstTokenKind::RBrace,
-      Self::Pipe => AstTokenKind::Pipe,
-      Self::Bang => AstTokenKind::Bang,
-      Self::Ampersand => AstTokenKind::Ampersand,
+      Self::Identifier(_) => SyntacticTokenKind::Identifier,
+      Self::LitInt(_) => SyntacticTokenKind::Int,
+      Self::LitFloat(_) => SyntacticTokenKind::Float,
+      Self::LitInlineStr(_) => SyntacticTokenKind::InlineString,
+      Self::LitBlockStr(_) => SyntacticTokenKind::BlockString,
+      Self::Dollar => SyntacticTokenKind::Dollar,
+      Self::LParen => SyntacticTokenKind::LParen,
+      Self::RParen => SyntacticTokenKind::RParen,
+      Self::Spread => SyntacticTokenKind::Spread,
+      Self::Colon => SyntacticTokenKind::Colon,
+      Self::Equal => SyntacticTokenKind::Equal,
+      Self::At => SyntacticTokenKind::At,
+      Self::LBracket => SyntacticTokenKind::LBracket,
+      Self::RBracket => SyntacticTokenKind::RBracket,
+      Self::LBrace => SyntacticTokenKind::LBrace,
+      Self::RBrace => SyntacticTokenKind::RBrace,
+      Self::Pipe => SyntacticTokenKind::Pipe,
+      Self::Bang => SyntacticTokenKind::Bang,
+      Self::Ampersand => SyntacticTokenKind::Ampersand,
     }
   }
 }
 
-impl<S> From<AstToken<S>> for AstTokenKind {
+impl<S> From<SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
-  fn from(token: AstToken<S>) -> Self {
-    AstTokenKind::from(&token)
+  fn from(token: SyntacticToken<S>) -> Self {
+    SyntacticTokenKind::from(&token)
   }
 }
 
-impl<S> From<&AstToken<S>> for AstTokenKind {
+impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
-  fn from(token: &AstToken<S>) -> Self {
+  fn from(token: &SyntacticToken<S>) -> Self {
     token.kind()
   }
 }
@@ -121,7 +121,7 @@ impl<S> From<&AstToken<S>> for AstTokenKind {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
-pub enum AstTokenKind {
+pub enum SyntacticTokenKind {
   /// Identifier token
   Identifier,
   /// Int literal token
