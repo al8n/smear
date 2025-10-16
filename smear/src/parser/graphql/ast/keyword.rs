@@ -5,7 +5,7 @@ use logosky::{
 
 use crate::{
   keywords::{self, *},
-  lexer::graphql::ast::AstLexerErrors,
+  lexer::graphql::ast::SyntacticLexerErrors,
 };
 
 use super::*;
@@ -16,7 +16,7 @@ macro_rules! keyword_parser {
       impl<'a, S> Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
       where
         SyntacticToken<S>: Token<'a>,
-        <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+        <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
         <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
         str: logosky::utils::cmp::Equivalent<S>,
       {

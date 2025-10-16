@@ -5,7 +5,9 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 
-use crate::{lexer::graphqlx::ast::AstLexerErrors, parser::graphqlx::error::InvalidEnumValue};
+use crate::{
+  lexer::graphqlx::ast::SyntacticLexerErrors, parser::graphqlx::error::InvalidEnumValue,
+};
 
 use super::super::*;
 
@@ -62,7 +64,7 @@ impl<'a, S>
   for EnumValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Path<S>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,

@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::lexer::graphqlx::{LitFloat, ast::AstLexerErrors};
+use crate::lexer::graphqlx::{LitFloat, ast::SyntacticLexerErrors};
 
 use super::super::*;
 
@@ -70,7 +70,7 @@ impl<'a, S>
   for FloatValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]

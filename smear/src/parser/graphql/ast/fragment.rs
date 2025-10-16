@@ -5,7 +5,7 @@ use logosky::{
 };
 
 use crate::{
-  lexer::graphql::ast::AstLexerErrors,
+  lexer::graphql::ast::SyntacticLexerErrors,
   scaffold::{self, FragmentName},
 };
 
@@ -18,7 +18,7 @@ impl<'a, S>
   for FragmentName<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   str: logosky::utils::cmp::Equivalent<S>,
 {

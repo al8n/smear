@@ -4,7 +4,7 @@ use logosky::{
   utils::{Span, cmp::Equivalent},
 };
 
-use crate::lexer::graphqlx::ast::AstLexerErrors;
+use crate::lexer::graphqlx::ast::SyntacticLexerErrors;
 
 use super::super::*;
 
@@ -15,7 +15,7 @@ impl<'a, S>
   for NullValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   str: Equivalent<S>,
 {

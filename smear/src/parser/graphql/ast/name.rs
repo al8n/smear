@@ -5,7 +5,7 @@ use logosky::{
 };
 
 use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenStream};
-use crate::lexer::graphql::ast::AstLexerErrors;
+use crate::lexer::graphql::ast::SyntacticLexerErrors;
 
 /// A GraphQL name identifier.
 ///
@@ -66,7 +66,7 @@ impl<'a, S>
   for Name<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]

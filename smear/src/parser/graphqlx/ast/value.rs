@@ -1,7 +1,7 @@
 use crate::{
   error::{UnclosedBraceError, UnclosedBracketError},
   hints::VariableValueHint,
-  lexer::graphqlx::ast::AstLexerErrors,
+  lexer::graphqlx::ast::SyntacticLexerErrors,
   parser::{graphqlx::Expectation, ident::Ident},
   punctuator::{LBrace, PathSeparator, RBrace, RBracket},
   scaffold::{self, Path},
@@ -126,7 +126,7 @@ impl<'a, S>
   for InputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   LBrace:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
@@ -389,7 +389,7 @@ impl<'a, S>
   for ConstInputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   LBrace:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,

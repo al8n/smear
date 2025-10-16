@@ -4,7 +4,7 @@ use logosky::{
   utils::Span,
 };
 
-use crate::lexer::graphqlx::ast::AstLexerErrors;
+use crate::lexer::graphqlx::ast::SyntacticLexerErrors;
 
 use super::super::*;
 
@@ -15,7 +15,7 @@ impl<'a, S>
   for StringValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
@@ -43,7 +43,7 @@ impl<'a, S>
   for InlineStringValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
@@ -70,7 +70,7 @@ impl<'a, S>
   for BlockStringValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]

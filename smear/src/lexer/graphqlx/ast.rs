@@ -19,13 +19,13 @@ mod str;
 /// The char type used for the AST token.
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
 /// The error data type for lexing based on AST [`Token`].
-pub type AstLexerErrorData<'a, S> =
+pub type SyntacticLexerErrorData<'a, S> =
   error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 /// The error type for lexing based on AST [`Token`].
-pub type AstLexerError<'a, S> =
+pub type SyntacticLexerError<'a, S> =
   error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 /// A collection of errors of AST [`Token`].
-pub type AstLexerErrors<'a, S> =
+pub type SyntacticLexerErrors<'a, S> =
   error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
 #[derive(

@@ -1,7 +1,7 @@
 use crate::{
   error::{UnclosedBraceError as _, UnclosedBracketError},
   hints::VariableValueHint,
-  lexer::graphql::ast::AstLexerErrors,
+  lexer::graphql::ast::SyntacticLexerErrors,
   punctuator::{RBrace, RBracket},
   scaffold,
 };
@@ -140,7 +140,7 @@ impl<'a, S>
   for InputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   RBrace:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
@@ -355,7 +355,7 @@ impl<'a, S>
   for ConstInputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   RBrace:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,

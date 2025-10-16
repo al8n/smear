@@ -6,7 +6,7 @@ use logosky::{
 
 use crate::{
   keywords,
-  lexer::graphqlx::ast::AstLexerErrors,
+  lexer::graphqlx::ast::SyntacticLexerErrors,
   scaffold::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation},
 };
 
@@ -17,7 +17,7 @@ impl<'a, S>
   for Location
 where
   SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   str: Equivalent<S>,
 {
