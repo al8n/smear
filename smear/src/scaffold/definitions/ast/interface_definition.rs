@@ -18,7 +18,7 @@ use crate::{
 
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImplementInterfaces<Name, Container = Vec<Name>> {
+pub struct ImplementInterfaces<Name, Container = std::vec::Vec<Name>> {
   span: Span,
   interfaces: Container,
   _m: PhantomData<Name>,

@@ -14,7 +14,7 @@ use crate::punctuator::{LAngle, RAngle};
 /// <T, U> # A type generics with two type parameters: `T` and `U`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExecutableDefinitionTypeGenerics<Ident, Container = Vec<Ident>> {
+pub struct ExecutableDefinitionTypeGenerics<Ident, Container = std::vec::Vec<Ident>> {
   span: Span,
   params: Container,
   _ident: PhantomData<Ident>,

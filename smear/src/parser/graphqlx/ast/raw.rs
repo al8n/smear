@@ -146,8 +146,8 @@ pub type FragmentSpread<
   S,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
-  ArgumentContainer = Vec<Argument<S>>,
-  Container = Vec<Directive<S, ArgumentContainer>>,
+  ArgumentContainer = std::vec::Vec<Argument<S>>,
+  Container = std::vec::Vec<Directive<S, ArgumentContainer>>,
 > = scaffold::FragmentSpread<
   FragmentTypePath<S, IdentsContainer, TypeContainer>,
   Directives<S, ArgumentContainer, Container>,
@@ -157,8 +157,8 @@ pub type InlineFragment<
   S,
   IdentsContainer = DefaultIdentsContainer<S>,
   TypeContainer = DefaultTypeContainer<S>,
-  ArgumentContainer = Vec<Argument<S>>,
-  DirectiveContainer = Vec<Directive<S, ArgumentContainer>>,
+  ArgumentContainer = std::vec::Vec<Argument<S>>,
+  DirectiveContainer = std::vec::Vec<Directive<S, ArgumentContainer>>,
 > = scaffold::InlineFragment<
   TypeCondition<S, IdentsContainer, TypeContainer>,
   Directives<S, ArgumentContainer, DirectiveContainer>,

@@ -20,7 +20,7 @@ use super::{DefinitionTypeGenerics, DefinitionTypeParam};
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DefinitionName<Ident, Type, Container = Vec<DefinitionTypeParam<Ident, Type>>> {
+pub struct DefinitionName<Ident, Type, Container = std::vec::Vec<DefinitionTypeParam<Ident, Type>>> {
   span: Span,
   ident: Ident,
   generics: Option<DefinitionTypeGenerics<Ident, Type, Container>>,

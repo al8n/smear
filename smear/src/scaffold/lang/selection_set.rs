@@ -81,7 +81,7 @@ mod standard;
 ///
 /// Spec: [Selection Sets](https://spec.graphql.org/draft/#sec-Selection-Sets)
 #[derive(Debug, Clone, Copy)]
-pub struct SelectionSet<Selection, Container = Vec<Selection>> {
+pub struct SelectionSet<Selection, Container = std::vec::Vec<Selection>> {
   span: Span,
   selections: Container,
   _marker: PhantomData<Selection>,

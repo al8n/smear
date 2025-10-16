@@ -20,7 +20,7 @@ use super::ExecutableDefinitionTypeGenerics;
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExecutableDefinitionName<Ident, Container = Vec<Ident>> {
+pub struct ExecutableDefinitionName<Ident, Container = std::vec::Vec<Ident>> {
   span: Span,
   ident: Ident,
   generics: Option<ExecutableDefinitionTypeGenerics<Ident, Container>>,

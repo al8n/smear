@@ -55,7 +55,7 @@ use core::marker::PhantomData;
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
 #[derive(Debug, Clone)]
-pub struct List<Value, Container = Vec<Value>> {
+pub struct List<Value, Container = std::vec::Vec<Value>> {
   span: Span,
   values: Container,
   _m: PhantomData<Value>,

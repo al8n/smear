@@ -23,7 +23,7 @@ use super::Path;
 ///     : identifier ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NamedSpecifier<Ident, Container = Vec<Ident>> {
+pub struct NamedSpecifier<Ident, Container = std::vec::Vec<Ident>> {
   span: Span,
   name: Ident,
   alias: Option<Path<Ident, Container>>,
@@ -112,7 +112,7 @@ impl<Ident, Container> NamedSpecifier<Ident, Container> {
 ///     : "*" ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WildcardSpecifier<Ident, Container = Vec<Ident>> {
+pub struct WildcardSpecifier<Ident, Container = std::vec::Vec<Ident>> {
   span: Span,
   alias: Option<Path<Ident, Container>>,
 }
@@ -196,7 +196,7 @@ impl<Ident, Container> WildcardSpecifier<Ident, Container> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Unwrap, TryUnwrap, IsVariant)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ImportMember<Ident, Container = Vec<Ident>> {
+pub enum ImportMember<Ident, Container = std::vec::Vec<Ident>> {
   /// A named import specifier, potentially with an alias.
   Named(NamedSpecifier<Ident, Container>),
   /// A wildcard import specifier, potentially with an alias.
@@ -272,8 +272,8 @@ impl<Ident, Container> ImportMember<Ident, Container> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImportList<
   Ident,
-  PathContainer = Vec<Ident>,
-  Container = Vec<ImportMember<Ident, PathContainer>>,
+  PathContainer = std::vec::Vec<Ident>,
+  Container = std::vec::Vec<ImportMember<Ident, PathContainer>>,
 > {
   span: Span,
   items: Container,
@@ -416,8 +416,8 @@ where
 #[try_unwrap(ref, ref_mut)]
 pub enum ImportClause<
   Ident,
-  PathContainer = Vec<Ident>,
-  ItemContainer = Vec<ImportMember<Ident, PathContainer>>,
+  PathContainer = std::vec::Vec<Ident>,
+  ItemContainer = std::vec::Vec<ImportMember<Ident, PathContainer>>,
 > {
   /// A brace import containing multiple named or wildcard specifiers.
   List(ImportList<Ident, PathContainer, ItemContainer>),
@@ -518,8 +518,8 @@ where
 pub struct ImportDefinition<
   Ident,
   FilePath,
-  PathContainer = Vec<Ident>,
-  ItemContainer = Vec<ImportMember<Ident, PathContainer>>,
+  PathContainer = std::vec::Vec<Ident>,
+  ItemContainer = std::vec::Vec<ImportMember<Ident, PathContainer>>,
 > {
   span: Span,
   file: FilePath,

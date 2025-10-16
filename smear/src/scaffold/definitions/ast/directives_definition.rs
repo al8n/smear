@@ -561,7 +561,7 @@ from_location!(
 
 /// Represents a collection of directive locations where a directive can be applied.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DirectiveLocations<Location, Container = Vec<Location>> {
+pub struct DirectiveLocations<Location, Container = std::vec::Vec<Location>> {
   span: Span,
   locations: Container,
   _m: PhantomData<Location>,

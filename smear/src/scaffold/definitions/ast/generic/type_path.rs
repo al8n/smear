@@ -17,7 +17,7 @@ use super::{super::Path, TypeGenerics};
 /// v1::Comment<ID, Name>
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypePath<Ident, Type, PathSegmentContainer = Vec<Ident>, TypeContainer = Vec<Type>> {
+pub struct TypePath<Ident, Type, PathSegmentContainer = std::vec::Vec<Ident>, TypeContainer = std::vec::Vec<Type>> {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,
   generics: Option<TypeGenerics<Type, TypeContainer>>,

@@ -97,7 +97,7 @@ where
 /// <T, U> # A type generics with two type parameters: `T` and `U`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExtensionTypeGenerics<Ident, Container = Vec<ExtensionTypeParam<Ident>>> {
+pub struct ExtensionTypeGenerics<Ident, Container = std::vec::Vec<ExtensionTypeParam<Ident>>> {
   span: Span,
   params: Container,
   _ident: PhantomData<Ident>,

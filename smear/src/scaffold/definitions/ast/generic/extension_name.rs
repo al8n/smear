@@ -38,8 +38,8 @@ use super::{super::Path, ExtensionTypeGenerics, ExtensionTypeParam};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionName<
   Ident,
-  PathSegmentContainer = Vec<Ident>,
-  Container = Vec<ExtensionTypeParam<Ident>>,
+  PathSegmentContainer = std::vec::Vec<Ident>,
+  Container = std::vec::Vec<ExtensionTypeParam<Ident>>,
 > {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,

@@ -7,7 +7,6 @@ use logosky::{
 use crate::punctuator::At;
 
 use core::marker::PhantomData;
-use std::vec::Vec;
 
 /// Represents a single directive in a GraphQL-style syntax.
 ///
@@ -139,7 +138,7 @@ where
 ///
 /// Spec: [Directives](https://spec.graphql.org/draft/#Directives)
 #[derive(Debug, Clone, Copy)]
-pub struct Directives<Directive, Container = Vec<Directive>> {
+pub struct Directives<Directive, Container = std::vec::Vec<Directive>> {
   span: Span,
   directives: Container,
   _directive: PhantomData<Directive>,

@@ -55,7 +55,7 @@ use core::marker::PhantomData;
 /// - **Right bracket**: The closing `]` token with its position  
 /// - **Values**: The parsed elements in their container
 #[derive(Debug, Clone)]
-pub struct Set<Value, Container = Vec<Value>> {
+pub struct Set<Value, Container = std::vec::Vec<Value>> {
   span: Span,
   values: Container,
   _m: PhantomData<Value>,

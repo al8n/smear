@@ -61,7 +61,7 @@ impl From<SyntacticTokenKind> for Expectation {
 }
 
 /// The default container type used for collections in the AST.
-pub type DefaultVec<T> = Vec<T>;
+pub type DefaultVec<T> = std::vec::Vec<T>;
 
 /// The token stream type used for the AST parser implementation.
 pub type SyntacticTokenStream<'a, S> = logosky::TokenStream<'a, SyntacticToken<S>>;

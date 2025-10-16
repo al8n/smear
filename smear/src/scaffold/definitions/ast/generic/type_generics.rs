@@ -26,7 +26,7 @@ use crate::punctuator::{LAngle, RAngle};
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TypeGenerics<Type, Container = Vec<Type>> {
+pub struct TypeGenerics<Type, Container = std::vec::Vec<Type>> {
   span: Span,
   params: Container,
   _type: PhantomData<Type>,

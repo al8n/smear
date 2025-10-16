@@ -5,7 +5,6 @@ use logosky::{
 };
 
 use core::marker::PhantomData;
-use std::vec::Vec;
 
 use crate::punctuator::{Colon, LBrace, RBrace};
 
@@ -181,7 +180,7 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct RootOperationTypesDefinition<
   RootOperationTypeDefinition,
-  Container = Vec<RootOperationTypeDefinition>,
+  Container = std::vec::Vec<RootOperationTypeDefinition>,
 > {
   span: Span,
   root_operation_types: Container,

@@ -376,7 +376,7 @@ where
 /// Note: Zero or more variable definitions are allowed (the `*` indicates zero-or-more).
 /// Empty variables definitions `()` are valid and represent operations with no parameters.
 #[derive(Debug, Clone, Copy)]
-pub struct VariablesDefinition<VariableDefinition, Container = Vec<VariableDefinition>> {
+pub struct VariablesDefinition<VariableDefinition, Container = std::vec::Vec<VariableDefinition>> {
   span: Span,
   variables: Container,
   _v: PhantomData<VariableDefinition>,

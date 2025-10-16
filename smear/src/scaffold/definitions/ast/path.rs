@@ -10,7 +10,7 @@ use crate::punctuator::PathSeparator;
 
 /// A GraphQLx path, which is a sequence of identifiers separated by `::`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Path<Ident, Container = Vec<Ident>> {
+pub struct Path<Ident, Container = std::vec::Vec<Ident>> {
   span: Span,
   segments: Container,
   fqdp: bool, // fully qualified path

@@ -31,7 +31,7 @@ use logosky::{
 /// type FullDocument<S> = Document<DefinitionOrExtension<S>>;
 /// ```
 #[derive(Debug, Clone)]
-pub struct Document<Definition, Container = Vec<Definition>> {
+pub struct Document<Definition, Container = std::vec::Vec<Definition>> {
   span: Span,
   definitions: Container,
   _m: PhantomData<Definition>,

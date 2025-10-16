@@ -176,7 +176,7 @@ where
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments)
 #[derive(Debug, Clone, Copy)]
-pub struct Arguments<Arg, Container = Vec<Arg>> {
+pub struct Arguments<Arg, Container = std::vec::Vec<Arg>> {
   span: Span,
   l_paren: LParen,
   arguments: Container,

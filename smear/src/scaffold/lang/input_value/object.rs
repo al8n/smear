@@ -252,7 +252,7 @@ where
 ///
 /// Spec: [Input Object Values](https://spec.graphql.org/draft/#sec-Input-Object-Values)
 #[derive(Debug, Clone)]
-pub struct Object<Name, Value, Container = Vec<ObjectField<Name, Value>>> {
+pub struct Object<Name, Value, Container = std::vec::Vec<ObjectField<Name, Value>>> {
   span: Span,
   fields: Container,
   _m: PhantomData<(Name, Value)>,

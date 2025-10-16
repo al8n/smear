@@ -18,9 +18,9 @@ use super::TypePath;
 pub struct WherePredicate<
   Ident,
   Type,
-  PathSegmentsContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
-  Container = Vec<TypePath<Ident, Type>>,
+  PathSegmentsContainer = std::vec::Vec<Ident>,
+  TypeContainer = std::vec::Vec<Type>,
+  Container = std::vec::Vec<TypePath<Ident, Type>>,
 > {
   span: Span,
   bounded_type: TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
@@ -172,10 +172,10 @@ where
 pub struct WhereClause<
   Ident,
   Type,
-  PathSegmentsContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
-  TypePathsContainer = Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
-  Container = Vec<WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  PathSegmentsContainer = std::vec::Vec<Ident>,
+  TypeContainer = std::vec::Vec<Type>,
+  TypePathsContainer = std::vec::Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Container = std::vec::Vec<WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>>,
 > {
   span: Span,
   predicates: Container,
@@ -343,10 +343,10 @@ pub struct Constrained<
   Ident,
   Type,
   Target,
-  PathSegmentsContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
-  TypePathsContainer = Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
-  Container = Vec<
+  PathSegmentsContainer = std::vec::Vec<Ident>,
+  TypeContainer = std::vec::Vec<Type>,
+  TypePathsContainer = std::vec::Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Container = std::vec::Vec<
     WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
   >,
 > {

@@ -154,7 +154,7 @@ where
 /// - **Right bracket**: The closing `]` token with its position  
 /// - **Values**: The parsed elements in their container
 #[derive(Debug, Clone)]
-pub struct Map<Key, Value, Container = Vec<MapEntry<Key, Value>>> {
+pub struct Map<Key, Value, Container = std::vec::Vec<MapEntry<Key, Value>>> {
   span: Span,
   entries: Container,
   _m: PhantomData<MapEntry<Key, Value>>,

@@ -71,7 +71,7 @@ pub type SyntacticTokenErrors<'a, S> =
   Errors<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 
 /// The default container type used for collections in the AST.
-pub type DefaultVec<T> = Vec<T>;
+pub type DefaultVec<T> = std::vec::Vec<T>;
 
 /// Parse a value of type `T` from a string slice using the AST token.
 pub trait ParseStr<'a> {

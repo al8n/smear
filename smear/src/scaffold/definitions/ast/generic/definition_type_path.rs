@@ -20,8 +20,8 @@ use super::{super::Path, TypeGenerics};
 pub struct DefinitionTypePath<
   Ident,
   Type,
-  PathSegmentContainer = Vec<Ident>,
-  TypeContainer = Vec<Type>,
+  PathSegmentContainer = std::vec::Vec<Ident>,
+  TypeContainer = std::vec::Vec<Type>,
 > {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,

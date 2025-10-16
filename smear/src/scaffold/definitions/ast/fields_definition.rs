@@ -5,7 +5,6 @@ use logosky::{
 };
 
 use core::marker::PhantomData;
-use std::vec::Vec;
 
 use crate::punctuator::{Colon, LBrace, RBrace};
 
@@ -295,7 +294,7 @@ where
 ///
 /// Spec: [Fields Definition](https://spec.graphql.org/draft/#sec-Fields-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct FieldsDefinition<FieldDefinition, Container = Vec<FieldDefinition>> {
+pub struct FieldsDefinition<FieldDefinition, Container = std::vec::Vec<FieldDefinition>> {
   span: Span,
   fields: Container,
   _m: PhantomData<FieldDefinition>,

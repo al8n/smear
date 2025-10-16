@@ -18,7 +18,7 @@ use crate::{
 
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnionMemberTypes<Name, Container = Vec<Name>> {
+pub struct UnionMemberTypes<Name, Container = std::vec::Vec<Name>> {
   span: Span,
   members: Container,
   _m: PhantomData<Name>,
