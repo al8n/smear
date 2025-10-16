@@ -91,9 +91,9 @@ use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
 let doc = ExecutableDocument::<&str>::parse_str(query)?;
 
 // CST for tooling - preserves formatting
-use smear::lexer::graphql::cst::CstToken;
+use smear::lexer::graphql::cst::LosslessToken;
 use logosky::TokenStream;
-let tokens = TokenStream::<CstToken>::new(source);
+let tokens = TokenStream::<LosslessToken>::new(source);
 // Access comments, whitespace, exact formatting
 ```
 

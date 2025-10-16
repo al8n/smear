@@ -7,7 +7,7 @@
 //   tests::{self, TestToken},
 // };
 
-// impl<'a> TestToken<'a> for CstToken<'a> {
+// impl<'a> TestToken<'a> for LosslessToken<'a> {
 //   #[inline]
 //   fn is_ignored(&self) -> bool {
 //     self.is_ignored()
@@ -47,107 +47,107 @@
 
 // #[test]
 // fn test_unexpected_character() {
-//   tests::test_unexpected_character::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unexpected_character::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unknown_character() {
-//   tests::test_unknown_character::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unknown_character::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_number_leading_zero() {
-//   tests::test_number_leading_zero::<CstToken<'_>, LimitExceeded>();
+//   tests::test_number_leading_zero::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_int_leading_zeros_then_check_suffix() {
-//   tests::test_int_leading_zeros_then_check_suffix::<CstToken<'_>, LimitExceeded>();
+//   tests::test_int_leading_zeros_then_check_suffix::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_float_leading_zeros_and_other() {
-//   tests::test_float_leading_zeros_and_other::<CstToken<'_>, LimitExceeded>();
+//   tests::test_float_leading_zeros_and_other::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_invalid_number_suffix() {
-//   tests::test_invalid_number_suffix::<CstToken<'_>, LimitExceeded>();
+//   tests::test_invalid_number_suffix::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_missing_integer_part() {
-//   tests::test_missing_integer_part::<CstToken<'_>, LimitExceeded>();
+//   tests::test_missing_integer_part::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_missing_integer_part_and_invalid_suffix() {
-//   tests::test_missing_integer_part_and_invalid_suffix::<CstToken<'_>, LimitExceeded>();
+//   tests::test_missing_integer_part_and_invalid_suffix::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_float_eof() {
-//   tests::test_unexpected_float_eof::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unexpected_float_eof::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_number_lexme() {
-//   tests::test_unexpected_number_lexme::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unexpected_number_lexme::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_integer_ok() {
-//   tests::test_integer_ok::<CstToken<'_>, LimitExceeded>();
+//   tests::test_integer_ok::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_float_ok() {
-//   tests::test_float_ok::<CstToken<'_>, LimitExceeded>();
+//   tests::test_float_ok::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_inline_string_ok() {
-//   tests::test_inline_string_ok::<CstToken<'_>, LimitExceeded>();
+//   tests::test_inline_string_ok::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unterminated_inline_string() {
-//   tests::test_unterminated_inline_string::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unterminated_inline_string::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_incomplete_unicode_and_eof() {
-//   tests::test_incomplete_unicode_and_eof::<CstToken<'_>, LimitExceeded>();
+//   tests::test_incomplete_unicode_and_eof::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_line_terminator() {
-//   tests::test_unexpected_line_terminator::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unexpected_line_terminator::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unexpected_escaped() {
-//   tests::test_unexpected_escaped::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unexpected_escaped::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_surrogate_pair() {
-//   tests::test_surrogate_pair::<CstToken<'_>, LimitExceeded>();
+//   tests::test_surrogate_pair::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_invalid_surrogate_pair() {
-//   tests::test_invalid_surrogate_pair::<CstToken<'_>, LimitExceeded>();
+//   tests::test_invalid_surrogate_pair::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_unterminated_block_string() {
-//   tests::test_unterminated_block_string::<CstToken<'_>, LimitExceeded>();
+//   tests::test_unterminated_block_string::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
 // fn test_block_string_literal() {
-//   tests::test_surrogate_pair_in_block_string::<CstToken<'_>, LimitExceeded>();
+//   tests::test_surrogate_pair_in_block_string::<LosslessToken<'_>, LimitExceeded>();
 // }
 
 // #[test]
@@ -156,7 +156,7 @@
 //   let field = "a {".repeat(depth) + &"}".repeat(depth);
 //   let query = field.replace("{}", "{b}").to_string();
 
-//   let lexer = CstToken::lexer_with_extras(
+//   let lexer = LosslessToken::lexer_with_extras(
 //     query.as_str(),
 //     Tracker::with_recursion_tracker(RecursionLimiter::with_limitation(depth - 1)),
 //   );
@@ -186,7 +186,7 @@
 //   let limit = 300;
 //   let source = "a ".repeat(limit);
 
-//   let mut lexer = CstToken::lexer_with_extras(
+//   let mut lexer = LosslessToken::lexer_with_extras(
 //     source.as_str(),
 //     Tracker::with_token_tracker(TokenLimiter::with_limitation(limit - 1)),
 //   );

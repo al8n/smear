@@ -12,7 +12,7 @@ macro_rules! token {
             self,
             tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
           },
-          cst::{CstToken, CstTokenKind},
+          cst::{LosslessToken, LosslessTokenKind},
           LitInt, LitFloat,
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
@@ -21,8 +21,8 @@ macro_rules! token {
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for CstToken<$slice> {
-        type Kind = CstTokenKind;
+      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for LosslessToken<$slice> {
+        type Kind = LosslessTokenKind;
         type Char = $char;
         type Logos = Token $(<$lt>)?;
 
@@ -205,7 +205,7 @@ macro_rules! token {
         LitBlockStr(LitBlockStr<$slice>),
       }
 
-      impl$(<$lt>)? From<Token $(<$lt>)?> for CstToken<$slice> {
+      impl$(<$lt>)? From<Token $(<$lt>)?> for LosslessToken<$slice> {
         #[inline(always)]
         fn from(value: Token $(<$lt>)?) -> Self {
           match value {

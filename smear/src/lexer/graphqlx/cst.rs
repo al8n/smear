@@ -17,22 +17,22 @@ mod slice;
 mod str;
 
 /// The char type used for the AST token.
-pub type CstTokenChar<'a, S> = <CstToken<S> as Token<'a>>::Char;
+pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
 /// The error data type for lexing based on AST [`Token`].
 pub type CstLexerErrorData<'a, S> =
-  error::LexerErrorData<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+  error::LexerErrorData<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 /// The error type for lexing based on AST [`Token`].
-pub type CstLexerError<'a, S> = error::LexerError<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+pub type CstLexerError<'a, S> = error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 /// A collection of errors of AST [`Token`].
 pub type CstLexerErrors<'a, S> =
-  error::LexerErrors<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+  error::LexerErrors<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum CstToken<S> {
+pub enum LosslessToken<S> {
   /// Asterisk `*` token
   Asterisk,
   /// Ampersand `&` token
@@ -103,59 +103,59 @@ pub enum CstToken<S> {
   LitBlockStr(LitBlockStr<S>),
 }
 
-impl<S> CstToken<S> {
+impl<S> LosslessToken<S> {
   /// Returns the kind of the token.
   #[inline]
-  pub const fn kind(&self) -> CstTokenKind {
+  pub const fn kind(&self) -> LosslessTokenKind {
     match self {
-      Self::Identifier(_) => CstTokenKind::Identifier,
-      Self::LitInt(_) => CstTokenKind::Int,
-      Self::LitFloat(_) => CstTokenKind::Float,
-      Self::LitInlineStr(_) => CstTokenKind::InlineString,
-      Self::LitBlockStr(_) => CstTokenKind::BlockString,
-      Self::Dollar => CstTokenKind::Dollar,
-      Self::LParen => CstTokenKind::LParen,
-      Self::RParen => CstTokenKind::RParen,
-      Self::Spread => CstTokenKind::Spread,
-      Self::Colon => CstTokenKind::Colon,
-      Self::Equal => CstTokenKind::Equal,
-      Self::At => CstTokenKind::At,
-      Self::LBracket => CstTokenKind::LBracket,
-      Self::RBracket => CstTokenKind::RBracket,
-      Self::LBrace => CstTokenKind::LBrace,
-      Self::RBrace => CstTokenKind::RBrace,
-      Self::Pipe => CstTokenKind::Pipe,
-      Self::Bang => CstTokenKind::Bang,
-      Self::Ampersand => CstTokenKind::Ampersand,
-      Self::LAngle => CstTokenKind::LAngle,
-      Self::RAngle => CstTokenKind::RAngle,
-      Self::FatArrow => CstTokenKind::FatArrow,
-      Self::Plus => CstTokenKind::Plus,
-      Self::Minus => CstTokenKind::Minus,
-      Self::PathSeparator => CstTokenKind::PathSeparator,
-      Self::Asterisk => CstTokenKind::Asterisk,
-      Self::Space => CstTokenKind::Space,
-      Self::Tab => CstTokenKind::Tab,
-      Self::Newline => CstTokenKind::Newline,
-      Self::CarriageReturn => CstTokenKind::CarriageReturn,
-      Self::CarriageReturnAndNewline => CstTokenKind::CarriageReturnAndNewline,
-      Self::Comma => CstTokenKind::Comma,
-      Self::Comment(_) => CstTokenKind::Comment,
-      Self::Bom(_) => CstTokenKind::Bom,
+      Self::Identifier(_) => LosslessTokenKind::Identifier,
+      Self::LitInt(_) => LosslessTokenKind::Int,
+      Self::LitFloat(_) => LosslessTokenKind::Float,
+      Self::LitInlineStr(_) => LosslessTokenKind::InlineString,
+      Self::LitBlockStr(_) => LosslessTokenKind::BlockString,
+      Self::Dollar => LosslessTokenKind::Dollar,
+      Self::LParen => LosslessTokenKind::LParen,
+      Self::RParen => LosslessTokenKind::RParen,
+      Self::Spread => LosslessTokenKind::Spread,
+      Self::Colon => LosslessTokenKind::Colon,
+      Self::Equal => LosslessTokenKind::Equal,
+      Self::At => LosslessTokenKind::At,
+      Self::LBracket => LosslessTokenKind::LBracket,
+      Self::RBracket => LosslessTokenKind::RBracket,
+      Self::LBrace => LosslessTokenKind::LBrace,
+      Self::RBrace => LosslessTokenKind::RBrace,
+      Self::Pipe => LosslessTokenKind::Pipe,
+      Self::Bang => LosslessTokenKind::Bang,
+      Self::Ampersand => LosslessTokenKind::Ampersand,
+      Self::LAngle => LosslessTokenKind::LAngle,
+      Self::RAngle => LosslessTokenKind::RAngle,
+      Self::FatArrow => LosslessTokenKind::FatArrow,
+      Self::Plus => LosslessTokenKind::Plus,
+      Self::Minus => LosslessTokenKind::Minus,
+      Self::PathSeparator => LosslessTokenKind::PathSeparator,
+      Self::Asterisk => LosslessTokenKind::Asterisk,
+      Self::Space => LosslessTokenKind::Space,
+      Self::Tab => LosslessTokenKind::Tab,
+      Self::Newline => LosslessTokenKind::Newline,
+      Self::CarriageReturn => LosslessTokenKind::CarriageReturn,
+      Self::CarriageReturnAndNewline => LosslessTokenKind::CarriageReturnAndNewline,
+      Self::Comma => LosslessTokenKind::Comma,
+      Self::Comment(_) => LosslessTokenKind::Comment,
+      Self::Bom(_) => LosslessTokenKind::Bom,
     }
   }
 }
 
-impl<S> From<CstToken<S>> for CstTokenKind {
+impl<S> From<LosslessToken<S>> for LosslessTokenKind {
   #[inline]
-  fn from(token: CstToken<S>) -> Self {
-    CstTokenKind::from(&token)
+  fn from(token: LosslessToken<S>) -> Self {
+    LosslessTokenKind::from(&token)
   }
 }
 
-impl<S> From<&CstToken<S>> for CstTokenKind {
+impl<S> From<&LosslessToken<S>> for LosslessTokenKind {
   #[inline]
-  fn from(token: &CstToken<S>) -> Self {
+  fn from(token: &LosslessToken<S>) -> Self {
     token.kind()
   }
 }
@@ -163,7 +163,7 @@ impl<S> From<&CstToken<S>> for CstTokenKind {
 /// The token kind for
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
-pub enum CstTokenKind {
+pub enum LosslessTokenKind {
   /// Asterisk `*` token
   Asterisk,
   /// Ampersand `&` token
