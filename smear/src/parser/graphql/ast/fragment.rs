@@ -5,7 +5,7 @@ use logosky::{
 };
 
 use crate::{
-  lexer::graphql::ast::SyntacticLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
   scaffold::{self, FragmentName},
 };
 

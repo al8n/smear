@@ -5,7 +5,7 @@ use logosky::{
 
 use crate::{
   keywords::{self, *},
-  lexer::graphql::ast::SyntacticLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
 };
 
 use super::*;
