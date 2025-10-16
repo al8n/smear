@@ -75,6 +75,11 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
     }
   }
 
+  #[inline]
+  pub(crate) const fn path_mut(&mut self) -> &mut Path<Ident, PathSegmentContainer> {
+    &mut self.path
+  }
+
   /// Returns the path.
   #[inline]
   pub const fn path(&self) -> &Path<Ident, PathSegmentContainer> {

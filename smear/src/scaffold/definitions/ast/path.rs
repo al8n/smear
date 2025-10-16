@@ -54,6 +54,11 @@ impl<Ident, Container> Path<Ident, Container> {
     }
   }
 
+  #[inline]
+  pub(crate) const fn set_fqdp(&mut self, fqdp: bool) {
+    self.fqdp = fqdp;
+  }
+
   /// Returns the segments of the path.
   #[inline]
   pub const fn segments(&self) -> &Container {

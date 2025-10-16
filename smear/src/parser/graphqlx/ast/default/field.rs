@@ -476,6 +476,21 @@ where
                       selection_set,
                     )))
                   }
+                  // Fragment spread
+                  SyntacticToken::PathSeparator => {
+                    let (mut tp, directives) = inp.parse(
+                      TypePath::<S>::parser()
+                        .then(Directives::parser().or_not()),
+                    )?;
+                    tp.path_mut().set_fqdp(true);
+
+                    let (tp_span, path, generics) = tp.into_components();
+                    Ok(Selection::FragmentSpread(FragmentSpread::new(
+                      inp.span_since(&before),
+                      FragmentTypePath::new((fragment_span.start()..tp_span.end()).into(), path, generics),
+                      directives,
+                    )))
+                  },
                   SyntacticToken::LBrace => {
                     let (selection, rbrace) = inp.parse(
                       selection_parser
