@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, string::String};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::human_display::DisplayHuman;

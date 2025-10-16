@@ -1,3 +1,5 @@
+use std::vec::Vec;
+
 use logosky::{
   Parseable,
   chumsky::{ParseResult, Parser},

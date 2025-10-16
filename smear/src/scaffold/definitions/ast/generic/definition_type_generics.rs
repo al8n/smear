@@ -8,6 +8,8 @@ use logosky::{
 
 use crate::punctuator::{Equal, LAngle, RAngle};
 
+use std::vec::Vec;
+
 /// A definition type parameter with an optional default type.
 ///
 /// ```graphqlx

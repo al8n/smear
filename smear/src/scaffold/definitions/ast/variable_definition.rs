@@ -8,6 +8,8 @@ use logosky::{
 
 use crate::punctuator::{Colon, LParen, RParen};
 
+use std::vec::Vec;
+
 /// Represents a variable definition in a GraphQL operation.
 ///
 /// A variable definition specifies a parameter that can be provided to a GraphQL

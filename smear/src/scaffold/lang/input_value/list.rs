@@ -9,6 +9,7 @@ use crate::error::UnclosedBracketError;
 use crate::punctuator::{LBracket, RBracket};
 
 use core::marker::PhantomData;
+use std::vec::Vec;
 
 /// A GraphQL list literal value.
 ///

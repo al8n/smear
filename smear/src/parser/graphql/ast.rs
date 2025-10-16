@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+use std::vec::Vec;
+
 use logosky::{
   Parseable,
   chumsky::{ParseResult, Parser},

@@ -16,6 +16,8 @@ use crate::{
   punctuator::Ampersand,
 };
 
+use std::vec::Vec;
+
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImplementInterfaces<Name, Container = Vec<Name>> {

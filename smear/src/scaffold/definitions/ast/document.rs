@@ -6,6 +6,8 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
+use std::vec::Vec;
+
 /// A document consisting of a series of definitions.
 ///
 /// This is the top-level container for GraphQL documents. It holds a collection of definitions

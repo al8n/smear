@@ -14,6 +14,8 @@ use crate::{
 
 use super::{super::Path, TypeGenerics};
 
+use std::vec::Vec;
+
 /// A GraphQLx type path.
 ///
 /// ## Example

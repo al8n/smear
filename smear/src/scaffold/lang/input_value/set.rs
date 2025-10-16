@@ -12,6 +12,7 @@ use crate::{
 };
 
 use core::marker::PhantomData;
+use std::vec::Vec;
 
 /// A GraphQLx set literal value.
 ///

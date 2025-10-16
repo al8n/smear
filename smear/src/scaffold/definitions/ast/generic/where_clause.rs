@@ -13,6 +13,8 @@ use crate::{
 
 use super::TypePath;
 
+use std::vec::Vec;
+
 /// A where predicate, which constrains a type to implement certain interfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WherePredicate<

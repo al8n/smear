@@ -8,6 +8,8 @@ use logosky::{
 
 use crate::punctuator::{LAngle, RAngle};
 
+use std::vec::Vec;
+
 /// A extension type parameter with an optional default type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionTypeParam<Ident> {

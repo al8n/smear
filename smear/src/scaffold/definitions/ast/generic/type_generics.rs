@@ -8,6 +8,8 @@ use logosky::{
 
 use crate::punctuator::{LAngle, RAngle};
 
+use std::vec::Vec;
+
 /// A type generics.
 ///
 /// ## Example

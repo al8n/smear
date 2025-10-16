@@ -9,6 +9,7 @@ use crate::error::UnclosedBraceError;
 use crate::punctuator::{Colon, LBrace, RBrace};
 
 use core::marker::PhantomData;
+use std::vec::Vec;
 
 /// A single field within a GraphQL input object literal.
 ///

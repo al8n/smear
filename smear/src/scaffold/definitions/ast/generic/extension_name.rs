@@ -8,6 +8,8 @@ use crate::punctuator::{LAngle, PathSeparator, RAngle};
 
 use super::{super::Path, ExtensionTypeGenerics, ExtensionTypeParam};
 
+use std::vec::Vec;
+
 /// The AST for a extension name.
 ///
 /// In the below example, `User<ID, Name>` is a extension name, where `User` is the identifier,

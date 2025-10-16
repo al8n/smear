@@ -14,6 +14,8 @@ use crate::{
 
 use super::Path;
 
+use std::vec::Vec;
+
 /// A GraphQLx imported item, potentially with an alias.
 ///
 /// ## Grammar

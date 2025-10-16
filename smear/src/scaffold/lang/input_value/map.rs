@@ -12,6 +12,7 @@ use crate::{
 };
 
 use core::marker::PhantomData;
+use std::vec::Vec;
 
 /// A single entry in a GraphQLx map literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

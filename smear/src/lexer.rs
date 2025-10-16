@@ -200,6 +200,8 @@ mod string_lexer;
 ///   // Process each token...
 /// }
 /// ```
+#[cfg(feature = "graphql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
 pub mod graphql;
 
 /// Lexers for GraphQLX (extended GraphQL).
@@ -234,6 +236,8 @@ pub mod graphql;
 /// # Note
 ///
 /// GraphQLX requires the `unstable` feature flag.
+#[cfg(feature = "graphqlx")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
 mod handlers;

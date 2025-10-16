@@ -8,6 +8,8 @@ use logosky::{
 
 use crate::punctuator::PathSeparator;
 
+use std::vec::Vec;
+
 /// A GraphQLx path, which is a sequence of identifiers separated by `::`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Path<Ident, Container = Vec<Ident>> {
