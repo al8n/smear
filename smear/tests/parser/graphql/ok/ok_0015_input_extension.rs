@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0015_input_extension.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn input_object_extension() {
   use smear::parser::graphql::ast::{InputObjectTypeExtension, ParseStr};
@@ -25,6 +26,7 @@ fn input_object_extension() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_input_object_extension() {
   use smear::parser::graphqlx::ast::{InputObjectTypeExtension, ParseStr};
 

@@ -3,6 +3,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0042_object_type_definition_without_fields.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn object_type_definition_without_fields() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -51,6 +52,7 @@ fn object_type_definition_without_fields() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_object_type_definition_without_fields() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0026_schema_extension.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn schema_extension() {
   use smear::parser::graphql::ast::{SchemaExtension, ParseStr};
 
@@ -35,6 +36,7 @@ fn schema_extension() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_schema_extension() {
   use smear::parser::graphqlx::ast::{SchemaExtension, ParseStr};
 

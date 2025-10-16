@@ -3,6 +3,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0032_supergraph.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn supergraph() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -15,6 +16,7 @@ fn supergraph() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_supergraph() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0031_variables_with_default.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn variables_with_default() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -50,6 +51,7 @@ fn variables_with_default() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_variables_with_default() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

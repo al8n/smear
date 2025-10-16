@@ -3,6 +3,7 @@ const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0008_directi
 
 const ARGS_INPUT: &str = r###"(isTreat: Boolean, treatKind: String)"###;
 
+#[cfg(feature = "graphql")]
 #[test]
 fn arguments_definition() {
   use smear::parser::graphql::ast::{ArgumentsDefinition, ParseStr};
@@ -70,6 +71,7 @@ fn directive_definition_with_arguments() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_arguments_definition() {
   use smear::parser::graphqlx::ast::{ArgumentsDefinition, ParseStr};
 

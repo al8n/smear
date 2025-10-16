@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0037_operation_type_definition_with_inline_fragment.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn operation_type_definition_with_inline_fragment() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -101,6 +102,7 @@ fn operation_type_definition_with_inline_fragment() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_operation_type_definition_with_inline_fragment() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

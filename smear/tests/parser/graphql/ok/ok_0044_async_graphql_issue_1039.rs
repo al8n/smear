@@ -4,6 +4,7 @@ const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0044_async_g
 
 // https://github.com/async-graphql/async-graphql/issues/1039
 #[test]
+#[cfg(feature = "graphql")]
 fn async_graphql_issue_1039() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 

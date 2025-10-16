@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0001_input_type_definition_without_input_values.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn input_object_type_definition_without_input_values() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -52,6 +53,7 @@ fn input_object_type_definition_without_input_values() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_input_object_type_definition_without_input_values() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0003_selection_with_fields.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn selection_with_fields() {
   use smear::parser::graphql::ast::{SelectionSet, ParseStr};
 
@@ -63,6 +64,7 @@ fn selection_with_fields() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_selection_with_fields() {
   use smear::parser::graphqlx::ast::{SelectionSet, ParseStr};
 

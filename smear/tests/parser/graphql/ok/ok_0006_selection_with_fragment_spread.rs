@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0006_selection_with_fragment_spread.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn selection_with_fragment_spread() {
   use smear::parser::graphql::ast::{SelectionSet, ParseStr};
 
@@ -105,6 +106,7 @@ fn selection_with_fragment_spread() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_selection_with_fragment_spread() {
   use smear::parser::graphqlx::ast::{SelectionSet, ParseStr};
 

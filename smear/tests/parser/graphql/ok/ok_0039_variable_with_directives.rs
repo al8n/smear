@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0039_variable_with_directives.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn variable_with_directives() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -59,6 +60,7 @@ fn variable_with_directives() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_variable_with_directives() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

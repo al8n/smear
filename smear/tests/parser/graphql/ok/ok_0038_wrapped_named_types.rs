@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0038_wrapped_named_types.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn wrapped_named_types() {
   use smear::parser::graphql::ast::{{Document, ObjectTypeDefinition}, ParseStr};
 
@@ -128,6 +129,7 @@ fn wrapped_named_types() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_wrapped_named_types() {
   use smear::parser::graphqlx::ast::{{Document, ObjectTypeDefinition}, ParseStr};
 

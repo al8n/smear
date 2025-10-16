@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0014_input_definition.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn input_object_definition() {
   use smear::parser::graphql::ast::{DescribedInputObjectTypeDefinition, ParseStr};
@@ -32,6 +33,7 @@ fn input_object_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_input_object_definition() {
   use smear::parser::graphqlx::ast::{DescribedInputObjectTypeDefinition, ParseStr};
 
