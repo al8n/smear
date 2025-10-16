@@ -1,6 +1,6 @@
 use crate::{
   error::UnclosedBraceError,
-  lexer::graphql::ast::SyntacticLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
   punctuator::{At, RBrace},
 };
 

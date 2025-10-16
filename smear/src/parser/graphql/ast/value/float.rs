@@ -4,7 +4,7 @@ use logosky::{
   utils::Span,
 };
 
-use crate::lexer::graphql::ast::SyntacticLexerErrors;
+use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
 
 use super::super::*;
 

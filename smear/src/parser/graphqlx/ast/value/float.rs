@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::lexer::graphqlx::{LitFloat, ast::SyntacticLexerErrors};
+use crate::lexer::graphqlx::{LitFloat, syntactic::SyntacticLexerErrors};
 
 use super::super::*;
 

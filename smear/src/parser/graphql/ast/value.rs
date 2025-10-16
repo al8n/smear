@@ -1,7 +1,7 @@
 use crate::{
   error::{UnclosedBraceError as _, UnclosedBracketError},
   hints::VariableValueHint,
-  lexer::graphql::ast::SyntacticLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
   punctuator::{RBrace, RBracket},
   scaffold,
 };

@@ -2,10 +2,10 @@
 pub mod error;
 
 /// Abstract syntax tree (AST) lexers for GraphQL
-pub mod ast;
+pub mod syntactic;
 
 /// Concrete syntax tree (CST) lexers for GraphQL
-pub mod cst;
+pub mod lossless;
 
 mod handlers;
 

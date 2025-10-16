@@ -6,7 +6,7 @@ use logosky::{
 };
 
 use crate::{
-  lexer::graphqlx::ast::SyntacticLexerErrors, parser::graphqlx::error::InvalidEnumValue,
+  lexer::graphqlx::syntactic::SyntacticLexerErrors, parser::graphqlx::error::InvalidEnumValue,
 };
 
 use super::super::*;

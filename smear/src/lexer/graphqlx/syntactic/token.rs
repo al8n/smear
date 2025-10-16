@@ -9,7 +9,7 @@ macro_rules! token {
         lexer::{graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
-          ast::{SyntacticToken, SyntacticTokenKind, LitInt, LitFloat},
+          syntactic::{SyntacticToken, SyntacticTokenKind, LitInt, LitFloat},
         }, LitBlockStr, LitInlineStr, SealedWrapper, handlers::*},
       };
 

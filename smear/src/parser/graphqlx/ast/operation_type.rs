@@ -6,7 +6,7 @@ use logosky::{
 
 use crate::{
   keywords::{Mutation, Query, Subscription},
-  lexer::graphqlx::ast::SyntacticLexerErrors,
+  lexer::graphqlx::syntactic::SyntacticLexerErrors,
   scaffold::OperationType,
 };
 

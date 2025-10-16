@@ -12,7 +12,7 @@ macro_rules! token {
             increase_recursion_depth,
             self,
           },
-          ast::{SyntacticToken, SyntacticTokenKind},
+          syntactic::{SyntacticToken, SyntacticTokenKind},
         }, handlers::*, LitBlockStr, LitInlineStr, SealedWrapper,},
       };
 

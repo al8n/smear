@@ -91,26 +91,61 @@ pub mod scaffold;
 /// The lexer module converts source text into zero-copy tokens. It provides lexers for
 /// both standard GraphQL and the extended GraphQLX dialect.
 ///
+/// # Token Streams
+///
+/// Smear provides **two complementary token types** for different use cases:
+///
+/// ## SyntacticToken (Fast)
+///
+/// - **Skips trivia**: Automatically filters out whitespace, comments, and commas
+/// - **Use for**: GraphQL servers, query execution, performance-critical parsing
+/// - **Benefits**: Minimal memory footprint, maximum speed
+///
+/// ## LosslessToken (Complete)
+///
+/// - **Preserves trivia**: Includes all whitespace, comments, and formatting
+/// - **Use for**: Code formatters, linters, IDEs, syntax highlighters
+/// - **Benefits**: Perfect source reconstruction, access to all source information
+///
 /// # Features
 ///
 /// - **Zero-copy tokenization**: All tokens reference the original source
-/// - **Generic source types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, and more
+/// - **Generic source types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::HipStr`, and more
 /// - **Error recovery**: Can continue lexing after errors
+/// - **Thread-safe**: Tokens are `Send + Sync` when using thread-safe source types
 ///
 /// # Modules
 ///
 /// - [`graphql`](lexer::graphql): Standard GraphQL lexer (draft specification)
-/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLX lexer with generics, imports, etc.
+///   - [`graphql::syntactic`](lexer::graphql::syntactic): Fast tokens (skips trivia)
+///   - [`graphql::lossless`](lexer::graphql::lossless): Complete tokens (preserves all formatting)
 ///
-/// # Example
+/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLX lexer with generics, imports, etc.
+///   - [`graphqlx::syntactic`](lexer::graphqlx::syntactic): Fast tokens (skips trivia)
+///   - [`graphqlx::lossless`](lexer::graphqlx::lossless): Complete tokens (preserves all formatting)
+///
+/// # Examples
+///
+/// ## Fast tokenization with SyntacticToken
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphql::ast::SyntacticToken;
+/// use smear::lexer::graphql::syntactic::SyntacticToken;
 /// use logosky::TokenStream;
 ///
 /// let source = "query { user { id name } }";
 /// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
-/// // Process tokens...
+/// // Only syntactically significant tokens (whitespace automatically skipped)
+/// ```
+///
+/// ## Complete tokenization with LosslessToken
+///
+/// ```rust,ignore
+/// use smear::lexer::graphql::lossless::LosslessToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { # comment\n  user { id }\n}";
+/// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+/// // ALL tokens including spaces, comments, exact formatting
 /// ```
 pub mod lexer;
 

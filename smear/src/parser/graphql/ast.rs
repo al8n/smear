@@ -10,7 +10,7 @@ use super::{
   Expectation,
   error::{Error, Errors, Extra},
 };
-use crate::lexer::graphql::ast::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
+use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
 pub use fragment::*;

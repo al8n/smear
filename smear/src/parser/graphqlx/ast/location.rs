@@ -6,7 +6,7 @@ use logosky::{
 
 use crate::{
   keywords,
-  lexer::graphqlx::ast::SyntacticLexerErrors,
+  lexer::graphqlx::syntactic::SyntacticLexerErrors,
   scaffold::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation},
 };
 

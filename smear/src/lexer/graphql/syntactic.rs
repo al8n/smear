@@ -3,7 +3,7 @@ use logosky::{Token, utils::recursion_tracker::RecursionLimitExceeded};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  LitFloat, LitInt, error,
+  error,
 };
 
 use token::token;
@@ -16,18 +16,73 @@ mod tests;
 mod slice;
 mod str;
 
-/// The char type used for the AST token.
+/// The char type used for the syntactic token.
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on AST [`Token`].
+/// The error data type for lexing based on syntactic [`Token`].
 pub type SyntacticLexerErrorData<'a, S> =
   error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// The error type for lexing based on AST [`Token`].
+/// The error type for lexing based on syntactic [`Token`].
 pub type SyntacticLexerError<'a, S> =
   error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// A collection of errors of AST [`Token`].
+/// A collection of errors for syntactic [`Token`].
 pub type SyntacticLexerErrors<'a, S> =
   error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
+/// A syntactic token for GraphQL lexing that only includes syntactically significant tokens.
+///
+/// This token type is optimized for high-performance parsing by **excluding trivia** (whitespace,
+/// comments, and commas). It provides minimal memory footprint and fast lexing, making it ideal
+/// for GraphQL servers, query execution, and other performance-critical applications.
+///
+/// # Ignored Tokens (Trivia)
+///
+/// The following tokens are automatically skipped during lexing and will NOT appear in the token stream:
+/// - **Whitespace**: spaces, tabs, newlines, carriage returns
+/// - **Comments**: `# ...` (from `#` to end of line)
+/// - **Commas**: `,`
+/// - **Byte Order Mark (BOM)**: `\u{FEFF}`
+///
+/// These trivia tokens are defined by the lexer's skip pattern and are discarded during tokenization.
+///
+/// # Use Cases
+///
+/// - **GraphQL servers**: Fast query parsing without formatting overhead
+/// - **Query execution**: Minimal token stream for performance-critical paths
+/// - **Schema compilation**: Efficient type system parsing
+/// - **Production systems**: Where formatting preservation is not required
+///
+/// # Comparison with [`LosslessToken`](super::lossless::LosslessToken)
+///
+/// | Feature | `SyntacticToken` | [`LosslessToken`](super::lossless::LosslessToken) |
+/// |---------|------------------|----------------------------------------------|
+/// | Whitespace | ❌ Skipped | ✅ Preserved |
+/// | Comments | ❌ Skipped | ✅ Preserved |
+/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Performance | ⚡ Fast | 🐢 Slower |
+/// | Memory | 💾 Minimal | 💾 Higher |
+/// | Use case | Servers, execution | Formatters, linters, IDEs |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphql::syntactic::SyntacticToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { user { id } }";
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+///
+/// // Only syntactically significant tokens appear in the stream:
+/// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
+/// // (whitespace is automatically skipped)
+/// ```
+///
+/// # Generic Over Source Type
+///
+/// `SyntacticToken<S>` is generic over the source type `S`, allowing zero-copy parsing:
+/// - `SyntacticToken<&str>` - For borrowed string sources
+/// - `SyntacticToken<&[u8]>` - For byte slice sources
+/// - `SyntacticToken<bytes::Bytes>` - For shared ownership with cheap cloning
+/// - `SyntacticToken<hipstr::HipStr>` - For hybrid string storage
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
@@ -35,21 +90,17 @@ pub type SyntacticLexerErrors<'a, S> =
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum SyntacticToken<S> {
-  /// Asterisk `*` token
-  Asterisk,
   /// Ampersand `&` token
   Ampersand,
   /// At `@` token
   At,
-  /// Right angle bracket `>` token
-  RAngle,
   /// Right curly brace `}` token
   RBrace,
   /// Right square bracket `]` token
   RBracket,
   /// Right parenthesis `)` token
   RParen,
-  /// Dot `.` token
+  /// Colon `:` token
   Colon,
   /// Dollar `$` token
   Dollar,
@@ -57,8 +108,6 @@ pub enum SyntacticToken<S> {
   Equal,
   /// Exclamation mark `!` token
   Bang,
-  /// Left angle bracket `<` token
-  LAngle,
   /// Left curly brace `{` token
   LBrace,
   /// Left square bracket `[` token
@@ -67,22 +116,14 @@ pub enum SyntacticToken<S> {
   LParen,
   /// Pipe `|` token
   Pipe,
-  /// Fat arrow `=>` token
-  FatArrow,
   /// Spread operator `...` token
   Spread,
-  /// Plus `+` token
-  Plus,
-  /// Minus `-` token
-  Minus,
-  /// Path separator `::` token
-  PathSeparator,
   /// Identifier token
   Identifier(S),
   /// Float literal token
-  LitFloat(LitFloat<S>),
+  LitFloat(S),
   /// Int literal token
-  LitInt(LitInt<S>),
+  LitInt(S),
   /// Inline string token
   LitInlineStr(LitInlineStr<S>),
   /// Block string token
@@ -113,13 +154,6 @@ impl<S> SyntacticToken<S> {
       Self::Pipe => SyntacticTokenKind::Pipe,
       Self::Bang => SyntacticTokenKind::Bang,
       Self::Ampersand => SyntacticTokenKind::Ampersand,
-      Self::LAngle => SyntacticTokenKind::LAngle,
-      Self::RAngle => SyntacticTokenKind::RAngle,
-      Self::FatArrow => SyntacticTokenKind::FatArrow,
-      Self::Plus => SyntacticTokenKind::Plus,
-      Self::Minus => SyntacticTokenKind::Minus,
-      Self::PathSeparator => SyntacticTokenKind::PathSeparator,
-      Self::Asterisk => SyntacticTokenKind::Asterisk,
     }
   }
 }
@@ -138,7 +172,11 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
-/// The token kind for
+/// The kind of a [`SyntacticToken`], without the associated source data.
+///
+/// This enum represents the type of a token without carrying the actual source slice,
+/// making it useful for pattern matching and token classification without dealing with
+/// the generic source type parameter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
@@ -155,12 +193,6 @@ pub enum SyntacticTokenKind {
   BlockString,
   /// Dollar `$` token
   Dollar,
-  /// Fat arrow `=>` token
-  FatArrow,
-  /// Left angle bracket `<` token
-  LAngle,
-  /// Right angle bracket `>` token
-  RAngle,
   /// Left parenthesis `(` token
   LParen,
   /// Right parenthesis `)` token
@@ -171,17 +203,15 @@ pub enum SyntacticTokenKind {
   Colon,
   /// Equal `=` token
   Equal,
-  /// Asterisk `*` token
-  Asterisk,
   /// At `@` token
   At,
-  /// Left square bracket `[` token
+  /// Left bracket `[` token
   LBracket,
-  /// Right square bracket `]` token
+  /// Right bracket `]` token
   RBracket,
-  /// Left curly brace `{` token
+  /// Left brace `{` token
   LBrace,
-  /// Right curly brace `}` token
+  /// Right brace `}` token
   RBrace,
   /// Pipe `|` token
   Pipe,
@@ -189,10 +219,4 @@ pub enum SyntacticTokenKind {
   Bang,
   /// Ampersand `&` token
   Ampersand,
-  /// Plus `+` token
-  Plus,
-  /// Minus `-` token
-  Minus,
-  /// Path separator `::` token
-  PathSeparator,
 }
