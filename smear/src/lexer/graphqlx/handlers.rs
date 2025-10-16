@@ -4,6 +4,7 @@ use logosky::{
   utils::{
     Lexeme, UnexpectedEnd, UnexpectedLexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+    tracker::{LimitExceeded, Tracker},
   },
 };
 
@@ -16,6 +17,108 @@ use super::error;
 
 pub(super) mod slice;
 pub(super) mod str;
+
+#[inline(always)]
+pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer.extras.increase_recursion();
+  lexer.extras.increase_token();
+  lexer
+    .extras
+    .check()
+    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
+}
+
+#[inline(always)]
+pub(super) fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer.extras.increase_token();
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_and_then<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
+) -> Result<O, error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
+    .and_then(|_| {
+      f(lexer).inspect(|_| {
+        increase_token(lexer);
+      })
+    })
+}
+
+#[allow(clippy::result_large_err)]
+#[inline(always)]
+pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
+) -> Result<O, error::LexerErrors<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| {
+      error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())).into()
+    })
+    .and_then(|_| {
+      f(lexer).inspect(|_| {
+        increase_token(lexer);
+      })
+    })
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_map<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> O,
+) -> Result<O, error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
+    .map(|_| {
+      increase_token(lexer);
+      f(lexer)
+    })
+}
+
+#[inline(always)]
+pub(super) fn tt_hook<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e.into())))
+    .inspect(|_| {
+      increase_token(lexer);
+    })
+}
 
 #[inline(always)]
 pub(super) fn increase_recursion_depth<'a, C, T>(

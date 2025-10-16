@@ -8,7 +8,7 @@ use crate::{
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, UnexpectedEnd},
+  utils::{Lexeme, UnexpectedEnd, tracker::Tracker},
 };
 
 use super::error;
@@ -28,6 +28,25 @@ where
 {
   match lexer.slice().as_ref().iter().next() {
     Some(&ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
+    None => LexerError::unexpected_eoi(lexer.span().into()),
+  }
+  .into()
+}
+
+#[inline(always)]
+pub(in crate::lexer) fn cst_default_error<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> error::LexerErrors<u8, Extras>
+where
+  T: Logos<'a, Source = S, Extras = Tracker>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  match lexer.slice().as_ref().iter().next() {
+    Some(&ch) => {
+      lexer.extras.increase_token();
+      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
+    }
     None => LexerError::unexpected_eoi(lexer.span().into()),
   }
   .into()

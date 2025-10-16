@@ -1,10 +1,7 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{
-  Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
-  recursion_tracker::RecursionLimitExceeded,
-};
+use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
 
 use crate::{error::*, hints::*};
 
@@ -283,16 +280,16 @@ impl<Char, StateError> UnterminatedSpreadOperatorError for LexerErrors<Char, Sta
   }
 }
 
-impl<Char> BadStateError for LexerError<Char, RecursionLimitExceeded> {
-  type StateError = RecursionLimitExceeded;
+impl<Char, StateError> BadStateError for LexerError<Char, StateError> {
+  type StateError = StateError;
   #[inline]
   fn bad_state(span: Span, error: Self::StateError) -> Self {
     Self::const_new(span, LexerErrorData::State(error))
   }
 }
 
-impl<Char> BadStateError for LexerErrors<Char, RecursionLimitExceeded> {
-  type StateError = RecursionLimitExceeded;
+impl<Char, StateError> BadStateError for LexerErrors<Char, StateError> {
+  type StateError = StateError;
   #[inline]
   fn bad_state(span: Span, error: Self::StateError) -> Self {
     LexerError::const_new(span, LexerErrorData::State(error)).into()

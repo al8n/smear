@@ -47,93 +47,71 @@ macro_rules! token {
       #[logos(subpattern exp = r"(?&esign)(?&digit)+")]
       #[logos(subpattern frac = r"\.(?&digit)+")]
       pub enum Token $(<$lt>)? {
-        /// Ampersand `&` token
         #[token("&", tt_hook)]
         Ampersand,
 
-        /// At `@` token
         #[token("@", tt_hook)]
         At,
 
-        /// Comma `,` token
         #[token("}", decrease_recursion_depth_and_increase_token)]
         RBrace,
 
-        /// Bracket `]` token
         #[token("]", decrease_recursion_depth_and_increase_token)]
         RBracket,
 
-        /// Parenthesis `)` token
         #[token(")", decrease_recursion_depth_and_increase_token)]
         RParen,
 
-        /// Dot `.` token
         #[token(":", tt_hook)]
         Colon,
 
-        /// Dollar `$` token
         #[token("$", tt_hook)]
         Dollar,
 
-        /// Equal `=` token
         #[token("=", tt_hook)]
         Equal,
 
-        /// Exclamation mark `!` token
         #[token("!", tt_hook)]
         Bang,
 
-        /// Left curly brace `{` token
         #[token("{", increase_recursion_depth_and_token)]
         LBrace,
 
-        /// Left square bracket `[` token
         #[token("[", increase_recursion_depth_and_token)]
         LBracket,
 
-        /// Left parenthesis `(` token
         #[token("(", increase_recursion_depth_and_token)]
         LParen,
 
-        /// Pipe `|` token
         #[token("|", tt_hook)]
         Pipe,
 
-        /// Comma `,` token
         #[token(",", tt_hook)]
         Comma,
 
-        /// Space ` ` token
         #[token(" ", tt_hook)]
         Space,
 
-        /// Tab `\t` token
         #[token("\t", tt_hook)]
         Tab,
 
-        /// Newline `\n` token
         #[token("\n", tt_hook)]
         Newline,
 
-        /// Carriage return `\r` token
         #[token("\r", tt_hook)]
         CarriageReturn,
 
-        /// Newline with carriage return `\r\n` token
         #[token("\r\n", tt_hook)]
         CarriageReturnAndNewline,
 
-        /// BOM `\u{FEFF}` token
         #[token("\u{FEFF}", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Bom($slice),
 
-        /// Spread operator `...` token
         #[token("...", tt_hook)]
         #[token("..", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
-        /// Comment token, including the leading `#`
         #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Comment($slice),
 
@@ -151,7 +129,7 @@ macro_rules! token {
         #[regex("-?(0|(?&non_zero_digit)(?&digit)*)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
         Float($slice),
 
-        #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice())  })]
+        #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Identifier($slice),
 
         #[regex("(?&int)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)))]

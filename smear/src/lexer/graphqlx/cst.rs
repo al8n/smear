@@ -1,304 +1,235 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexable,
-  logos::{Lexer, Logos},
-  utils::tracker::{LimitExceeded, Tracker},
-};
+use logosky::{Token, utils::tracker::LimitExceeded};
 
 use super::{
-  handlers::{str::*, unterminated_spread_operator},
-  string_lexer::*,
+  super::{LitBlockStr, LitInlineStr},
+  LitFloat, LitInt, error,
 };
 
-use crate::error::{self, *};
+use token::token;
+
+mod token;
 
 #[cfg(test)]
 mod tests;
 
-/// The error data type for lexing based on lossless [`Token`].
-pub type LexerErrorData = error::LexerErrorData<char, LimitExceeded>;
-/// The error type for lexing based on lossless [`Token`].
-pub type LexerError = error::LexerError<char, LimitExceeded>;
-/// A collection of errors of lossless [`Token`].
-pub type LexerErrors = error::LexerErrors<char, LimitExceeded>;
+mod slice;
+mod str;
 
-#[inline(always)]
-pub(super) fn increase_recursion_depth_and_token<'a>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-) -> Result<(), LexerError> {
-  lexer.extras.increase_recursion();
-  lexer.extras.increase_token();
-  lexer
-    .extras
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e)))
-}
+/// The char type used for the AST token.
+pub type CstTokenChar<'a, S> = <CstToken<S> as Token<'a>>::Char;
+/// The error data type for lexing based on AST [`Token`].
+pub type CstLexerErrorData<'a, S> =
+  error::LexerErrorData<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// The error type for lexing based on AST [`Token`].
+pub type CstLexerError<'a, S> = error::LexerError<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// A collection of errors of AST [`Token`].
+pub type CstLexerErrors<'a, S> =
+  error::LexerErrors<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
 
-#[inline(always)]
-pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
-  lexer.extras.decrease_recursion();
-  // right punctuation also increases the token count
-  lexer.extras.increase_token();
-}
-
-#[inline(always)]
-pub(super) fn increase_token<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
-  lexer.extras.increase_token();
-}
-
-#[inline(always)]
-fn tt_hook_and_then<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerError>,
-) -> Result<O, LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
-}
-
-#[allow(clippy::result_large_err)]
-#[inline(always)]
-fn tt_hook_and_then_into_errors<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerErrors>,
-) -> Result<O, LexerErrors> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())).into())
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
-}
-
-#[inline(always)]
-fn tt_hook_map<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> O,
-) -> Result<O, LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .map(|_| {
-      increase_token(lexer);
-      f(lexer)
-    })
-}
-
-#[inline(always)]
-fn tt_hook<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) -> Result<(), LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .inspect(|_| {
-      increase_token(lexer);
-    })
-}
-
-/// The token kind for lossless lexing.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[repr(u16)]
-pub enum TokenKind {
-  Ampersand,
-  At,
-  RBrace,
-  LBrace,
-  RBracket,
-  LBracket,
-  RParen,
-  LParen,
-  Bang,
-  Colon,
-  Dollar,
-  Equal,
-  Float,
-  Boolean,
-  Identifier,
-  Int,
-  Whitespaces,
-  Pipe,
-  Spread,
-  String,
-  Comment,
-}
-
-/// Lexer for the GraphQL specification: http://spec.graphql.org/
 #[derive(
-  Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
+  Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-#[logos(
-  crate = logosky::logos,
-  extras = Tracker,
-  error(LexerErrors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => {
-      lexer.extras.increase_token();
-      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
-    },
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }.into())
-)]
-pub enum CstToken<'a> {
+pub enum CstToken<S> {
+  /// Asterisk `*` token
+  Asterisk,
   /// Ampersand `&` token
-  #[token("&", tt_hook)]
   Ampersand,
-
   /// At `@` token
-  #[token("@", tt_hook)]
   At,
-
-  /// Comma `,` token
-  #[token("}", decrease_recursion_depth)]
+  /// BOM `\u{FEFF}` token
+  Bom(S),
+  /// Right angle bracket `>` token
+  RAngle,
+  /// Right curly brace `}` token
   RBrace,
-
-  /// Bracket `]` token
-  #[token("]", decrease_recursion_depth)]
+  /// Right square bracket `]` token
   RBracket,
-
-  /// Parenthesis `)` token
-  #[token(")", decrease_recursion_depth)]
+  /// Right parenthesis `)` token
   RParen,
-
-  /// Dot `.` token
-  #[token(":", tt_hook)]
+  /// Colon `:` token
   Colon,
-
   /// Dollar `$` token
-  #[token("$", tt_hook)]
   Dollar,
-
   /// Equal `=` token
-  #[token("=", tt_hook)]
   Equal,
-
   /// Exclamation mark `!` token
-  #[token("!", tt_hook)]
   Bang,
-
+  /// Left angle bracket `<` token
+  LAngle,
   /// Left curly brace `{` token
-  #[token("{", increase_recursion_depth_and_token)]
   LBrace,
-
   /// Left square bracket `[` token
-  #[token("[", increase_recursion_depth_and_token)]
   LBracket,
-
   /// Left parenthesis `(` token
-  #[token("(", increase_recursion_depth_and_token)]
   LParen,
-
   /// Pipe `|` token
-  #[token("|", tt_hook)]
   Pipe,
-
+  /// Fat arrow `=>` token
+  FatArrow,
   /// Spread operator `...` token
-  #[token("...", tt_hook)]
-  #[token("..", |lexer| tt_hook_and_then(lexer, unterminated_spread_operator))]
-  #[token(".", |lexer| tt_hook_and_then(lexer, unterminated_spread_operator))]
   Spread,
-
-  /// Comment token, including the leading `#`
-  #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-  Comment(&'a str),
-
-  /// Whitespace token
-  #[regex("[ \t,\r\n\u{FEFF}]+", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-  Whitespaces(&'a str),
-
-  /// Float literal token
-  #[regex("-?0[0-9]+(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
-  #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix)))]
-  #[regex(
-    "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_then_check_suffix)
-  )]
-  #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
-  #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
-  #[regex("-?0[0-9]+\\.", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_fractional_error))]
-  #[regex("-?(0|[1-9][0-9]*)\\.", |lexer| tt_hook_and_then(lexer, handle_fractional_error))]
-  #[regex("-?0[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
-  #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
-  Float(&'a str),
-
+  /// Plus `+` token
+  Plus,
+  /// Minus `-` token
+  Minus,
+  /// Space ` ` token
+  Space,
+  /// Tab `\t` token
+  Tab,
+  /// Newline `\n` token
+  Newline,
+  /// Carriage return `\r` token
+  CarriageReturn,
+  /// Carriage return + newline `\r\n` token
+  CarriageReturnAndNewline,
+  /// Comma `,` token
+  Comma,
+  /// Comment `# ...` token
+  Comment(S),
+  /// Path separator `::` token
+  PathSeparator,
   /// Identifier token
-  #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice())  })]
-  Identifier(&'a str),
-
-  /// Integer literal token
-  #[regex("-?(0|[1-9][0-9]*)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, DecimalError::UnexpectedSuffix)))]
-  #[regex("-?0[0-9]+", |lexer| {
-    tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, DecimalError::LeadingZeros, DecimalError::UnexpectedSuffix))
-  })]
-  #[token("-", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))
-  })]
-  #[token("+", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
-  })]
-  Int(&'a str),
-  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitInlineStr::lex(SealedWrapper::from_mut(lexer))) })]
-  LitInlineStr(LitInlineStr<&'a str>),
-  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitBlockStr::lex(SealedWrapper::from_mut(lexer))) })]
-  LitBlockStr(LitBlockStr<&'a str>),
+  Identifier(S),
+  /// Float literal token
+  LitFloat(LitFloat<S>),
+  /// Int literal token
+  LitInt(LitInt<S>),
+  /// Inline string token
+  LitInlineStr(LitInlineStr<S>),
+  /// Block string token
+  LitBlockStr(LitBlockStr<S>),
 }
 
-impl<'a> logosky::Token<'a> for CstToken<'a> {
-  type Kind = TokenKind;
-  type Char = char;
-  type Logos = Self;
-
-  #[inline(always)]
-  fn from_logos(value: Self::Logos) -> Self {
-    value
-  }
-
-  #[inline(always)]
-  fn kind(&self) -> Self::Kind {
+impl<S> CstToken<S> {
+  /// Returns the kind of the token.
+  #[inline]
+  pub const fn kind(&self) -> CstTokenKind {
     match self {
-      Self::Ampersand => TokenKind::Ampersand,
-      Self::At => TokenKind::At,
-      Self::RBrace => TokenKind::RBrace,
-      Self::LBrace => TokenKind::LBrace,
-      Self::RBracket => TokenKind::RBracket,
-      Self::LBracket => TokenKind::LBracket,
-      Self::RParen => TokenKind::RParen,
-      Self::LParen => TokenKind::LParen,
-      Self::Bang => TokenKind::Bang,
-      Self::Colon => TokenKind::Colon,
-      Self::Dollar => TokenKind::Dollar,
-      Self::Equal => TokenKind::Equal,
-      Self::Float(_) => TokenKind::Float,
-      Self::Identifier(_) => TokenKind::Identifier,
-      Self::Int(_) => TokenKind::Int,
-      Self::Pipe => TokenKind::Pipe,
-      Self::Spread => TokenKind::Spread,
-      Self::LitInlineStr(_) => TokenKind::String,
-      Self::LitBlockStr(_) => TokenKind::String,
-      Self::Comment(_) => TokenKind::Comment,
-      Self::Whitespaces(_) => TokenKind::Whitespaces,
+      Self::Identifier(_) => CstTokenKind::Identifier,
+      Self::LitInt(_) => CstTokenKind::Int,
+      Self::LitFloat(_) => CstTokenKind::Float,
+      Self::LitInlineStr(_) => CstTokenKind::InlineString,
+      Self::LitBlockStr(_) => CstTokenKind::BlockString,
+      Self::Dollar => CstTokenKind::Dollar,
+      Self::LParen => CstTokenKind::LParen,
+      Self::RParen => CstTokenKind::RParen,
+      Self::Spread => CstTokenKind::Spread,
+      Self::Colon => CstTokenKind::Colon,
+      Self::Equal => CstTokenKind::Equal,
+      Self::At => CstTokenKind::At,
+      Self::LBracket => CstTokenKind::LBracket,
+      Self::RBracket => CstTokenKind::RBracket,
+      Self::LBrace => CstTokenKind::LBrace,
+      Self::RBrace => CstTokenKind::RBrace,
+      Self::Pipe => CstTokenKind::Pipe,
+      Self::Bang => CstTokenKind::Bang,
+      Self::Ampersand => CstTokenKind::Ampersand,
+      Self::LAngle => CstTokenKind::LAngle,
+      Self::RAngle => CstTokenKind::RAngle,
+      Self::FatArrow => CstTokenKind::FatArrow,
+      Self::Plus => CstTokenKind::Plus,
+      Self::Minus => CstTokenKind::Minus,
+      Self::PathSeparator => CstTokenKind::PathSeparator,
+      Self::Asterisk => CstTokenKind::Asterisk,
+      Self::Space => CstTokenKind::Space,
+      Self::Tab => CstTokenKind::Tab,
+      Self::Newline => CstTokenKind::Newline,
+      Self::CarriageReturn => CstTokenKind::CarriageReturn,
+      Self::CarriageReturnAndNewline => CstTokenKind::CarriageReturnAndNewline,
+      Self::Comma => CstTokenKind::Comma,
+      Self::Comment(_) => CstTokenKind::Comment,
+      Self::Bom(_) => CstTokenKind::Bom,
     }
   }
 }
 
-impl<'a> CstToken<'a> {
-  /// Returns `true` if the token belongs to an ignored category.
-  #[inline(always)]
-  pub const fn is_ignored(&self) -> bool {
-    self.is_whitespaces() || self.is_comment()
+impl<S> From<CstToken<S>> for CstTokenKind {
+  #[inline]
+  fn from(token: CstToken<S>) -> Self {
+    CstTokenKind::from(&token)
   }
+}
+
+impl<S> From<&CstToken<S>> for CstTokenKind {
+  #[inline]
+  fn from(token: &CstToken<S>) -> Self {
+    token.kind()
+  }
+}
+
+/// The token kind for
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(u16)]
+pub enum CstTokenKind {
+  /// Asterisk `*` token
+  Asterisk,
+  /// Ampersand `&` token
+  At,
+  /// At `@` token
+  Bom,
+  /// BOM `\u{FEFF}` token
+  Dollar,
+  /// Fat arrow `=>` token
+  FatArrow,
+  /// Left angle bracket `<` token
+  LAngle,
+  /// Right angle bracket `>` token
+  RAngle,
+  /// Left parenthesis `(` token
+  LParen,
+  /// Right parenthesis `)` token
+  RParen,
+  /// Spread operator `...` token
+  Spread,
+  /// Colon `:` token
+  Colon,
+  /// Equal `=` token
+  Equal,
+  /// Left bracket `[` token
+  LBracket,
+  /// Right bracket `]` token
+  RBracket,
+  /// Left brace `{` token
+  LBrace,
+  /// Right brace `}` token
+  RBrace,
+  /// Pipe `|` token
+  Pipe,
+  /// Bang `!` token
+  Bang,
+  /// Ampersand `&` token
+  Ampersand,
+  /// Plus `+` token
+  Plus,
+  /// Minus `-` token
+  Minus,
+  /// Path separator `::` token
+  PathSeparator,
+  /// Comma `,` token
+  Comma,
+  /// Space ` ` token
+  Space,
+  /// Tab `\t` token
+  Tab,
+  /// Newline `\n` token
+  Newline,
+  /// Carriage return `\r` token
+  CarriageReturn,
+  /// Carriage return + newline `\r\n` token
+  CarriageReturnAndNewline,
+  /// Comment `# ...` token
+  Comment,
+  /// Identifier token
+  Identifier,
+  /// Float literal token
+  Float,
+  /// Int literal token
+  Int,
+  /// Inline string token
+  InlineString,
+  /// Block string token
+  BlockString,
 }
