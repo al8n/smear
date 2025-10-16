@@ -1,307 +1,202 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexable,
-  logos::{Lexer, Logos},
-  utils::tracker::{LimitExceeded, Tracker},
-};
+use logosky::{Token, utils::tracker::LimitExceeded};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
   error,
 };
 
+use token::token;
 
-use crate::error::*;
-
+mod slice;
+mod str;
 mod token;
 
 #[cfg(test)]
 mod tests;
 
-/// The error data type for lexing based on lossless [`Token`].
-pub type LexerErrorData = error::LexerErrorData<char, LimitExceeded>;
-/// The error type for lexing based on lossless [`Token`].
-pub type LexerError = error::LexerError<char, LimitExceeded>;
-/// A collection of errors of lossless [`Token`].
-pub type LexerErrors = error::LexerErrors<char, LimitExceeded>;
+/// The char type used for the AST token.
+pub type CstTokenChar<'a, S> = <CstToken<S> as Token<'a>>::Char;
+/// The error data type for lexing based on AST [`Token`].
+pub type CstLexerErrorData<'a, S> =
+  error::LexerErrorData<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// The error type for lexing based on AST [`Token`].
+pub type CstLexerError<'a, S> = error::LexerError<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// A collection of errors of AST [`Token`].
+pub type CstLexerErrors<'a, S> =
+  error::LexerErrors<<CstToken<S> as Token<'a>>::Char, LimitExceeded>;
 
-#[inline(always)]
-pub(super) fn increase_recursion_depth_and_token<'a>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-) -> Result<(), LexerError> {
-  lexer.extras.increase_recursion();
-  lexer.extras.increase_token();
-  lexer
-    .extras
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e)))
+#[derive(
+  Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
+)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum CstToken<S> {
+  /// Ampersand `&` token
+  Ampersand,
+  /// At `@` token
+  At,
+  /// BOM `\u{FEFF}` token
+  Bom(S),
+  /// Right curly brace `}` token
+  RBrace,
+  /// Right square bracket `]` token
+  RBracket,
+  /// Right parenthesis `)` token
+  RParen,
+  /// Space ` ` token
+  Space,
+  /// Tab `\t` token
+  Tab,
+  /// Carriage return `\r` token
+  CarriageReturn,
+  /// Newline `\n` token
+  Newline,
+  /// Carriage return + Newline `\r\n` token
+  CarriageReturnAndNewline,
+  /// Comment token, including the leading `#`
+  Comment(S),
+  /// Comma `,` token
+  Comma,
+  /// Colon `:` token
+  Colon,
+  /// Dollar `$` token
+  Dollar,
+  /// Equal `=` token
+  Equal,
+  /// Exclamation mark `!` token
+  Bang,
+  /// Left curly brace `{` token
+  LBrace,
+  /// Left square bracket `[` token
+  LBracket,
+  /// Left parenthesis `(` token
+  LParen,
+  /// Pipe `|` token
+  Pipe,
+  /// Spread operator `...` token
+  Spread,
+  /// Identifier token
+  Identifier(S),
+  /// Float literal token
+  LitFloat(S),
+  /// Int literal token
+  LitInt(S),
+  /// Inline string token
+  LitInlineStr(LitInlineStr<S>),
+  /// Block string token
+  LitBlockStr(LitBlockStr<S>),
 }
 
-#[inline(always)]
-pub(super) fn decrease_recursion_depth<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
-  lexer.extras.decrease_recursion();
-  // right punctuation also increases the token count
-  lexer.extras.increase_token();
+impl<S> CstToken<S> {
+  /// Returns the kind of the token.
+  #[inline]
+  pub const fn kind(&self) -> CstTokenKind {
+    match self {
+      Self::Identifier(_) => CstTokenKind::Identifier,
+      Self::LitInt(_) => CstTokenKind::Int,
+      Self::LitFloat(_) => CstTokenKind::Float,
+      Self::LitInlineStr(_) => CstTokenKind::InlineString,
+      Self::LitBlockStr(_) => CstTokenKind::BlockString,
+      Self::Dollar => CstTokenKind::Dollar,
+      Self::LParen => CstTokenKind::LParen,
+      Self::RParen => CstTokenKind::RParen,
+      Self::Spread => CstTokenKind::Spread,
+      Self::Colon => CstTokenKind::Colon,
+      Self::Equal => CstTokenKind::Equal,
+      Self::At => CstTokenKind::At,
+      Self::LBracket => CstTokenKind::LBracket,
+      Self::RBracket => CstTokenKind::RBracket,
+      Self::LBrace => CstTokenKind::LBrace,
+      Self::RBrace => CstTokenKind::RBrace,
+      Self::Pipe => CstTokenKind::Pipe,
+      Self::Bang => CstTokenKind::Bang,
+      Self::Ampersand => CstTokenKind::Ampersand,
+      Self::Comma => CstTokenKind::Comma,
+      Self::Space => CstTokenKind::Space,
+      Self::Tab => CstTokenKind::Tab,
+      Self::CarriageReturn => CstTokenKind::CarriageReturn,
+      Self::Newline => CstTokenKind::Newline,
+      Self::CarriageReturnAndNewline => CstTokenKind::CarriageReturnAndNewline,
+      Self::Bom(_) => CstTokenKind::Bom,
+      Self::Comment(_) => CstTokenKind::Comment,
+    }
+  }
 }
 
-#[inline(always)]
-pub(super) fn increase_token<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) {
-  lexer.extras.increase_token();
+impl<S> From<CstToken<S>> for CstTokenKind {
+  #[inline]
+  fn from(token: CstToken<S>) -> Self {
+    CstTokenKind::from(&token)
+  }
 }
 
-#[inline(always)]
-fn tt_hook_and_then<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerError>,
-) -> Result<O, LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
-}
-
-#[allow(clippy::result_large_err)]
-#[inline(always)]
-fn tt_hook_and_then_into_errors<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> Result<O, LexerErrors>,
-) -> Result<O, LexerErrors> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())).into())
-    .and_then(|_| {
-      f(lexer).inspect(|_| {
-        increase_token(lexer);
-      })
-    })
-}
-
-#[inline(always)]
-fn tt_hook_map<'a, O>(
-  lexer: &mut Lexer<'a, CstToken<'a>>,
-  f: impl FnOnce(&mut Lexer<'a, CstToken<'a>>) -> O,
-) -> Result<O, LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .map(|_| {
-      increase_token(lexer);
-      f(lexer)
-    })
-}
-
-#[inline(always)]
-fn tt_hook<'a>(lexer: &mut Lexer<'a, CstToken<'a>>) -> Result<(), LexerError> {
-  lexer
-    .extras
-    .token()
-    .check()
-    .map_err(|e| LexerError::new(lexer.span(), LexerErrorData::State(e.into())))
-    .inspect(|_| {
-      increase_token(lexer);
-    })
+impl<S> From<&CstToken<S>> for CstTokenKind {
+  #[inline]
+  fn from(token: &CstToken<S>) -> Self {
+    token.kind()
+  }
 }
 
 /// The token kind for lossless lexing.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 pub enum CstTokenKind {
-  Ampersand,
-  At,
-  RBrace,
-  LBrace,
-  RBracket,
-  LBracket,
-  RParen,
-  LParen,
-  Bang,
-  Colon,
-  Dollar,
-  Equal,
-  Float,
-  Boolean,
-  Identifier,
-  Int,
-  Whitespaces,
-  Pipe,
-  Spread,
-  String,
-  Comment,
-}
-
-/// Lexer for the GraphQL specification: http://spec.graphql.org/
-#[derive(
-  Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
-)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-#[logos(
-  crate = logosky::logos,
-  extras = Tracker,
-  error(LexerErrors, |lexer| match lexer.slice().chars().next() {
-    Some(ch) => {
-      lexer.extras.increase_token();
-      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
-    },
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }.into())
-)]
-pub enum CstToken<'a> {
   /// Ampersand `&` token
-  #[token("&", tt_hook)]
   Ampersand,
-
   /// At `@` token
-  #[token("@", tt_hook)]
   At,
-
-  /// Comma `,` token
-  #[token("}", decrease_recursion_depth)]
+  /// BOM `\u{FEFF}` token
+  Bom,
+  /// Right curly brace `}` token
   RBrace,
-
-  /// Bracket `]` token
-  #[token("]", decrease_recursion_depth)]
-  RBracket,
-
-  /// Parenthesis `)` token
-  #[token(")", decrease_recursion_depth)]
-  RParen,
-
-  /// Dot `.` token
-  #[token(":", tt_hook)]
-  Colon,
-
-  /// Dollar `$` token
-  #[token("$", tt_hook)]
-  Dollar,
-
-  /// Equal `=` token
-  #[token("=", tt_hook)]
-  Equal,
-
-  /// Exclamation mark `!` token
-  #[token("!", tt_hook)]
-  Bang,
-
-  /// Left curly brace `{` token
-  #[token("{", increase_recursion_depth_and_token)]
+  /// Right square bracket `]` token
   LBrace,
 
+  RBracket,
   /// Left square bracket `[` token
-  #[token("[", increase_recursion_depth_and_token)]
   LBracket,
-
+  /// Right parenthesis `)` token
+  RParen,
   /// Left parenthesis `(` token
-  #[token("(", increase_recursion_depth_and_token)]
   LParen,
-
+  /// Bang `!` token
+  Bang,
+  /// Colon `:` token
+  Colon,
+  /// Dollar `$` token
+  Dollar,
+  /// Equal `=` token
+  Equal,
+  /// Space ` ` token
+  Space,
+  /// Tab `\t` token
+  Tab,
+  /// Carriage return token
+  CarriageReturn,
+  /// Newline token
+  Newline,
+  /// `\r\n` token
+  CarriageReturnAndNewline,
+  /// Comma `,` token
+  Comma,
   /// Pipe `|` token
-  #[token("|", tt_hook)]
   Pipe,
-
   /// Spread operator `...` token
-  #[token("...", tt_hook)]
-  #[token("..", |lexer| tt_hook_and_then(lexer, unterminated_spread_operator))]
-  #[token(".", |lexer| tt_hook_and_then(lexer, unterminated_spread_operator))]
   Spread,
-
-  /// Comment token, including the leading `#`
-  #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-  Comment(&'a str),
-
-  /// Whitespace token
-  #[regex("[ \t,\r\n\u{FEFF}]+", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-  Whitespaces(&'a str),
 
   /// Float literal token
-  #[regex("-?0[0-9]+(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
-  #[regex("-?(0|[1-9][0-9]*)(\\.[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+|[eE][+-]?[0-9]+)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, FloatError::UnexpectedSuffix)))]
-  #[regex(
-    "-?\\.[0-9]+([eE][+-]?[0-9]+)?",
-    |lexer| tt_hook_and_then_into_errors(lexer, handle_float_missing_integer_part_error_then_check_suffix)
-  )]
-  #[regex("-?0[0-9]+\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
-  #[regex("-?(0|[1-9][0-9]*)\\.[0-9]+[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
-  #[regex("-?0[0-9]+\\.", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_fractional_error))]
-  #[regex("-?(0|[1-9][0-9]*)\\.", |lexer| tt_hook_and_then(lexer, handle_fractional_error))]
-  #[regex("-?0[0-9]+[eE][+-]?", |lexer| tt_hook_and_then_into_errors(lexer, handle_leading_zeros_and_exponent_error))]
-  #[regex("-?(0|[1-9][0-9]*)[eE][+-]?", |lexer| tt_hook_and_then(lexer, handle_exponent_error))]
-  Float(&'a str),
-
+  Float,
+  /// Boolean literal token
+  Boolean,
   /// Identifier token
-  #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice())  })]
-  Identifier(&'a str),
-
+  Identifier,
   /// Integer literal token
-  #[regex("-?(0|[1-9][0-9]*)", |lexer| tt_hook_and_then(lexer, |lexer| handle_number_suffix(lexer, IntError::UnexpectedSuffix)))]
-  #[regex("-?0[0-9]+", |lexer| {
-    tt_hook_and_then_into_errors(lexer, |lexer| handle_leading_zero_and_number_suffix_error(lexer, IntError::LeadingZeros, IntError::UnexpectedSuffix))
-  })]
-  #[token("-", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '-', lexer.span().start)))
-  })]
-  #[token("+", |lexer| {
-    tt_hook_and_then(lexer, |lexer| Err(LexerError::unexpected_char(lexer.span().into(), '+', lexer.span().start)))
-  })]
-  Int(&'a str),
-  #[token("\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitInlineStr::lex(SealedWrapper::from_mut(lexer))) })]
-  LitInlineStr(LitInlineStr<&'a str>),
-  #[token("\"\"\"", |lexer| { tt_hook_and_then(lexer, |lexer| LitBlockStr::lex(SealedWrapper::from_mut(lexer))) })]
-  LitBlockStr(LitBlockStr<&'a str>),
-}
-
-impl<'a> logosky::Token<'a> for CstToken<'a> {
-  type Kind = TokenKind;
-  type Char = char;
-  type Logos = Self;
-
-  #[inline(always)]
-  fn from_logos(value: Self::Logos) -> Self {
-    value
-  }
-
-  #[inline(always)]
-  fn kind(&self) -> Self::Kind {
-    match self {
-      Self::Ampersand => TokenKind::Ampersand,
-      Self::At => TokenKind::At,
-      Self::RBrace => TokenKind::RBrace,
-      Self::LBrace => TokenKind::LBrace,
-      Self::RBracket => TokenKind::RBracket,
-      Self::LBracket => TokenKind::LBracket,
-      Self::RParen => TokenKind::RParen,
-      Self::LParen => TokenKind::LParen,
-      Self::Bang => TokenKind::Bang,
-      Self::Colon => TokenKind::Colon,
-      Self::Dollar => TokenKind::Dollar,
-      Self::Equal => TokenKind::Equal,
-      Self::Float(_) => TokenKind::Float,
-      Self::Identifier(_) => TokenKind::Identifier,
-      Self::Int(_) => TokenKind::Int,
-      Self::Pipe => TokenKind::Pipe,
-      Self::Spread => TokenKind::Spread,
-      Self::LitInlineStr(_) => TokenKind::String,
-      Self::LitBlockStr(_) => TokenKind::String,
-      Self::Comment(_) => TokenKind::Comment,
-      Self::Whitespaces(_) => TokenKind::Whitespaces,
-    }
-  }
-}
-
-impl<'a> CstToken<'a> {
-  /// Returns `true` if the token belongs to an ignored category.
-  #[inline(always)]
-  pub const fn is_ignored(&self) -> bool {
-    self.is_whitespaces() || self.is_comment()
-  }
+  Int,
+  /// Inline string token
+  InlineString,
+  /// Block string token
+  BlockString,
+  /// Comment token
+  Comment,
 }

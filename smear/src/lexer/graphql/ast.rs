@@ -44,7 +44,7 @@ pub enum AstToken<S> {
   RBracket,
   /// Right parenthesis `)` token
   RParen,
-  /// Dot `.` token
+  /// Colon `:` token
   Colon,
   /// Dollar `$` token
   Dollar,

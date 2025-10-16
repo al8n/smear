@@ -3,7 +3,7 @@ use logosky::{
   logos::Lexer,
   utils::{
     CharSize, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
-    recursion_tracker::RecursionLimiter,
+    recursion_tracker::RecursionLimiter, tracker::Tracker,
   },
 };
 
@@ -19,6 +19,16 @@ where
   E: UnterminatedSpreadOperatorError,
 {
   E::unterminated_spread_operator(lexer.span().into())
+}
+
+#[inline(always)]
+pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer.extras.decrease_recursion();
+  // right punctuation also increases the token count
+  lexer.extras.increase_token();
 }
 
 #[inline(always)]
@@ -165,7 +175,7 @@ pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   match b {
     b' ' | b'\t' | b'\r' | b'\n' | b',' | b'#' => true,
     0xEF => {
-      // BOM
+      // Bom
       slice.len() >= 3 && slice[1] == 0xBB && slice[2] == 0xBF
     }
     _ => false,
