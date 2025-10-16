@@ -240,4 +240,5 @@ pub mod graphql;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod handlers;

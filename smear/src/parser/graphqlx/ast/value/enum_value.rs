@@ -11,10 +11,10 @@ use crate::{
 
 use super::super::*;
 
-// pub use crate::parser::value::EnumValue;
+use crate::parser::value::EnumValue as EnumValueInner;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
-pub struct EnumValue<S>(Path<S>);
+pub struct EnumValue<S>(EnumValueInner<Path<S>>);
 
 impl<S> AsSpan<Span> for EnumValue<S> {
   #[inline]
@@ -35,7 +35,8 @@ impl<S> IntoComponents for EnumValue<S> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.0.into_components()
+    let (_, path) = self.0.into_components();
+    path.into_components()
   }
 }
 
@@ -43,7 +44,7 @@ impl<S> EnumValue<S> {
   /// Creates a new enum value.
   #[inline]
   pub(super) const fn new(path: Path<S>) -> Self {
-    Self(path)
+    Self(EnumValueInner::new(*path.span(), path))
   }
 
   /// Returns the span of the enum value.
@@ -54,8 +55,8 @@ impl<S> EnumValue<S> {
 
   /// Returns the value of the enum.
   #[inline]
-  pub fn value(&self) -> &Path<S> {
-    &self.0
+  pub const fn value(&self) -> &Path<S> {
+    self.0.source_ref()
   }
 }
 

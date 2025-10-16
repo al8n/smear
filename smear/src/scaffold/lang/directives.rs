@@ -104,11 +104,7 @@ impl<Name, Args> Directive<Name, Args> {
     At::parser()
       .ignore_then(name_parser)
       .then(args_parser.or_not())
-      .map_with(|(name, arguments), exa| Self {
-        span: exa.span(),
-        name,
-        arguments,
-      })
+      .map_with(|(name, arguments), exa| Self::new(exa.span(), name, arguments))
   }
 }
 
@@ -217,10 +213,6 @@ where
       .repeated()
       .at_least(1)
       .collect()
-      .map_with(|directives, exa| Self {
-        span: exa.span(),
-        directives,
-        _directive: PhantomData,
-      })
+      .map_with(|directives, exa| Self::new(exa.span(), directives))
   }
 }

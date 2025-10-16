@@ -126,7 +126,9 @@ pub mod graphql;
 pub mod graphqlx;
 
 /// Common value parsers shared between GraphQL and GraphQLX.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod value;
 
 /// Common identifier parsers.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod ident;

@@ -170,11 +170,7 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
     LBrace::parser()
       .ignore_then(selection_parser.repeated().at_least(1).collect())
       .then_ignore(RBrace::parser())
-      .map_with(|selections, exa| Self {
-        span: exa.span(),
-        selections,
-        _marker: PhantomData,
-      })
+      .map_with(|selections, exa| Self::new(exa.span(), selections))
   }
 }
 
