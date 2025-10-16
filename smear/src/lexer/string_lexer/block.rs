@@ -189,7 +189,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
 
         // Fast-return for empty result.
         if keep_start >= keep_end {
-          return std::borrow::Cow::Owned(String::new());
+          return std::borrow::Cow::Owned(std::string::String::new());
         }
 
         // Write one logical line body:
@@ -237,7 +237,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
         }
 
         // Iterate logical lines of `inner`, honoring CR, LF, or CRLF.
-        let mut out = String::with_capacity(cap);
+        let mut out = std::string::String::with_capacity(cap);
         let mut i = 0usize;
         let bytes = inner.as_bytes();
         let mut line_idx = 0usize;

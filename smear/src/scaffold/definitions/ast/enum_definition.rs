@@ -211,7 +211,8 @@ where
 ///
 /// Spec: [Enum Values Definition](https://spec.graphql.org/draft/#sec-Enum-Values-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumValuesDefinition<EnumValueDefinition, Container = std::vec::Vec<EnumValueDefinition>> {
+pub struct EnumValuesDefinition<EnumValueDefinition, Container = std::vec::Vec<EnumValueDefinition>>
+{
   span: Span,
   enum_values: Container,
   _m: PhantomData<EnumValueDefinition>,

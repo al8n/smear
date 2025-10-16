@@ -120,7 +120,10 @@ use crate::punctuator::{LBrace, RBrace};
 ///
 /// Spec: [InputFieldsDefinition](https://spec.graphql.org/draft/#InputFieldsDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputFieldsDefinition<InputValueDefinition, Container = std::vec::Vec<InputValueDefinition>> {
+pub struct InputFieldsDefinition<
+  InputValueDefinition,
+  Container = std::vec::Vec<InputValueDefinition>,
+> {
   span: Span,
   values: Container,
   _input_value_definition: PhantomData<InputValueDefinition>,

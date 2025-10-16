@@ -117,7 +117,7 @@ impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
     match value {
       LitInlineStr::Plain(s) => Cow::Borrowed(s.as_str()),
       LitInlineStr::Complex(s) => {
-        let mut builder = String::with_capacity(s.required_capacity());
+        let mut builder = std::string::String::with_capacity(s.required_capacity());
         let raw = s.as_str();
         normalize_str_to_string(&raw[1..raw.len() - 1], &mut builder);
         Cow::Owned(builder)

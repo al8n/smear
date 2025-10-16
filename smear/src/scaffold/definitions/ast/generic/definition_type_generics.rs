@@ -120,7 +120,11 @@ where
 /// <T, U> # A type generics with two type parameters: `T` and `U`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DefinitionTypeGenerics<Ident, Type, Container = std::vec::Vec<DefinitionTypeParam<Ident, Type>>> {
+pub struct DefinitionTypeGenerics<
+  Ident,
+  Type,
+  Container = std::vec::Vec<DefinitionTypeParam<Ident, Type>>,
+> {
   span: Span,
   params: Container,
   _ident: PhantomData<Ident>,

@@ -73,7 +73,10 @@ use crate::punctuator::{LParen, RParen};
 ///
 /// Spec: [ArgumentsDefinition](https://spec.graphql.org/draft/#ArgumentsDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct ArgumentsDefinition<InputValueDefinition, Container = std::vec::Vec<InputValueDefinition>> {
+pub struct ArgumentsDefinition<
+  InputValueDefinition,
+  Container = std::vec::Vec<InputValueDefinition>,
+> {
   span: Span,
   values: Container,
   _input_value_definition: PhantomData<InputValueDefinition>,
