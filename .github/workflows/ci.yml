@@ -22,7 +22,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -Dwarnings
+  RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
   RUST_BACKTRACE: 1
   nightly: nightly
   stable: stable
@@ -175,7 +175,7 @@ jobs:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Run test
-      run: cargo test --all-features
+      run: cargo test --all-features -- --quiet
 
   miri-tb:
     name: miri-tb-${{ matrix.target }}-${{ matrix.cfg }}
