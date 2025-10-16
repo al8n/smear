@@ -1,11 +1,14 @@
 use crate::{
-  keywords::On, lexer::graphqlx::syntactic::SyntacticLexerErrors, punctuator::{At, LBrace, RBrace, Spread}
+  lexer::graphqlx::syntactic::SyntacticLexerErrors,
+  punctuator::{At, RBrace},
 };
 
 use super::{ty::Path, *};
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Parseable, Source, Token, Tokenizer, chumsky::{extra::ParserExtra, prelude::*}, utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent}
+  Lexed, Logos, Parseable, Source, Token, Tokenizer,
+  chumsky::{extra::ParserExtra, prelude::*},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 
 type FragmentSpreadAlias<S> = scaffold::FragmentSpread<FragmentTypePath<S>, Directives<S>>;
@@ -137,7 +140,12 @@ impl<S> InlineFragment<S> {
     directives: Option<Directives<S>>,
     selection_set: SelectionSet<S>,
   ) -> Self {
-    Self(InlineFragmentAlias::new(span, type_condition, directives, selection_set))
+    Self(InlineFragmentAlias::new(
+      span,
+      type_condition,
+      directives,
+      selection_set,
+    ))
   }
 
   /// Returns the span of the inline fragment.
@@ -163,30 +171,22 @@ impl<S> InlineFragment<S> {
   pub const fn selection_set(&self) -> &SelectionSet<S> {
     self.0.selection_set()
   }
+}
 
+impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<S>
+where
+  InlineFragmentAlias<S>: Parseable<'a, I, T, Error>,
+{
   #[inline]
-  fn parser_with<'a, I, T, Error, E>(
-    selection_set_parser: impl Parser<'a, I, SelectionSet<S>, E> + Clone,
-  ) -> impl Parser<'a, I, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
     I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    TypeCondition<S>: Parseable<'a, I, T, Error>,
-    Directives<S>: Parseable<'a, I, T, Error>,
-    Spread: Parseable<'a, I, T, Error>,
-    On: Parseable<'a, I, T, Error>,
-    LBrace: Parseable<'a, I, T, Error>,
-    RBrace: Parseable<'a, I, T, Error>,
   {
-    InlineFragmentAlias::parser_with(
-      TypeCondition::parser(),
-      Directives::parser(),
-      selection_set_parser,
-    )
-    .map(Self)
+    InlineFragmentAlias::parser::<E>().map(Self)
   }
 }
 
@@ -220,46 +220,41 @@ impl<S> IntoSpan<Span> for Selection<S> {
   }
 }
 
-impl<'a, S: 'a, I, T, Error> Parseable<'a, I, T, Error> for Selection<S>
+impl<'a, S: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  for Selection<S>
 where
-  On: Parseable<'a, I, T, Error>,
-  Spread: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  TypeCondition<S>: Parseable<'a, I, T, Error>,
-  FragmentTypePath<S>: Parseable<'a, I, T, Error>,
-  Alias<S>: Parseable<'a, I, T, Error>,
-  Ident<S>: Parseable<'a, I, T, Error>,
-  Arguments<S>: Parseable<'a, I, T, Error>,
-  Directives<S>: Parseable<'a, I, T, Error>,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
-    T: Token<'a>,
-    Error: 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|selection| {
-      let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone()).boxed();
+      let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone());
 
-      let field_p = scaffold::Field::parser_with(
-        Arguments::parser(),
-        Directives::parser(),
-        selection_set.clone(),
-      )
-      .map(Field::from)
-      .boxed();
+      let field_p =
+        scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
+          .map(Field::from);
 
-      let inline_p = InlineFragment::parser_with(selection_set.clone())
-        .map(Self::InlineFragment)
-        .boxed();
-
-      let spread_p = FragmentSpread::parser().map(Self::FragmentSpread).boxed();
-
-      choice((field_p.map(Self::Field), spread_p, inline_p))
+      field_p.map(Self::Field).or(fragment_parser(selection))
     })
   }
 }
@@ -349,40 +344,38 @@ impl<S> Field<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for Field<S>
+impl<'a, S: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  for Field<S>
 where
-  On: Parseable<'a, I, T, Error> + 'a,
-  Spread: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  TypeCondition<S>: Parseable<'a, I, T, Error> + 'a,
-  FragmentTypePath<S>: Parseable<'a, I, T, Error> + 'a,
-  Alias<S>: Parseable<'a, I, T, Error> + 'a,
-  Ident<S>: Parseable<'a, I, T, Error> + 'a,
-  Arguments<S>: Parseable<'a, I, T, Error> + 'a,
-  Directives<S>: Parseable<'a, I, T, Error> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
-    T: Token<'a>,
-    Error: 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|field_parser| {
-      // Inner fixpoint: build a `Selection<S>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
-        // StandardSelectionSet needs a `Selection` parser
-        let selection_set = SelectionSet::parser_with(selection.clone());
-
-        let spread = FragmentSpread::parser().map(|fs| Selection::FragmentSpread(fs));
-
-        let inline =
-          InlineFragment::parser_with(selection_set.clone()).map(|f| Selection::InlineFragment(f));
-
-        choice((field_parser.map(Selection::Field), spread, inline))
+        field_parser
+          .map(Selection::Field)
+          .or(fragment_parser(selection))
       });
 
       // Pass the selection parser to the selection set
@@ -434,7 +427,7 @@ where
         match token {
           SyntacticToken::Spread => {
             let current_cursor = inp.cursor();
-
+            let cp = inp.save();
             match inp.next() {
               None => Err(
                 SyntacticTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
@@ -452,11 +445,13 @@ where
                   SyntacticToken::Identifier(name) => {
                     // if we do not have on, then it's a fragment spread
                     if !"on".equivalent(&name) {
-                      let directives = inp.parse(Directives::parser().or_not())?;
+                      inp.rewind(cp);
+                      let (p, directives) = inp
+                        .parse(FragmentTypePath::parser().then(Directives::parser().or_not()))?;
 
                       return Ok(Selection::FragmentSpread(FragmentSpread::new(
                         inp.span_since(&before),
-                        FragmentTypePath::new(fragment_span, name),
+                        p,
                         directives,
                       )));
                     }
@@ -478,19 +473,21 @@ where
                   }
                   // Fragment spread
                   SyntacticToken::PathSeparator => {
-                    let (mut tp, directives) = inp.parse(
-                      TypePath::<S>::parser()
-                        .then(Directives::parser().or_not()),
-                    )?;
+                    let (mut tp, directives) =
+                      inp.parse(TypePath::<S>::parser().then(Directives::parser().or_not()))?;
                     tp.path_mut().set_fqdp(true);
 
                     let (tp_span, path, generics) = tp.into_components();
                     Ok(Selection::FragmentSpread(FragmentSpread::new(
                       inp.span_since(&before),
-                      FragmentTypePath::new((fragment_span.start()..tp_span.end()).into(), path, generics),
+                      FragmentTypePath::new(
+                        (fragment_span.start()..tp_span.end()).into(),
+                        path,
+                        generics,
+                      ),
                       directives,
                     )))
-                  },
+                  }
                   SyntacticToken::LBrace => {
                     let (selection, rbrace) = inp.parse(
                       selection_parser

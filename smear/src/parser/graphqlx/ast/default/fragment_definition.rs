@@ -50,10 +50,7 @@ impl<S, Type> IntoComponents for TypeCondition<S, Type> {
 
 impl<S, Type> TypeCondition<S, Type> {
   #[inline]
-  pub(super) const fn new(
-    span: Span,
-    name: scaffold::generic::TypePath<Ident<S>, Type>,
-  ) -> Self {
+  pub(super) const fn new(span: Span, name: scaffold::generic::TypePath<Ident<S>, Type>) -> Self {
     Self(TypeConditionAlias::new(span, name))
   }
 
