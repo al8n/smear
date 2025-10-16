@@ -16,15 +16,15 @@ mod tests;
 mod slice;
 mod str;
 
-/// The char type used for the syntactic token.
+/// The char type used for the [`SyntacticToken`].
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on syntactic [`Token`].
+/// The error data type for lexing based on [`SyntacticToken`].
 pub type SyntacticLexerErrorData<'a, S> =
   error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// The error type for lexing based on syntactic [`Token`].
+/// The error type for lexing based on [`SyntacticToken`].
 pub type SyntacticLexerError<'a, S> =
   error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// A collection of errors for syntactic [`Token`].
+/// A collection of errors for [`SyntacticToken`].
 pub type SyntacticLexerErrors<'a, S> =
   error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
@@ -82,7 +82,6 @@ pub type SyntacticLexerErrors<'a, S> =
 /// - `SyntacticToken<&str>` - For borrowed string sources
 /// - `SyntacticToken<&[u8]>` - For byte slice sources
 /// - `SyntacticToken<bytes::Bytes>` - For shared ownership with cheap cloning
-/// - `SyntacticToken<hipstr::HipStr>` - For hybrid string storage
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]

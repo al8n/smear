@@ -195,7 +195,6 @@ mod string_lexer;
 /// - `&str`: Most common, UTF-8 validated
 /// - `&[u8]`: For binary sources, can be converted to `&str` when needed
 /// - `bytes::Bytes`: For shared ownership (requires `bytes` feature)
-/// - `hipstr::HipStr`: For hybrid string storage (requires `hipstr` feature)
 ///
 /// # Modules
 ///

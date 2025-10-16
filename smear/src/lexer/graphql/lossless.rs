@@ -17,13 +17,13 @@ mod tests;
 
 /// The char type used for the lossless token.
 pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on lossless [`Token`].
+/// The error data type for lexing based on [`LosslessToken`].
 pub type LosslessLexerErrorData<'a, S> =
   error::LexerErrorData<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// The error type for lexing based on lossless [`Token`].
+/// The error type for lexing based on [`LosslessToken`].
 pub type LosslessLexerError<'a, S> =
   error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// A collection of errors for lossless [`Token`].
+/// A collection of errors for [`LosslessToken`].
 pub type LosslessLexerErrors<'a, S> =
   error::LexerErrors<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 
@@ -81,7 +81,6 @@ pub type LosslessLexerErrors<'a, S> =
 /// - `LosslessToken<&str>` - For borrowed string sources
 /// - `LosslessToken<&[u8]>` - For byte slice sources
 /// - `LosslessToken<bytes::Bytes>` - For shared ownership with cheap cloning
-/// - `LosslessToken<hipstr::HipStr>` - For hybrid string storage
 ///
 /// # Building Concrete Syntax Trees (CST)
 ///
