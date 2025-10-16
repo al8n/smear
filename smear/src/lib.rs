@@ -121,7 +121,7 @@ pub mod scaffold;
 ///   - [`graphql::lossless`](lexer::graphql::lossless): Complete tokens (preserves all formatting)
 ///
 /// - [`graphqlx`](lexer::graphqlx): Extended GraphQLX lexer with generics, imports, etc.
-///   - [`graphqlx::ast`](lexer::graphqlx::ast): Fast tokens (skips trivia)
+///   - [`graphqlx::syntactic`](lexer::graphqlx::syntactic): Fast tokens (skips trivia)
 ///   - [`graphqlx::lossless`](lexer::graphqlx::lossless): Complete tokens (preserves all formatting)
 ///
 /// # Examples

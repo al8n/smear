@@ -36,10 +36,10 @@ pub type LosslessLexerErrors<'a, S> =
 /// # Preserved Trivia Tokens
 ///
 /// Unlike [`SyntacticToken`](super::syntactic::SyntacticToken), `LosslessToken` includes variants for all trivia:
-/// - **Whitespace**: [`Space`](Self::Space), [`Tab`](Self::Tab), [`Newline`](Self::Newline), [`CarriageReturn`](Self::CarriageReturn), [`CarriageReturnAndNewline`](Self::CarriageReturnAndNewline)
-/// - **Comments**: [`Comment`](Self::Comment) - preserves `# ...` comments with their content
-/// - **Commas**: [`Comma`](Self::Comma)
-/// - **Byte Order Mark**: [`Bom`](Self::Bom) - preserves `\u{FEFF}` characters
+/// - **Whitespace**: [`Space`](LosslessToken::Space), [`Tab`](LosslessToken::Tab), [`Newline`](LosslessToken::Newline), [`CarriageReturn`](LosslessToken::CarriageReturn), [`CarriageReturnAndNewline`](LosslessToken::CarriageReturnAndNewline)
+/// - **Comments**: [`Comment`](LosslessToken::Comment) - preserves `# ...` comments with their content
+/// - **Commas**: [`Comma`](LosslessToken::Comma)
+/// - **Byte Order Mark**: [`Bom`](LosslessToken::Bom) - preserves `\u{FEFF}` characters
 ///
 /// # Use Cases
 ///

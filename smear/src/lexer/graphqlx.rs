@@ -4,19 +4,45 @@ use logosky::utils::human_display::DisplayHuman;
 /// Errors for GraphQLx lexers
 pub mod error;
 
-/// Abstract syntax tree (AST) lexers for GraphQLx
+/// Syntactic tokens for GraphQLx - fast lexing that skips trivia.
+///
+/// This module provides [`SyntacticToken`](syntactic::SyntacticToken), which is optimized for
+/// high-performance parsing by automatically filtering out whitespace, comments, and commas.
+///
+/// **Use this for**: GraphQLx servers, query execution, schema compilation, and any
+/// performance-critical parsing where you don't need to preserve formatting.
+///
+/// **Key benefits**:
+/// - Minimal memory footprint
+/// - Maximum parsing speed
+/// - Zero-copy token references
+/// - Supports GraphQLx extensions (generics, imports, type paths, etc.)
+///
+/// See [`SyntacticToken`](syntactic::SyntacticToken) for detailed documentation.
 pub mod syntactic {
   pub use super::ast::*;
 }
 
-/// Concrete syntax tree (CST) lexers for GraphQLx
+/// Lossless tokens for GraphQLx - complete source preservation.
+///
+/// This module provides [`LosslessToken`](lossless::LosslessToken), which preserves all source
+/// information including whitespace, comments, and formatting. Essential for developer tools
+/// that need to maintain or manipulate source code without losing information.
+///
+/// **Use this for**: Code formatters, linters, IDEs, syntax highlighters, documentation tools,
+/// and any application that needs perfect source reconstruction.
+///
+/// **Key benefits**:
+/// - Complete source fidelity
+/// - Access to all comments and formatting
+/// - Build Concrete Syntax Trees (CST)
+/// - Supports GraphQLx extensions (generics, imports, type paths, etc.)
+///
+/// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
 mod ast;
 mod handlers;
-
-// #[cfg(test)]
-// mod tests;
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
 #[derive(
