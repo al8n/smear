@@ -33,6 +33,7 @@ pub type AstLexerErrors<'a, S> =
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum AstToken<S> {
   /// Ampersand `&` token
   Ampersand,
@@ -119,25 +120,44 @@ impl<S> From<&AstToken<S>> for AstTokenKind {
 /// The token kind for
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
+#[non_exhaustive]
 pub enum AstTokenKind {
+  /// Identifier token
   Identifier,
+  /// Int literal token
   Int,
-  Boolean,
+  /// Float literal token
   Float,
+  /// Inline string token
   InlineString,
+  /// Block string token
   BlockString,
+  /// Dollar `$` token
   Dollar,
+  /// Left parenthesis `(` token
   LParen,
+  /// Right parenthesis `)` token
   RParen,
+  /// Spread operator `...` token
   Spread,
+  /// Colon `:` token
   Colon,
+  /// Equal `=` token
   Equal,
+  /// At `@` token
   At,
+  /// Left bracket `[` token
   LBracket,
+  /// Right bracket `]` token
   RBracket,
+  /// Left brace `{` token
   LBrace,
+  /// Right brace `}` token
   RBrace,
+  /// Pipe `|` token
   Pipe,
+  /// Bang `!` token
   Bang,
+  /// Ampersand `&` token
   Ampersand,
 }

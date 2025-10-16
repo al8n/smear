@@ -6,7 +6,9 @@ pub mod cst;
 
 mod error;
 
+/// Expectations for the GraphQLx parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Expectation {
   /// An inline string was expected.
   InlineString,

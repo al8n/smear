@@ -16,22 +16,25 @@ mod tests;
 mod slice;
 mod str;
 
-/// The char type used for the AST token.
+/// The char type used for the lossless token.
 pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on AST [`Token`].
-pub type CstLexerErrorData<'a, S> =
+/// The error data type for lexing based on lossless [`Token`].
+pub type LosslessLexerErrorData<'a, S> =
   error::LexerErrorData<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// The error type for lexing based on AST [`Token`].
-pub type CstLexerError<'a, S> = error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// A collection of errors of AST [`Token`].
-pub type CstLexerErrors<'a, S> =
+/// The error type for lexing based on lossless [`Token`].
+pub type LosslessLexerError<'a, S> =
+  error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// A collection of errors of lossless [`Token`].
+pub type LosslessLexerErrors<'a, S> =
   error::LexerErrors<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 
+/// A lossless token for GraphQLx lexing, preserving all characters including ignored tokens.
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum LosslessToken<S> {
   /// Asterisk `*` token
   Asterisk,
@@ -163,6 +166,7 @@ impl<S> From<&LosslessToken<S>> for LosslessTokenKind {
 /// The token kind for
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
+#[non_exhaustive]
 pub enum LosslessTokenKind {
   /// Asterisk `*` token
   Asterisk,

@@ -49,8 +49,6 @@ impl From<AstTokenKind> for Expectation {
       AstTokenKind::RParen => Self::RParen,
       AstTokenKind::Int => Self::IntValue,
       AstTokenKind::Float => Self::FloatValue,
-      AstTokenKind::Boolean => Self::BooleanValue,
-      AstTokenKind::String => Self::StringValue,
       AstTokenKind::FatArrow => Self::FatArrow,
       AstTokenKind::LAngle => Self::LAngle,
       AstTokenKind::RAngle => Self::RAngle,

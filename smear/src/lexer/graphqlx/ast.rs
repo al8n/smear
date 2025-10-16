@@ -33,6 +33,7 @@ pub type AstLexerErrors<'a, S> =
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum AstToken<S> {
   /// Asterisk `*` token
   Asterisk,
@@ -140,33 +141,58 @@ impl<S> From<&AstToken<S>> for AstTokenKind {
 /// The token kind for
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
+#[non_exhaustive]
 pub enum AstTokenKind {
+  /// Identifier token
   Identifier,
+  /// Int literal token
   Int,
-  Boolean,
+  /// Float literal token
   Float,
+  /// Inline string token
   InlineString,
+  /// Block string token
   BlockString,
-  String,
+  /// Dollar `$` token
   Dollar,
+  /// Fat arrow `=>` token
   FatArrow,
+  /// Left angle bracket `<` token
   LAngle,
+  /// Right angle bracket `>` token
   RAngle,
+  /// Left parenthesis `(` token
   LParen,
+  /// Right parenthesis `)` token
   RParen,
+  /// Spread operator `...` token
   Spread,
+  /// Colon `:` token
   Colon,
+  /// Equal `=` token
   Equal,
+  /// Asterisk `*` token
   Asterisk,
+  /// At `@` token
   At,
+  /// Left square bracket `[` token
   LBracket,
+  /// Right square bracket `]` token
   RBracket,
+  /// Left curly brace `{` token
   LBrace,
+  /// Right curly brace `}` token
   RBrace,
+  /// Pipe `|` token
   Pipe,
+  /// Bang `!` token
   Bang,
+  /// Ampersand `&` token
   Ampersand,
+  /// Plus `+` token
   Plus,
+  /// Minus `-` token
   Minus,
+  /// Path separator `::` token
   PathSeparator,
 }
