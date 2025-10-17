@@ -20,7 +20,7 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ## Overview
 
-**Smear** is a high-performance GraphQL parser library built on parser combinators. It provides zero-copy parsing for the GraphQL draft specification and is designed to enable anyone to develop GraphQL-like Schema Definition Languages (SDLs) using reusable parser combinators.
+**Smear** is a high-performance GraphQL parser library built on parser combinators. It provides zero-copy parsing for the GraphQL draft specification and is designed to enable anyone to develop GraphQL-like Domain Specific Languages (DSLs) using reusable parser combinators.
 
 ### Key Features
 
@@ -35,7 +35,7 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ## Why Smear Over Other Rust GraphQL Parsers?
 
-Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like apollo-parser, graphql-parser, async-graphql-parser, and cynic-parser:
+Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like `apollo-parser`, `graphql-parser`, `async-graphql-parser`, and `cynic-parser`:
 
 ### Thread-Safe AST by Design
 
