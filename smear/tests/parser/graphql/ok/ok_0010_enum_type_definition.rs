@@ -1,6 +1,11 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0010_enum_type_definition.graphql");
 
+#[cfg(not(windows))]
+const DESCRIPTION: &str = "\n    description\n    ";
+#[cfg(windows)]
+const DESCRIPTION: &str = "\r\n    description\r\n    ";
+
 #[cfg(feature = "graphql")]
 #[test]
 fn enum_type_definition() {
@@ -31,7 +36,7 @@ fn enum_type_definition() {
         .as_ref()
         .unwrap()
         .source().trim_matches('"'),
-      "\n    description\n    "
+      DESCRIPTION
     );
     assert!(north.directives().is_none());
   }
@@ -90,7 +95,7 @@ fn graphqlx_enum_type_definition() {
         .as_ref()
         .unwrap()
         .source().trim_matches('"'),
-      "\n    description\n    "
+      DESCRIPTION
     );
     assert!(north.directives().is_none());
   }
