@@ -51,6 +51,7 @@ fn async_graphql_issue_1039() {
 
 // https://github.com/async-graphql/async-graphql/issues/1039
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_async_graphql_issue_1039() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

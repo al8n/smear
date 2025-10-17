@@ -31,6 +31,7 @@ fn arguments_definition() {
   assert!(iter.next().is_none());
 }
 
+#[cfg(feature = "graphql")]
 #[test]
 fn directive_definition_with_arguments() {
   use smear::parser::graphql::ast::{DirectiveDefinition, ParseStr};
@@ -99,6 +100,7 @@ fn graphqlx_arguments_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_directive_definition_with_arguments() {
   use smear::parser::graphqlx::ast::{DirectiveDefinition, ParseStr};
 
