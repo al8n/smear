@@ -6,11 +6,14 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-type UnionTypeDefinitionAlias<S> =
-  scaffold::UnionTypeDefinition<DefinitionName<S>, ConstDirectives<S>, UnionMemberTypes<S>>;
+type UnionTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::UnionTypeDefinition<
+  DefinitionName<S, Ty>,
+  ConstDirectives<S, Ty>,
+  UnionMemberTypes<S, Ty>,
+>;
 
-type UnionTypeExtensionAlias<S> =
-  scaffold::UnionTypeExtension<ExtensionName<S>, ConstDirectives<S>, UnionMemberTypes<S>>;
+type UnionTypeExtensionAlias<S, Ty = Type<S>> =
+  scaffold::UnionTypeExtension<ExtensionName<S>, ConstDirectives<S, Ty>, UnionMemberTypes<S, Ty>>;
 
 /// A union type definition with an optional description.
 ///
@@ -25,13 +28,13 @@ pub type DescribedUnionTypeDefinition<S> = Described<UnionTypeDefinition<S>, S>;
 ///
 /// Groups the union member types with their associated generic constraints.
 #[derive(Debug, Clone, From, Into)]
-pub(super) struct UnionMemberTypes<S> {
-  where_clause: Option<WhereClause<S>>,
-  types: super::UnionMemberTypes<S>,
+pub(super) struct UnionMemberTypes<S, Ty = Type<S>> {
+  where_clause: Option<WhereClause<S, Ty>>,
+  types: super::UnionMemberTypes<S, Ty>,
 }
 
-impl<S> IntoComponents for UnionMemberTypes<S> {
-  type Components = (Option<WhereClause<S>>, super::UnionMemberTypes<S>);
+impl<S, Ty> IntoComponents for UnionMemberTypes<S, Ty> {
+  type Components = (Option<WhereClause<S, Ty>>, super::UnionMemberTypes<S, Ty>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -39,24 +42,24 @@ impl<S> IntoComponents for UnionMemberTypes<S> {
   }
 }
 
-impl<S> UnionMemberTypes<S> {
+impl<S, Ty> UnionMemberTypes<S, Ty> {
   /// Returns the optional where clause of the union member types.
   #[inline]
-  pub(super) const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub(super) const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.where_clause.as_ref()
   }
 
   /// Returns the union member types.
   #[inline]
-  pub(super) const fn types(&self) -> &super::UnionMemberTypes<S> {
+  pub(super) const fn types(&self) -> &super::UnionMemberTypes<S, Ty> {
     &self.types
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for UnionMemberTypes<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for UnionMemberTypes<S, Ty>
 where
-  WhereClause<S>: Parseable<'a, I, T, Error>,
-  super::UnionMemberTypes<S>: Parseable<'a, I, T, Error>,
+  WhereClause<S, Ty>: Parseable<'a, I, T, Error>,
+  super::UnionMemberTypes<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -92,30 +95,30 @@ where
 ///   = |? TypePath (| TypePath)*
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct UnionTypeDefinition<S>(UnionTypeDefinitionAlias<S>);
+pub struct UnionTypeDefinition<S, Ty = Type<S>>(UnionTypeDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for UnionTypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for UnionTypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for UnionTypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for UnionTypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for UnionTypeDefinition<S> {
+impl<S, Ty> IntoComponents for UnionTypeDefinition<S, Ty> {
   type Components = (
     Span,
     Ident<S>,
-    Option<DefinitionTypeGenerics<S>>,
-    Option<ConstDirectives<S>>,
-    Option<super::UnionMemberTypes<S>>,
-    Option<WhereClause<S>>,
+    Option<DefinitionTypeGenerics<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<super::UnionMemberTypes<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
   );
 
   #[inline]
@@ -133,7 +136,7 @@ impl<S> IntoComponents for UnionTypeDefinition<S> {
   }
 }
 
-impl<S> UnionTypeDefinition<S> {
+impl<S, Ty> UnionTypeDefinition<S, Ty> {
   /// Returns the name of the union type definition.
   #[inline]
   pub const fn name(&self) -> &Ident<S> {
@@ -142,13 +145,13 @@ impl<S> UnionTypeDefinition<S> {
 
   /// Returns the optional directives of the union type definition.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the optional union member types of the union type definition.
   #[inline]
-  pub const fn members(&self) -> Option<&super::UnionMemberTypes<S>> {
+  pub const fn members(&self) -> Option<&super::UnionMemberTypes<S, Ty>> {
     match self.0.member_types() {
       Some(members) => Some(members.types()),
       None => None,
@@ -157,13 +160,13 @@ impl<S> UnionTypeDefinition<S> {
 
   /// Returns the optional generics of the union type definition.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     self.0.name().generics()
   }
 
   /// Returns the optional where clause of the union type definition.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.member_types() {
       Some(members) => members.where_clause(),
       None => None,
@@ -171,9 +174,9 @@ impl<S> UnionTypeDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for UnionTypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for UnionTypeDefinition<S, Ty>
 where
-  UnionTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  UnionTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -201,30 +204,30 @@ where
 ///   extend union Path TypeGenerics? UnionMemberTypes WhereClause?
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct UnionTypeExtension<S>(UnionTypeExtensionAlias<S>);
+pub struct UnionTypeExtension<S, Ty>(UnionTypeExtensionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for UnionTypeExtension<S> {
+impl<S, Ty> AsSpan<Span> for UnionTypeExtension<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for UnionTypeExtension<S> {
+impl<S, Ty> IntoSpan<Span> for UnionTypeExtension<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for UnionTypeExtension<S> {
+impl<S, Ty> IntoComponents for UnionTypeExtension<S, Ty> {
   type Components = (
     Span,
     Path<S>,
     Option<ExtensionTypeGenerics<S>>,
-    Option<ConstDirectives<S>>,
-    Option<super::UnionMemberTypes<S>>,
-    Option<WhereClause<S>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<super::UnionMemberTypes<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
   );
 
   #[inline]
@@ -253,7 +256,7 @@ impl<S> IntoComponents for UnionTypeExtension<S> {
   }
 }
 
-impl<S> UnionTypeExtension<S> {
+impl<S, Ty> UnionTypeExtension<S, Ty> {
   /// Returns the path of the union type extension.
   #[inline]
   pub const fn path(&self) -> &Path<S> {
@@ -268,13 +271,13 @@ impl<S> UnionTypeExtension<S> {
 
   /// Returns the optional directives of the union type extension.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the optional union member types of the union type extension.
   #[inline]
-  pub const fn members(&self) -> Option<&super::UnionMemberTypes<S>> {
+  pub const fn members(&self) -> Option<&super::UnionMemberTypes<S, Ty>> {
     match self.0.member_types() {
       Some(members) => Some(members.types()),
       None => None,
@@ -283,7 +286,7 @@ impl<S> UnionTypeExtension<S> {
 
   /// Returns the optional where clause of the union type extension.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.member_types() {
       Some(members) => members.where_clause(),
       None => None,
@@ -291,9 +294,9 @@ impl<S> UnionTypeExtension<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for UnionTypeExtension<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for UnionTypeExtension<S, Ty>
 where
-  UnionTypeExtensionAlias<S>: Parseable<'a, I, T, Error>,
+  UnionTypeExtensionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

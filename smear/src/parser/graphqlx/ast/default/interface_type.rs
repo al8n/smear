@@ -6,18 +6,18 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-type InterfaceTypeDefinitionAlias<S> = scaffold::InterfaceTypeDefinition<
-  DefinitionName<S>,
-  ImplementInterfaces<S>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
+type InterfaceTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::InterfaceTypeDefinition<
+  DefinitionName<S, Ty>,
+  ImplementInterfaces<S, Ty>,
+  ConstDirectives<S, Ty>,
+  FieldsDefinition<S, Ty>,
 >;
 
-type InterfaceTypeExtensionAlias<S> = scaffold::InterfaceTypeExtension<
+type InterfaceTypeExtensionAlias<S, Ty = Type<S>> = scaffold::InterfaceTypeExtension<
   ExtensionName<S>,
-  ImplementInterfaces<S>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
+  ImplementInterfaces<S, Ty>,
+  ConstDirectives<S, Ty>,
+  FieldsDefinition<S, Ty>,
 >;
 
 /// An interface type definition with an optional description.
@@ -27,7 +27,8 @@ type InterfaceTypeExtensionAlias<S> = scaffold::InterfaceTypeExtension<
 /// ```text
 /// DescribedInterfaceTypeDefinition : Description? InterfaceTypeDefinition
 /// ```
-pub type DescribedInterfaceTypeDefinition<S> = Described<InterfaceTypeDefinition<S>, S>;
+pub type DescribedInterfaceTypeDefinition<S, Ty = Type<S>> =
+  Described<InterfaceTypeDefinition<S, Ty>, S>;
 
 /// A GraphQLx interface type definition.
 ///
@@ -42,31 +43,31 @@ pub type DescribedInterfaceTypeDefinition<S> = Described<InterfaceTypeDefinition
 ///   interface Name TypeGenerics? ImplementsInterfaces? Directives? WhereClause? FieldsDefinition?
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct InterfaceTypeDefinition<S>(InterfaceTypeDefinitionAlias<S>);
+pub struct InterfaceTypeDefinition<S, Ty = Type<S>>(InterfaceTypeDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for InterfaceTypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for InterfaceTypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for InterfaceTypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for InterfaceTypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for InterfaceTypeDefinition<S> {
+impl<S, Ty> IntoComponents for InterfaceTypeDefinition<S, Ty> {
   type Components = (
     Span,
     Ident<S>,
-    Option<DefinitionTypeGenerics<S>>,
-    Option<ImplementInterfaces<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::FieldsDefinition<S>>,
+    Option<DefinitionTypeGenerics<S, Ty>>,
+    Option<ImplementInterfaces<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::FieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -92,7 +93,7 @@ impl<S> IntoComponents for InterfaceTypeDefinition<S> {
   }
 }
 
-impl<S> InterfaceTypeDefinition<S> {
+impl<S, Ty> InterfaceTypeDefinition<S, Ty> {
   /// Returns the span of the interface type definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -107,25 +108,25 @@ impl<S> InterfaceTypeDefinition<S> {
 
   /// Returns the type generics of the interface type definition, if any.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     self.0.name().generics()
   }
 
   /// Returns the implemented interfaces of the interface type definition, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
+  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
     self.0.implements()
   }
 
   /// Returns the directives of the interface type definition, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the where clause of the interface type definition, if any.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -134,7 +135,7 @@ impl<S> InterfaceTypeDefinition<S> {
 
   /// Returns the fields definition of the interface type definition.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -142,9 +143,9 @@ impl<S> InterfaceTypeDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InterfaceTypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InterfaceTypeDefinition<S, Ty>
 where
-  InterfaceTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  InterfaceTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
@@ -172,31 +173,31 @@ where
 ///   extend interface Path TypeGenerics? ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct InterfaceTypeExtension<S>(InterfaceTypeExtensionAlias<S>);
+pub struct InterfaceTypeExtension<S, Ty = Type<S>>(InterfaceTypeExtensionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for InterfaceTypeExtension<S> {
+impl<S, Ty> AsSpan<Span> for InterfaceTypeExtension<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for InterfaceTypeExtension<S> {
+impl<S, Ty> IntoSpan<Span> for InterfaceTypeExtension<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for InterfaceTypeExtension<S> {
+impl<S, Ty> IntoComponents for InterfaceTypeExtension<S, Ty> {
   type Components = (
     Span,
     Path<S>,
     Option<ExtensionTypeGenerics<S>>,
-    Option<ImplementInterfaces<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::FieldsDefinition<S>>,
+    Option<ImplementInterfaces<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::FieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -240,7 +241,7 @@ impl<S> IntoComponents for InterfaceTypeExtension<S> {
   }
 }
 
-impl<S> InterfaceTypeExtension<S> {
+impl<S, Ty> InterfaceTypeExtension<S, Ty> {
   /// Returns the span of the interface type extension.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -261,19 +262,19 @@ impl<S> InterfaceTypeExtension<S> {
 
   /// Returns the implemented interfaces of the interface type extension, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
+  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
     self.0.implements()
   }
 
   /// Returns the directives of the interface type extension, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the where clause of the interface type extension, if any.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -282,7 +283,7 @@ impl<S> InterfaceTypeExtension<S> {
 
   /// Returns the fields definition of the interface type extension, if any.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -290,9 +291,9 @@ impl<S> InterfaceTypeExtension<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InterfaceTypeExtension<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InterfaceTypeExtension<S, Ty>
 where
-  InterfaceTypeExtensionAlias<S>: Parseable<'a, I, T, Error>,
+  InterfaceTypeExtensionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where

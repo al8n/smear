@@ -14,15 +14,13 @@ use crate::{
 };
 
 pub type Path<S> = scaffold::Path<Ident<S>>;
-pub type TypePath<S> = scaffold::generic::TypePath<Ident<S>, Type<S>>;
-pub type DefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, Type<S>>;
-pub type TypeGenerics<S> = scaffold::generic::TypeGenerics<Type<S>>;
+pub type TypePath<S, Ty = Type<S>> = scaffold::generic::TypePath<Ident<S>, Ty>;
+pub type DefinitionTypePath<S, Ty = Type<S>> = scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
 
-pub type ArcDefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, ArcType<S>>;
-pub type ArcTypeGenerics<S> = scaffold::generic::TypeGenerics<ArcType<S>>;
-
-pub type RcDefinitionTypePath<S> = scaffold::generic::DefinitionTypePath<Ident<S>, RcType<S>>;
-pub type RcTypeGenerics<S> = scaffold::generic::TypeGenerics<RcType<S>>;
+pub type ArcDefinitionTypePath<S, Ty = ArcType<S>> =
+  scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
+pub type RcDefinitionTypePath<S, Ty = RcType<S>> =
+  scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
 
 impl<S> From<Ident<S>> for Path<S> {
   #[inline]

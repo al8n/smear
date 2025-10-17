@@ -13,14 +13,9 @@ use crate::{
 
 use super::*;
 
-type TypeConditionAlias<S, Type> =
-  scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, Type>>;
-pub type RcTypeCondition<S> = TypeCondition<S, RcType<S>>;
-pub type ArcTypeCondition<S> = TypeCondition<S, ArcType<S>>;
-
-pub type FragmentTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, Type<S>>;
-pub type FragmentRcTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, RcType<S>>;
-pub type FragmentArcTypePath<S> = scaffold::generic::FragmentTypePath<Ident<S>, ArcType<S>>;
+type TypeConditionAlias<S, Ty = Type<S>> =
+  scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, Ty>>;
+pub type FragmentTypePath<S, Ty = Type<S>> = scaffold::generic::FragmentTypePath<Ident<S>, Ty>;
 
 #[derive(Debug, Clone, From, Into)]
 pub struct TypeCondition<S, Ty = Type<S>>(TypeConditionAlias<S, Ty>);
@@ -93,39 +88,39 @@ where
   }
 }
 
-type FragmentDefinitionAlias<S> = scaffold::FragmentDefinition<
+type FragmentDefinitionAlias<S, Ty = Type<S>> = scaffold::FragmentDefinition<
   And<Option<ExecutableDefinitionTypeGenerics<S>>, ExecutableDefinitionName<S>>,
-  TypeCondition<S>,
-  Directives<S>,
-  Constrained<Ident<S>, Type<S>, SelectionSet<S>>,
+  TypeCondition<S, Ty>,
+  Directives<S, Ty>,
+  Constrained<Ident<S>, Ty, SelectionSet<S, Ty>>,
 >;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct FragmentDefinition<S>(FragmentDefinitionAlias<S>);
+pub struct FragmentDefinition<S, Ty = Type<S>>(FragmentDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for FragmentDefinition<S> {
+impl<S, Ty> AsSpan<Span> for FragmentDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for FragmentDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for FragmentDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for FragmentDefinition<S> {
+impl<S, Ty> IntoComponents for FragmentDefinition<S, Ty> {
   type Components = (
     Span,
     Option<ExecutableDefinitionTypeGenerics<S>>,
     ExecutableDefinitionName<S>,
-    TypeCondition<S>,
-    Option<Directives<S>>,
-    Option<WhereClause<S>>,
-    SelectionSet<S>,
+    TypeCondition<S, Ty>,
+    Option<Directives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    SelectionSet<S, Ty>,
   );
 
   #[inline]
@@ -146,7 +141,7 @@ impl<S> IntoComponents for FragmentDefinition<S> {
   }
 }
 
-impl<S> FragmentDefinition<S> {
+impl<S, Ty> FragmentDefinition<S, Ty> {
   /// Returns a reference to the span covering the entire fragment definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -173,30 +168,30 @@ impl<S> FragmentDefinition<S> {
 
   /// Returns a reference to the type condition of the fragment definition.
   #[inline]
-  pub const fn type_condition(&self) -> &TypeCondition<S> {
+  pub const fn type_condition(&self) -> &TypeCondition<S, Ty> {
     self.0.type_condition()
   }
 
   /// Returns a reference to the optional directives of the fragment definition.
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives<S>> {
+  pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns a reference to the selection set of the fragment definition.
   #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<S> {
+  pub const fn selection_set(&self) -> &SelectionSet<S, Ty> {
     self.0.selection_set().target()
   }
 
   /// Returns a reference to the optional where clause of the fragment definition.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.0.selection_set().where_clause()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for FragmentDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FragmentDefinition<S, Ty>
 where
   keywords::Fragment: Parseable<'a, I, T, Error>,
   keywords::On: Parseable<'a, I, T, Error>,
@@ -207,12 +202,12 @@ where
   RAngle: Parseable<'a, I, T, Error>,
   Bang: Parseable<'a, I, T, Error>,
   Colon: Parseable<'a, I, T, Error>,
-  Ident<S>: Parseable<'a, I, T, Error>,
-  Type<S>: Parseable<'a, I, T, Error>,
-  ExecutableDefinitionName<S>: Parseable<'a, I, T, Error>,
-  ExecutableDefinitionTypeGenerics<S>: Parseable<'a, I, T, Error>,
-  Directives<S>: Parseable<'a, I, T, Error>,
-  SelectionSet<S>: Parseable<'a, I, T, Error>,
+  Ident<S>: Parseable<'a, I, T, Error> + 'a,
+  Ty: Parseable<'a, I, T, Error> + 'a,
+  ExecutableDefinitionName<S>: Parseable<'a, I, T, Error> + 'a,
+  ExecutableDefinitionTypeGenerics<S>: Parseable<'a, I, T, Error> + 'a,
+  Directives<S, Ty>: Parseable<'a, I, T, Error> + 'a,
+  SelectionSet<S, Ty>: Parseable<'a, I, T, Error> + 'a,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

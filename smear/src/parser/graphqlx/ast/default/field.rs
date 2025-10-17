@@ -11,31 +11,32 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 
-type FragmentSpreadAlias<S> = scaffold::FragmentSpread<FragmentTypePath<S>, Directives<S>>;
+type FragmentSpreadAlias<S, Ty = Type<S>> =
+  scaffold::FragmentSpread<FragmentTypePath<S, Ty>, Directives<S, Ty>>;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct FragmentSpread<S>(FragmentSpreadAlias<S>);
+pub struct FragmentSpread<S, Ty = Type<S>>(FragmentSpreadAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for FragmentSpread<S> {
+impl<S, Ty> AsSpan<Span> for FragmentSpread<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for FragmentSpread<S> {
+impl<S, Ty> IntoSpan<Span> for FragmentSpread<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for FragmentSpread<S> {
+impl<S, Ty> IntoComponents for FragmentSpread<S, Ty> {
   type Components = (
     Span,
     Path<S>,
-    Option<TypeGenerics<S>>,
-    Option<Directives<S>>,
+    Option<scaffold::generic::TypeGenerics<Ty>>,
+    Option<Directives<S, Ty>>,
   );
 
   #[inline]
@@ -46,12 +47,12 @@ impl<S> IntoComponents for FragmentSpread<S> {
   }
 }
 
-impl<S> FragmentSpread<S> {
+impl<S, Ty> FragmentSpread<S, Ty> {
   #[inline]
   pub(super) const fn new(
     span: Span,
-    name: FragmentTypePath<S>,
-    directives: Option<Directives<S>>,
+    name: FragmentTypePath<S, Ty>,
+    directives: Option<Directives<S, Ty>>,
   ) -> Self {
     Self(FragmentSpreadAlias::new(span, name, directives))
   }
@@ -70,20 +71,20 @@ impl<S> FragmentSpread<S> {
 
   /// Returns the type generics of the fragment spread name, if any.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Ty>> {
     self.0.name().type_generics()
   }
 
   /// Returns the directives of the fragment spread.
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives<S>> {
+  pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for FragmentSpread<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FragmentSpread<S, Ty>
 where
-  FragmentSpreadAlias<S>: Parseable<'a, I, T, Error>,
+  FragmentSpreadAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -98,32 +99,32 @@ where
   }
 }
 
-type InlineFragmentAlias<S> =
-  scaffold::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
+type InlineFragmentAlias<S, Ty = Type<S>> =
+  scaffold::InlineFragment<TypeCondition<S, Ty>, Directives<S, Ty>, SelectionSet<S, Ty>>;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct InlineFragment<S>(InlineFragmentAlias<S>);
+pub struct InlineFragment<S, Ty = Type<S>>(InlineFragmentAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for InlineFragment<S> {
+impl<S, Ty> AsSpan<Span> for InlineFragment<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for InlineFragment<S> {
+impl<S, Ty> IntoSpan<Span> for InlineFragment<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for InlineFragment<S> {
+impl<S, Ty> IntoComponents for InlineFragment<S, Ty> {
   type Components = (
     Span,
-    Option<TypeCondition<S>>,
-    Option<Directives<S>>,
-    SelectionSet<S>,
+    Option<TypeCondition<S, Ty>>,
+    Option<Directives<S, Ty>>,
+    SelectionSet<S, Ty>,
   );
 
   #[inline]
@@ -132,13 +133,13 @@ impl<S> IntoComponents for InlineFragment<S> {
   }
 }
 
-impl<S> InlineFragment<S> {
+impl<S, Ty> InlineFragment<S, Ty> {
   #[inline]
   pub(super) const fn new(
     span: Span,
-    type_condition: Option<TypeCondition<S>>,
-    directives: Option<Directives<S>>,
-    selection_set: SelectionSet<S>,
+    type_condition: Option<TypeCondition<S, Ty>>,
+    directives: Option<Directives<S, Ty>>,
+    selection_set: SelectionSet<S, Ty>,
   ) -> Self {
     Self(InlineFragmentAlias::new(
       span,
@@ -156,26 +157,26 @@ impl<S> InlineFragment<S> {
 
   /// Returns the type condition of the inline fragment, if any.
   #[inline]
-  pub const fn type_condition(&self) -> Option<&TypeCondition<S>> {
+  pub const fn type_condition(&self) -> Option<&TypeCondition<S, Ty>> {
     self.0.type_condition()
   }
 
   /// Returns the directives of the inline fragment, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives<S>> {
+  pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the selection set of the inline fragment.
   #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<S> {
+  pub const fn selection_set(&self) -> &SelectionSet<S, Ty> {
     self.0.selection_set()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<S, Ty>
 where
-  InlineFragmentAlias<S>: Parseable<'a, I, T, Error>,
+  InlineFragmentAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -190,26 +191,26 @@ where
   }
 }
 
-pub type SelectionSet<S> = scaffold::SelectionSet<Selection<S>>;
+pub type SelectionSet<S, Ty = Type<S>> = scaffold::SelectionSet<Selection<S, Ty>>;
 
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
-pub enum Selection<S> {
-  Field(Field<S>),
-  FragmentSpread(FragmentSpread<S>),
-  InlineFragment(InlineFragment<S>),
+pub enum Selection<S, Ty = Type<S>> {
+  Field(Field<S, Ty>),
+  FragmentSpread(FragmentSpread<S, Ty>),
+  InlineFragment(InlineFragment<S, Ty>),
 }
 
-impl<S> AsSpan<Span> for Selection<S> {
+impl<S, Ty> AsSpan<Span> for Selection<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for Selection<S> {
+impl<S, Ty> IntoSpan<Span> for Selection<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
@@ -220,16 +221,18 @@ impl<S> IntoSpan<Span> for Selection<S> {
   }
 }
 
-impl<'a, S: 'a>
+impl<'a, S: 'a, Ty: 'a>
   Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for Selection<S>
+  for Selection<S, Ty>
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S>:
+  Directives<S, Ty>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
@@ -259,7 +262,7 @@ where
   }
 }
 
-impl<S> Selection<S> {
+impl<S, Ty> Selection<S, Ty> {
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -270,34 +273,34 @@ impl<S> Selection<S> {
   }
 }
 
-type FieldAlias<S> =
-  scaffold::Field<Alias<S>, Ident<S>, Arguments<S>, Directives<S>, SelectionSet<S>>;
+type FieldAlias<S, Ty = Type<S>> =
+  scaffold::Field<Alias<S>, Ident<S>, Arguments<S>, Directives<S, Ty>, SelectionSet<S, Ty>>;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct Field<S>(FieldAlias<S>);
+pub struct Field<S, Ty = Type<S>>(FieldAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for Field<S> {
+impl<S, Ty> AsSpan<Span> for Field<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for Field<S> {
+impl<S, Ty> IntoSpan<Span> for Field<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for Field<S> {
+impl<S, Ty> IntoComponents for Field<S, Ty> {
   type Components = (
     Span,
     Option<Alias<S>>,
     Ident<S>,
     Option<Arguments<S>>,
-    Option<Directives<S>>,
-    Option<SelectionSet<S>>,
+    Option<Directives<S, Ty>>,
+    Option<SelectionSet<S, Ty>>,
   );
 
   #[inline]
@@ -306,7 +309,7 @@ impl<S> IntoComponents for Field<S> {
   }
 }
 
-impl<S> Field<S> {
+impl<S, Ty> Field<S, Ty> {
   /// Returns a reference to the span covering the entire field.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -333,27 +336,29 @@ impl<S> Field<S> {
 
   /// Returns a reference to the directives of the field, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives<S>> {
+  pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns a reference to the selection set of the field, if any.
   #[inline]
-  pub const fn selection_set(&self) -> Option<&SelectionSet<S>> {
+  pub const fn selection_set(&self) -> Option<&SelectionSet<S, Ty>> {
     self.0.selection_set()
   }
 }
 
-impl<'a, S: 'a>
+impl<'a, S: 'a, Ty: 'a>
   Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for Field<S>
+  for Field<S, Ty>
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S>:
+  Directives<S, Ty>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
@@ -387,18 +392,18 @@ where
   }
 }
 
-fn fragment_parser<'a, S, E>(
-  selection_parser: impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone + 'a,
-) -> impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone
+fn fragment_parser<'a, S, Ty, E>(
+  selection_parser: impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S, Ty>, E> + Clone + 'a,
+) -> impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S, Ty>, E> + Clone
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directive<S>:
+  Directive<S, Ty>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S>:
+  Directives<S, Ty>:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   RBrace:
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
@@ -406,6 +411,8 @@ where
     Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
   S: 'a,
+  Ty:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticTokenStream<'a, S>: Tokenizer<
       'a,
@@ -458,7 +465,7 @@ where
 
                     // otherwise, it's an inline fragment with type condition
                     let ((name, directives), selection_set) = inp.parse(
-                      TypePath::<S>::parser()
+                      TypePath::<S, Ty>::parser()
                         .then(Directives::parser().or_not())
                         .then(selection_set.clone()),
                     )?;
@@ -474,7 +481,7 @@ where
                   // Fragment spread
                   SyntacticToken::PathSeparator => {
                     let (mut tp, directives) =
-                      inp.parse(TypePath::<S>::parser().then(Directives::parser().or_not()))?;
+                      inp.parse(TypePath::<S, Ty>::parser().then(Directives::parser().or_not()))?;
                     tp.path_mut().set_fqdp(true);
 
                     let (tp_span, path, generics) = tp.into_components();
@@ -515,7 +522,7 @@ where
                   }
                   SyntacticToken::At => {
                     let (directives, selection_set) = inp.parse(
-                      TypePath::<S>::parser::<E>()
+                      TypePath::<S, Ty>::parser::<E>()
                         .then(Arguments::parser().or_not())
                         .map_with(|(name, args), exa| Directive::new(exa.span(), name, args))
                         .separated_by(At::parser())
