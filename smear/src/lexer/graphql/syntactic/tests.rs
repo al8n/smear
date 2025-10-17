@@ -7,6 +7,8 @@ use crate::lexer::{
   graphql::tests::{self, TestToken},
 };
 
+use std::string::ToString;
+
 type StrSyntacticToken<'a> = SyntacticToken<&'a str>;
 
 impl<'a> TestToken<'a> for SyntacticToken<&'a str> {
