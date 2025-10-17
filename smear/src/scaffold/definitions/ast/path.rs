@@ -54,6 +54,7 @@ impl<Ident, Container> Path<Ident, Container> {
     }
   }
 
+  #[cfg(feature = "graphqlx")]
   #[inline]
   pub(crate) const fn set_fqdp(&mut self, fqdp: bool) {
     self.fqdp = fqdp;
