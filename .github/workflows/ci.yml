@@ -357,7 +357,7 @@ jobs:
           RUSTFLAGS: "--cfg all_tests"
         with:
           command: tarpaulin
-          args: --all-features --run-types tests --run-types doctests --workspace --out xml -- --quiet
+          args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v5
         with:
