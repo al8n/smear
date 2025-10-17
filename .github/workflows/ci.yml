@@ -174,18 +174,26 @@ jobs:
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
-    - name: Install LLVM + set lld linker (macOS)
+    - name: Install LLVM + set ld64.lld (macOS)
       if: runner.os == 'macOS'
       run: |
         brew update
         brew install llvm
         LLVM_PREFIX="$(brew --prefix llvm)"
+
+        # Use Homebrew clang as the driver
         echo "PATH=$LLVM_PREFIX/bin:$PATH" >> $GITHUB_ENV
         echo "CC=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
         echo "CXX=$LLVM_PREFIX/bin/clang++" >> $GITHUB_ENV
         echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
         echo "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
-        echo "RUSTFLAGS=${RUSTFLAGS} -C linker=$LLVM_PREFIX/bin/clang -C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
+
+        # Important: use the *path* to ld64.lld, not just "lld"
+        echo "RUSTFLAGS=${RUSTFLAGS} -C linker=$LLVM_PREFIX/bin/clang -C link-arg=-fuse-ld=$LLVM_PREFIX/bin/ld64.lld" >> $GITHUB_ENV
+
+        # (Optional) sanity checks
+        $LLVM_PREFIX/bin/clang --version
+        $LLVM_PREFIX/bin/ld64.lld -v
     - name: Run test
       run: cargo test --all-features -- --quiet
     
