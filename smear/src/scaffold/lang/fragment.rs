@@ -75,8 +75,9 @@ impl<S> IntoComponents for FragmentName<S> {
 }
 
 impl<S> FragmentName<S> {
+  /// Creates a new fragment name with the given span and source value.
   #[inline]
-  pub(crate) const fn new(span: Span, value: S) -> Self {
+  pub const fn new(span: Span, value: S) -> Self {
     Self { span, value }
   }
 
@@ -209,10 +210,7 @@ impl<Name> TypeCondition<Name> {
   {
     On::parser()
       .ignore_then(name_parser)
-      .map_with(|name, exa| Self {
-        span: exa.span(),
-        name,
-      })
+      .map_with(|name, exa| Self::new(exa.span(), name))
   }
 }
 
@@ -419,11 +417,7 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
     Spread::parser()
       .ignore_then(fragment_name_parser)
       .then(directives_parser.or_not())
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
+      .map_with(|(name, directives), exa| Self::new(exa.span(), name, directives))
   }
 }
 
@@ -631,11 +625,8 @@ impl<TypeCondition, Directives, SelectionSet>
       .ignore_then(type_condition_parser.or_not())
       .then(directives_parser.or_not())
       .then(selection_set_parser)
-      .map_with(|((type_condition, directives), selection_set), exa| Self {
-        span: exa.span(),
-        type_condition,
-        directives,
-        selection_set,
+      .map_with(|((type_condition, directives), selection_set), exa| {
+        Self::new(exa.span(), type_condition, directives, selection_set)
       })
   }
 }

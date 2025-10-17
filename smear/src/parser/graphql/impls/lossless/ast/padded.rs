@@ -89,8 +89,8 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          Token::BOM => Ok(Bom::new(span)),
-          tok => Err(Error::unexpected_token(tok, TokenKind::BOM, span).into()),
+          Token::Bom => Ok(Bom::new(span)),
+          tok => Err(Error::unexpected_token(tok, TokenKind::Bom, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
@@ -236,7 +236,7 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
             LineTerminatorHint::CarriageReturnNewLine,
             span,
           )),
-          Token::BOM => Self::ByteOrderMark(Bom::new(span)),
+          Token::Bom => Self::ByteOrderMark(Bom::new(span)),
           Token::Comment(content) => Self::Comment(Comment::new(span, content)),
           Token::Comma => Self::Comma(Comma::new(span)),
           tok => return Err(Error::unexpected_token(tok, TokenKind::Whitespace, span).into()),

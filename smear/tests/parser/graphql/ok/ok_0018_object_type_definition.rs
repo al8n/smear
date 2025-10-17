@@ -3,6 +3,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0018_object_type_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn object_type_definition() {
   use smear::parser::graphql::ast::{DescribedObjectTypeDefinition, ParseStr};
 
@@ -59,6 +60,7 @@ fn object_type_definition() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphlx_object_type_definition() {
   use smear::parser::graphqlx::ast::{DescribedObjectTypeDefinition, ParseStr};
 

@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0012_fragment_definition.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn fragment_definition() {
   use smear::parser::graphql::ast::{FragmentDefinition, ParseStr};
@@ -48,6 +49,7 @@ fn fragment_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_fragment_definition() {
   use smear::parser::graphqlx::ast::{FragmentDefinition, ParseStr};
 

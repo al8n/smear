@@ -1,12 +1,9 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Token,
-  utils::{human_display::DisplayHuman, recursion_tracker::RecursionLimitExceeded},
-};
+use logosky::{Token, utils::recursion_tracker::RecursionLimitExceeded};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  error,
+  LitFloat, LitInt, error,
 };
 
 use token::token;
@@ -19,24 +16,78 @@ mod tests;
 mod slice;
 mod str;
 
-/// The char type used for the AST token.
-pub type AstTokenChar<'a, S> = <AstToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on AST [`Token`].
-pub type AstLexerErrorData<'a, S> =
-  error::LexerErrorData<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// The error type for lexing based on AST [`Token`].
-pub type AstLexerError<'a, S> =
-  error::LexerError<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// A collection of errors of AST [`Token`].
-pub type AstLexerErrors<'a, S> =
-  error::LexerErrors<<AstToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// The char type used for the syntactic token.
+pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
+/// The error data type for lexing based on syntactic [`Token`].
+pub type SyntacticLexerErrorData<'a, S> =
+  error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// The error type for lexing based on syntactic [`Token`].
+pub type SyntacticLexerError<'a, S> =
+  error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// A collection of errors for syntactic [`Token`].
+pub type SyntacticLexerErrors<'a, S> =
+  error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 
+/// A syntactic token for GraphQLx lexing that only includes syntactically significant tokens.
+///
+/// This token type is optimized for high-performance parsing by **excluding trivia** (whitespace,
+/// comments, and commas). It provides minimal memory footprint and fast lexing, making it ideal
+/// for GraphQL servers, query execution, and other performance-critical applications.
+///
+/// # Ignored Tokens (Trivia)
+///
+/// The following tokens are automatically skipped during lexing and will NOT appear in the token stream:
+/// - **Whitespace**: spaces, tabs, newlines, carriage returns
+/// - **Comments**: `# ...` (from `#` to end of line)
+/// - **Commas**: `,`
+/// - **Byte Order Mark (BOM)**: `\u{FEFF}`
+///
+/// These trivia tokens are defined by the lexer's skip pattern and are discarded during tokenization.
+///
+/// # Use Cases
+///
+/// - **GraphQL servers**: Fast query parsing without formatting overhead
+/// - **Query execution**: Minimal token stream for performance-critical paths
+/// - **Schema compilation**: Efficient type system parsing
+/// - **Production systems**: Where formatting preservation is not required
+///
+/// # Comparison with [`LosslessToken`](super::lossless::LosslessToken)
+///
+/// | Feature | `SyntacticToken` | [`LosslessToken`](super::lossless::LosslessToken) |
+/// |---------|------------------|----------------------------------------------|
+/// | Whitespace | ❌ Skipped | ✅ Preserved |
+/// | Comments | ❌ Skipped | ✅ Preserved |
+/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Performance | ⚡ Fast | 🐢 Slower |
+/// | Use case | Servers, execution | Formatters, linters, IDEs |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphqlx::ast::SyntacticToken;
+/// use logosky::TokenStream;
+///
+/// let source = "query { user { id } }";
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+///
+/// // Only syntactically significant tokens appear in the stream:
+/// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
+/// // (whitespace is automatically skipped)
+/// ```
+///
+/// # Generic Over Source Type
+///
+/// `SyntacticToken<S>` is generic over the source type `S`, allowing zero-copy parsing:
+/// - `SyntacticToken<&str>` - For borrowed string sources
+/// - `SyntacticToken<&[u8]>` - For byte slice sources
+/// - `SyntacticToken<bytes::Bytes>` - For shared ownership with cheap cloning
 #[derive(
   Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum AstToken<S> {
+#[non_exhaustive]
+pub enum SyntacticToken<S> {
   /// Asterisk `*` token
   Asterisk,
   /// Ampersand `&` token
@@ -91,234 +142,114 @@ pub enum AstToken<S> {
   LitBlockStr(LitBlockStr<S>),
 }
 
-impl<S> AstToken<S> {
+impl<S> SyntacticToken<S> {
   /// Returns the kind of the token.
   #[inline]
-  pub const fn kind(&self) -> AstTokenKind {
+  pub const fn kind(&self) -> SyntacticTokenKind {
     match self {
-      Self::Identifier(_) => AstTokenKind::Identifier,
-      Self::LitInt(_) => AstTokenKind::Int,
-      Self::LitFloat(_) => AstTokenKind::Float,
-      Self::LitInlineStr(_) => AstTokenKind::InlineString,
-      Self::LitBlockStr(_) => AstTokenKind::BlockString,
-      Self::Dollar => AstTokenKind::Dollar,
-      Self::LParen => AstTokenKind::LParen,
-      Self::RParen => AstTokenKind::RParen,
-      Self::Spread => AstTokenKind::Spread,
-      Self::Colon => AstTokenKind::Colon,
-      Self::Equal => AstTokenKind::Equal,
-      Self::At => AstTokenKind::At,
-      Self::LBracket => AstTokenKind::LBracket,
-      Self::RBracket => AstTokenKind::RBracket,
-      Self::LBrace => AstTokenKind::LBrace,
-      Self::RBrace => AstTokenKind::RBrace,
-      Self::Pipe => AstTokenKind::Pipe,
-      Self::Bang => AstTokenKind::Bang,
-      Self::Ampersand => AstTokenKind::Ampersand,
-      Self::LAngle => AstTokenKind::LAngle,
-      Self::RAngle => AstTokenKind::RAngle,
-      Self::FatArrow => AstTokenKind::FatArrow,
-      Self::Plus => AstTokenKind::Plus,
-      Self::Minus => AstTokenKind::Minus,
-      Self::PathSeparator => AstTokenKind::PathSeparator,
-      Self::Asterisk => AstTokenKind::Asterisk,
+      Self::Identifier(_) => SyntacticTokenKind::Identifier,
+      Self::LitInt(_) => SyntacticTokenKind::Int,
+      Self::LitFloat(_) => SyntacticTokenKind::Float,
+      Self::LitInlineStr(_) => SyntacticTokenKind::InlineString,
+      Self::LitBlockStr(_) => SyntacticTokenKind::BlockString,
+      Self::Dollar => SyntacticTokenKind::Dollar,
+      Self::LParen => SyntacticTokenKind::LParen,
+      Self::RParen => SyntacticTokenKind::RParen,
+      Self::Spread => SyntacticTokenKind::Spread,
+      Self::Colon => SyntacticTokenKind::Colon,
+      Self::Equal => SyntacticTokenKind::Equal,
+      Self::At => SyntacticTokenKind::At,
+      Self::LBracket => SyntacticTokenKind::LBracket,
+      Self::RBracket => SyntacticTokenKind::RBracket,
+      Self::LBrace => SyntacticTokenKind::LBrace,
+      Self::RBrace => SyntacticTokenKind::RBrace,
+      Self::Pipe => SyntacticTokenKind::Pipe,
+      Self::Bang => SyntacticTokenKind::Bang,
+      Self::Ampersand => SyntacticTokenKind::Ampersand,
+      Self::LAngle => SyntacticTokenKind::LAngle,
+      Self::RAngle => SyntacticTokenKind::RAngle,
+      Self::FatArrow => SyntacticTokenKind::FatArrow,
+      Self::Plus => SyntacticTokenKind::Plus,
+      Self::Minus => SyntacticTokenKind::Minus,
+      Self::PathSeparator => SyntacticTokenKind::PathSeparator,
+      Self::Asterisk => SyntacticTokenKind::Asterisk,
     }
   }
 }
 
-impl<S> From<AstToken<S>> for AstTokenKind {
+impl<S> From<SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
-  fn from(token: AstToken<S>) -> Self {
-    AstTokenKind::from(&token)
+  fn from(token: SyntacticToken<S>) -> Self {
+    SyntacticTokenKind::from(&token)
   }
 }
 
-impl<S> From<&AstToken<S>> for AstTokenKind {
+impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
-  fn from(token: &AstToken<S>) -> Self {
+  fn from(token: &SyntacticToken<S>) -> Self {
     token.kind()
   }
 }
 
-/// The token kind for
+/// The kind of a [`SyntacticToken`], without the associated source data.
+///
+/// This enum represents the type of a token without carrying the actual source slice,
+/// making it useful for pattern matching and token classification without dealing with
+/// the generic source type parameter.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
-pub enum AstTokenKind {
+#[non_exhaustive]
+pub enum SyntacticTokenKind {
+  /// Identifier token
   Identifier,
+  /// Int literal token
   Int,
-  Boolean,
+  /// Float literal token
   Float,
+  /// Inline string token
   InlineString,
+  /// Block string token
   BlockString,
-  String,
+  /// Dollar `$` token
   Dollar,
+  /// Fat arrow `=>` token
   FatArrow,
+  /// Left angle bracket `<` token
   LAngle,
+  /// Right angle bracket `>` token
   RAngle,
+  /// Left parenthesis `(` token
   LParen,
+  /// Right parenthesis `)` token
   RParen,
+  /// Spread operator `...` token
   Spread,
+  /// Colon `:` token
   Colon,
+  /// Equal `=` token
   Equal,
+  /// Asterisk `*` token
   Asterisk,
+  /// At `@` token
   At,
+  /// Left square bracket `[` token
   LBracket,
+  /// Right square bracket `]` token
   RBracket,
+  /// Left curly brace `{` token
   LBrace,
+  /// Right curly brace `}` token
   RBrace,
+  /// Pipe `|` token
   Pipe,
+  /// Bang `!` token
   Bang,
+  /// Ampersand `&` token
   Ampersand,
+  /// Plus `+` token
   Plus,
+  /// Minus `-` token
   Minus,
+  /// Path separator `::` token
   PathSeparator,
-}
-
-/// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
-#[derive(
-  Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, TryUnwrap, Unwrap,
-)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum LitInt<S> {
-  /// A decimal integer literal.
-  Decimal(S),
-  /// A hexadecimal integer literal.
-  Hex(S),
-  /// A binary integer literal.
-  Binary(S),
-  /// An octal integer literal.
-  Octal(S),
-}
-
-impl<S> AsRef<S> for LitInt<S> {
-  #[inline(always)]
-  fn as_ref(&self) -> &S {
-    self.source_ref()
-  }
-}
-
-impl AsRef<str> for LitInt<&str> {
-  #[inline(always)]
-  fn as_ref(&self) -> &str {
-    self.source_ref()
-  }
-}
-
-impl AsRef<[u8]> for LitInt<&[u8]> {
-  #[inline(always)]
-  fn as_ref(&self) -> &[u8] {
-    self.source_ref()
-  }
-}
-
-impl<S: core::fmt::Display> core::fmt::Display for LitInt<S> {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source_ref().fmt(f)
-  }
-}
-
-impl<S: DisplayHuman> DisplayHuman for LitInt<S> {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source_ref().fmt(f)
-  }
-}
-
-impl<S> LitInt<S> {
-  /// Returns the underlying source.
-  #[inline]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    match self {
-      Self::Decimal(s) => *s,
-      Self::Hex(s) => *s,
-      Self::Binary(s) => *s,
-      Self::Octal(s) => *s,
-    }
-  }
-
-  /// Returns the reference to the underlying source.
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
-    match self {
-      Self::Decimal(s) => s,
-      Self::Hex(s) => s,
-      Self::Binary(s) => s,
-      Self::Octal(s) => s,
-    }
-  }
-}
-
-/// A GraphQLx float literal, which can be in decimal or hexadecimal format.
-#[derive(
-  Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, TryUnwrap, Unwrap,
-)]
-#[unwrap(ref, ref_mut)]
-#[try_unwrap(ref, ref_mut)]
-pub enum LitFloat<S> {
-  /// A decimal float literal.
-  Decimal(S),
-  /// A hexadecimal float literal.
-  Hex(S),
-}
-
-impl<S> AsRef<S> for LitFloat<S> {
-  #[inline(always)]
-  fn as_ref(&self) -> &S {
-    self.source_ref()
-  }
-}
-
-impl AsRef<str> for LitFloat<&str> {
-  #[inline(always)]
-  fn as_ref(&self) -> &str {
-    self.source_ref()
-  }
-}
-
-impl AsRef<[u8]> for LitFloat<&[u8]> {
-  #[inline(always)]
-  fn as_ref(&self) -> &[u8] {
-    self.source_ref()
-  }
-}
-
-impl<S: DisplayHuman> DisplayHuman for LitFloat<S> {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source_ref().fmt(f)
-  }
-}
-
-impl<S: core::fmt::Display> core::fmt::Display for LitFloat<S> {
-  #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    self.source_ref().fmt(f)
-  }
-}
-
-impl<S> LitFloat<S> {
-  /// Returns the underlying source.
-  #[inline]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    match self {
-      Self::Decimal(s) => *s,
-      Self::Hex(s) => *s,
-    }
-  }
-
-  /// Returns the reference to the underlying source.
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
-    match self {
-      Self::Decimal(s) => s,
-      Self::Hex(s) => s,
-    }
-  }
 }

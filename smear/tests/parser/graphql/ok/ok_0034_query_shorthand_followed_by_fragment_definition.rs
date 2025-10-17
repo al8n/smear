@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0034_query_shorthand_followed_by_fragment_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn query_shorthand_followed_by_fragment_definition() {
   use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
 
@@ -55,6 +56,7 @@ fn query_shorthand_followed_by_fragment_definition() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_query_shorthand_followed_by_fragment_definition() {
   use smear::parser::graphqlx::ast::{ExecutableDocument, ParseStr};
 

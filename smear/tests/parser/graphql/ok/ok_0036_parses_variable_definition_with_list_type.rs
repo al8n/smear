@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0036_parses_variable_definition_with_list_type.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn parses_variable_definition_with_list_type() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -52,6 +53,7 @@ fn parses_variable_definition_with_list_type() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_parses_variable_definition_with_list_type() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

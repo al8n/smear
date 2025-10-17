@@ -20,13 +20,13 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ## Overview
 
-**Smear** is a high-performance GraphQL parser library built on parser combinators. It provides zero-copy parsing for the GraphQL draft specification and is designed to enable anyone to develop GraphQL-like Schema Definition Languages (SDLs) using reusable parser combinators.
+**Smear** is a high-performance GraphQL parser library built on parser combinators. It provides zero-copy parsing for the GraphQL draft specification and is designed to enable anyone to develop GraphQL-like Domain Specific Languages (DSLs) using reusable parser combinators.
 
 ### Key Features
 
 - **Thread-Safe & Concurrent**: AST is `Send + Sync` when using thread-safe source types, enabling parallel schema compilation and batched query processing across multiple threads
 - **True Zero-Copy**: All tokens and AST nodes hold slices into the original source—no string allocations, minimal memory footprint, maximum performance
-- **Both AST & CST**: Choose Abstract Syntax Trees for fast execution or Concrete Syntax Trees (lossless) for tooling that preserves formatting
+- **Dual Token Streams**: Choose `SyntacticToken` (fast, skips trivia) for servers or `LosslessToken` (complete, preserves all formatting) for tooling
 - **Generic Over Source Types**: Works seamlessly with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom source types
 - **Highly Customizable**: Three-layer scaffold architecture with reusable combinators for building custom GraphQL-like DSLs
 - **Draft Spec Compliant**: Fully implements the GraphQL draft specification with comprehensive error reporting
@@ -35,7 +35,7 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 
 ## Why Smear Over Other Rust GraphQL Parsers?
 
-Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like apollo-parser, graphql-parser, async-graphql-parser, and cynic-parser:
+Smear's architecture offers unique advantages that set it apart from other Rust GraphQL parsers like `apollo-parser`, `graphql-parser`, `async-graphql-parser`, and `cynic-parser`:
 
 ### Thread-Safe AST by Design
 
@@ -67,37 +67,43 @@ Choose the source type that fits your use case:
 
 The three-layer scaffold architecture provides reusable generic AST node definitions, making it straightforward to build custom GraphQL-like domain-specific languages. GraphQLX (included) demonstrates this by adding generics, imports, type paths, and namespacing to GraphQL.
 
-### Both AST and CST Support
+### Dual Token Streams: Syntactic and Lossless
 
-Unlike other Rust GraphQL parsers that only provide either AST (Abstract Syntax Tree) or CST (Concrete Syntax Tree), smear supports **both**:
+Unlike other Rust GraphQL parsers that only provide one token type, smear offers **two complementary token streams** to suit different use cases:
 
-**AST (Abstract Syntax Tree)** - For performance-critical execution:
+**SyntacticToken (Fast)** - For performance-critical execution:
 
-- Ignores whitespace and comments
-- Optimized for GraphQL servers and query execution
-- Minimal memory footprint
-- Fast parsing and traversal
+- **Skips trivia**: Automatically filters out whitespace, comments, and commas
+- **Optimized for speed**: Minimal memory footprint and fast parsing
+- **Use cases**: GraphQL servers, query execution, schema compilation
+- **Zero-copy**: All tokens reference the original source with no allocations
 
-**CST (Concrete/Lossless Syntax Tree)** - For tooling that preserves formatting:
+**LosslessToken (Complete)** - For tooling that preserves formatting:
 
-- Preserves all source information including comments and whitespace
-- Essential for linters, formatters, and refactoring tools
-- Enables accurate source-to-source transformations
-- IDE features like "go to definition" with precise locations
+- **Preserves trivia**: Includes all whitespace, comments, commas, and formatting
+- **Complete fidelity**: Every character from the source is represented
+- **Use cases**: Code formatters, linters, IDEs, syntax highlighters, refactoring tools
+- **CST-ready**: Build Concrete Syntax Trees with perfect source reconstruction
 
 ```rust
-// AST for servers - fast execution
-use smear::parser::graphql::ast::{ExecutableDocument, ParseStr};
-let doc = ExecutableDocument::<&str>::parse_str(query)?;
-
-// CST for tooling - preserves formatting
-use smear::lexer::graphql::cst::CstToken;
+// SyntacticToken for servers - fast execution
+use smear::lexer::graphql::syntactic::SyntacticToken;
 use logosky::TokenStream;
-let tokens = TokenStream::<CstToken>::new(source);
-// Access comments, whitespace, exact formatting
+
+let source = "query { user { id } }";
+let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+// Only syntactically significant tokens (whitespace skipped)
+
+// LosslessToken for tooling - preserves formatting
+use smear::lexer::graphql::lossless::LosslessToken;
+
+let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+// ALL tokens including spaces, comments, exact formatting
 ```
 
-This makes smear suitable for **both GraphQL servers** (using AST for performance) **and development tools** (using CST for accurate code manipulation).
+**The Bottom Line**: Use `SyntacticToken` when you need speed (servers, execution engines), and `LosslessToken` when you need perfect source preservation (formatters, linters, IDEs).
+
+This dual-token architecture makes smear suitable for **both GraphQL servers** (using SyntacticToken for performance) **and development tools** (using LosslessToken for accurate code manipulation).
 
 ## Architecture
 

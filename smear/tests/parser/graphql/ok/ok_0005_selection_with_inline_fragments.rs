@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0005_selection_with_inline_fragments.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn selection_with_inline_fragment() {
   use smear::parser::graphql::ast::{SelectionSet, ParseStr};
 
@@ -49,6 +50,7 @@ fn selection_with_inline_fragment() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_selection_with_inline_fragment() {
   use smear::parser::graphqlx::ast::{SelectionSet, ParseStr};
 

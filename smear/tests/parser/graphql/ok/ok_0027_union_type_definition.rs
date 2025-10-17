@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0027_union_type_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn union_type_definition() {
   use smear::parser::graphql::ast::{TypeSystemDocument, ParseStr};
 
@@ -38,6 +39,7 @@ fn union_type_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_union_type_definition() {
   use smear::parser::graphqlx::ast::{TypeSystemDocument, ParseStr};
 

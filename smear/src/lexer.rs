@@ -168,13 +168,26 @@ mod string_lexer;
 /// This module provides zero-copy tokenization for GraphQL source text. All tokens
 /// reference spans in the original source, avoiding unnecessary allocations.
 ///
-/// # Token Types
+/// # Token Streams
+///
+/// GraphQL lexing offers two complementary token types:
+///
+/// - **[`SyntacticToken`](graphql::syntactic::SyntacticToken)** - Fast token stream that skips trivia (whitespace, comments, commas)
+///   - Use for: GraphQL servers, query execution, performance-critical parsing
+///   - Benefits: Minimal memory, maximum speed
+///
+/// - **[`LosslessToken`](graphql::lossless::LosslessToken)** - Complete token stream that preserves all source information
+///   - Use for: Code formatters, linters, IDEs, syntax highlighters
+///   - Benefits: Perfect source reconstruction, access to comments and formatting
+///
+/// # Recognized Tokens
 ///
 /// The GraphQL lexer recognizes:
 /// - **Identifiers**: Names for types, fields, arguments, etc.
 /// - **Literals**: Integers, floats, strings (inline and block), booleans, null
 /// - **Punctuators**: `(`, `)`, `{`, `}`, `[`, `]`, `:`, `=`, `@`, `$`, `!`, `|`, `&`, `,`
 /// - **Keywords**: `query`, `mutation`, `subscription`, `fragment`, `type`, `interface`, etc.
+/// - **Trivia** (LosslessToken only): Whitespace, comments, commas
 ///
 /// # Source Types
 ///
@@ -185,21 +198,24 @@ mod string_lexer;
 ///
 /// # Modules
 ///
-/// - [`ast`](graphql::ast): AST token definitions for standard GraphQL
+/// - [`syntactic`](graphql::syntactic): Syntactic tokens (fast, skips trivia)
+/// - [`lossless`](graphql::lossless): Lossless tokens (complete, preserves all formatting)
 /// - [`error`](graphql::error): Lexer-specific error types
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphql::ast::AstToken;
+/// use smear::lexer::graphql::syntactic::SyntacticToken;
 /// use logosky::TokenStream;
 ///
 /// let source = "query { user { id } }";
-/// let tokens = TokenStream::<AstToken<&str>>::new(source);
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
 /// for token in tokens {
-///   // Process each token...
+///   // Only syntactically significant tokens (whitespace automatically skipped)
 /// }
 /// ```
+#[cfg(feature = "graphql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
 pub mod graphql;
 
 /// Lexers for GraphQLX (extended GraphQL).
@@ -207,33 +223,58 @@ pub mod graphql;
 /// This module extends the standard GraphQL lexer with additional tokens for GraphQLX
 /// features like generics, imports, map types, and namespacing.
 ///
-/// # Additional Token Types
+/// # Token Streams
 ///
-/// Beyond standard GraphQL tokens, GraphQLX adds:
-/// - **Path separator**: `::` for namespaced types
-/// - **Angle brackets**: `<`, `>` for generics
-/// - **Fat arrow**: `=>` for map types
-/// - **Additional keywords**: `import`, `from`, `as`, `where`, `map`
+/// GraphQLX lexing offers two complementary token types:
+///
+/// - **[`SyntacticToken`](graphqlx::ast::SyntacticToken)** - Fast token stream that skips trivia (whitespace, comments, commas)
+///   - Use for: GraphQLX servers, query execution, performance-critical parsing
+///   - Benefits: Minimal memory, maximum speed
+///
+/// - **[`LosslessToken`](graphqlx::lossless::LosslessToken)** - Complete token stream that preserves all source information
+///   - Use for: Code formatters, linters, IDEs, syntax highlighters
+///   - Benefits: Perfect source reconstruction, access to comments and formatting
+///
+/// # Additional Tokens (Beyond GraphQL)
+///
+/// GraphQLX adds these tokens for advanced features:
+/// - **Path separator**: `::` for namespaced types (`namespace::Type`)
+/// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
+/// - **Fat arrow**: `=>` for map types (`<Key => Value>`)
+/// - **Arithmetic operators**: `+`, `-` for extended type operations
+/// - **Additional keywords**: `import`, `from`, `as`, `where`, `map`, `set`
 /// - **Asterisk**: `*` for wildcard imports
+///
+/// # Source Types
+///
+/// Like the GraphQL lexer, GraphQLX is generic over source type `S`:
+/// - `&str`: UTF-8 validated strings
+/// - `&[u8]`: Byte slices
+/// - `bytes::Bytes`: Shared ownership (requires `bytes` feature)
 ///
 /// # Modules
 ///
-/// - [`ast`](graphqlx::ast): AST token definitions for GraphQLX
+/// - [`ast`](graphqlx::ast): Syntactic tokens (fast, skips trivia)
+/// - [`lossless`](graphqlx::lossless): Lossless tokens (complete, preserves all formatting)
 /// - [`error`](graphqlx::error): Lexer-specific error types
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphqlx::ast::AstToken;
+/// use smear::lexer::graphqlx::ast::SyntacticToken;
 /// use logosky::TokenStream;
 ///
 /// let source = "import { User } from \"./types.graphqlx\"";
-/// let tokens = TokenStream::<AstToken<&str>>::new(source);
+/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+/// // Fast tokenization with trivia automatically skipped
 /// ```
 ///
 /// # Note
 ///
 /// GraphQLX requires the `unstable` feature flag.
+#[cfg(feature = "graphqlx")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod handlers;

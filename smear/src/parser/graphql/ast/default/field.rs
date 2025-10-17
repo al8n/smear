@@ -1,6 +1,6 @@
 use crate::{
   error::UnclosedBraceError,
-  lexer::graphql::ast::AstLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
   punctuator::{At, RBrace},
 };
 
@@ -47,27 +47,32 @@ impl<S> IntoSpan<Span> for Selection<S> {
   }
 }
 
-impl<'a, S: 'a> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for Selection<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  Directives<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
-    AstTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
         'a,
-        AstToken<S>,
-        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
       >,
-    AstTokenErrors<'a, S>: 'a,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|selection| {
       let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone());
@@ -166,27 +171,32 @@ impl<S> Field<S> {
   }
 }
 
-impl<'a, S: 'a> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for Field<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  Directives<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
-    AstTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
         'a,
-        AstToken<S>,
-        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
       >,
-    AstTokenErrors<'a, S>: 'a,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|field_parser| {
       // Inner fixpoint: build a `Selection<S>` parser by using the recursive `field_parser`.
@@ -206,54 +216,61 @@ where
 }
 
 fn fragment_parser<'a, S, E>(
-  selection_parser: impl Parser<'a, AstTokenStream<'a, S>, Selection<S>, E> + Clone + 'a,
-) -> impl Parser<'a, AstTokenStream<'a, S>, Selection<S>, E> + Clone
+  selection_parser: impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone + 'a,
+) -> impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S>, E> + Clone
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  Directive<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  Directives<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
-  At: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directive<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  At:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
   S: 'a,
-  E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
-  AstTokenStream<'a, S>: Tokenizer<
+  E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+  SyntacticTokenStream<'a, S>: Tokenizer<
       'a,
-      AstToken<S>,
-      Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+      SyntacticToken<S>,
+      Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
     >,
-  AstTokenErrors<'a, S>: 'a,
+  SyntacticTokenErrors<'a, S>: 'a,
 {
   let selection_set = SelectionSet::parser_with(selection_parser.clone());
   custom(move |inp| {
     let before = inp.cursor();
 
     match inp.next() {
-      None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+      None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
       Some(Lexed::Error(errs)) => {
-        Err(AstTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+        Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
       }
       Some(Lexed::Token(Spanned { span, data: token })) => {
         match token {
-          AstToken::Spread => {
+          SyntacticToken::Spread => {
             let current_cursor = inp.cursor();
 
             match inp.next() {
-              None => {
-                Err(AstTokenError::unexpected_end_of_input(inp.span_since(&current_cursor)).into())
-              }
-              Some(Lexed::Error(errs)) => {
-                Err(AstTokenError::from_lexer_errors(errs, inp.span_since(&current_cursor)).into())
-              }
+              None => Err(
+                SyntacticTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
+                  .into(),
+              ),
+              Some(Lexed::Error(errs)) => Err(
+                SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&current_cursor))
+                  .into(),
+              ),
               Some(Lexed::Token(Spanned {
                 span: fragment_span,
                 data: fragment_token,
               })) => {
                 match fragment_token {
-                  AstToken::Identifier(name) => {
+                  SyntacticToken::Identifier(name) => {
                     // if we do not have on, then it's a fragment spread
                     if !"on".equivalent(&name) {
                       let directives = inp.parse(Directives::parser().or_not())?;
@@ -280,7 +297,7 @@ where
                       selection_set,
                     )))
                   }
-                  AstToken::LBrace => {
+                  SyntacticToken::LBrace => {
                     let (selection, rbrace) = inp.parse(
                       selection_parser
                         .clone()
@@ -291,7 +308,9 @@ where
                     )?;
 
                     match rbrace {
-                      None => Err(AstTokenError::unclosed_brace(inp.span_since(&before)).into()),
+                      None => {
+                        Err(SyntacticTokenError::unclosed_brace(inp.span_since(&before)).into())
+                      }
                       Some(_) => {
                         let span = inp.span_since(&before);
                         Ok(Selection::InlineFragment(InlineFragment::new(
@@ -303,7 +322,7 @@ where
                       }
                     }
                   }
-                  AstToken::At => {
+                  SyntacticToken::At => {
                     let (directives, selection_set) = inp.parse(
                       Name::<S>::parser::<E>()
                         .then(Arguments::parser().or_not())
@@ -321,7 +340,7 @@ where
                     )))
                   }
                   token => Err(
-                    AstTokenError::unexpected_token(
+                    SyntacticTokenError::unexpected_token(
                       token,
                       Expectation::FragmentSpreadOrInlineFragment,
                       fragment_span,
@@ -332,7 +351,9 @@ where
               }
             }
           }
-          token => Err(AstTokenError::unexpected_token(token, Expectation::Spread, span).into()),
+          token => {
+            Err(SyntacticTokenError::unexpected_token(token, Expectation::Spread, span).into())
+          }
         }
       }
     }

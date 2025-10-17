@@ -4,6 +4,7 @@ use logosky::{
   utils::{
     Lexeme, UnexpectedEnd, UnexpectedLexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+    tracker::{LimitExceeded, Tracker},
   },
 };
 
@@ -18,18 +19,67 @@ pub(super) mod slice;
 pub(super) mod str;
 
 #[inline(always)]
+pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  handlers::increase_recursion_depth_and_token(lexer)
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_and_then<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
+) -> Result<O, error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  handlers::tt_hook_and_then(lexer, f)
+}
+
+#[allow(clippy::result_large_err)]
+#[inline(always)]
+pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
+) -> Result<O, error::LexerErrors<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  handlers::tt_hook_and_then_into_errors(lexer, f)
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_map<'a, C, T, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> O,
+) -> Result<O, error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  handlers::tt_hook_map(lexer, f)
+}
+
+#[inline(always)]
+pub(super) fn tt_hook<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  handlers::tt_hook(lexer)
+}
+
+#[inline(always)]
 pub(super) fn increase_recursion_depth<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
 where
   T: Logos<'a, Extras = RecursionLimiter>,
 {
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| error::LexerError::new(lexer.span(), error::LexerErrorData::State(e)))
+  handlers::increase_recursion_depth(lexer)
 }
 
 #[inline(always)]

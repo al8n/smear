@@ -5,14 +5,16 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 
-use crate::{lexer::graphqlx::ast::AstLexerErrors, parser::graphqlx::error::InvalidEnumValue};
+use crate::{
+  lexer::graphqlx::syntactic::SyntacticLexerErrors, parser::graphqlx::error::InvalidEnumValue,
+};
 
 use super::super::*;
 
-// pub use crate::parser::value::EnumValue;
+use crate::parser::value::EnumValue as EnumValueInner;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
-pub struct EnumValue<S>(Path<S>);
+pub struct EnumValue<S>(EnumValueInner<Path<S>>);
 
 impl<S> AsSpan<Span> for EnumValue<S> {
   #[inline]
@@ -33,7 +35,8 @@ impl<S> IntoComponents for EnumValue<S> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    self.0.into_components()
+    let (_, path) = self.0.into_components();
+    path.into_components()
   }
 }
 
@@ -41,7 +44,7 @@ impl<S> EnumValue<S> {
   /// Creates a new enum value.
   #[inline]
   pub(super) const fn new(path: Path<S>) -> Self {
-    Self(path)
+    Self(EnumValueInner::new(*path.span(), path))
   }
 
   /// Returns the span of the enum value.
@@ -52,32 +55,36 @@ impl<S> EnumValue<S> {
 
   /// Returns the value of the enum.
   #[inline]
-  pub fn value(&self) -> &Path<S> {
-    &self.0
+  pub const fn value(&self) -> &Path<S> {
+    self.0.source_ref()
   }
 }
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for EnumValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Path<S>: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Path<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<Path<S>>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    AstTokenStream<'a, S>: Tokenizer<
+    SyntacticTokenStream<'a, S>: Tokenizer<
         'a,
-        AstToken<S>,
-        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
       >,
-    AstToken<S>: Token<'a>,
-    AstTokenErrors<'a, S>: 'a,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    SyntacticToken<S>: Token<'a>,
+    SyntacticTokenErrors<'a, S>: 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
     Path::parser().try_map(|path, span: Span| {
       if "true".equivalent(&path) {

@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0002_selection_simple.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn selection_simple() {
   use smear::parser::graphql::ast::{SelectionSet, ParseStr};
 
@@ -22,6 +23,7 @@ fn selection_simple() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_selection_simple() {
   use smear::parser::graphqlx::ast::{SelectionSet, ParseStr};
 

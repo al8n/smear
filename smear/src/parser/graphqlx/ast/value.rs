@@ -1,13 +1,15 @@
 use crate::{
   error::{UnclosedBraceError, UnclosedBracketError},
   hints::VariableValueHint,
-  lexer::graphqlx::ast::AstLexerErrors,
+  lexer::graphqlx::syntactic::SyntacticLexerErrors,
   parser::{graphqlx::Expectation, ident::Ident},
   punctuator::{LBrace, PathSeparator, RBrace, RBracket},
   scaffold::{self, Path},
 };
 
-use super::{AstToken, AstTokenError, AstTokenErrors, AstTokenStream, DefaultVec};
+use super::{
+  DefaultVec, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenStream,
+};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
@@ -119,47 +121,58 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for InputValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  PathSeparator: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  LBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBracket:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  PathSeparator:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
-    AstTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
         'a,
-        AstToken<S>,
-        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
       >,
-    AstTokenErrors<'a, S>: 'a,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
+      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
         let before = inp.cursor();
 
         match inp.next() {
-          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
               let output = match token {
-                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
-                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
-                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
-                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
-                AstToken::PathSeparator => {
+                SyntacticToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                SyntacticToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                SyntacticToken::LitInlineStr(raw) => {
+                  Self::String(StringValue::new(span, raw.into()))
+                }
+                SyntacticToken::LitBlockStr(raw) => {
+                  Self::String(StringValue::new(span, raw.into()))
+                }
+                SyntacticToken::PathSeparator => {
                   let segments = inp.parse(
                     Ident::<S>::parser()
                       .separated_by(PathSeparator::parser())
@@ -173,14 +186,14 @@ where
                     true,
                   )))
                 }
-                AstToken::Identifier(name) => match () {
+                SyntacticToken::Identifier(name) => match () {
                   () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
                   () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
                   () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
                   () if "set".equivalent(&name) => match inp.peek() {
                     None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                     Some(Lexed::Token(Spanned {
-                      data: AstToken::LBrace,
+                      data: SyntacticToken::LBrace,
                       ..
                     })) => {
                       let (values, r) = inp.parse(
@@ -191,7 +204,7 @@ where
 
                       match r {
                         Some(_) => Self::Set(Set::new(inp.span_since(&before), values)),
-                        None => return Err(AstTokenError::unclosed_brace(span).into()),
+                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
                       }
                     }
                     _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
@@ -199,7 +212,7 @@ where
                   () if "map".equivalent(&name) => match inp.peek() {
                     None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                     Some(Lexed::Token(Spanned {
-                      data: AstToken::LBrace,
+                      data: SyntacticToken::LBrace,
                       ..
                     })) => {
                       let (values, r) = inp.parse(
@@ -214,34 +227,38 @@ where
 
                       match r {
                         Some(_) => Self::Map(Map::new(inp.span_since(&before), values)),
-                        None => return Err(AstTokenError::unclosed_brace(span).into()),
+                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
                       }
                     }
                     _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                   },
                   _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                 },
-                AstToken::Dollar => {
+                SyntacticToken::Dollar => {
                   let current_cursor = inp.cursor();
                   let name = match inp.next() {
                     Some(Lexed::Token(Spanned {
                       span,
-                      data: AstToken::Identifier(name),
+                      data: SyntacticToken::Identifier(name),
                     })) => Ident::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
                       return Err(
-                        AstTokenError::unexpected_token(data, Expectation::Identifier, span).into(),
+                        SyntacticTokenError::unexpected_token(data, Expectation::Identifier, span)
+                          .into(),
                       );
                     }
                     Some(Lexed::Error(err)) => {
                       return Err(
-                        AstTokenError::from_lexer_errors(err, inp.span_since(&current_cursor))
-                          .into(),
+                        SyntacticTokenError::from_lexer_errors(
+                          err,
+                          inp.span_since(&current_cursor),
+                        )
+                        .into(),
                       );
                     }
                     None => {
                       return Err(
-                        AstTokenError::unexpected_end_of_variable_value(
+                        SyntacticTokenError::unexpected_end_of_variable_value(
                           VariableValueHint::Name,
                           inp.span_since(&before),
                         )
@@ -251,7 +268,7 @@ where
                   };
                   Self::Variable(VariableValue::new(inp.span_since(&before), name))
                 }
-                AstToken::LBrace => {
+                SyntacticToken::LBrace => {
                   let (fields, rbrace) = inp.parse(
                     ObjectField::<S>::parser_with(Ident::<S>::parser(), parser.clone())
                       .repeated()
@@ -263,10 +280,12 @@ where
                       inp.span_since(&before),
                       fields,
                     ))),
-                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                    None => Err(SyntacticTokenErrors::unclosed_brace(
+                      inp.span_since(&before),
+                    )),
                   };
                 }
-                AstToken::LBracket => {
+                SyntacticToken::LBracket => {
                   let (elements, rbracket) = inp.parse(
                     parser
                       .clone()
@@ -280,12 +299,15 @@ where
                       inp.span_since(&before),
                       elements,
                     ))),
-                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                    None => Err(SyntacticTokenErrors::unclosed_bracket(
+                      inp.span_since(&before),
+                    )),
                   };
                 }
                 tok => {
                   return Err(
-                    AstTokenError::unexpected_token(tok, Expectation::InputValue, span).into(),
+                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
+                      .into(),
                   );
                 }
               };
@@ -362,47 +384,58 @@ impl<S> IntoSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for ConstInputValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  RBrace: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  RBracket: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
-  PathSeparator: Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  LBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBracket:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  PathSeparator:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
-    AstTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
         'a,
-        AstToken<S>,
-        Slice = <<<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
       >,
-    AstTokenErrors<'a, S>: 'a,
+    SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      custom::<_, AstTokenStream<'_, S>, Self, E>(move |inp| {
+      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
         let before = inp.cursor();
 
         match inp.next() {
-          None => Err(AstTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              Err(AstTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
               let output = match token {
-                AstToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
-                AstToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
-                AstToken::LitInlineStr(raw) => Self::String(StringValue::new(span, raw.into())),
-                AstToken::LitBlockStr(raw) => Self::String(StringValue::new(span, raw.into())),
-                AstToken::PathSeparator => {
+                SyntacticToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
+                SyntacticToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
+                SyntacticToken::LitInlineStr(raw) => {
+                  Self::String(StringValue::new(span, raw.into()))
+                }
+                SyntacticToken::LitBlockStr(raw) => {
+                  Self::String(StringValue::new(span, raw.into()))
+                }
+                SyntacticToken::PathSeparator => {
                   let segments = inp.parse(
                     Ident::<S>::parser()
                       .separated_by(PathSeparator::parser())
@@ -416,14 +449,14 @@ where
                     true,
                   )))
                 }
-                AstToken::Identifier(name) => match () {
+                SyntacticToken::Identifier(name) => match () {
                   () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
                   () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
                   () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
                   () if "set".equivalent(&name) => match inp.peek() {
                     None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                     Some(Lexed::Token(Spanned {
-                      data: AstToken::LBrace,
+                      data: SyntacticToken::LBrace,
                       ..
                     })) => {
                       let (values, r) = inp.parse(
@@ -434,7 +467,7 @@ where
 
                       match r {
                         Some(_) => Self::Set(ConstSet::new(inp.span_since(&before), values)),
-                        None => return Err(AstTokenError::unclosed_brace(span).into()),
+                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
                       }
                     }
                     _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
@@ -442,7 +475,7 @@ where
                   () if "map".equivalent(&name) => match inp.peek() {
                     None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                     Some(Lexed::Token(Spanned {
-                      data: AstToken::LBrace,
+                      data: SyntacticToken::LBrace,
                       ..
                     })) => {
                       let (values, r) = inp.parse(
@@ -457,14 +490,14 @@ where
 
                       match r {
                         Some(_) => Self::Map(ConstMap::new(inp.span_since(&before), values)),
-                        None => return Err(AstTokenError::unclosed_brace(span).into()),
+                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
                       }
                     }
                     _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                   },
                   _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
                 },
-                AstToken::LBrace => {
+                SyntacticToken::LBrace => {
                   let (fields, rbrace) = inp.parse(
                     ConstObjectField::<S>::parser_with(Ident::<S>::parser(), parser.clone())
                       .repeated()
@@ -476,10 +509,12 @@ where
                       inp.span_since(&before),
                       fields,
                     ))),
-                    None => Err(AstTokenErrors::unclosed_brace(inp.span_since(&before))),
+                    None => Err(SyntacticTokenErrors::unclosed_brace(
+                      inp.span_since(&before),
+                    )),
                   };
                 }
-                AstToken::LBracket => {
+                SyntacticToken::LBracket => {
                   let (elements, rbracket) = inp.parse(
                     parser
                       .clone()
@@ -493,12 +528,15 @@ where
                       inp.span_since(&before),
                       elements,
                     ))),
-                    None => Err(AstTokenErrors::unclosed_bracket(inp.span_since(&before))),
+                    None => Err(SyntacticTokenErrors::unclosed_bracket(
+                      inp.span_since(&before),
+                    )),
                   };
                 }
                 tok => {
                   return Err(
-                    AstTokenError::unexpected_token(tok, Expectation::InputValue, span).into(),
+                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
+                      .into(),
                   );
                 }
               };

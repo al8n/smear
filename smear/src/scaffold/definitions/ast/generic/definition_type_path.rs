@@ -8,6 +8,8 @@ use crate::punctuator::{Bang, LAngle, PathSeparator, RAngle};
 
 use super::{super::Path, TypeGenerics};
 
+use std::vec::Vec;
+
 /// A GraphQLx type path.
 ///
 /// ## Example

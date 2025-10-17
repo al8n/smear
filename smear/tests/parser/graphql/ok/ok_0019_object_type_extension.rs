@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0019_object_type_extension.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn object_type_extension() {
   use smear::parser::graphql::ast::{ObjectTypeExtension, ParseStr};
 
@@ -48,6 +49,7 @@ fn object_type_extension() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_object_type_extension() {
   use smear::parser::graphqlx::ast::{ObjectTypeExtension, ParseStr};
 

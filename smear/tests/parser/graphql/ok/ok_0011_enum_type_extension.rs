@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0011_enum_type_extension.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn enum_type_extension() {
   use smear::parser::graphql::ast::{EnumTypeExtension, ParseStr};
@@ -37,6 +38,7 @@ fn enum_type_extension() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_enum_type_extension() {
   use smear::parser::graphqlx::ast::{EnumTypeExtension, ParseStr};
 

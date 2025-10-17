@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0016_interface_definition.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn interface_object_definition() {
   use smear::parser::graphql::ast::{DescribedInterfaceTypeDefinition, ParseStr};
@@ -24,6 +25,7 @@ fn interface_object_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_interface_object_definition() {
   use smear::parser::graphqlx::ast::{DescribedInterfaceTypeDefinition, ParseStr};
 

@@ -23048,7 +23048,7 @@ type DependencyPath {
   path: [DependencyPathPartial!]!
 }
 
-"""Edge for a paginated dependency path for SBOM occurrences"""
+"""Edge for a paginated dependency path for SBom occurrences"""
 type DependencyPathEdge {
   """Cursor for use in pagination."""
   cursor: String!
@@ -23057,7 +23057,7 @@ type DependencyPathEdge {
   node: DependencyPath
 }
 
-"""Paginated dependency paths for SBOM occurrences"""
+"""Paginated dependency paths for SBom occurrences"""
 type DependencyPathPage {
   """List of dependency path edges."""
   edges: [DependencyPathEdge!]!
@@ -32823,7 +32823,7 @@ type Group implements GroupInterface & Todoable {
     """Returns only the projects which have vulnerabilities."""
     hasVulnerabilities: Boolean = false
 
-    """Return only the projects related to the specified SBOM component."""
+    """Return only the projects related to the specified SBom component."""
     sbomComponentId: ID = null
 
     """Returns the elements in the list that come after the specified cursor."""
@@ -34392,7 +34392,7 @@ type GroupDora {
     """Returns only the projects which have vulnerabilities."""
     hasVulnerabilities: Boolean = false
 
-    """Return only the projects related to the specified SBOM component."""
+    """Return only the projects related to the specified SBom component."""
     sbomComponentId: ID = null
 
     """Date range to start DORA lookup from."""
@@ -51536,7 +51536,7 @@ type Namespace implements Todoable {
     """Returns only the projects which have vulnerabilities."""
     hasVulnerabilities: Boolean = false
 
-    """Return only the projects related to the specified SBOM component."""
+    """Return only the projects related to the specified SBom component."""
     sbomComponentId: ID = null
 
     """Returns the elements in the list that come after the specified cursor."""
@@ -71956,8 +71956,8 @@ type SecurityPolicyValidationError {
 }
 
 enum SecurityPreferredLicenseSourceConfiguration {
-  """Use the SBOM as a source of license information for dependencies."""
-  SBOM
+  """Use the SBom as a source of license information for dependencies."""
+  SBom
 
   """
   Use internal instance license database as a source of license information for dependencies.

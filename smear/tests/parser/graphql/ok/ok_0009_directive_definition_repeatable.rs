@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0009_directive_definition_repeatable.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn directive_definition_repeatable() {
   use smear::parser::graphql::ast::{DirectiveDefinition, ParseStr};
@@ -42,6 +43,7 @@ fn directive_definition_repeatable() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_directive_definition_repeatable() {
   use smear::parser::graphqlx::ast::{DirectiveDefinition, ParseStr};
 

@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0033_directive_on_argument_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn directive_on_argument_definition() {
   use smear::parser::graphql::ast::{ObjectTypeDefinition, ParseStr};
 
@@ -36,6 +37,7 @@ fn directive_on_argument_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_directive_on_argument_definition() {
   use smear::parser::graphqlx::ast::{ObjectTypeDefinition, ParseStr};
 

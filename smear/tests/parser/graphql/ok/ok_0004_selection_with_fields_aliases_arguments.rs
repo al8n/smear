@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0004_selection_with_fields_aliases_arguments.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn selection_with_fields_aliases_arguments() {
   use smear::parser::graphql::ast::{SelectionSet, ParseStr};
 
@@ -72,6 +73,7 @@ fn selection_with_fields_aliases_arguments() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_selection_with_fields_aliases_arguments() {
   use smear::parser::graphqlx::ast::{SelectionSet, ParseStr};
 

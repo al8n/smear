@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0041_implements_list.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn implements_list() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -111,6 +112,7 @@ fn implements_list() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_implements_list() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

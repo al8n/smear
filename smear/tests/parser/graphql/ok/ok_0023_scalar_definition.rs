@@ -1,6 +1,7 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0023_scalar_definition.graphql");
 
+#[cfg(feature = "graphql")]
 #[test]
 fn scalar_type_definition() {
   use smear::parser::graphql::ast::{Document, ParseStr};
@@ -33,6 +34,7 @@ fn scalar_type_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_scalar_type_definition() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

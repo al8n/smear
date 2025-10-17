@@ -8,6 +8,8 @@ use crate::punctuator::{LAngle, RAngle};
 
 use super::ExecutableDefinitionTypeGenerics;
 
+use std::vec::Vec;
+
 /// The AST for a definition name.
 ///
 /// In the below example, `User<ID, Name = String>` is a definition name, where `User` is the identifier,

@@ -11,6 +11,8 @@ use logosky::{
   },
 };
 
+use std::vec::Vec;
+
 use crate::{
   keywords::*,
   punctuator::{At, Pipe},

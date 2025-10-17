@@ -8,6 +8,8 @@ use core::marker::PhantomData;
 
 use crate::punctuator::{Colon, LParen, RParen};
 
+use std::vec::Vec;
+
 /// A single named argument in a GraphQL operation or directive.
 ///
 /// Represents a name-value pair used to pass parameters to GraphQL fields,

@@ -11,7 +11,9 @@ pub mod ast;
 /// The concrete syntax tree (CST) definitions and parsers for GraphQL language.
 pub mod cst;
 
+/// Expectations for the GraphQL parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Expectation {
   /// An inline string was expected.
   InlineString,

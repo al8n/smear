@@ -51,6 +51,11 @@ impl<S> IntoComponents for Directive<S> {
 }
 
 impl<S> Directive<S> {
+  #[inline]
+  pub(super) const fn new(span: Span, name: TypePath<S>, arguments: Option<Arguments<S>>) -> Self {
+    Self(DirectiveAlias::new(span, name, arguments))
+  }
+
   /// Returns the span of the directive.
   #[inline]
   pub const fn span(&self) -> &Span {

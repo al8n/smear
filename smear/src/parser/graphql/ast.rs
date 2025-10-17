@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+use std::vec::Vec;
+
 use logosky::{
   Parseable,
   chumsky::{ParseResult, Parser},
@@ -10,7 +12,7 @@ use super::{
   Expectation,
   error::{Error, Errors, Extra},
 };
-use crate::lexer::graphql::ast::{AstToken, AstTokenChar, AstTokenKind};
+use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
 pub use fragment::*;
@@ -31,45 +33,44 @@ mod ty;
 mod type_system;
 mod value;
 
-impl From<AstTokenKind> for Expectation {
+impl From<SyntacticTokenKind> for Expectation {
   #[inline]
-  fn from(kind: AstTokenKind) -> Self {
+  fn from(kind: SyntacticTokenKind) -> Self {
     match kind {
-      AstTokenKind::Identifier => Self::Name,
-      AstTokenKind::InlineString => Self::InlineString,
-      AstTokenKind::BlockString => Self::BlockString,
-      AstTokenKind::Dollar => Self::Dollar,
-      AstTokenKind::At => Self::At,
-      AstTokenKind::Ampersand => Self::Ampersand,
-      AstTokenKind::Spread => Self::Spread,
-      AstTokenKind::Pipe => Self::Pipe,
-      AstTokenKind::Equal => Self::Equal,
-      AstTokenKind::Colon => Self::Colon,
-      AstTokenKind::Bang => Self::Bang,
-      AstTokenKind::LBrace => Self::LBrace,
-      AstTokenKind::RBrace => Self::RBrace,
-      AstTokenKind::LBracket => Self::LBracket,
-      AstTokenKind::RBracket => Self::RBracket,
-      AstTokenKind::LParen => Self::LParen,
-      AstTokenKind::RParen => Self::RParen,
-      AstTokenKind::Int => Self::IntValue,
-      AstTokenKind::Float => Self::FloatValue,
-      AstTokenKind::Boolean => Self::BooleanValue,
+      SyntacticTokenKind::Identifier => Self::Name,
+      SyntacticTokenKind::InlineString => Self::InlineString,
+      SyntacticTokenKind::BlockString => Self::BlockString,
+      SyntacticTokenKind::Dollar => Self::Dollar,
+      SyntacticTokenKind::At => Self::At,
+      SyntacticTokenKind::Ampersand => Self::Ampersand,
+      SyntacticTokenKind::Spread => Self::Spread,
+      SyntacticTokenKind::Pipe => Self::Pipe,
+      SyntacticTokenKind::Equal => Self::Equal,
+      SyntacticTokenKind::Colon => Self::Colon,
+      SyntacticTokenKind::Bang => Self::Bang,
+      SyntacticTokenKind::LBrace => Self::LBrace,
+      SyntacticTokenKind::RBrace => Self::RBrace,
+      SyntacticTokenKind::LBracket => Self::LBracket,
+      SyntacticTokenKind::RBracket => Self::RBracket,
+      SyntacticTokenKind::LParen => Self::LParen,
+      SyntacticTokenKind::RParen => Self::RParen,
+      SyntacticTokenKind::Int => Self::IntValue,
+      SyntacticTokenKind::Float => Self::FloatValue,
     }
   }
 }
 
 /// The token stream type used for the AST parser implementation.
-pub type AstTokenStream<'a, S> = logosky::TokenStream<'a, AstToken<S>>;
+pub type SyntacticTokenStream<'a, S> = logosky::TokenStream<'a, SyntacticToken<S>>;
 /// The parser extra type used for the AST parser implementation.
 pub type AstParserExtra<'a, S> =
-  Extra<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+  Extra<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The error type used for the AST parser implementation.
-pub type AstTokenError<'a, S> =
-  Error<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+pub type SyntacticTokenError<'a, S> =
+  Error<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The errors type used for the AST parser implementation.
-pub type AstTokenErrors<'a, S> =
-  Errors<S, AstToken<S>, AstTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+pub type SyntacticTokenErrors<'a, S> =
+  Errors<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
@@ -77,7 +78,7 @@ pub type DefaultVec<T> = Vec<T>;
 /// Parse a value of type `T` from a string slice using the AST token.
 pub trait ParseStr<'a> {
   /// Parses a value of this type from the given string slice.
-  fn parse_str<S>(input: &'a S) -> ParseResult<Self, AstTokenErrors<'a, &'a str>>
+  fn parse_str<S>(input: &'a S) -> ParseResult<Self, SyntacticTokenErrors<'a, &'a str>>
   where
     Self: Sized + 'a,
     S: ?Sized + AsRef<str>;
@@ -85,28 +86,33 @@ pub trait ParseStr<'a> {
 
 impl<'b, T> ParseStr<'b> for T
 where
-  T: Parseable<'b, AstTokenStream<'b, &'b str>, AstToken<&'b str>, AstTokenErrors<'b, &'b str>>,
+  T: Parseable<
+      'b,
+      SyntacticTokenStream<'b, &'b str>,
+      SyntacticToken<&'b str>,
+      SyntacticTokenErrors<'b, &'b str>,
+    >,
 {
   #[inline]
-  fn parse_str<S>(input: &'b S) -> ParseResult<Self, AstTokenErrors<'b, &'b str>>
+  fn parse_str<S>(input: &'b S) -> ParseResult<Self, SyntacticTokenErrors<'b, &'b str>>
   where
     Self: Sized + 'b,
     S: ?Sized + AsRef<str>,
   {
     <T as Parseable<
       'b,
-      AstTokenStream<'b, &'b str>,
-      AstToken<&'b str>,
-      AstTokenErrors<'b, &'b str>,
+      SyntacticTokenStream<'b, &'b str>,
+      SyntacticToken<&'b str>,
+      SyntacticTokenErrors<'b, &'b str>,
     >>::parser::<AstParserExtra<&str>>()
-    .parse(AstTokenStream::new(input.as_ref()))
+    .parse(SyntacticTokenStream::new(input.as_ref()))
   }
 }
 
 /// Parse a value of type `T` from a bytes slice using the AST token.
 pub trait ParseBytesSlice<'a> {
   /// Parses a value of this type from the given bytes slice.
-  fn parse_bytes_slice<S>(input: &'a S) -> ParseResult<Self, AstTokenErrors<'a, &'a [u8]>>
+  fn parse_bytes_slice<S>(input: &'a S) -> ParseResult<Self, SyntacticTokenErrors<'a, &'a [u8]>>
   where
     Self: Sized + 'a,
     S: ?Sized + AsRef<[u8]>;
@@ -114,21 +120,26 @@ pub trait ParseBytesSlice<'a> {
 
 impl<'b, T> ParseBytesSlice<'b> for T
 where
-  T: Parseable<'b, AstTokenStream<'b, &'b [u8]>, AstToken<&'b [u8]>, AstTokenErrors<'b, &'b [u8]>>,
+  T: Parseable<
+      'b,
+      SyntacticTokenStream<'b, &'b [u8]>,
+      SyntacticToken<&'b [u8]>,
+      SyntacticTokenErrors<'b, &'b [u8]>,
+    >,
 {
   #[inline]
-  fn parse_bytes_slice<S>(input: &'b S) -> ParseResult<Self, AstTokenErrors<'b, &'b [u8]>>
+  fn parse_bytes_slice<S>(input: &'b S) -> ParseResult<Self, SyntacticTokenErrors<'b, &'b [u8]>>
   where
     Self: Sized + 'b,
     S: ?Sized + AsRef<[u8]>,
   {
     <T as Parseable<
       'b,
-      AstTokenStream<'b, &'b [u8]>,
-      AstToken<&'b [u8]>,
-      AstTokenErrors<'b, &'b [u8]>,
+      SyntacticTokenStream<'b, &'b [u8]>,
+      SyntacticToken<&'b [u8]>,
+      SyntacticTokenErrors<'b, &'b [u8]>,
     >>::parser::<AstParserExtra<&[u8]>>()
-    .parse(AstTokenStream::new(input.as_ref()))
+    .parse(SyntacticTokenStream::new(input.as_ref()))
   }
 }
 
@@ -137,7 +148,9 @@ where
 #[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
 pub trait ParseBytes<'a> {
   /// Parses a value of this type from the given bytes slice.
-  fn parse_bytes(input: &'a bytes::Bytes) -> ParseResult<Self, AstTokenErrors<'a, bytes::Bytes>>
+  fn parse_bytes(
+    input: &'a bytes::Bytes,
+  ) -> ParseResult<Self, SyntacticTokenErrors<'a, bytes::Bytes>>
   where
     Self: Sized + 'a;
 }
@@ -149,17 +162,25 @@ const _: () = {
 
   impl<'a, T> ParseBytes<'a> for T
   where
-    T: Parseable<'a, AstTokenStream<'a, Bytes>, AstToken<Bytes>, AstTokenErrors<'a, Bytes>>,
+    T: Parseable<
+        'a,
+        SyntacticTokenStream<'a, Bytes>,
+        SyntacticToken<Bytes>,
+        SyntacticTokenErrors<'a, Bytes>,
+      >,
   {
     #[inline]
-    fn parse_bytes(input: &'a Bytes) -> ParseResult<Self, AstTokenErrors<'a, Bytes>>
+    fn parse_bytes(input: &'a Bytes) -> ParseResult<Self, SyntacticTokenErrors<'a, Bytes>>
     where
       Self: Sized + 'a,
     {
-      <T as Parseable<'a, AstTokenStream<'a, Bytes>, AstToken<Bytes>, AstTokenErrors<'a, Bytes>>>::parser::<
-        AstParserExtra<Bytes>,
-      >()
-      .parse(AstTokenStream::new(CustomSource::from_ref(input)))
+      <T as Parseable<
+        'a,
+        SyntacticTokenStream<'a, Bytes>,
+        SyntacticToken<Bytes>,
+        SyntacticTokenErrors<'a, Bytes>,
+      >>::parser::<AstParserExtra<Bytes>>()
+      .parse(SyntacticTokenStream::new(CustomSource::from_ref(input)))
     }
   }
 };

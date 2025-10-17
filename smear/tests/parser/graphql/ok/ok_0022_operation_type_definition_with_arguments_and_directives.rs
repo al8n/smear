@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0022_operation_type_definition_with_arguments_and_directives.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn operation_type_definition_with_arguments_and_directives() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -76,6 +77,7 @@ fn operation_type_definition_with_arguments_and_directives() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_operation_type_definition_with_arguments_and_directives() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

@@ -8,6 +8,8 @@ use crate::punctuator::{LAngle, PathSeparator, RAngle};
 
 use super::{super::Path, TypeGenerics};
 
+use std::vec::Vec;
+
 /// A GraphQLx type path.
 ///
 /// ## Example
@@ -71,6 +73,12 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
       path,
       generics,
     }
+  }
+
+  #[cfg(feature = "graphqlx")]
+  #[inline]
+  pub(crate) const fn path_mut(&mut self) -> &mut Path<Ident, PathSegmentContainer> {
+    &mut self.path
   }
 
   /// Returns the path.

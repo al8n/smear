@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0007_directive_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn directive_definition() {
   use smear::parser::graphql::ast::{DirectiveDefinition, ParseStr};
 
@@ -15,6 +16,7 @@ fn directive_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_directive_definition() {
   use smear::parser::graphqlx::ast::{DirectiveDefinition, ParseStr};
 

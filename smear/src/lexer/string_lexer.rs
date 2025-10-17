@@ -3,7 +3,7 @@ use logosky::{
   logos::Lexer,
   utils::{
     human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty, DisplaySDL},
+    sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
 

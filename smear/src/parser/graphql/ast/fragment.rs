@@ -5,7 +5,7 @@ use logosky::{
 };
 
 use crate::{
-  lexer::graphql::ast::AstLexerErrors,
+  lexer::graphql::syntactic::SyntacticLexerErrors,
   scaffold::{self, FragmentName},
 };
 
@@ -13,25 +13,26 @@ use super::*;
 
 pub type TypeCondition<S> = scaffold::TypeCondition<Name<S>>;
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for FragmentName<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   str: logosky::utils::cmp::Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Identifier(name) => {
+          SyntacticToken::Identifier(name) => {
             if "on".equivalent(&name) {
               Err(Error::invalid_fragment_name(name, span).into())
             } else {
@@ -41,7 +42,7 @@ where
           tok => Err(Error::unexpected_token(tok, Expectation::FragmentName, span).into()),
         }
       }
-      Lexed::Error(err) => Err(AstTokenError::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(SyntacticTokenError::from_lexer_errors(err, span).into()),
     })
   }
 }

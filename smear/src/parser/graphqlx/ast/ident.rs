@@ -4,8 +4,8 @@ use logosky::{
   utils::Span,
 };
 
-use super::{AstToken, AstTokenErrors, AstTokenStream, Error, Expectation};
-use crate::lexer::graphqlx::ast::AstLexerErrors;
+use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenStream};
+use crate::lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
 /// A GraphQLx identifier.
 ///
@@ -61,23 +61,25 @@ use crate::lexer::graphqlx::ast::AstLexerErrors;
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
 pub type Name<S> = crate::parser::ident::Ident<S>;
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>> for Name<S>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  for Name<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<S>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         match tok {
-          AstToken::Identifier(name) => Ok(Name::new(span, name)),
+          SyntacticToken::Identifier(name) => Ok(Name::new(span, name)),
           tok => Err(Error::unexpected_token(tok, Expectation::Identifier, span).into()),
         }
       }

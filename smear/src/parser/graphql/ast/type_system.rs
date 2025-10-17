@@ -11,29 +11,29 @@ use super::*;
 #[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeDefinition<S> {
+pub enum TypeDefinition<S, Ty = Type<Name<S>>> {
   /// The scalar type definition.
   Scalar(ScalarTypeDefinition<S>),
   /// The object type definition.
-  Object(ObjectTypeDefinition<S>),
+  Object(ObjectTypeDefinition<S, Ty>),
   /// The interface type definition.
-  Interface(InterfaceTypeDefinition<S>),
+  Interface(InterfaceTypeDefinition<S, Ty>),
   /// The union type definition.
   Union(UnionTypeDefinition<S>),
   /// The enum type definition.
   Enum(EnumTypeDefinition<S>),
   /// The input object type definition.
-  InputObject(InputObjectTypeDefinition<S>),
+  InputObject(InputObjectTypeDefinition<S, Ty>),
 }
 
-impl<S> AsSpan<Span> for TypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for TypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for TypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for TypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
@@ -47,7 +47,7 @@ impl<S> IntoSpan<Span> for TypeDefinition<S> {
   }
 }
 
-impl<S> TypeDefinition<S> {
+impl<S, Ty> TypeDefinition<S, Ty> {
   /// Returns the span of the type definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -62,14 +62,14 @@ impl<S> TypeDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for TypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for TypeDefinition<S, Ty>
 where
   ScalarTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  ObjectTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  InterfaceTypeDefinition<S>: Parseable<'a, I, T, Error>,
+  ObjectTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
+  InterfaceTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
   UnionTypeDefinition<S>: Parseable<'a, I, T, Error>,
   EnumTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  InputObjectTypeDefinition<S>: Parseable<'a, I, T, Error>,
+  InputObjectTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -95,29 +95,29 @@ where
 #[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeExtension<S> {
+pub enum TypeExtension<S, Ty = Type<Name<S>>> {
   /// The scalar type extension.
   Scalar(ScalarTypeExtension<S>),
   /// The object type extension.
-  Object(ObjectTypeExtension<S>),
+  Object(ObjectTypeExtension<S, Ty>),
   /// The interface type extension.
-  Interface(InterfaceTypeExtension<S>),
+  Interface(InterfaceTypeExtension<S, Ty>),
   /// The union type extension.
   Union(UnionTypeExtension<S>),
   /// The enum type extension.
   Enum(EnumTypeExtension<S>),
   /// The input object type extension.
-  InputObject(InputObjectTypeExtension<S>),
+  InputObject(InputObjectTypeExtension<S, Ty>),
 }
 
-impl<S> AsSpan<Span> for TypeExtension<S> {
+impl<S, Ty> AsSpan<Span> for TypeExtension<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for TypeExtension<S> {
+impl<S, Ty> IntoSpan<Span> for TypeExtension<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     match self {
@@ -131,7 +131,7 @@ impl<S> IntoSpan<Span> for TypeExtension<S> {
   }
 }
 
-impl<S> TypeExtension<S> {
+impl<S, Ty> TypeExtension<S, Ty> {
   /// Returns the span of the type extension.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -146,14 +146,14 @@ impl<S> TypeExtension<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for TypeExtension<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for TypeExtension<S, Ty>
 where
   ScalarTypeExtension<S>: Parseable<'a, I, T, Error>,
-  ObjectTypeExtension<S>: Parseable<'a, I, T, Error>,
-  InterfaceTypeExtension<S>: Parseable<'a, I, T, Error>,
+  ObjectTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
+  InterfaceTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
   UnionTypeExtension<S>: Parseable<'a, I, T, Error>,
   EnumTypeExtension<S>: Parseable<'a, I, T, Error>,
-  InputObjectTypeExtension<S>: Parseable<'a, I, T, Error>,
+  InputObjectTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

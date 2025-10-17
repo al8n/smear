@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0030_values.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn values() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -99,6 +100,7 @@ fn values() {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_values() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};

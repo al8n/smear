@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0040_type_token_order.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn type_token_order() {
   use smear::parser::graphql::ast::{ObjectTypeDefinition, ParseStr};
 
@@ -41,6 +42,7 @@ fn type_token_order() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_type_token_order() {
   use smear::parser::graphqlx::ast::{ObjectTypeDefinition, ParseStr};
 

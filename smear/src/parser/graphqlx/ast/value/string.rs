@@ -4,31 +4,32 @@ use logosky::{
   utils::Span,
 };
 
-use crate::lexer::graphqlx::ast::AstLexerErrors;
+use crate::lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
 use super::super::*;
 
 pub use crate::parser::value::{BlockStringValue, InlineStringValue, StringValue};
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for StringValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          AstToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
-          AstToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
+          SyntacticToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
+          SyntacticToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
           tok => return Err(Error::unexpected_token(tok, Expectation::StringValue, span).into()),
         })
       }
@@ -37,24 +38,25 @@ where
   }
 }
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for InlineStringValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          AstToken::LitInlineStr(raw) => InlineStringValue::new(span, raw),
+          SyntacticToken::LitInlineStr(raw) => InlineStringValue::new(span, raw),
           tok => return Err(Error::unexpected_token(tok, Expectation::InlineString, span).into()),
         })
       }
@@ -63,24 +65,25 @@ where
   }
 }
 
-impl<'a, S> Parseable<'a, AstTokenStream<'a, S>, AstToken<S>, AstTokenErrors<'a, S>>
+impl<'a, S>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for BlockStringValue<S>
 where
-  AstToken<S>: Token<'a>,
-  <AstToken<S> as Token<'a>>::Logos: Logos<'a, Error = AstLexerErrors<'a, S>>,
-  <<AstToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, AstTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, AstTokenStream<'a, S>, Error = AstTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
-    any().try_map(|res: Lexed<'_, AstToken<_>>, span: Span| match res {
+    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {
         let (span, tok) = tok.into_components();
         Ok(match tok {
-          AstToken::LitBlockStr(raw) => BlockStringValue::new(span, raw),
+          SyntacticToken::LitBlockStr(raw) => BlockStringValue::new(span, raw),
           tok => return Err(Error::unexpected_token(tok, Expectation::BlockString, span).into()),
         })
       }

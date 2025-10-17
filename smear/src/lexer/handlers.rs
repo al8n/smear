@@ -3,14 +3,129 @@ use logosky::{
   logos::Lexer,
   utils::{
     CharSize, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
-    recursion_tracker::RecursionLimiter,
+    recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+    tracker::{LimitExceeded, Tracker},
   },
 };
 
-use crate::error::UnterminatedSpreadOperatorError;
+use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
 
-pub(super) mod slice;
-pub(super) mod str;
+#[inline(always)]
+fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer.extras.increase_token();
+}
+
+#[inline(always)]
+pub(super) fn increase_recursion_depth<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
+where
+  T: Logos<'a, Extras = RecursionLimiter>,
+  E: BadStateError<StateError = RecursionLimitExceeded>,
+{
+  lexer.extras.increase();
+
+  lexer
+    .extras
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e))
+}
+
+#[inline(always)]
+pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), E>
+where
+  T: Logos<'a, Extras = Tracker>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer.extras.increase_recursion();
+  lexer.extras.increase_token();
+  lexer
+    .extras
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e))
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_and_then<'a, T, E, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
+) -> Result<O, E>
+where
+  T: Logos<'a, Extras = Tracker>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
+    .and_then(|_| {
+      f(lexer).inspect(|_| {
+        increase_token(lexer);
+      })
+    })
+}
+
+#[allow(clippy::result_large_err)]
+#[inline(always)]
+pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
+) -> Result<O, E>
+where
+  T: Logos<'a, Extras = Tracker>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
+    .and_then(|_| {
+      f(lexer).inspect(|_| {
+        increase_token(lexer);
+      })
+    })
+}
+
+#[inline(always)]
+pub(super) fn tt_hook_map<'a, T, E, O>(
+  lexer: &mut Lexer<'a, T>,
+  f: impl FnOnce(&mut Lexer<'a, T>) -> O,
+) -> Result<O, E>
+where
+  T: Logos<'a, Extras = Tracker>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
+    .map(|_| {
+      increase_token(lexer);
+      f(lexer)
+    })
+}
+
+#[inline(always)]
+pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
+where
+  T: Logos<'a, Extras = Tracker>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer
+    .extras
+    .token()
+    .check()
+    .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
+    .inspect(|_| {
+      increase_token(lexer);
+    })
+}
 
 #[inline(always)]
 pub(super) fn unterminated_spread_operator_error<'a, T, E>(lexer: &mut Lexer<'a, T>) -> E
@@ -19,6 +134,16 @@ where
   E: UnterminatedSpreadOperatorError,
 {
   E::unterminated_spread_operator(lexer.span().into())
+}
+
+#[inline(always)]
+pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = Tracker>,
+{
+  lexer.extras.decrease_recursion();
+  // right punctuation also increases the token count
+  lexer.extras.increase_token();
 }
 
 #[inline(always)]
@@ -165,7 +290,7 @@ pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   match b {
     b' ' | b'\t' | b'\r' | b'\n' | b',' | b'#' => true,
     0xEF => {
-      // BOM
+      // Bom
       slice.len() >= 3 && slice[1] == 0xBB && slice[2] == 0xBF
     }
     _ => false,

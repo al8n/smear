@@ -3,6 +3,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0035_query_with_variables.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn query_with_variables() {
   use smear::parser::graphql::ast::{OperationDefinition, ParseStr};
 
@@ -27,6 +28,7 @@ fn query_with_variables() {
 
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_query_with_variables() {
   use smear::parser::graphqlx::ast::{OperationDefinition, ParseStr};
 

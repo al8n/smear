@@ -3,6 +3,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0028_union_type_definition_followed_by_object_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn union_type_definition_followed_by_object_definition() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -49,6 +50,7 @@ fn union_type_definition_followed_by_object_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_union_type_definition_followed_by_object_definition() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 

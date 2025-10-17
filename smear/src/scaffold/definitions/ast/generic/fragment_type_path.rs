@@ -14,6 +14,8 @@ use crate::{
 
 use super::{super::Path, TypeGenerics};
 
+use std::vec::Vec;
+
 /// A GraphQLx type path.
 ///
 /// ## Example
@@ -72,7 +74,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
 {
   /// Creates a new path from the given segments.
   #[inline]
-  const fn new(
+  pub(crate) const fn new(
     span: Span,
     path: Path<Ident, PathSegmentContainer>,
     generics: Option<TypeGenerics<Type, TypeContainer>>,

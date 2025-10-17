@@ -44,7 +44,7 @@ macro_rules! keyword {
           /// Creates a new keyword.
           #[doc = "Creates a new `" $kw "` keyword."]
           #[inline(always)]
-          pub(crate) const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
+          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
             Self { span }
           }
 

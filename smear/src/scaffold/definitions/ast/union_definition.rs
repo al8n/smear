@@ -16,6 +16,8 @@ use crate::{
   punctuator::{Equal, Pipe},
 };
 
+use std::vec::Vec;
+
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnionMemberTypes<Name, Container = Vec<Name>> {

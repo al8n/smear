@@ -14,7 +14,7 @@ std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default",
 
 unstable = []
 
-cst = ["std"]
+cst = ["std", "rowan"]
 graphql = []
 graphqlx = ["unstable"]
 
@@ -29,6 +29,7 @@ paste = "1"
 thiserror.workspace = true
 logosky = { workspace = true, features = ["either"] }
 
+rowan = { version = "0.16", optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }

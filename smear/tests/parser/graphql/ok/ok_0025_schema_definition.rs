@@ -2,6 +2,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0025_schema_definition.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn schema_definition() {
   use smear::parser::graphql::ast::{SchemaDefinition, ParseStr};
 
@@ -40,6 +41,7 @@ fn schema_definition() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_schema_definition() {
   use smear::parser::graphqlx::ast::{SchemaDefinition, ParseStr};
 

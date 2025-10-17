@@ -1,6 +1,7 @@
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0043_interface_type_definition_without_fields.graphql");
 
 #[test]
+#[cfg(feature = "graphql")]
 fn interface_type_definition_without_fields() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -55,6 +56,7 @@ fn interface_type_definition_without_fields() {
 }
 
 #[test]
+#[cfg(feature = "graphqlx")]
 fn graphqlx_interface_type_definition_without_fields() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 
