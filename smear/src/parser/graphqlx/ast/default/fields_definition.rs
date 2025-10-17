@@ -6,31 +6,31 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-pub(super) type FieldsDefinitionAlias<S> =
-  scaffold::generic::Constrained<Ident<S>, Type<S>, scaffold::FieldsDefinition<FieldDefinition<S>>>;
+pub(super) type FieldsDefinitionAlias<S, Ty = Type<S>> =
+  scaffold::generic::Constrained<Ident<S>, Ty, scaffold::FieldsDefinition<FieldDefinition<S, Ty>>>;
 
 #[derive(Debug, Clone, From, Into)]
-pub(super) struct FieldsDefinition<S>(FieldsDefinitionAlias<S>);
+pub(super) struct FieldsDefinition<S, Ty = Type<S>>(FieldsDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for FieldsDefinition<S> {
+impl<S, Ty> AsSpan<Span> for FieldsDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for FieldsDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for FieldsDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for FieldsDefinition<S> {
+impl<S, Ty> IntoComponents for FieldsDefinition<S, Ty> {
   type Components = (
     Span,
-    Option<WhereClause<S>>,
-    scaffold::FieldsDefinition<FieldDefinition<S>>,
+    Option<WhereClause<S, Ty>>,
+    scaffold::FieldsDefinition<FieldDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -40,23 +40,23 @@ impl<S> IntoComponents for FieldsDefinition<S> {
   }
 }
 
-impl<S> FieldsDefinition<S> {
+impl<S, Ty> FieldsDefinition<S, Ty> {
   /// Returns the optional where clause of the fields definition.
   #[inline]
-  pub(super) const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub(super) const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.0.where_clause()
   }
 
   /// Returns the fields of the fields definition.
   #[inline]
-  pub(super) const fn fields(&self) -> &scaffold::FieldsDefinition<FieldDefinition<S>> {
+  pub(super) const fn fields(&self) -> &scaffold::FieldsDefinition<FieldDefinition<S, Ty>> {
     self.0.target()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for FieldsDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FieldsDefinition<S, Ty>
 where
-  FieldsDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  FieldsDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

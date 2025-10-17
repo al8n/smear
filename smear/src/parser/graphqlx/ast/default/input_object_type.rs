@@ -6,16 +6,16 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-type InputObjectTypeDefinitionAlias<S> = scaffold::InputObjectTypeDefinition<
-  DefinitionName<S>,
-  ConstDirectives<S>,
-  InputFieldsDefinition<S>,
+type InputObjectTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::InputObjectTypeDefinition<
+  DefinitionName<S, Ty>,
+  ConstDirectives<S, Ty>,
+  InputFieldsDefinition<S, Ty>,
 >;
 
-type InputObjectTypeExtensionAlias<S> = scaffold::InputObjectTypeExtension<
+type InputObjectTypeExtensionAlias<S, Ty = Type<S>> = scaffold::InputObjectTypeExtension<
   ExtensionName<S>,
-  ConstDirectives<S>,
-  InputFieldsDefinition<S>,
+  ConstDirectives<S, Ty>,
+  InputFieldsDefinition<S, Ty>,
 >;
 
 /// An input object type definition with an optional description.
@@ -25,7 +25,8 @@ type InputObjectTypeExtensionAlias<S> = scaffold::InputObjectTypeExtension<
 /// ```text
 /// DescribedInputObjectTypeDefinition : Description? InputObjectTypeDefinition
 /// ```
-pub type DescribedInputObjectTypeDefinition<S> = Described<InputObjectTypeDefinition<S>, S>;
+pub type DescribedInputObjectTypeDefinition<S, Ty = Type<S>> =
+  Described<InputObjectTypeDefinition<S, Ty>, S>;
 
 /// A GraphQLx input object type definition.
 ///
@@ -39,30 +40,30 @@ pub type DescribedInputObjectTypeDefinition<S> = Described<InputObjectTypeDefini
 ///   input Name TypeGenerics? Directives? WhereClause? InputFieldsDefinition?
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct InputObjectTypeDefinition<S>(InputObjectTypeDefinitionAlias<S>);
+pub struct InputObjectTypeDefinition<S, Ty = Type<S>>(InputObjectTypeDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for InputObjectTypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for InputObjectTypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for InputObjectTypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for InputObjectTypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for InputObjectTypeDefinition<S> {
+impl<S, Ty> IntoComponents for InputObjectTypeDefinition<S, Ty> {
   type Components = (
     Span,
     Ident<S>,
-    Option<DefinitionTypeGenerics<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::InputFieldsDefinition<S>>,
+    Option<DefinitionTypeGenerics<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::InputFieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -80,7 +81,7 @@ impl<S> IntoComponents for InputObjectTypeDefinition<S> {
   }
 }
 
-impl<S> InputObjectTypeDefinition<S> {
+impl<S, Ty> InputObjectTypeDefinition<S, Ty> {
   /// Returns the span of the input object type definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -95,19 +96,19 @@ impl<S> InputObjectTypeDefinition<S> {
 
   /// Returns the optional generics of the input object type definition.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     self.0.name().generics()
   }
 
   /// Returns the optional directives of the input object type definition.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the optional where clause of the input object type definition.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -116,7 +117,7 @@ impl<S> InputObjectTypeDefinition<S> {
 
   /// Returns the optional input fields definition of the input object type definition.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::InputFieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::InputFieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -124,9 +125,9 @@ impl<S> InputObjectTypeDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeDefinition<S, Ty>
 where
-  InputObjectTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  InputObjectTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -154,30 +155,30 @@ where
 ///   extend input Path TypeGenerics? WhereClause? InputFieldsDefinition
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct InputObjectTypeExtension<S>(InputObjectTypeExtensionAlias<S>);
+pub struct InputObjectTypeExtension<S, Ty = Type<S>>(InputObjectTypeExtensionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for InputObjectTypeExtension<S> {
+impl<S, Ty> AsSpan<Span> for InputObjectTypeExtension<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for InputObjectTypeExtension<S> {
+impl<S, Ty> IntoSpan<Span> for InputObjectTypeExtension<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for InputObjectTypeExtension<S> {
+impl<S, Ty> IntoComponents for InputObjectTypeExtension<S, Ty> {
   type Components = (
     Span,
     Path<S>,
     Option<ExtensionTypeGenerics<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::InputFieldsDefinition<S>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::InputFieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -196,7 +197,7 @@ impl<S> IntoComponents for InputObjectTypeExtension<S> {
   }
 }
 
-impl<S> InputObjectTypeExtension<S> {
+impl<S, Ty> InputObjectTypeExtension<S, Ty> {
   /// Returns the span of the input object type extension.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -217,13 +218,13 @@ impl<S> InputObjectTypeExtension<S> {
 
   /// Returns the optional directives of the input object type extension.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the optional where clause of the input object type extension.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -232,7 +233,7 @@ impl<S> InputObjectTypeExtension<S> {
 
   /// Returns the optional input fields definition of the input object type extension.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::InputFieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::InputFieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -240,9 +241,9 @@ impl<S> InputObjectTypeExtension<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeExtension<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeExtension<S, Ty>
 where
-  InputObjectTypeExtensionAlias<S>: Parseable<'a, I, T, Error>,
+  InputObjectTypeExtensionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

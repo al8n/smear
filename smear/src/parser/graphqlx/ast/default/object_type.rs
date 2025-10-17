@@ -6,18 +6,18 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-type ObjectTypeDefinitionAlias<S> = scaffold::ObjectTypeDefinition<
-  DefinitionName<S>,
-  ImplementInterfaces<S>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
+type ObjectTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::ObjectTypeDefinition<
+  DefinitionName<S, Ty>,
+  ImplementInterfaces<S, Ty>,
+  ConstDirectives<S, Ty>,
+  FieldsDefinition<S, Ty>,
 >;
 
-type ObjectTypeExtensionAlias<S> = scaffold::ObjectTypeExtension<
+type ObjectTypeExtensionAlias<S, Ty = Type<S>> = scaffold::ObjectTypeExtension<
   ExtensionName<S>,
-  ImplementInterfaces<S>,
-  ConstDirectives<S>,
-  FieldsDefinition<S>,
+  ImplementInterfaces<S, Ty>,
+  ConstDirectives<S, Ty>,
+  FieldsDefinition<S, Ty>,
 >;
 
 /// An object type definition with an optional description.
@@ -27,7 +27,7 @@ type ObjectTypeExtensionAlias<S> = scaffold::ObjectTypeExtension<
 /// ```text
 /// DescribedObjectTypeDefinition : Description? ObjectTypeDefinition
 /// ```
-pub type DescribedObjectTypeDefinition<S> = Described<ObjectTypeDefinition<S>, S>;
+pub type DescribedObjectTypeDefinition<S, Ty = Type<S>> = Described<ObjectTypeDefinition<S, Ty>, S>;
 
 /// A GraphQLx object type definition.
 ///
@@ -42,31 +42,31 @@ pub type DescribedObjectTypeDefinition<S> = Described<ObjectTypeDefinition<S>, S
 ///   type Name TypeGenerics? ImplementsInterfaces? Directives? WhereClause? FieldsDefinition?
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct ObjectTypeDefinition<S>(ObjectTypeDefinitionAlias<S>);
+pub struct ObjectTypeDefinition<S, Ty = Type<S>>(ObjectTypeDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for ObjectTypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for ObjectTypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for ObjectTypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for ObjectTypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for ObjectTypeDefinition<S> {
+impl<S, Ty> IntoComponents for ObjectTypeDefinition<S, Ty> {
   type Components = (
     Span,
     Ident<S>,
-    Option<DefinitionTypeGenerics<S>>,
-    Option<ImplementInterfaces<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::FieldsDefinition<S>>,
+    Option<DefinitionTypeGenerics<S, Ty>>,
+    Option<ImplementInterfaces<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::FieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -92,7 +92,7 @@ impl<S> IntoComponents for ObjectTypeDefinition<S> {
   }
 }
 
-impl<S> ObjectTypeDefinition<S> {
+impl<S, Ty> ObjectTypeDefinition<S, Ty> {
   /// Returns the span of the object type definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -107,25 +107,25 @@ impl<S> ObjectTypeDefinition<S> {
 
   /// Returns the type generics of the object type definition, if any.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     self.0.name().generics()
   }
 
   /// Returns the implemented interfaces of the object type definition, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
+  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
     self.0.implements()
   }
 
   /// Returns the directives of the object type definition, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the where clause of the object type definition, if any.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -134,7 +134,7 @@ impl<S> ObjectTypeDefinition<S> {
 
   /// Returns the fields definition of the object type definition.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -142,9 +142,9 @@ impl<S> ObjectTypeDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for ObjectTypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for ObjectTypeDefinition<S, Ty>
 where
-  ObjectTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  ObjectTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
@@ -172,31 +172,31 @@ where
 ///   extend type Path TypeGenerics? ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct ObjectTypeExtension<S>(ObjectTypeExtensionAlias<S>);
+pub struct ObjectTypeExtension<S, Ty = Type<S>>(ObjectTypeExtensionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for ObjectTypeExtension<S> {
+impl<S, Ty> AsSpan<Span> for ObjectTypeExtension<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for ObjectTypeExtension<S> {
+impl<S, Ty> IntoSpan<Span> for ObjectTypeExtension<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for ObjectTypeExtension<S> {
+impl<S, Ty> IntoComponents for ObjectTypeExtension<S, Ty> {
   type Components = (
     Span,
     Path<S>,
     Option<ExtensionTypeGenerics<S>>,
-    Option<ImplementInterfaces<S>>,
-    Option<ConstDirectives<S>>,
-    Option<WhereClause<S>>,
-    Option<super::FieldsDefinition<S>>,
+    Option<ImplementInterfaces<S, Ty>>,
+    Option<ConstDirectives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    Option<super::FieldsDefinition<S, Ty>>,
   );
 
   #[inline]
@@ -240,7 +240,7 @@ impl<S> IntoComponents for ObjectTypeExtension<S> {
   }
 }
 
-impl<S> ObjectTypeExtension<S> {
+impl<S, Ty> ObjectTypeExtension<S, Ty> {
   /// Returns the span of the object type extension.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -261,19 +261,19 @@ impl<S> ObjectTypeExtension<S> {
 
   /// Returns the implemented interfaces of the object type extension, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S>> {
+  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
     self.0.implements()
   }
 
   /// Returns the directives of the object type extension, if any.
   #[inline]
-  pub const fn directives(&self) -> Option<&ConstDirectives<S>> {
+  pub const fn directives(&self) -> Option<&ConstDirectives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the where clause of the object type extension, if any.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => fields_def.where_clause(),
       None => None,
@@ -282,7 +282,7 @@ impl<S> ObjectTypeExtension<S> {
 
   /// Returns the fields definition of the object type extension, if any.
   #[inline]
-  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S>> {
+  pub const fn fields_definition(&self) -> Option<&super::FieldsDefinition<S, Ty>> {
     match self.0.fields_definition() {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
@@ -290,9 +290,9 @@ impl<S> ObjectTypeExtension<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for ObjectTypeExtension<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for ObjectTypeExtension<S, Ty>
 where
-  ObjectTypeExtensionAlias<S>: Parseable<'a, I, T, Error>,
+  ObjectTypeExtensionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where

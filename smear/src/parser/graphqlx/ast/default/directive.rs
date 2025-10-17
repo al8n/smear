@@ -13,36 +13,36 @@ use crate::{
 
 use super::*;
 
-type DirectiveDefinitionAlias<S> = scaffold::DirectiveDefinition<
-  DefinitionName<S>,
-  ArgumentsDefinition<S>,
-  And<DirectiveLocations<Location>, Option<WhereClause<S>>>,
+type DirectiveDefinitionAlias<S, Ty = Type<S>> = scaffold::DirectiveDefinition<
+  DefinitionName<S, Ty>,
+  ArgumentsDefinition<S, Ty>,
+  And<DirectiveLocations<Location>, Option<WhereClause<S, Ty>>>,
 >;
 
-type DirectiveAlias<S> = scaffold::Directive<TypePath<S>, Arguments<S>>;
+type DirectiveAlias<S, Ty = Type<S>> = scaffold::Directive<TypePath<S, Ty>, Arguments<S>>;
 
-type ConstDirectiveAlias<S> = scaffold::Directive<TypePath<S>, ConstArguments<S>>;
+type ConstDirectiveAlias<S, Ty = Type<S>> = scaffold::Directive<TypePath<S, Ty>, ConstArguments<S>>;
 
 /// A GraphQLx directive.
 #[derive(Debug, Clone, From, Into)]
-pub struct Directive<S>(DirectiveAlias<S>);
+pub struct Directive<S, Ty = Type<S>>(DirectiveAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for Directive<S> {
+impl<S, Ty> AsSpan<Span> for Directive<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for Directive<S> {
+impl<S, Ty> IntoSpan<Span> for Directive<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for Directive<S> {
-  type Components = (Span, TypePath<S>, Option<Arguments<S>>);
+impl<S, Ty> IntoComponents for Directive<S, Ty> {
+  type Components = (Span, TypePath<S, Ty>, Option<Arguments<S>>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -50,9 +50,13 @@ impl<S> IntoComponents for Directive<S> {
   }
 }
 
-impl<S> Directive<S> {
+impl<S, Ty> Directive<S, Ty> {
   #[inline]
-  pub(super) const fn new(span: Span, name: TypePath<S>, arguments: Option<Arguments<S>>) -> Self {
+  pub(super) const fn new(
+    span: Span,
+    name: TypePath<S, Ty>,
+    arguments: Option<Arguments<S>>,
+  ) -> Self {
     Self(DirectiveAlias::new(span, name, arguments))
   }
 
@@ -70,7 +74,7 @@ impl<S> Directive<S> {
 
   /// Returns the type generics of the directive path, if any.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Ty>> {
     self.0.name().type_generics()
   }
 
@@ -81,9 +85,9 @@ impl<S> Directive<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for Directive<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for Directive<S, Ty>
 where
-  DirectiveAlias<S>: Parseable<'a, I, T, Error>,
+  DirectiveAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -94,29 +98,29 @@ where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    DirectiveAlias::<S>::parser().map(Self)
+    DirectiveAlias::parser().map(Self)
   }
 }
 
 #[derive(Debug, Clone, From, Into)]
-pub struct ConstDirective<S>(ConstDirectiveAlias<S>);
+pub struct ConstDirective<S, Ty = Type<S>>(ConstDirectiveAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for ConstDirective<S> {
+impl<S, Ty> AsSpan<Span> for ConstDirective<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for ConstDirective<S> {
+impl<S, Ty> IntoSpan<Span> for ConstDirective<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for ConstDirective<S> {
-  type Components = (Span, TypePath<S>, Option<ConstArguments<S>>);
+impl<S, Ty> IntoComponents for ConstDirective<S, Ty> {
+  type Components = (Span, TypePath<S, Ty>, Option<ConstArguments<S>>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -124,7 +128,7 @@ impl<S> IntoComponents for ConstDirective<S> {
   }
 }
 
-impl<S> ConstDirective<S> {
+impl<S, Ty> ConstDirective<S, Ty> {
   /// Returns the span of the const directive.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -139,7 +143,7 @@ impl<S> ConstDirective<S> {
 
   /// Returns the type generics of the const directive path, if any.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Ty>> {
     self.0.name().type_generics()
   }
 
@@ -150,9 +154,9 @@ impl<S> ConstDirective<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for ConstDirective<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for ConstDirective<S, Ty>
 where
-  ConstDirectiveAlias<S>: Parseable<'a, I, T, Error>,
+  ConstDirectiveAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -163,7 +167,7 @@ where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    ConstDirectiveAlias::<S>::parser().map(Self)
+    ConstDirectiveAlias::parser().map(Self)
   }
 }
 
@@ -180,30 +184,30 @@ where
 ///   Description? directive @ Name TypeGenerics? ArgumentsDefinition? repeatable? on DirectiveLocations WhereClause?
 /// ```
 #[derive(Debug, Clone, From, Into)]
-pub struct DirectiveDefinition<S>(DirectiveDefinitionAlias<S>);
+pub struct DirectiveDefinition<S, Ty = Type<S>>(DirectiveDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for DirectiveDefinition<S> {
+impl<S, Ty> AsSpan<Span> for DirectiveDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for DirectiveDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for DirectiveDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for DirectiveDefinition<S> {
+impl<S, Ty> IntoComponents for DirectiveDefinition<S, Ty> {
   type Components = (
     Span,
-    DefinitionName<S>,
-    Option<ArgumentsDefinition<S>>,
+    DefinitionName<S, Ty>,
+    Option<ArgumentsDefinition<S, Ty>>,
     bool,
     DirectiveLocations<Location>,
-    Option<WhereClause<S>>,
+    Option<WhereClause<S, Ty>>,
   );
 
   #[inline]
@@ -214,7 +218,7 @@ impl<S> IntoComponents for DirectiveDefinition<S> {
   }
 }
 
-impl<S> DirectiveDefinition<S> {
+impl<S, Ty> DirectiveDefinition<S, Ty> {
   /// Returns the span of the directive definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -229,13 +233,13 @@ impl<S> DirectiveDefinition<S> {
 
   /// Returns the type generics of the directive definition.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     self.0.name().generics()
   }
 
   /// Returns the arguments definition of the directive definition, if any.
   #[inline]
-  pub const fn arguments_definition(&self) -> Option<&ArgumentsDefinition<S>> {
+  pub const fn arguments_definition(&self) -> Option<&ArgumentsDefinition<S, Ty>> {
     self.0.arguments_definition()
   }
 
@@ -247,7 +251,7 @@ impl<S> DirectiveDefinition<S> {
 
   /// Returns the where clause of the directive definition, if any.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.0.locations().second().as_ref()
   }
 
@@ -258,16 +262,16 @@ impl<S> DirectiveDefinition<S> {
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for DirectiveDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for DirectiveDefinition<S, Ty>
 where
   At: Parseable<'a, I, T, Error>,
   keywords::Directive: Parseable<'a, I, T, Error>,
   keywords::On: Parseable<'a, I, T, Error>,
   keywords::Repeatable: Parseable<'a, I, T, Error>,
   DirectiveLocations<Location>: Parseable<'a, I, T, Error>,
-  WhereClause<S>: Parseable<'a, I, T, Error>,
-  DefinitionName<S>: Parseable<'a, I, T, Error>,
-  ArgumentsDefinition<S>: Parseable<'a, I, T, Error>,
+  WhereClause<S, Ty>: Parseable<'a, I, T, Error>,
+  DefinitionName<S, Ty>: Parseable<'a, I, T, Error>,
+  ArgumentsDefinition<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone

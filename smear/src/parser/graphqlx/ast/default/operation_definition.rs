@@ -7,41 +7,41 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-type NamedOperationDefinitionAlias<S> = scaffold::NamedOperationDefinition<
-  DefinitionName<S>,
+type NamedOperationDefinitionAlias<S, Ty = Type<S>> = scaffold::NamedOperationDefinition<
+  DefinitionName<S, Ty>,
   OperationType,
-  VariablesDefinition<S>,
-  Directives<S>,
-  scaffold::generic::Constrained<Ident<S>, Type<S>, SelectionSet<S>>,
+  VariablesDefinition<S, Ty>,
+  Directives<S, Ty>,
+  scaffold::generic::Constrained<Ident<S>, Ty, SelectionSet<S, Ty>>,
 >;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct NamedOperationDefinition<S>(NamedOperationDefinitionAlias<S>);
+pub struct NamedOperationDefinition<S, Ty = Type<S>>(NamedOperationDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for NamedOperationDefinition<S> {
+impl<S, Ty> AsSpan<Span> for NamedOperationDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for NamedOperationDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for NamedOperationDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for NamedOperationDefinition<S> {
+impl<S, Ty> IntoComponents for NamedOperationDefinition<S, Ty> {
   type Components = (
     Span,
     Option<Ident<S>>,
-    Option<DefinitionTypeGenerics<S>>,
+    Option<DefinitionTypeGenerics<S, Ty>>,
     OperationType,
-    Option<VariablesDefinition<S>>,
-    Option<Directives<S>>,
-    Option<WhereClause<S>>,
-    SelectionSet<S>,
+    Option<VariablesDefinition<S, Ty>>,
+    Option<Directives<S, Ty>>,
+    Option<WhereClause<S, Ty>>,
+    SelectionSet<S, Ty>,
   );
 
   #[inline]
@@ -68,7 +68,7 @@ impl<S> IntoComponents for NamedOperationDefinition<S> {
   }
 }
 
-impl<S> NamedOperationDefinition<S> {
+impl<S, Ty> NamedOperationDefinition<S, Ty> {
   /// Returns the name of the operation definition, if it exists.
   #[inline]
   pub const fn name(&self) -> Option<&Ident<S>> {
@@ -80,7 +80,7 @@ impl<S> NamedOperationDefinition<S> {
 
   /// Returns the definition type generics, if they exist.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&DefinitionTypeGenerics<S, Ty>> {
     match self.0.name() {
       Some(def_name) => def_name.generics(),
       None => None,
@@ -95,32 +95,32 @@ impl<S> NamedOperationDefinition<S> {
 
   /// Returns the optional variable definitions of the operation.
   #[inline]
-  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition<S>> {
+  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition<S, Ty>> {
     self.0.variable_definitions()
   }
 
   /// Returns the optional directives of the operation.
   #[inline]
-  pub const fn directives(&self) -> Option<&Directives<S>> {
+  pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
   }
 
   /// Returns the optional where clause of the operation.
   #[inline]
-  pub const fn where_clause(&self) -> Option<&WhereClause<S>> {
+  pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.0.selection_set().where_clause()
   }
 
   /// Returns the selection set of the operation.
   #[inline]
-  pub const fn selection_set(&self) -> &SelectionSet<S> {
+  pub const fn selection_set(&self) -> &SelectionSet<S, Ty> {
     self.0.selection_set().target()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for NamedOperationDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for NamedOperationDefinition<S, Ty>
 where
-  NamedOperationDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  NamedOperationDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
@@ -135,32 +135,32 @@ where
   }
 }
 
-type RootOperationTypeDefinitionAlias<S> =
-  scaffold::RootOperationTypeDefinition<TypePath<S>, OperationType>;
+type RootOperationTypeDefinitionAlias<S, Ty = Type<S>> =
+  scaffold::RootOperationTypeDefinition<TypePath<S, Ty>, OperationType>;
 
 #[derive(Debug, Clone, From, Into)]
-pub struct RootOperationTypeDefinition<S>(RootOperationTypeDefinitionAlias<S>);
+pub struct RootOperationTypeDefinition<S, Ty = Type<S>>(RootOperationTypeDefinitionAlias<S, Ty>);
 
-impl<S> AsSpan<Span> for RootOperationTypeDefinition<S> {
+impl<S, Ty> AsSpan<Span> for RootOperationTypeDefinition<S, Ty> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.0.as_span()
   }
 }
 
-impl<S> IntoSpan<Span> for RootOperationTypeDefinition<S> {
+impl<S, Ty> IntoSpan<Span> for RootOperationTypeDefinition<S, Ty> {
   #[inline]
   fn into_span(self) -> Span {
     self.0.into_span()
   }
 }
 
-impl<S> IntoComponents for RootOperationTypeDefinition<S> {
+impl<S, Ty> IntoComponents for RootOperationTypeDefinition<S, Ty> {
   type Components = (
     Span,
     OperationType,
     super::ty::Path<S>,
-    Option<TypeGenerics<S>>,
+    Option<scaffold::generic::TypeGenerics<Ty>>,
   );
 
   #[inline]
@@ -171,7 +171,7 @@ impl<S> IntoComponents for RootOperationTypeDefinition<S> {
   }
 }
 
-impl<S> RootOperationTypeDefinition<S> {
+impl<S, Ty> RootOperationTypeDefinition<S, Ty> {
   /// Returns the operation type (e.g., Query, Mutation, Subscription).
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -192,14 +192,14 @@ impl<S> RootOperationTypeDefinition<S> {
 
   /// Returns the optional type generics of the root operation type definition.
   #[inline]
-  pub const fn type_generics(&self) -> Option<&TypeGenerics<S>> {
+  pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Ty>> {
     self.0.name().type_generics()
   }
 }
 
-impl<'a, S, I, T, Error> Parseable<'a, I, T, Error> for RootOperationTypeDefinition<S>
+impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for RootOperationTypeDefinition<S, Ty>
 where
-  RootOperationTypeDefinitionAlias<S>: Parseable<'a, I, T, Error>,
+  RootOperationTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
 {
   #[inline]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
