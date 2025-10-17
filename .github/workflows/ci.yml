@@ -176,11 +176,28 @@ jobs:
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Use lld-link (Windows)
       if: runner.os == 'Windows'
+      shell: pwsh
       run: |
-        choco install -y llvm
-        $LLVM = (Get-Command lld-link.exe).Source | Split-Path -Parent
-        echo "RUSTFLAGS=${env:RUSTFLAGS} -C linker=lld-link -C link-arg=/DEBUG:FASTLINK -C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
-        lld-link /V
+        # lld already comes with Chocolatey llvm on GH runners; install/upgrade if needed
+        choco upgrade -y llvm
+
+        # Ensure LLVM bin is on PATH (where lld-link.exe lives)
+        $llvmBin = 'C:\Program Files\LLVM\bin'
+        if (-not (Test-Path $llvmBin)) {
+          Write-Error "LLVM bin not found at $llvmBin"
+          exit 1
+        }
+        echo "PATH=$llvmBin;$env:PATH" >> $env:GITHUB_ENV
+
+        # Verify
+        & "$llvmBin\lld-link.exe" --version
+
+        # Tell Cargo to use lld-link for MSVC target
+        echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=lld-link.exe" >> $env:GITHUB_ENV
+
+        # Make PDB generation lighter & avoid incremental weirdness in CI
+        echo "RUSTFLAGS=$env:RUSTFLAGS -C link-arg=/DEBUG:FASTLINK -C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
+
     - name: Install LLVM + LLD and use ld64.lld (macOS)
       if: runner.os == 'macOS'
       run: |
