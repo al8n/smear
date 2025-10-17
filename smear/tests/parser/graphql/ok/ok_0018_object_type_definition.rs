@@ -2,6 +2,12 @@
 
 const ALL: &str = include_str!("../../../fixtures/parser/graphql/ok/0018_object_type_definition.graphql");
 
+#[cfg(not(windows))]
+const DESCRIPTION: &str = "\n    description of field\n    ";
+
+#[cfg(windows)]
+const DESCRIPTION: &str = "\r\n    description of field\r\n    ";
+
 #[test]
 #[cfg(feature = "graphql")]
 fn object_type_definition() {
@@ -31,7 +37,7 @@ fn object_type_definition() {
     assert_eq!(name.name().source(), "name");
     assert_eq!(
       name.description().unwrap().source().trim_matches('"'),
-      "\n    description of field\n    "
+      DESCRIPTION
     );
     let ty = name.ty().unwrap_name_ref();
 
@@ -88,7 +94,7 @@ fn graphlx_object_type_definition() {
     assert_eq!(name.name().source(), "name");
     assert_eq!(
       name.description().unwrap().source().trim_matches('"'),
-      "\n    description of field\n    "
+      DESCRIPTION
     );
     let ty = name.ty().unwrap_path_ref();
 
