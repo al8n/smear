@@ -3,6 +3,7 @@ use std::fs;
 
 #[test]
 #[cfg(feature = "graphql")]
+#[cfg_attr(miri, ignore)]
 fn parse_schemas() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -35,6 +36,7 @@ fn parse_schemas() {
 
 #[test]
 #[cfg(feature = "graphql")]
+#[cfg_attr(miri, ignore)]
 fn parse_bytes_slice_schemas() {
   use smear::parser::graphql::ast::{Document, ParseBytesSlice};
 
@@ -68,6 +70,7 @@ fn parse_bytes_slice_schemas() {
 #[test]
 #[cfg(feature = "bytes")]
 #[cfg(feature = "graphql")]
+#[cfg_attr(miri, ignore)]
 fn parse_bytes_schemas() {
   use smear::parser::graphql::ast::{Document, ParseBytes};
   use bytes::Bytes;
@@ -102,6 +105,7 @@ fn parse_bytes_schemas() {
 
 #[test]
 #[cfg(feature = "graphqlx")]
+#[cfg_attr(miri, ignore)]
 fn parse_graphqlx_schemas() {
   use smear::parser::graphqlx::ast::*;
 

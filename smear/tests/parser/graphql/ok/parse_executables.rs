@@ -4,6 +4,7 @@ use std::fs;
 
 #[test]
 #[cfg(feature = "graphql")]
+#[cfg_attr(miri, ignore)]
 fn parse_executables() {
   use smear::parser::graphql::ast::{Document, ParseStr};
 
@@ -35,6 +36,7 @@ fn parse_executables() {
 
 #[cfg(feature = "graphqlx")]
 #[test]
+#[cfg_attr(miri, ignore)]
 fn parse_graphqlx_executables() {
   use smear::parser::graphqlx::ast::{Document, ParseStr};
 
