@@ -1,0 +1,30 @@
+[package]
+name = "smear-parser"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme = "README.md"
+description = "High-performance parser for GraphQL and GraphQL-like DSLs"
+
+[features]
+default = ["std", "graphql", "graphqlx"]
+alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
+std = ["smear-scaffold/std", "smear-lexer/std"]
+
+unstable = ["smear-lexer/unstable"]
+
+graphql = ["smear-lexer/graphql"]
+graphqlx = ["unstable", "smear-lexer/graphqlx"]
+
+bytes = ["smear-lexer/bytes", "logosky/bytes"]
+bstr = ["smear-lexer/bstr", "logosky/bstr"]
+hipstr = ["smear-lexer/hipstr", "logosky/hipstr"]
+smallvec = ["smear-lexer/smallvec"]
+
+[dependencies]
+derive_more.workspace = true
+logosky.workspace = true
+smear-scaffold.workspace = true
+smear-lexer.workspace = true

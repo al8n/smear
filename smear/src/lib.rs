@@ -84,7 +84,7 @@ pub mod keywords;
 /// // Use standard Document with your custom definitions
 /// type MyDocument = scaffold::Document<MyDefinition>;
 /// ```
-pub mod scaffold;
+pub use smear_scaffold as scaffold;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///
@@ -180,7 +180,7 @@ pub use smear_lexer as lexer;
 ///   - Map types (`<Key => Value>`)
 ///   - Set types (`<Element>`)
 ///   - Path types (`namespace::Type`)
-pub mod parser;
+pub use smear_parser as parser;
 
 #[doc(hidden)]
 pub mod __private {
