@@ -1,0 +1,35 @@
+[package]
+name = "smear-lexer"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme = "README.md"
+description = "Blazing fast lexer for GraphQL and GraphQL-like DSLs"
+
+[features]
+default = ["std", "graphql", "graphqlx", "smallvec"]
+alloc = []
+std = ["thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+
+unstable = []
+
+graphql = []
+graphqlx = ["unstable"]
+smallvec = ["dep:smallvec"]
+
+bytes = ["dep:bytes", "logosky/bytes"]
+bstr = ["dep:bstr", "logosky/bstr"]
+hipstr = ["dep:hipstr", "logosky/hipstr"]
+
+[dependencies]
+derive_more.workspace = true
+paste = "1"
+thiserror.workspace = true
+logosky.workspace = true
+
+hipstr = { version = "0.8", default-features = false, optional = true }
+bytes = { workspace = true, optional = true }
+bstr = { workspace = true, optional = true }
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }

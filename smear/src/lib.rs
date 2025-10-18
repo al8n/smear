@@ -147,7 +147,7 @@ pub mod scaffold;
 /// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
 /// // ALL tokens including spaces, comments, exact formatting
 /// ```
-pub mod lexer;
+pub use smear_lexer as lexer;
 
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///

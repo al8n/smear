@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "smear",
+  "smear-lexer",
 ]
 resolver = "3"
 
@@ -22,3 +23,4 @@ logosky = { version = "0.1", default-features = false }
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
+smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }

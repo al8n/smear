@@ -58,6 +58,7 @@ impl From<SyntacticTokenKind> for Expectation {
       SyntacticTokenKind::Plus => Self::Plus,
       SyntacticTokenKind::Minus => Self::Minus,
       SyntacticTokenKind::PathSeparator => Self::PathSeparator,
+      _ => unreachable!("unexpected token kind in parser: {:?}", kind),
     }
   }
 }

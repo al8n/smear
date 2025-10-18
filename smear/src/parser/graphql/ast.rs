@@ -56,6 +56,7 @@ impl From<SyntacticTokenKind> for Expectation {
       SyntacticTokenKind::RParen => Self::RParen,
       SyntacticTokenKind::Int => Self::IntValue,
       SyntacticTokenKind::Float => Self::FloatValue,
+      _ => unreachable!("unexpected token kind in parser: {:?}", kind),
     }
   }
 }
