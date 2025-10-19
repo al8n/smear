@@ -75,9 +75,9 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
     }
   }
 
-  #[cfg(feature = "graphqlx")]
+  /// Returns a mutable reference to the path.
   #[inline]
-  pub(crate) const fn path_mut(&mut self) -> &mut Path<Ident, PathSegmentContainer> {
+  pub const fn path_mut(&mut self) -> &mut Path<Ident, PathSegmentContainer> {
     &mut self.path
   }
 

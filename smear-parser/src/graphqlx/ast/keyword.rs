@@ -4,9 +4,9 @@ use logosky::{
   utils::Span,
 };
 
-use crate::{
+use smear_lexer::{
+  graphqlx::syntactic::SyntacticLexerErrors,
   keywords::{self, *},
-  lexer::graphqlx::syntactic::SyntacticLexerErrors,
 };
 
 use super::*;

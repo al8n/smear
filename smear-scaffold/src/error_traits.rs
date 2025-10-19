@@ -2,7 +2,6 @@ use logosky::utils::Span;
 
 use crate::hints::*;
 
-
 /// An error which can occur when an unexpected token is encountered.
 pub trait UnexpectedTokenError {
   /// The actual token type.

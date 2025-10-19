@@ -5,12 +5,13 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::lexer::graphqlx::{LitFloat, syntactic::SyntacticLexerErrors};
+use smear_lexer::graphqlx::{LitFloat, syntactic::SyntacticLexerErrors};
 
 use super::super::*;
 
-type FloatValueAlias<S> = crate::parser::value::FloatValue<LitFloat<S>>;
+type FloatValueAlias<S> = crate::value::FloatValue<LitFloat<S>>;
 
+/// A floating-point value in GraphQLx.
 #[derive(Debug, Clone, Copy, From, Into)]
 pub struct FloatValue<S>(FloatValueAlias<S>);
 

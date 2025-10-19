@@ -1,9 +1,9 @@
-use crate::{lexer::graphqlx::syntactic::SyntacticLexerErrors, punctuator::*};
 use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::Span,
 };
+use smear_lexer::{graphqlx::syntactic::SyntacticLexerErrors, punctuator::*};
 
 use super::*;
 

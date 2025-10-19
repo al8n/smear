@@ -6,7 +6,10 @@ use logosky::{
 
 use crate::error::UnclosedBraceError;
 
-use smear_lexer::{keywords, punctuator::{FatArrow, LBrace, RBrace}};
+use smear_lexer::{
+  keywords,
+  punctuator::{FatArrow, LBrace, RBrace},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -161,7 +164,7 @@ pub struct Map<Key, Value, Container = Vec<MapEntry<Key, Value>>> {
 impl<Key, Value, Container> Map<Key, Value, Container> {
   /// Creates a new map literal with the given span and entries.
   #[inline]
-  pub(crate) const fn new(span: Span, entries: Container) -> Self {
+  pub const fn new(span: Span, entries: Container) -> Self {
     Self {
       span,
       entries,

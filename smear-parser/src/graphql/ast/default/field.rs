@@ -1,31 +1,40 @@
-use crate::{
-  error::UnclosedBraceError,
-  lexer::graphql::syntactic::SyntacticLexerErrors,
-  punctuator::{At, RBrace},
-};
-
-use super::*;
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
+use smear_lexer::{
+  graphql::syntactic::SyntacticLexerErrors,
+  punctuator::{At, RBrace},
+};
+use smear_scaffold::error::UnclosedBraceError;
 
+use super::*;
+
+/// A fragment spread in a selection set.
 pub type FragmentSpread<S> = scaffold::FragmentSpread<FragmentName<S>, Directives<S>>;
 
+/// An inline fragment in a selection set.
 pub type InlineFragment<S> =
   scaffold::InlineFragment<TypeCondition<S>, Directives<S>, SelectionSet<S>>;
 
+/// A selection set containing fields, fragment spreads, and inline fragments.
 pub type SelectionSet<S> = scaffold::SelectionSet<Selection<S>>;
 
+/// A selection in a GraphQL selection set.
+///
+/// A selection can be a field, a fragment spread, or an inline fragment.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Selection<S> {
+  /// A field selection.
   Field(Field<S>),
+  /// A fragment spread selection.
   FragmentSpread(FragmentSpread<S>),
+  /// An inline fragment selection.
   InlineFragment(InlineFragment<S>),
 }
 
@@ -87,6 +96,7 @@ where
 }
 
 impl<S> Selection<S> {
+  /// Returns a reference to the span covering the entire selection.
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -100,6 +110,7 @@ impl<S> Selection<S> {
 type FieldAlias<S> =
   scaffold::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>;
 
+/// A GraphQL field.
 #[derive(Debug, Clone, From, Into)]
 pub struct Field<S>(FieldAlias<S>);
 

@@ -4,13 +4,10 @@ use logosky::{
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
+use smear_lexer::punctuator::{Bang, LBracket, RBracket};
+use smear_scaffold::{ListType, NamedType};
 
 use std::{boxed::Box, rc::Rc, sync::Arc};
-
-use crate::{
-  punctuator::{Bang, LBracket, RBracket},
-  scaffold::{ListType, NamedType},
-};
 
 macro_rules! ty {
   ($(

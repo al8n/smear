@@ -112,7 +112,9 @@ impl<Selection, Container> IntoComponents for SelectionSet<Selection, Container>
 }
 
 impl<Selection, Container> SelectionSet<Selection, Container> {
-  pub(crate) const fn new(span: Span, selections: Container) -> Self {
+  /// Creates a new selection set with the given span and selections.
+  #[inline]
+  pub const fn new(span: Span, selections: Container) -> Self {
     Self {
       span,
       selections,

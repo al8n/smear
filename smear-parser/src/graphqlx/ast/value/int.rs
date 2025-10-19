@@ -5,12 +5,13 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::lexer::graphqlx::{LitInt, syntactic::SyntacticLexerErrors};
+use smear_lexer::graphqlx::{LitInt, syntactic::SyntacticLexerErrors};
 
 use super::super::*;
 
-type IntValueAlias<S> = crate::parser::value::IntValue<LitInt<S>>;
+type IntValueAlias<S> = crate::value::IntValue<LitInt<S>>;
 
+/// An integer value in GraphQLx.
 #[derive(Debug, Clone, Copy, From, Into)]
 pub struct IntValue<S>(IntValueAlias<S>);
 

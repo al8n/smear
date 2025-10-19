@@ -4,8 +4,10 @@ use logosky::utils::{
   sdl_display::{DisplayCompact, DisplayPretty},
 };
 
+/// A boolean value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanValue {
+
   span: Span,
   value: bool,
 }

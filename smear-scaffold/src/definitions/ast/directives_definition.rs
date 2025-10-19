@@ -11,7 +11,10 @@ use logosky::{
   },
 };
 
-use smear_lexer::{keywords::*, punctuator::{At, Pipe}};
+use smear_lexer::{
+  keywords::*,
+  punctuator::{At, Pipe},
+};
 
 use std::vec::Vec;
 

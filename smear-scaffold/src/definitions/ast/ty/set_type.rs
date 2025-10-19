@@ -89,8 +89,9 @@ impl<Type> IntoComponents for SetType<Type> {
 }
 
 impl<Type> SetType<Type> {
+  /// Creates a new set type instance.
   #[inline]
-  pub(crate) const fn new(span: Span, ty: Type, required: bool) -> Self {
+  pub const fn new(span: Span, ty: Type, required: bool) -> Self {
     Self { span, ty, required }
   }
 

@@ -1,10 +1,5 @@
 use crate::{
-  error::{
-    ParseVariableValueError, UnclosedBraceError, UnclosedBracketError,
-    UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
-    UnexpectedEndOfInterfaceExtensionError, UnexpectedEndOfObjectExtensionError,
-    UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
-  },
+  error::ParseVariableValueError,
   hints::{
     EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
     ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
@@ -13,6 +8,12 @@ use crate::{
 use logosky::{
   Token,
   utils::{IntoComponents, Span},
+};
+use smear_scaffold::error::{
+  UnclosedBraceError, UnclosedBracketError, UnexpectedEndOfEnumExtensionError,
+  UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError,
+  UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError,
+  UnexpectedEndOfUnionExtensionError,
 };
 
 use super::*;

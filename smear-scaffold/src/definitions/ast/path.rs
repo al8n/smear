@@ -45,7 +45,7 @@ impl<Ident, Container> IntoComponents for Path<Ident, Container> {
 impl<Ident, Container> Path<Ident, Container> {
   /// Creates a new path from the given segments.
   #[inline]
-  pub(crate) const fn new(span: Span, segments: Container, fqdp: bool) -> Self {
+  pub const fn new(span: Span, segments: Container, fqdp: bool) -> Self {
     Self {
       span,
       segments,
@@ -54,9 +54,9 @@ impl<Ident, Container> Path<Ident, Container> {
     }
   }
 
-  #[cfg(feature = "graphqlx")]
+  /// Sets whether the path is fully qualified (i.e., starts with `::`).
   #[inline]
-  pub(crate) const fn set_fqdp(&mut self, fqdp: bool) {
+  pub const fn set_fqdp(&mut self, fqdp: bool) {
     self.fqdp = fqdp;
   }
 

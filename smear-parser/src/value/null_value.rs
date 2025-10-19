@@ -6,6 +6,8 @@ use logosky::utils::{
 
 use core::fmt::Display;
 
+/// A null value literal.
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NullValue<S> {
   source: S,

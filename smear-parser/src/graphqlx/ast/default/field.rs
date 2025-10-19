@@ -1,19 +1,20 @@
-use crate::{
-  lexer::graphqlx::syntactic::SyntacticLexerErrors,
-  punctuator::{At, RBrace},
-};
-
-use super::{ty::Path, *};
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
+use smear_lexer::{
+  graphqlx::syntactic::SyntacticLexerErrors,
+  punctuator::{At, RBrace},
+};
+
+use super::{ty::Path, *};
 
 type FragmentSpreadAlias<S, Ty = Type<S>> =
   scaffold::FragmentSpread<FragmentTypePath<S, Ty>, Directives<S, Ty>>;
 
+/// A fragment spread in a GraphQLx selection set.
 #[derive(Debug, Clone, From, Into)]
 pub struct FragmentSpread<S, Ty = Type<S>>(FragmentSpreadAlias<S, Ty>);
 
@@ -102,6 +103,7 @@ where
 type InlineFragmentAlias<S, Ty = Type<S>> =
   scaffold::InlineFragment<TypeCondition<S, Ty>, Directives<S, Ty>, SelectionSet<S, Ty>>;
 
+/// An inline fragment in a GraphQLx selection set.
 #[derive(Debug, Clone, From, Into)]
 pub struct InlineFragment<S, Ty = Type<S>>(InlineFragmentAlias<S, Ty>);
 
@@ -191,15 +193,20 @@ where
   }
 }
 
+/// A selection set containing fields, fragment spreads, and inline fragments.
 pub type SelectionSet<S, Ty = Type<S>> = scaffold::SelectionSet<Selection<S, Ty>>;
 
+/// A selection in a GraphQLx selection set.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Selection<S, Ty = Type<S>> {
+  /// A field selection.
   Field(Field<S, Ty>),
+  /// A fragment spread selection.
   FragmentSpread(FragmentSpread<S, Ty>),
+  /// An inline fragment selection.
   InlineFragment(InlineFragment<S, Ty>),
 }
 
@@ -263,6 +270,7 @@ where
 }
 
 impl<S, Ty> Selection<S, Ty> {
+  /// Returns the span of the selection.
   #[inline]
   pub const fn span(&self) -> &Span {
     match self {
@@ -276,6 +284,7 @@ impl<S, Ty> Selection<S, Ty> {
 type FieldAlias<S, Ty = Type<S>> =
   scaffold::Field<Alias<S>, Ident<S>, Arguments<S>, Directives<S, Ty>, SelectionSet<S, Ty>>;
 
+/// A field in a GraphQLx selection set.
 #[derive(Debug, Clone, From, Into)]
 pub struct Field<S, Ty = Type<S>>(FieldAlias<S, Ty>);
 

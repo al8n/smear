@@ -6,7 +6,10 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use smear_lexer::{keywords::Where, punctuator::{Ampersand, Colon, LAngle, PathSeparator, RAngle}};
+use smear_lexer::{
+  keywords::Where,
+  punctuator::{Ampersand, Colon, LAngle, PathSeparator, RAngle},
+};
 
 use super::TypePath;
 

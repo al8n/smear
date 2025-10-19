@@ -4,19 +4,20 @@ use logosky::{
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
-
-use crate::{
+use smear_lexer::{
   keywords,
   punctuator::{Ampersand, Bang, Colon, LAngle, PathSeparator, RAngle},
-  scaffold::{self, And, generic::Constrained},
 };
+use smear_scaffold::{self as scaffold, And, generic::Constrained};
 
 use super::*;
 
 type TypeConditionAlias<S, Ty = Type<S>> =
   scaffold::TypeCondition<scaffold::generic::TypePath<Ident<S>, Ty>>;
+/// A type path for a fragment reference with optional type parameters.
 pub type FragmentTypePath<S, Ty = Type<S>> = scaffold::generic::FragmentTypePath<Ident<S>, Ty>;
 
+/// A type condition specifying the type on which a fragment operates.
 #[derive(Debug, Clone, From, Into)]
 pub struct TypeCondition<S, Ty = Type<S>>(TypeConditionAlias<S, Ty>);
 
@@ -95,6 +96,7 @@ type FragmentDefinitionAlias<S, Ty = Type<S>> = scaffold::FragmentDefinition<
   Constrained<Ident<S>, Ty, SelectionSet<S, Ty>>,
 >;
 
+/// A GraphQLx fragment definition.
 #[derive(Debug, Clone, From, Into)]
 pub struct FragmentDefinition<S, Ty = Type<S>>(FragmentDefinitionAlias<S, Ty>);
 

@@ -6,6 +6,8 @@ use logosky::utils::{
 };
 
 use core::fmt::Display;
+/// A floating-point value literal.
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FloatValue<S> {

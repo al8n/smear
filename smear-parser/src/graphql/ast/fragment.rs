@@ -11,6 +11,7 @@ use crate::{
 
 use super::*;
 
+/// A type condition for a fragment, specifying the type it applies to.
 pub type TypeCondition<S> = scaffold::TypeCondition<Name<S>>;
 
 impl<'a, S>

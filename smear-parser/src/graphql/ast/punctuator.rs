@@ -1,8 +1,8 @@
-use crate::{lexer::graphql::syntactic::SyntacticLexerErrors, punctuator::*};
 use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
 };
+use smear_lexer::{graphql::syntactic::SyntacticLexerErrors, punctuator::*};
 
 use super::*;
 

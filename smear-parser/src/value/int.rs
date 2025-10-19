@@ -6,6 +6,8 @@ use logosky::utils::{
 };
 
 use core::fmt::Display;
+/// An integer value literal.
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IntValue<S> {

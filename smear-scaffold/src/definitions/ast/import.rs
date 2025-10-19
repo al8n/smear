@@ -8,7 +8,10 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use smear_lexer::{keywords, punctuator::{Asterisk, LBrace, PathSeparator, RBrace}};
+use smear_lexer::{
+  keywords,
+  punctuator::{Asterisk, LBrace, PathSeparator, RBrace},
+};
 
 use super::Path;
 

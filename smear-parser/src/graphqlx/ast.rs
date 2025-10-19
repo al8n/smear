@@ -6,10 +6,13 @@ use logosky::{
   utils::recursion_tracker::RecursionLimitExceeded,
 };
 
-use super::{error::{Error, Errors, Extra}, Expectation};
+use super::{
+  Expectation,
+  error::{Error, Errors, Extra},
+};
 use crate::{
-  lexer::graphqlx::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind},
   ident::Ident,
+  lexer::graphqlx::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind},
 };
 
 pub use default::*;

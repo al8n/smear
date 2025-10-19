@@ -53,8 +53,9 @@ impl<Key, Value> IntoComponents for MapType<Key, Value> {
 }
 
 impl<Key, Value> MapType<Key, Value> {
+  /// Creates a new map type instance.
   #[inline]
-  pub(crate) const fn new(span: Span, key: Key, value: Value, required: bool) -> Self {
+  pub const fn new(span: Span, key: Key, value: Value, required: bool) -> Self {
     Self {
       span,
       key,

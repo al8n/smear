@@ -17,10 +17,10 @@ pub use logosky;
 pub mod error;
 /// The hints module contains types and traits for expected token hints.
 pub mod hints;
-/// Punctuation tokens used in GraphQL and GraphQLX.
-pub mod punctuator;
 /// Keyword tokens for GraphQL and GraphQLX.
 pub mod keywords;
+/// Punctuation tokens used in GraphQL and GraphQLX.
+pub mod punctuator;
 
 /// Lexers for standard GraphQL (draft specification).
 ///

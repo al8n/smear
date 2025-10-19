@@ -73,8 +73,9 @@ impl<Name, InputValue> IntoComponents for ObjectField<Name, InputValue> {
 }
 
 impl<Name, InputValue> ObjectField<Name, InputValue> {
+  /// Creates a new object field with the given span, name, and value.
   #[inline]
-  pub(crate) const fn new(span: Span, name: Name, value: InputValue) -> Self {
+  pub const fn new(span: Span, name: Name, value: InputValue) -> Self {
     Self { span, name, value }
   }
 
@@ -285,7 +286,7 @@ impl<Name, InputValue, Container> IntoComponents for Object<Name, InputValue, Co
 impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   /// Creates a new object literal with the given span and fields.
   #[inline(always)]
-  pub(crate) const fn new(span: Span, fields: Container) -> Self {
+  pub const fn new(span: Span, fields: Container) -> Self {
     Self {
       span,
       fields,

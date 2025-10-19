@@ -6,7 +6,10 @@ use logosky::{
 
 use crate::error::UnclosedBraceError;
 
-use smear_lexer::{keywords, punctuator::{LBrace, RBrace}};
+use smear_lexer::{
+  keywords,
+  punctuator::{LBrace, RBrace},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -62,7 +65,7 @@ pub struct Set<Value, Container = Vec<Value>> {
 impl<Value, Container> Set<Value, Container> {
   /// Creates a new set literal with the given span and values.
   #[inline]
-  pub(crate) const fn new(span: Span, values: Container) -> Self {
+  pub const fn new(span: Span, values: Container) -> Self {
     Self {
       span,
       values,

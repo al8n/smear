@@ -15,6 +15,7 @@ type NamedOperationDefinitionAlias<S, Ty = Type<S>> = scaffold::NamedOperationDe
   scaffold::generic::Constrained<Ident<S>, Ty, SelectionSet<S, Ty>>,
 >;
 
+/// A named GraphQLx operation definition (query, mutation, or subscription).
 #[derive(Debug, Clone, From, Into)]
 pub struct NamedOperationDefinition<S, Ty = Type<S>>(NamedOperationDefinitionAlias<S, Ty>);
 
@@ -138,6 +139,7 @@ where
 type RootOperationTypeDefinitionAlias<S, Ty = Type<S>> =
   scaffold::RootOperationTypeDefinition<TypePath<S, Ty>, OperationType>;
 
+/// A root operation type definition in a schema (query, mutation, or subscription).
 #[derive(Debug, Clone, From, Into)]
 pub struct RootOperationTypeDefinition<S, Ty = Type<S>>(RootOperationTypeDefinitionAlias<S, Ty>);
 

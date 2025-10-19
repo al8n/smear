@@ -1,21 +1,23 @@
 use crate::{
-  error::{UnclosedBraceError, UnclosedBracketError},
-  hints::VariableValueHint,
-  lexer::graphqlx::syntactic::SyntacticLexerErrors,
-  parser::{graphqlx::Expectation, ident::Ident},
-  punctuator::{LBrace, PathSeparator, RBrace, RBracket},
-  scaffold::{self, Path},
+  hints::VariableValueHint, ident::Ident, lexer::graphqlx::syntactic::SyntacticLexerErrors,
 };
 
 use super::{
-  DefaultVec, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenStream,
+  DefaultVec, Expectation, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
+  SyntacticTokenStream,
 };
+
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Parseable, Source, Token, Tokenizer,
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
+};
+use smear_lexer::punctuator::{LBrace, PathSeparator, RBrace, RBracket};
+use smear_scaffold::{
+  self as scaffold, Path,
+  error::{UnclosedBraceError, UnclosedBracketError},
 };
 
 pub use boolean_value::*;
@@ -25,7 +27,8 @@ pub use int::*;
 pub use null_value::*;
 pub use string::*;
 
-pub type VariableValue<S> = crate::parser::value::VariableValue<Ident<S>>;
+/// A variable value reference in GraphQLx.
+pub type VariableValue<S> = crate::value::VariableValue<Ident<S>>;
 
 mod boolean_value;
 mod enum_value;
@@ -34,24 +37,36 @@ mod int;
 mod null_value;
 mod string;
 
+/// A list value in GraphQLx that can contain any input value.
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+/// A set value in GraphQLx containing unique input values.
 pub type Set<S, Container = DefaultVec<InputValue<S>>> = scaffold::Set<InputValue<S>, Container>;
+/// A key-value entry in a map.
 pub type MapEntry<S> = scaffold::MapEntry<InputValue<S>, InputValue<S>>;
+/// A map value in GraphQLx containing key-value pairs.
 pub type Map<S, Container = DefaultVec<(InputValue<S>, InputValue<S>)>> =
   scaffold::Map<InputValue<S>, InputValue<S>, Container>;
+/// An object value in GraphQLx containing named fields.
 pub type Object<S, Container = DefaultVec<InputValue<S>>> =
   scaffold::Object<Ident<S>, InputValue<S>, Container>;
+/// A field in an object value.
 pub type ObjectField<S> = scaffold::ObjectField<Ident<S>, InputValue<S>>;
 
+/// A constant list value in GraphQLx (cannot contain variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::List<ConstInputValue<S>, Container>;
+/// A constant set value in GraphQLx (cannot contain variables).
 pub type ConstSet<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Set<ConstInputValue<S>, Container>;
+/// A constant key-value entry in a map.
 pub type ConstMapEntry<S> = scaffold::MapEntry<ConstInputValue<S>, ConstInputValue<S>>;
+/// A constant map value in GraphQLx (cannot contain variables).
 pub type ConstMap<S, Container = DefaultVec<(ConstInputValue<S>, ConstInputValue<S>)>> =
   scaffold::Map<ConstInputValue<S>, ConstInputValue<S>, Container>;
+/// A constant object value in GraphQLx (cannot contain variables).
 pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
   scaffold::Object<Ident<S>, ConstInputValue<S>, Container>;
+/// A field in a constant object value.
 pub type ConstObjectField<S> = scaffold::ObjectField<Ident<S>, ConstInputValue<S>>;
 
 /// GraphQLx Input Value

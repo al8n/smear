@@ -3,10 +3,9 @@
 //! This module provides types for GraphQLx's import system, which allows
 //! schemas to be split across multiple files and composed together.
 
-use crate::{
-  parser::{ident::Ident, value::InlineStringValue},
-  scaffold::{self, Path},
-};
+use crate::{ident::Ident, value::InlineStringValue};
+
+use smear_scaffold::{self as scaffold, Path};
 
 /// A named import specifier, optionally with an alias.
 ///
@@ -51,6 +50,9 @@ pub type ImportMember<S> = scaffold::ImportMember<Ident<S>>;
 /// ```
 pub type ImportList<S> = scaffold::ImportList<Ident<S>>;
 
+/// An import clause specifying what to import.
+///
+/// Can be either a list of specific imports or a wildcard import.
 pub type ImportClause<S> = scaffold::ImportClause<Ident<S>>;
 
 /// A complete GraphQLx import definition.

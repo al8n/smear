@@ -1,5 +1,6 @@
-use crate::hints::VariableValueHint;
+use logosky::utils::Span;
 
+use crate::hints::VariableValueHint;
 
 /// An error which can occur when parsing a variable value.
 pub trait ParseVariableValueError<Name> {

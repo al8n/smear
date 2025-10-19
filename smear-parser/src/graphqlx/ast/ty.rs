@@ -4,21 +4,26 @@ use logosky::{
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
+use smear_lexer::punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket};
 
 use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 use crate::{
-  parser::ident::Ident,
-  punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket},
+  ident::Ident,
   scaffold::{self, ListType, MapType, SetType},
 };
 
+/// A path referencing a type, module, or schema element.
 pub type Path<S> = scaffold::Path<Ident<S>>;
+/// A type path with optional generic type parameters.
 pub type TypePath<S, Ty = Type<S>> = scaffold::generic::TypePath<Ident<S>, Ty>;
+/// A definition-level type path with generic type parameters.
 pub type DefinitionTypePath<S, Ty = Type<S>> = scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
 
+/// A definition-level type path using `Arc` for thread-safe reference counting.
 pub type ArcDefinitionTypePath<S, Ty = ArcType<S>> =
   scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
+/// A definition-level type path using `Rc` for single-threaded reference counting.
 pub type RcDefinitionTypePath<S, Ty = RcType<S>> =
   scaffold::generic::DefinitionTypePath<Ident<S>, Ty>;
 

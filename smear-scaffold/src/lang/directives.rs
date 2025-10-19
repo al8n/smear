@@ -46,7 +46,9 @@ impl<Name, Args> IntoComponents for Directive<Name, Args> {
 }
 
 impl<Name, Args> Directive<Name, Args> {
-  pub(crate) const fn new(span: Span, name: Name, arguments: Option<Args>) -> Self {
+  /// Creates a new directive with the given span, name, and optional arguments.
+  #[inline]
+  pub const fn new(span: Span, name: Name, arguments: Option<Args>) -> Self {
     Self {
       span,
       name,
@@ -165,7 +167,9 @@ impl<Directive, Container> IntoComponents for Directives<Directive, Container> {
 }
 
 impl<Directive, Container> Directives<Directive, Container> {
-  pub(crate) const fn new(span: Span, directives: Container) -> Self {
+  /// Creates a new directives collection with the given span and directives.
+  #[inline]
+  pub const fn new(span: Span, directives: Container) -> Self {
     Self {
       span,
       directives,

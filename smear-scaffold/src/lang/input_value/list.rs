@@ -65,7 +65,7 @@ pub struct List<Value, Container = Vec<Value>> {
 impl<Value, Container> List<Value, Container> {
   /// Creates a new list literal with the given span and values.
   #[inline]
-  pub(crate) const fn new(span: Span, values: Container) -> Self {
+  pub const fn new(span: Span, values: Container) -> Self {
     Self {
       span,
       values,

@@ -2,10 +2,9 @@ use logosky::{
   Lexed, Logos, Parseable, Token,
   chumsky::{Parser, extra::ParserExtra, prelude::any},
 };
-
-use crate::{
+use smear_lexer::{
+  graphql::syntactic::SyntacticLexerErrors,
   keywords::{self, *},
-  lexer::graphql::syntactic::SyntacticLexerErrors,
 };
 
 use super::*;

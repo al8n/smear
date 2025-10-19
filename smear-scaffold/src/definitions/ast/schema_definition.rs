@@ -5,10 +5,7 @@ use logosky::{
 };
 use smear_lexer::keywords::{Extend, Schema};
 
-use crate::{
-  error::UnexpectedEndOfSchemaExtensionError,
-  hints::SchemaExtensionHint,
-};
+use crate::{error::UnexpectedEndOfSchemaExtensionError, hints::SchemaExtensionHint};
 
 /// Represents a GraphQL schema definition that describes the structure and capabilities of a GraphQL service.
 ///

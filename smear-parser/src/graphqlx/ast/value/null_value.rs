@@ -4,11 +4,11 @@ use logosky::{
   utils::{Span, cmp::Equivalent},
 };
 
-use crate::lexer::graphqlx::syntactic::SyntacticLexerErrors;
+use smear_lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
 use super::super::*;
 
-pub use crate::parser::value::NullValue;
+pub use crate::value::NullValue;
 
 impl<'a, S>
   Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>

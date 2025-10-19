@@ -3,12 +3,8 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{Span, cmp::Equivalent},
 };
-
-use crate::{
-  keywords,
-  lexer::graphql::syntactic::SyntacticLexerErrors,
-  scaffold::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation},
-};
+use smear_lexer::{graphql::syntactic::SyntacticLexerErrors, keywords};
+use smear_scaffold::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation};
 
 use super::*;
 

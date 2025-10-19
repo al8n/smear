@@ -3,12 +3,11 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{Span, cmp::Equivalent},
 };
-
-use crate::{
+use smear_lexer::{
+  graphql::syntactic::SyntacticLexerErrors,
   keywords::{Mutation, Query, Subscription},
-  lexer::graphql::syntactic::SyntacticLexerErrors,
-  scaffold::OperationType,
 };
+use smear_scaffold::OperationType;
 
 use super::*;
 

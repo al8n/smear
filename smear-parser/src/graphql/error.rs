@@ -11,7 +11,7 @@ use logosky::{
   utils::{Span, UnexpectedEnd},
 };
 
-use crate::parser::graphql::Expectation as Exp;
+use super::Expectation as Exp;
 
 pub use crate::{
   error::{ParseVariableValueError, UnexpectedKeyword, UnexpectedToken},
@@ -29,9 +29,12 @@ pub use core::num::{IntErrorKind, ParseFloatError, ParseIntError};
 pub type Extra<S, T, Char = char, Expectation = Exp, StateError = ()> =
   logosky::chumsky::extra::Err<Errors<S, T, Char, Expectation, StateError>>;
 
+/// Represents an unclosed delimiter in GraphQL source.
 #[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Unclosed {
+  /// An unclosed list (missing `]`).
   List,
+  /// An unclosed object (missing `}`).
   Object,
 }
 

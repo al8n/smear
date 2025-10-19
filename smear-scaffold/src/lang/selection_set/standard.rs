@@ -4,15 +4,16 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
-use smear_lexer::{keywords::On, punctuator::{LBrace, RBrace, Spread}};
+use smear_lexer::{
+  keywords::On,
+  punctuator::{LBrace, RBrace, Spread},
+};
 
-use crate::{StandardField, FragmentSpread, InlineFragment, SelectionSet, Field};
+use crate::{Field, FragmentSpread, InlineFragment, SelectionSet, StandardField};
 
 /// A standard selection set in GraphQL.
 pub type StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> =
-  SelectionSet<
-    StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>,
-  >;
+  SelectionSet<StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>;
 
 /// Represents a standard selection in a GraphQL selection set.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]

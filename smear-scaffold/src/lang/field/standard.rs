@@ -10,7 +10,10 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use smear_lexer::{keywords::On, punctuator::{LBrace, RBrace, Spread}};
+use smear_lexer::{
+  keywords::On,
+  punctuator::{LBrace, RBrace, Spread},
+};
 
 use crate::FragmentSpread;
 
@@ -235,8 +238,7 @@ where
       // Pass the selection parser to the selection set
       let selection_set = crate::StandardSelectionSet::parser_with(selection);
 
-      crate::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
-        .map(Self)
+      crate::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
     })
   }
 }

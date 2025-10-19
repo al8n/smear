@@ -18,13 +18,17 @@ unstable = ["smear-lexer/unstable"]
 graphql = ["smear-lexer/graphql"]
 graphqlx = ["unstable", "smear-lexer/graphqlx"]
 
-bytes = ["smear-lexer/bytes", "logosky/bytes"]
+bytes = ["dep:bytes", "smear-lexer/bytes", "logosky/bytes"]
 bstr = ["smear-lexer/bstr", "logosky/bstr"]
 hipstr = ["smear-lexer/hipstr", "logosky/hipstr"]
-smallvec = ["smear-lexer/smallvec"]
+smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 
 [dependencies]
 derive_more.workspace = true
 logosky.workspace = true
 smear-scaffold.workspace = true
 smear-lexer.workspace = true
+paste = "1"
+
+bytes = { workspace = true, optional = true }
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }

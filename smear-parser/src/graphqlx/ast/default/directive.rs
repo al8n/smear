@@ -4,12 +4,8 @@ use logosky::{
   chumsky::{extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
-
-use crate::{
-  keywords,
-  punctuator::At,
-  scaffold::{self, And, DirectiveLocations, Location},
-};
+use smear_lexer::{keywords, punctuator::At};
+use smear_scaffold::{self as scaffold, And, DirectiveLocations, Location};
 
 use super::*;
 
@@ -102,6 +98,7 @@ where
   }
 }
 
+/// A const directive (used in type system definitions).
 #[derive(Debug, Clone, From, Into)]
 pub struct ConstDirective<S, Ty = Type<S>>(ConstDirectiveAlias<S, Ty>);
 

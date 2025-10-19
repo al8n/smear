@@ -4,10 +4,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
-use crate::{
-  error::UnexpectedEndOfInputObjectExtensionError,
-  hints::InputObjectTypeExtensionHint,
-};
+use crate::{error::UnexpectedEndOfInputObjectExtensionError, hints::InputObjectTypeExtensionHint};
 
 use smear_lexer::keywords::{Extend, Input};
 

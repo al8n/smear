@@ -8,38 +8,11 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// Error types and traits for GraphQL parsing.
-///
-/// This module provides comprehensive error handling for lexing and parsing operations,
-/// including span information for precise error reporting.
-///
-/// ## Key Types
-///
-/// - [`UnexpectedToken`](error::UnexpectedToken): Represents an unexpected token error with span information
-/// - Error traits for implementing custom error types
-pub mod error;
-
 /// Hint system for expected GraphQL tokens.
 ///
 /// Provides hints about what tokens were expected during parsing, useful for
 /// generating helpful error messages and IDE integration.
 pub mod hints;
-
-/// Punctuation tokens used in GraphQL and GraphQLX.
-///
-/// Defines all punctuation marks recognized by the lexer, including:
-/// - Delimiters: `()`, `{}`, `[]`
-/// - Operators: `!`, `=`, `@`, `$`, `|`, `&`
-/// - Separators: `:`, `,`
-/// - GraphQLX-specific: `::`, `=>`, `<`, `>`
-pub mod punctuator;
-
-/// Keyword tokens for GraphQL and GraphQLX.
-///
-/// Contains all reserved keywords recognized by the lexer:
-/// - GraphQL: `query`, `mutation`, `subscription`, `fragment`, `type`, `interface`, etc.
-/// - GraphQLX: `import`, `from`, `as`, `where`, `map`, `set`
-pub mod keywords;
 
 /// Scaffold structures for building GraphQL-like DSLs.
 ///

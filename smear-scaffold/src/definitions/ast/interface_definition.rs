@@ -9,13 +9,12 @@ use logosky::{
     sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
-use smear_lexer::{keywords::{Extend, Implements, Interface}, punctuator::Ampersand};
-
-use crate::{
-  error::UnexpectedEndOfInterfaceExtensionError,
-  hints::InterfaceTypeExtensionHint,
+use smear_lexer::{
+  keywords::{Extend, Implements, Interface},
+  punctuator::Ampersand,
 };
 
+use crate::{error::UnexpectedEndOfInterfaceExtensionError, hints::InterfaceTypeExtensionHint};
 
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

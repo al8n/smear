@@ -4,11 +4,11 @@ use logosky::{
   utils::Span,
 };
 
-use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
+use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
 
 use super::super::*;
 
-pub use crate::parser::value::FloatValue;
+pub use crate::value::FloatValue;
 
 impl<'a, S>
   Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>

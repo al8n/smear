@@ -3,15 +3,15 @@ use logosky::{
   chumsky::{self, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
-use smear_lexer::{keywords::{Enum, Extend}, punctuator::{LBrace, RBrace}};
+use smear_lexer::{
+  keywords::{Enum, Extend},
+  punctuator::{LBrace, RBrace},
+};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use crate::{
-  error::UnexpectedEndOfEnumExtensionError,
-  hints::EnumTypeExtensionHint,
-};
+use crate::{error::UnexpectedEndOfEnumExtensionError, hints::EnumTypeExtensionHint};
 
 /// Represents a single enum value definition in a GraphQL enum type.
 ///

@@ -59,7 +59,7 @@ use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
 /// Such semantic validation should be performed at a higher level.
 ///
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
-pub type Name<S> = crate::parser::ident::Ident<S>;
+pub type Name<S> = crate::ident::Ident<S>;
 
 impl<'a, S>
   Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>

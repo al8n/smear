@@ -1,10 +1,4 @@
-use crate::{
-  error::{UnclosedBraceError as _, UnclosedBracketError},
-  hints::VariableValueHint,
-  lexer::graphql::syntactic::SyntacticLexerErrors,
-  punctuator::{RBrace, RBracket},
-  scaffold,
-};
+use crate::{hints::VariableValueHint, lexer::graphql::syntactic::SyntacticLexerErrors, scaffold};
 
 use super::{
   DefaultVec, Expectation, Name, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
@@ -17,6 +11,8 @@ use logosky::{
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
+use smear_lexer::punctuator::{RBrace, RBracket};
+use smear_scaffold::error::{UnclosedBraceError, UnclosedBracketError};
 
 pub use boolean_value::*;
 pub use enum_value::*;
@@ -25,7 +21,9 @@ pub use int::*;
 pub use null_value::*;
 pub use string::*;
 
-pub type VariableValue<S> = crate::parser::value::VariableValue<super::Name<S>>;
+/// A GraphQL value that can appear in queries and mutations.
+
+pub type VariableValue<S> = crate::value::VariableValue<super::Name<S>>;
 
 mod boolean_value;
 mod enum_value;

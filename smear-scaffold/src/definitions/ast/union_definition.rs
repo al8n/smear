@@ -9,12 +9,12 @@ use logosky::{
     sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
-use smear_lexer::{keywords::{Extend, Union}, punctuator::{Pipe, Equal}};
-
-use crate::{
-  error::UnexpectedEndOfUnionExtensionError,
-  hints::UnionTypeExtensionHint,
+use smear_lexer::{
+  keywords::{Extend, Union},
+  punctuator::{Equal, Pipe},
 };
+
+use crate::{error::UnexpectedEndOfUnionExtensionError, hints::UnionTypeExtensionHint};
 
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

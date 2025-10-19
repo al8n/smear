@@ -4,11 +4,11 @@ use logosky::{
   utils::{Span, cmp::Equivalent},
 };
 
-use crate::{
+use smear_lexer::{
+  graphqlx::syntactic::SyntacticLexerErrors,
   keywords::{Mutation, Query, Subscription},
-  lexer::graphqlx::syntactic::SyntacticLexerErrors,
-  scaffold::OperationType,
 };
+use smear_scaffold::OperationType;
 
 use super::*;
 

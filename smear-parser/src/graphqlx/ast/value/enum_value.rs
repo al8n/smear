@@ -4,15 +4,13 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
+use smear_lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
-use crate::{
-  lexer::graphqlx::syntactic::SyntacticLexerErrors, parser::graphqlx::error::InvalidEnumValue,
-};
+use crate::{graphqlx::error::InvalidEnumValue, value::EnumValue as EnumValueInner};
 
 use super::super::*;
 
-use crate::parser::value::EnumValue as EnumValueInner;
-
+/// An enum value in GraphQLx.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, Into)]
 pub struct EnumValue<S>(EnumValueInner<Path<S>>);
 

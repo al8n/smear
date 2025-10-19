@@ -174,7 +174,9 @@ pub struct TypeCondition<Name> {
 }
 
 impl<Name> TypeCondition<Name> {
-  pub(crate) const fn new(span: Span, name: Name) -> Self {
+  /// Creates a new type condition with the given span and type name.
+  #[inline]
+  pub const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
 
@@ -364,8 +366,9 @@ impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, D
 }
 
 impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
+  /// Creates a new fragment spread with the given span, fragment name, and optional directives.
   #[inline]
-  pub(crate) const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self {
+  pub const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self {
     Self {
       span,
       name,
@@ -550,7 +553,9 @@ impl<TypeCondition, Directives, SelectionSet> IntoComponents
 impl<TypeCondition, Directives, SelectionSet>
   InlineFragment<TypeCondition, Directives, SelectionSet>
 {
-  pub(crate) const fn new(
+  /// Creates a new inline fragment with the given span, type condition, directives, and selection set.
+  #[inline]
+  pub const fn new(
     span: Span,
     type_condition: Option<TypeCondition>,
     directives: Option<Directives>,

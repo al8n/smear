@@ -70,9 +70,9 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
 impl<Ident, Type, PathSegmentContainer, TypeContainer>
   FragmentTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
 {
-  /// Creates a new path from the given segments.
+  /// Creates a new fragment type path with the given span, path, and generics.
   #[inline]
-  pub(crate) const fn new(
+  pub const fn new(
     span: Span,
     path: Path<Ident, PathSegmentContainer>,
     generics: Option<TypeGenerics<Type, TypeContainer>>,

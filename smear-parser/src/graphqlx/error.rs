@@ -23,7 +23,6 @@ pub use crate::{
   lexer::graphqlx::error::LexerErrors,
 };
 
-
 /// An extra alias
 pub type Extra<S, T, Char = char, Exp = Expectation, StateError = ()> =
   logosky::chumsky::extra::Err<Errors<S, T, Char, Exp, StateError>>;

@@ -1,7 +1,7 @@
 use derive_more::{Display, IsVariant};
 
-pub use smear_scaffold::hints::*;
 pub use smear_lexer::hints::*;
+pub use smear_scaffold::hints::*;
 
 /// Hints for parsing a variable value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Display)]
