@@ -68,9 +68,9 @@ pub use smear_scaffold as scaffold;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
 pub mod graphql;
 
-/// Parser combinators for GraphQLX (extended GraphQL with generics, imports, etc.).
+/// Parser combinators for GraphQLx (extended GraphQL with generics, imports, etc.).
 ///
-/// GraphQLX is an extended GraphQL dialect that adds powerful type system features
+/// GraphQLx is an extended GraphQL dialect that adds powerful type system features
 /// inspired by modern programming languages. It serves as a **demonstration** of how
 /// to build custom GraphQL-like DSLs using Smear's scaffold architecture.
 ///
@@ -138,7 +138,7 @@ pub mod graphql;
 ///
 /// ## Note
 ///
-/// GraphQLX requires the `unstable` feature flag as the syntax is still experimental.
+/// GraphQLx requires the `unstable` feature flag as the syntax is still experimental.
 #[cfg(feature = "graphqlx")]
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
@@ -149,7 +149,7 @@ pub mod error;
 /// Hint types for parsers.
 pub mod hints;
 
-/// Common value parsers shared between GraphQL and GraphQLX.
+/// Common value parsers shared between GraphQL and GraphQLx.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod value;
 

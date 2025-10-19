@@ -23,7 +23,7 @@ pub mod hints;
 ///
 /// The scaffold layer is designed to be parametric over concrete types, allowing:
 /// - Standard GraphQL to use simple names and types
-/// - GraphQLX to add generics, imports, and path types
+/// - GraphQLx to add generics, imports, and path types
 /// - **Custom DSLs to plug in their own extensions**
 ///
 /// ## Key Components
@@ -62,7 +62,7 @@ pub use smear_scaffold as scaffold;
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///
 /// The lexer module converts source text into zero-copy tokens. It provides lexers for
-/// both standard GraphQL and the extended GraphQLX dialect.
+/// both standard GraphQL and the extended GraphQLx dialect.
 ///
 /// # Token Streams
 ///
@@ -93,7 +93,7 @@ pub use smear_scaffold as scaffold;
 ///   - [`graphql::syntactic`](lexer::graphql::syntactic): Fast tokens (skips trivia)
 ///   - [`graphql::lossless`](lexer::graphql::lossless): Complete tokens (preserves all formatting)
 ///
-/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLX lexer with generics, imports, etc.
+/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLx lexer with generics, imports, etc.
 ///   - [`graphqlx::syntactic`](lexer::graphqlx::syntactic): Fast tokens (skips trivia)
 ///   - [`graphqlx::lossless`](lexer::graphqlx::lossless): Complete tokens (preserves all formatting)
 ///
@@ -125,7 +125,7 @@ pub use smear_lexer as lexer;
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///
 /// The parser module provides combinators for building Abstract Syntax Trees from token streams.
-/// It implements parsers for both standard GraphQL and the extended GraphQLX dialect.
+/// It implements parsers for both standard GraphQL and the extended GraphQLx dialect.
 ///
 /// ## Architecture
 ///
@@ -145,7 +145,7 @@ pub use smear_lexer as lexer;
 ///   - Executable documents (queries, mutations, subscriptions, fragments)
 ///   - Type extensions and schema definitions
 ///
-/// - [`graphqlx`](parser::graphqlx): Extended GraphQLX parser
+/// - [`graphqlx`](parser::graphqlx): Extended GraphQLx parser
 ///   - Everything from GraphQL, plus:
 ///   - Import statements (`import { Type } from "./file"`)
 ///   - Generics (`type Container<T>`)

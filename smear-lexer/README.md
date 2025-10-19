@@ -6,7 +6,7 @@
 
 Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 
-`smear-lexer` is the lexical analysis layer of the [Smear](https://github.com/al8n/smear) parser ecosystem, providing high-performance tokenization for GraphQL and GraphQLX source text.
+`smear-lexer` is the lexical analysis layer of the [Smear](https://github.com/al8n/smear) parser ecosystem, providing high-performance tokenization for GraphQL and GraphQLx source text.
 
 ## Features
 
@@ -14,7 +14,7 @@ Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 - **Dual Token Streams**: Choose `SyntacticToken` (fast, skips trivia) for servers or `LosslessToken` (complete, preserves formatting) for tooling
 - **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom types
 - **Draft Spec Compliant**: Fully implements GraphQL draft specification lexical grammar
-- **GraphQLX Support**: Extended tokens for generics, imports, namespacing, and more
+- **GraphQLx Support**: Extended tokens for generics, imports, namespacing, and more
 - **`no_std` Compatible**: Works in embedded environments with optional `alloc` support
 - **Comprehensive Error Reporting**: Detailed, actionable error messages with source location tracking
 
@@ -158,7 +158,7 @@ The GraphQL lexer recognizes:
 - **Keywords**: `query`, `mutation`, `subscription`, `fragment`, `type`, `interface`, `union`, `enum`, `input`, `schema`, `extend`, `scalar`, `implements`, `directive`, `on`, `repeatable`
 - **Trivia** (LosslessToken only): Whitespace, line terminators, comments, commas
 
-## GraphQLX: Extended GraphQL
+## GraphQLx: Extended GraphQL
 
 Enable the `graphqlx` feature (requires `unstable`) for extended tokens:
 
@@ -167,7 +167,7 @@ Enable the `graphqlx` feature (requires `unstable`) for extended tokens:
 smear-lexer = { version = "0.0.0", features = ["graphqlx", "unstable"] }
 ```
 
-GraphQLX is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:
+GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:
 
 - **Literals**:
   - **Integers** (all GraphQL formats plus):

@@ -17,9 +17,9 @@ pub use logosky;
 pub mod error;
 /// The hints module contains types and traits for expected token hints.
 pub mod hints;
-/// Keyword tokens for GraphQL and GraphQLX.
+/// Keyword tokens for GraphQL and GraphQLx.
 pub mod keywords;
-/// Punctuation tokens used in GraphQL and GraphQLX.
+/// Punctuation tokens used in GraphQL and GraphQLx.
 pub mod punctuator;
 
 /// Lexers for standard GraphQL (draft specification).
@@ -76,17 +76,17 @@ pub mod punctuator;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
 pub mod graphql;
 
-/// Lexers for GraphQLX (extended GraphQL).
+/// Lexers for GraphQLx (extended GraphQL).
 ///
-/// This module extends the standard GraphQL lexer with additional tokens for GraphQLX
+/// This module extends the standard GraphQL lexer with additional tokens for GraphQLx
 /// features like generics, imports, map types, and namespacing.
 ///
 /// # Token Streams
 ///
-/// GraphQLX lexing offers two complementary token types:
+/// GraphQLx lexing offers two complementary token types:
 ///
 /// - **[`SyntacticToken`](graphqlx::syntactic::SyntacticToken)** - Fast token stream that skips trivia (whitespace, comments, commas)
-///   - Use for: GraphQLX servers, query execution, performance-critical parsing
+///   - Use for: GraphQLx servers, query execution, performance-critical parsing
 ///   - Benefits: Minimal memory, maximum speed
 ///
 /// - **[`LosslessToken`](graphqlx::lossless::LosslessToken)** - Complete token stream that preserves all source information
@@ -95,7 +95,7 @@ pub mod graphql;
 ///
 /// # Additional Tokens (Beyond GraphQL)
 ///
-/// GraphQLX adds these tokens for advanced features:
+/// GraphQLx adds these tokens for advanced features:
 /// - **Path separator**: `::` for namespaced types (`namespace::Type`)
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
 /// - **Fat arrow**: `=>` for map types (`<Key => Value>`)
@@ -104,7 +104,7 @@ pub mod graphql;
 ///
 /// # Source Types
 ///
-/// Like the GraphQL lexer, GraphQLX is generic over source type `S`:
+/// Like the GraphQL lexer, GraphQLx is generic over source type `S`:
 /// - `&str`: UTF-8 validated strings
 /// - `&[u8]`: Byte slices
 /// - `bytes::Bytes`: Shared ownership (requires `bytes` feature)
@@ -127,7 +127,7 @@ pub mod graphql;
 ///
 /// # Note
 ///
-/// GraphQLX requires the `unstable` and `graphqlx` feature flag.
+/// GraphQLx requires the `unstable` and `graphqlx` feature flag.
 #[cfg(feature = "graphqlx")]
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;

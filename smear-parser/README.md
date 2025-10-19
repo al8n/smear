@@ -10,7 +10,7 @@ High-performance parser for GraphQL and GraphQL-like DSLs.
 
 - **Zero-Copy Parsing**: All AST nodes reference the original source—no string allocations
 - **Thread-Safe AST**: When using `Send + Sync` source types, the entire AST is `Send + Sync + 'static`
-- **Dual Dialects**: Complete parsers for both standard GraphQL and GraphQLX
+- **Dual Dialects**: Complete parsers for both standard GraphQL and GraphQLx
 - **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::HipStr`, and custom types
 - **Comprehensive Error Reporting**: Detailed error messages with source location information
 - **Parser Combinators**: Composable parsers built with the `chumsky` for parsing and `logos` for lexing.
@@ -20,7 +20,7 @@ High-performance parser for GraphQL and GraphQL-like DSLs.
 
 ### Parsing GraphQL
 
-```rust
+```rust,ignore
 use smear_parser::graphql::{self, ParseStr};
 
 // Parse a GraphQL schema
@@ -50,12 +50,12 @@ let ast = graphql::ast::ExecutableDocument::parse_str(query).unwrap();
 
 ### Parsing GraphQLx
 
-GraphQLX extends GraphQL with generics, imports, type paths, and more:
+GraphQLx extends GraphQL with generics, imports, type paths, and more:
 
-```rust
+```rust,ignore
 use smear_parser::graphqlx::{self, ParseStr};
 
-// Parse GraphQLX with generics and imports
+// Parse GraphQLx with generics and imports
 let schema = r#"
   import { Node } from "./common.graphqlx"
 
@@ -82,7 +82,7 @@ The `graphql` module provides a complete parser for the GraphQL specification:
 - **Executable Definitions**: Queries, mutations, subscriptions, fragments
 - **Full Spec Compliance**: Implements the complete GraphQL specification
 
-### GraphQLX
+### GraphQLx
 
 The `graphqlx` module extends GraphQL with powerful features for schema composition:
 
@@ -97,7 +97,7 @@ The `graphqlx` module extends GraphQL with powerful features for schema composit
 The parser provides convenient traits for different source types:
 
 ```rust,ignore
-use smear_parser::graphql::{ParseStr, ParseBytes, ParseBytesSlice};
+use smear_parser::graphql::{self, ParseStr, ParseBytes, ParseBytesSlice};
 
 // For &str sources
 let ast = graphql::ast::TypeSystemDocument::parse_str(schema_str)?;
@@ -117,14 +117,14 @@ The parser produces strongly-typed AST nodes:
 use smear_parser::graphql::ast;
 
 // Type system AST
-type TypeSystemDocument = ast::TypeSystemDocument<&str>;
-type ObjectTypeDefinition = ast::ObjectTypeDefinition<&str>;
-type FieldDefinition = ast::FieldDefinition<&str>;
+type TypeSystemDocument<'a> = ast::TypeSystemDocument<&'a str>;
+type ObjectTypeDefinition<'a> = ast::ObjectTypeDefinition<&'a str>;
+type FieldDefinition<'a> = ast::FieldDefinition<&'a str>;
 
 // Executable AST
-type ExecutableDocument = ast::ExecutableDocument<&str>;
-type OperationDefinition = ast::OperationDefinition<&str>;
-type SelectionSet = ast::SelectionSet<&str>;
+type ExecutableDocument<'a> = ast::ExecutableDocument<&'a str>;
+type OperationDefinition<'a> = ast::OperationDefinition<&'a str>;
+type SelectionSet<'a> = ast::SelectionSet<&'a str>;
 ```
 
 All AST types are generic over the source type `S`, allowing you to choose the source representation that fits your use case.
@@ -175,7 +175,7 @@ match graphql::ast::TypeSystemDocument::parse_str(invalid) {
 | `alloc` | Allocation support for `no_std` | |
 | `graphql` | Standard GraphQL parser | ✓ |
 | `graphqlx` | Extended GraphQL parser | ✓ |
-| `unstable` | Unstable features (required for GraphQLX) | |
+| `unstable` | Unstable features (required for GraphQLx) | |
 | `smallvec` | Use `smallvec` for small collections | |
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
@@ -185,7 +185,7 @@ match graphql::ast::TypeSystemDocument::parse_str(invalid) {
 
 This crate builds on the smear ecosystem:
 
-```
+```text
 ┌─────────────┐
 │ smear-lexer │  Zero-copy tokenization
 └──────┬──────┘
@@ -202,6 +202,7 @@ This crate builds on the smear ecosystem:
 ### Lexer Layer
 
 [`smear-lexer`](https://crates.io/crates/smear-lexer) provides:
+
 - Zero-copy tokenization
 - Dual token streams (syntactic and lossless)
 - Generic over source types
@@ -209,13 +210,15 @@ This crate builds on the smear ecosystem:
 ### Scaffold Layer
 
 [`smear-scaffold`](https://crates.io/crates/smear-scaffold) provides:
+
 - Generic, reusable AST node definitions
 - Type-safe AST construction
-- Shared between GraphQL and GraphQLX
+- Shared between GraphQL and GraphQLx
 
 ### Parser Layer (This Crate)
 
 Combines lexer and scaffold to provide:
+
 - Complete parser implementations
 - Parser combinator framework
 - Error recovery and reporting

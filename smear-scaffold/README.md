@@ -8,7 +8,7 @@ Generic, reusable AST scaffolding for GraphQL and GraphQL-like DSLs.
 
 ## Purpose
 
-The scaffold layer serves as the blueprint for building both the standard GraphQL parser and GraphQLX (the extended GraphQL dialect), as well as any custom GraphQL-like languages. By abstracting common AST patterns into generic structures, it provides:
+The scaffold layer serves as the blueprint for building both the standard GraphQL parser and GraphQLx (the extended GraphQL dialect), as well as any custom GraphQL-like languages. By abstracting common AST patterns into generic structures, it provides:
 
 - **Reusability**: Share AST node definitions across multiple DSL implementations
 - **Type Safety**: Leverage Rust's type system to ensure correctness at compile time
@@ -56,11 +56,11 @@ Most scaffold types are generic over one or more parameters:
 - **`Value`**: Input value type
 - **`Directive`**: Directive type
 
-This generality allows the same scaffold to support both standard GraphQL and extended variants like GraphQLX.
+This generality allows the same scaffold to support both standard GraphQL and extended variants like GraphQLx.
 
 ## GraphQLx Extensions
 
-The scaffold includes optional support for GraphQLX features through generic parameters:
+The scaffold includes optional support for GraphQLx features through generic parameters:
 
 - **Type Generics**: Parameterized types with generic type parameters
 - **Where Clauses**: Type constraints for generic parameters
@@ -82,7 +82,7 @@ Enables allocation support for `no_std` environments. This feature allows using 
 
 The scaffold is typically not used directly by end users. Instead, it's consumed by higher-level parser implementations.
 
-For most use cases, you should use the [`smear-parser`](https://crates.io/crates/smear-parser) crate, which builds complete GraphQL and GraphQLX parsers on top of this scaffold.
+For most use cases, you should use the [`smear-parser`](https://crates.io/crates/smear-parser) crate, which builds complete GraphQL and GraphQLx parsers on top of this scaffold.
 
 ## Integration with smear
 
