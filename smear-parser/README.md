@@ -153,7 +153,7 @@ std::thread::spawn(move || {
 The parser provides detailed error information:
 
 ```rust
-use smear_parser::graphql::{self, ParseStr};
+use smear_parser::graphql::{self, ast::ParseStr};
 
 let invalid = "type User { id: }"; // Missing type
 
