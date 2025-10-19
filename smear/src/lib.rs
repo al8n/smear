@@ -8,38 +8,11 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// Error types and traits for GraphQL parsing.
-///
-/// This module provides comprehensive error handling for lexing and parsing operations,
-/// including span information for precise error reporting.
-///
-/// ## Key Types
-///
-/// - [`UnexpectedToken`](error::UnexpectedToken): Represents an unexpected token error with span information
-/// - Error traits for implementing custom error types
-pub mod error;
-
 /// Hint system for expected GraphQL tokens.
 ///
 /// Provides hints about what tokens were expected during parsing, useful for
 /// generating helpful error messages and IDE integration.
 pub mod hints;
-
-/// Punctuation tokens used in GraphQL and GraphQLX.
-///
-/// Defines all punctuation marks recognized by the lexer, including:
-/// - Delimiters: `()`, `{}`, `[]`
-/// - Operators: `!`, `=`, `@`, `$`, `|`, `&`
-/// - Separators: `:`, `,`
-/// - GraphQLX-specific: `::`, `=>`, `<`, `>`
-pub mod punctuator;
-
-/// Keyword tokens for GraphQL and GraphQLX.
-///
-/// Contains all reserved keywords recognized by the lexer:
-/// - GraphQL: `query`, `mutation`, `subscription`, `fragment`, `type`, `interface`, etc.
-/// - GraphQLX: `import`, `from`, `as`, `where`, `map`, `set`
-pub mod keywords;
 
 /// Scaffold structures for building GraphQL-like DSLs.
 ///
@@ -50,7 +23,7 @@ pub mod keywords;
 ///
 /// The scaffold layer is designed to be parametric over concrete types, allowing:
 /// - Standard GraphQL to use simple names and types
-/// - GraphQLX to add generics, imports, and path types
+/// - GraphQLx to add generics, imports, and path types
 /// - **Custom DSLs to plug in their own extensions**
 ///
 /// ## Key Components
@@ -84,12 +57,12 @@ pub mod keywords;
 /// // Use standard Document with your custom definitions
 /// type MyDocument = scaffold::Document<MyDefinition>;
 /// ```
-pub mod scaffold;
+pub use smear_scaffold as scaffold;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///
 /// The lexer module converts source text into zero-copy tokens. It provides lexers for
-/// both standard GraphQL and the extended GraphQLX dialect.
+/// both standard GraphQL and the extended GraphQLx dialect.
 ///
 /// # Token Streams
 ///
@@ -120,7 +93,7 @@ pub mod scaffold;
 ///   - [`graphql::syntactic`](lexer::graphql::syntactic): Fast tokens (skips trivia)
 ///   - [`graphql::lossless`](lexer::graphql::lossless): Complete tokens (preserves all formatting)
 ///
-/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLX lexer with generics, imports, etc.
+/// - [`graphqlx`](lexer::graphqlx): Extended GraphQLx lexer with generics, imports, etc.
 ///   - [`graphqlx::syntactic`](lexer::graphqlx::syntactic): Fast tokens (skips trivia)
 ///   - [`graphqlx::lossless`](lexer::graphqlx::lossless): Complete tokens (preserves all formatting)
 ///
@@ -147,12 +120,12 @@ pub mod scaffold;
 /// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
 /// // ALL tokens including spaces, comments, exact formatting
 /// ```
-pub mod lexer;
+pub use smear_lexer as lexer;
 
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///
 /// The parser module provides combinators for building Abstract Syntax Trees from token streams.
-/// It implements parsers for both standard GraphQL and the extended GraphQLX dialect.
+/// It implements parsers for both standard GraphQL and the extended GraphQLx dialect.
 ///
 /// ## Architecture
 ///
@@ -172,7 +145,7 @@ pub mod lexer;
 ///   - Executable documents (queries, mutations, subscriptions, fragments)
 ///   - Type extensions and schema definitions
 ///
-/// - [`graphqlx`](parser::graphqlx): Extended GraphQLX parser
+/// - [`graphqlx`](parser::graphqlx): Extended GraphQLx parser
 ///   - Everything from GraphQL, plus:
 ///   - Import statements (`import { Type } from "./file"`)
 ///   - Generics (`type Container<T>`)
@@ -180,7 +153,7 @@ pub mod lexer;
 ///   - Map types (`<Key => Value>`)
 ///   - Set types (`<Element>`)
 ///   - Path types (`namespace::Type`)
-pub mod parser;
+pub use smear_parser as parser;
 
 #[doc(hidden)]
 pub mod __private {

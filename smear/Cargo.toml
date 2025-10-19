@@ -9,18 +9,19 @@ description = "Blazing fast, fully spec-compliant, reusable parser combinators f
 
 [features]
 default = ["std", "smallvec", "graphql", "graphqlx"]
-alloc = []
-std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+alloc = ["smear-lexer/alloc", "smear-scaffold/alloc", "smear-parser/alloc"]
+std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default", "smear-lexer/std", "smear-scaffold/std", "smear-parser/std"]
 
-unstable = []
+unstable = ["smear-lexer/unstable", "smear-parser/unstable"]
 
 cst = ["std", "rowan"]
-graphql = []
-graphqlx = ["unstable"]
+graphql = ["smear-lexer/graphql", "smear-parser/graphql"]
+graphqlx = ["unstable", "smear-lexer/graphqlx", "smear-parser/graphqlx"]
 
-bytes = ["dep:bytes", "logosky/bytes"]
-bstr = ["dep:bstr", "logosky/bstr"]
-hipstr = ["dep:hipstr", "logosky/hipstr"]
+bytes = ["dep:bytes", "logosky/bytes", "smear-lexer/bytes", "smear-parser/bytes"]
+bstr = ["dep:bstr", "logosky/bstr", "smear-lexer/bstr", "smear-parser/bstr"]
+hipstr = ["dep:hipstr", "logosky/hipstr", "smear-lexer/hipstr", "smear-parser/hipstr"]
+smallvec = ["dep:smallvec", "smear-lexer/smallvec", "smear-parser/smallvec"]
 
 [dependencies]
 derive_more.workspace = true
@@ -28,6 +29,9 @@ either = { version = "1", default-features = false }
 paste = "1"
 thiserror.workspace = true
 logosky = { workspace = true, features = ["either"] }
+smear-lexer.workspace = true
+smear-scaffold.workspace = true
+smear-parser.workspace = true
 
 rowan = { version = "0.16", optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
