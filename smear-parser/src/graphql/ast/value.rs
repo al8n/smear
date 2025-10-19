@@ -22,7 +22,6 @@ pub use null_value::*;
 pub use string::*;
 
 /// A GraphQL value that can appear in queries and mutations.
-
 pub type VariableValue<S> = crate::value::VariableValue<super::Name<S>>;
 
 mod boolean_value;
