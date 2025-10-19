@@ -115,18 +115,11 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub use and::*;
-pub use definitions::*;
-pub use lang::*;
-
 /// Parser error traits
-pub mod error {
-  pub use super::error_traits::*;
-}
+pub mod error;
+
 /// Hint types for parser errors
 pub mod hints;
 
-mod and;
-mod definitions;
-mod error_traits;
-mod lang;
+/// The scaffold AST nodes
+pub mod ast;

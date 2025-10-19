@@ -9,7 +9,7 @@ use smear_lexer::{
   punctuator::{LBrace, RBrace, Spread},
 };
 
-use crate::{Field, FragmentSpread, InlineFragment, SelectionSet, StandardField};
+use crate::ast::{Field, FragmentSpread, InlineFragment, SelectionSet, StandardField};
 
 /// A standard selection set in GraphQL.
 pub type StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> =

@@ -15,7 +15,7 @@ use smear_lexer::{
   punctuator::{LBrace, RBrace, Spread},
 };
 
-use crate::FragmentSpread;
+use crate::ast::{self, FragmentSpread};
 
 use super::super::{StandardSelection, StandardSelectionSet};
 
@@ -73,7 +73,7 @@ use super::super::{StandardSelection, StandardSelectionSet};
 #[derive(Debug, Clone, From, Into)]
 #[allow(clippy::type_complexity)]
 pub struct StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>(
-  crate::Field<
+  ast::Field<
     Alias,
     Name,
     Arguments,
@@ -221,11 +221,11 @@ where
       // Inner fixpoint: build a `StandardSelection<Span>` parser by using the recursive `field_parser`.
       let selection = recursive(|selection| {
         // StandardSelectionSet needs a `StandardSelection` parser
-        let selection_set = crate::StandardSelectionSet::parser_with(selection.clone());
+        let selection_set = ast::StandardSelectionSet::parser_with(selection.clone());
 
         let spread = FragmentSpread::parser().map(|fs| StandardSelection::FragmentSpread(fs));
 
-        let inline = crate::InlineFragment::parser_with(
+        let inline = ast::InlineFragment::parser_with(
           TypeCondition::parser(),
           Directives::parser(),
           selection_set.clone(),
@@ -236,9 +236,9 @@ where
       });
 
       // Pass the selection parser to the selection set
-      let selection_set = crate::StandardSelectionSet::parser_with(selection);
+      let selection_set = ast::StandardSelectionSet::parser_with(selection);
 
-      crate::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
+      ast::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
     })
   }
 }
