@@ -30,7 +30,7 @@ Blazing fast, fully spec-compliant, reusable parser combinators for standard Gra
 - **Generic Over Source Types**: Works seamlessly with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom source types
 - **Highly Customizable**: Three-layer scaffold architecture with reusable combinators for building custom GraphQL-like DSLs
 - **Draft Spec Compliant**: Fully implements the GraphQL draft specification with comprehensive error reporting
-- **GraphQLX Included**: Extended dialect with generics, imports, map types, namespacing, and type paths
+- **GraphQLx Included**: Extended dialect with generics, imports, map types, namespacing, and type paths
 - **`no_std` Compatible**: Works in embedded environments and WASM with optional `alloc` support
 
 ## Why Smear Over Other Rust GraphQL Parsers?
@@ -65,7 +65,7 @@ Choose the source type that fits your use case:
 
 ### Designed for DSL Creation
 
-The three-layer scaffold architecture provides reusable generic AST node definitions, making it straightforward to build custom GraphQL-like domain-specific languages. GraphQLX (included) demonstrates this by adding generics, imports, type paths, and namespacing to GraphQL.
+The three-layer scaffold architecture provides reusable generic AST node definitions, making it straightforward to build custom GraphQL-like domain-specific languages. GraphQLx (included) demonstrates this by adding generics, imports, type paths, and namespacing to GraphQL.
 
 ### Dual Token Streams: Syntactic and Lossless
 
@@ -112,7 +112,7 @@ Smear follows a three-layer architecture designed for maximum reusability:
 ### Layer 1: Lexer (Tokenization)
 
 - Converts source code into zero-copy tokens
-- Supports both GraphQL and GraphQLX tokens
+- Supports both GraphQL and GraphQLx tokens
 - Generic over source type (`&str`, `&[u8]`, etc.)
 
 ### Layer 2: Parser (AST or CST Construction)
@@ -125,7 +125,7 @@ Smear follows a three-layer architecture designed for maximum reusability:
 
 - Generic, reusable AST node definitions
 - The foundation for building custom DSLs
-- Shared between GraphQL and GraphQLX
+- Shared between GraphQL and GraphQLx
 
 ## Feature Flags
 
@@ -135,7 +135,7 @@ Smear follows a three-layer architecture designed for maximum reusability:
 | `alloc` | Allocation support for `no_std` | |
 | `graphql` | Standard GraphQL parser | ✓ |
 | `graphqlx` | Extended GraphQL parser | ✓ |
-| `unstable` | Unstable features (required for GraphQLX) | |
+| `unstable` | Unstable features (required for GraphQLx) | |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
