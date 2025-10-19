@@ -1,0 +1,23 @@
+[package]
+name = "smear-scaffold"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme = "README.md"
+description = "Generic, reusable AST scaffolding for GraphQL and GraphQL-like DSLs"
+
+[features]
+default = ["std"]
+alloc = []
+std = []
+
+cst = ["rowan"]
+
+[dependencies]
+derive_more.workspace = true
+logosky.workspace = true
+smear-lexer.workspace = true
+
+rowan = { version = "0.16", optional = true }
