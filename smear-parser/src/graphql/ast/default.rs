@@ -4,8 +4,9 @@
 //! with concrete GraphQL types. These aliases form the public API for parsing standard GraphQL.
 
 use super::*;
-use crate::scaffold::{
-  self, DirectiveLocations, ImplementInterfaces, Location, OperationType, UnionMemberTypes,
+use smear_scaffold::ast::{
+  self as scaffold, DirectiveLocations, ImplementInterfaces, Location, OperationType,
+  UnionMemberTypes,
 };
 
 pub use field::*;

@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 use smear_lexer::{keywords, punctuator::At};
-use smear_scaffold::{self as scaffold, And, DirectiveLocations, Location};
+use smear_scaffold::ast::{self as scaffold, And, DirectiveLocations, Location};
 
 use super::*;
 

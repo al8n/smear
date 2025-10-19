@@ -3,11 +3,8 @@ use logosky::{
   chumsky::{Parser, extra::ParserExtra, prelude::any},
   utils::{IntoComponents, Span, cmp::Equivalent},
 };
-
-use crate::{
-  lexer::graphql::syntactic::SyntacticLexerErrors,
-  scaffold::{self, FragmentName},
-};
+use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
+use smear_scaffold::ast::{self as scaffold, FragmentName};
 
 use super::*;
 

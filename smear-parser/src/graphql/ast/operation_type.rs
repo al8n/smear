@@ -7,7 +7,7 @@ use smear_lexer::{
   graphql::syntactic::SyntacticLexerErrors,
   keywords::{Mutation, Query, Subscription},
 };
-use smear_scaffold::OperationType;
+use smear_scaffold::ast::OperationType;
 
 use super::*;
 

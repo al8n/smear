@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoSpan, Span},
 };
 use smear_lexer::punctuator::{Bang, LBracket, RBracket};
-use smear_scaffold::{ListType, NamedType};
+use smear_scaffold::ast::{ListType, NamedType};
 
 use std::{boxed::Box, rc::Rc, sync::Arc};
 

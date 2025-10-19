@@ -5,13 +5,10 @@ use logosky::{
   utils::{AsSpan, IntoSpan, Span},
 };
 use smear_lexer::punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket};
-
+use smear_scaffold::ast::{self as scaffold, ListType, MapType, SetType};
 use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
-use crate::{
-  ident::Ident,
-  scaffold::{self, ListType, MapType, SetType},
-};
+use crate::ident::Ident;
 
 /// A path referencing a type, module, or schema element.
 pub type Path<S> = scaffold::Path<Ident<S>>;

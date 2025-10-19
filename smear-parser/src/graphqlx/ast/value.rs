@@ -16,7 +16,7 @@ use logosky::{
 };
 use smear_lexer::punctuator::{LBrace, PathSeparator, RBrace, RBracket};
 use smear_scaffold::{
-  self as scaffold, Path,
+  ast::{self as scaffold, Path},
   error::{UnclosedBraceError, UnclosedBracketError},
 };
 

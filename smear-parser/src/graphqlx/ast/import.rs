@@ -5,7 +5,7 @@
 
 use crate::{ident::Ident, value::InlineStringValue};
 
-use smear_scaffold::{self as scaffold, Path};
+use smear_scaffold::ast::{self as scaffold, Path};
 
 /// A named import specifier, optionally with an alias.
 ///

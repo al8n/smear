@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ident::Ident;
 
-use smear_scaffold::{self as scaffold, OperationType, Path};
+use smear_scaffold::ast::{self as scaffold, OperationType, Path};
 
 pub use directive::*;
 pub use field::*;

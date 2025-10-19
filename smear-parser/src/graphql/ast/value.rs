@@ -1,4 +1,4 @@
-use crate::{hints::VariableValueHint, lexer::graphql::syntactic::SyntacticLexerErrors, scaffold};
+use crate::{hints::VariableValueHint, lexer::graphql::syntactic::SyntacticLexerErrors};
 
 use super::{
   DefaultVec, Expectation, Name, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
@@ -12,7 +12,10 @@ use logosky::{
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 use smear_lexer::punctuator::{RBrace, RBracket};
-use smear_scaffold::error::{UnclosedBraceError, UnclosedBracketError};
+use smear_scaffold::{
+  ast as scaffold,
+  error::{UnclosedBraceError, UnclosedBracketError},
+};
 
 pub use boolean_value::*;
 pub use enum_value::*;

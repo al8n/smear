@@ -8,7 +8,7 @@ use smear_lexer::{
   keywords,
   punctuator::{Ampersand, Bang, Colon, LAngle, PathSeparator, RAngle},
 };
-use smear_scaffold::{self as scaffold, And, generic::Constrained};
+use smear_scaffold::ast::{self as scaffold, And, generic::Constrained};
 
 use super::*;
 
