@@ -7,7 +7,6 @@ use logosky::utils::{
 /// A boolean value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanValue {
-
   span: Span,
   value: bool,
 }

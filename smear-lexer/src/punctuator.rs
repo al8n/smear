@@ -2,7 +2,7 @@
 ///
 /// # Examples
 /// ```rust
-/// use smear::punctuator;
+/// use smear_lexer::punctuator;
 ///
 /// punctuator! {
 ///   (LAngle, "L_ANGLE", "<"),
