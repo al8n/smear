@@ -186,14 +186,14 @@ impl ExecutableDirectiveLocation {
   #[inline]
   pub const fn as_str(&self) -> &'static str {
     match self {
-      Self::Query(_) => QueryLocation::raw(),
-      Self::Mutation(_) => MutationLocation::raw(),
-      Self::Subscription(_) => SubscriptionLocation::raw(),
-      Self::Field(_) => FieldLocation::raw(),
-      Self::FragmentDefinition(_) => FragmentDefinitionLocation::raw(),
-      Self::FragmentSpread(_) => FragmentSpreadLocation::raw(),
-      Self::InlineFragment(_) => InlineFragmentLocation::raw(),
-      Self::VariableDefinition(_) => VariableDefinitionLocation::raw(),
+      Self::Query(_) => QueryLocation::<()>::raw(),
+      Self::Mutation(_) => MutationLocation::<()>::raw(),
+      Self::Subscription(_) => SubscriptionLocation::<()>::raw(),
+      Self::Field(_) => FieldLocation::<()>::raw(),
+      Self::FragmentDefinition(_) => FragmentDefinitionLocation::<()>::raw(),
+      Self::FragmentSpread(_) => FragmentSpreadLocation::<()>::raw(),
+      Self::InlineFragment(_) => InlineFragmentLocation::<()>::raw(),
+      Self::VariableDefinition(_) => VariableDefinitionLocation::<()>::raw(),
     }
   }
 
@@ -391,17 +391,17 @@ impl TypeSystemDirectiveLocation {
   #[inline]
   pub const fn as_str(&self) -> &'static str {
     match self {
-      Self::Schema(_) => SchemaLocation::raw(),
-      Self::Scalar(_) => ScalarLocation::raw(),
-      Self::Object(_) => ObjectLocation::raw(),
-      Self::FieldDefinition(_) => FieldDefinitionLocation::raw(),
-      Self::ArgumentDefinition(_) => ArgumentDefinitionLocation::raw(),
-      Self::Interface(_) => InterfaceLocation::raw(),
-      Self::Union(_) => UnionLocation::raw(),
-      Self::Enum(_) => EnumLocation::raw(),
-      Self::EnumValue(_) => EnumValueLocation::raw(),
-      Self::InputObject(_) => InputObjectLocation::raw(),
-      Self::InputFieldDefinition(_) => InputFieldDefinitionLocation::raw(),
+      Self::Schema(_) => SchemaLocation::<()>::raw(),
+      Self::Scalar(_) => ScalarLocation::<()>::raw(),
+      Self::Object(_) => ObjectLocation::<()>::raw(),
+      Self::FieldDefinition(_) => FieldDefinitionLocation::<()>::raw(),
+      Self::ArgumentDefinition(_) => ArgumentDefinitionLocation::<()>::raw(),
+      Self::Interface(_) => InterfaceLocation::<()>::raw(),
+      Self::Union(_) => UnionLocation::<()>::raw(),
+      Self::Enum(_) => EnumLocation::<()>::raw(),
+      Self::EnumValue(_) => EnumValueLocation::<()>::raw(),
+      Self::InputObject(_) => InputObjectLocation::<()>::raw(),
+      Self::InputFieldDefinition(_) => InputFieldDefinitionLocation::<()>::raw(),
     }
   }
 

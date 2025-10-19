@@ -16,15 +16,24 @@ macro_rules! punctuator {
       $(
         #[doc = "The `" $punct "` punctuator"]
         #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
-        pub struct $name {
+        pub struct $name<C = ()> {
           span: $crate::__private::logosky::utils::Span,
+          source: C,
         }
 
         impl $name {
           /// Creates a new punctuator with the given span.
           #[inline(always)]
           pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
-            Self { span }
+            Self { span, source: () }
+          }
+        }
+
+        impl<C> $name<C> {
+          #[doc = "Creates a new punctuator with the given span and source."]
+          #[inline(always)]
+          pub const fn with_source(span: $crate::__private::logosky::utils::Span, source: C) -> Self {
+            Self { span, source }
           }
 
           #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
@@ -44,88 +53,94 @@ macro_rules! punctuator {
           pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
             &self.span
           }
+
+          #[doc = "Returns a reference to the source of the `" $punct "` punctuator."]
+          #[inline]
+          pub const fn source(&self) -> &C {
+            &self.source
+          }
         }
 
-        impl ::core::cmp::PartialEq<::core::primitive::str> for $name {
+        impl<S> ::core::cmp::PartialEq<::core::primitive::str> for $name<S> {
           #[inline]
           fn eq(&self, other: &::core::primitive::str) -> bool {
             self.as_str().eq(other)
           }
         }
 
-        impl ::core::cmp::PartialOrd<::core::primitive::str> for $name {
+        impl<S> ::core::cmp::PartialOrd<::core::primitive::str> for $name<S> {
           #[inline]
           fn partial_cmp(&self, other: &::core::primitive::str) -> ::core::option::Option<::core::cmp::Ordering> {
             self.as_str().partial_cmp(other)
           }
         }
 
-        impl ::core::cmp::PartialEq<$name> for ::core::primitive::str {
+        impl<S> ::core::cmp::PartialEq<$name<S>> for ::core::primitive::str {
           #[inline]
-          fn eq(&self, other: &$name) -> bool {
+          fn eq(&self, other: &$name<S>) -> bool {
             self.eq(other.as_str())
           }
         }
 
-        impl ::core::cmp::PartialOrd<$name> for ::core::primitive::str {
+        impl<S> ::core::cmp::PartialOrd<$name<S>> for ::core::primitive::str {
           #[inline]
-          fn partial_cmp(&self, other: &$name) -> ::core::option::Option<::core::cmp::Ordering> {
+          fn partial_cmp(&self, other: &$name<S>) -> ::core::option::Option<::core::cmp::Ordering> {
             self.partial_cmp(other.as_str())
           }
         }
 
-        impl ::core::borrow::Borrow<::core::primitive::str> for $name {
+        impl<S> ::core::borrow::Borrow<::core::primitive::str> for $name<S> {
           #[inline]
           fn borrow(&self) -> &::core::primitive::str {
             self.as_str()
           }
         }
 
-        impl ::core::convert::AsRef<::core::primitive::str> for $name {
+        impl<S> ::core::convert::AsRef<::core::primitive::str> for $name<S> {
           #[inline]
           fn as_ref(&self) -> &::core::primitive::str {
             self.as_str()
           }
         }
 
-        impl $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl<S> $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name<S> {
           #[inline]
           fn as_span(&self) -> &$crate::__private::logosky::utils::Span {
             self.span()
           }
         }
 
-        impl $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl<S> $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name<S> {
           #[inline]
           fn into_span(self) -> $crate::__private::logosky::utils::Span {
             self.span
           }
         }
 
-        impl $crate::__private::logosky::utils::IntoComponents for $name {
-          type Components = $crate::__private::logosky::utils::Span;
+        impl<S> $crate::__private::logosky::utils::IntoComponents for $name<S> {
+          type Components = ($crate::__private::logosky::utils::Span, S);
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <Self as $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
+            (self.span, self.source)
           }
         }
 
-        impl ::core::fmt::Display for $name {
+        impl<S> ::core::fmt::Display for $name<S> {
           #[inline(always)]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt($punct, f)
           }
         }
 
-        impl $crate::__private::logosky::utils::human_display::DisplayHuman for $name {
+        impl<S> $crate::__private::logosky::utils::human_display::DisplayHuman for $name<S> {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name {
+        impl<S> $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name<S> {
           type Options = ();
 
           #[inline]
@@ -134,7 +149,7 @@ macro_rules! punctuator {
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name {
+        impl<S> $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name<S> {
           type Options = ();
 
           #[inline]
