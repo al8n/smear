@@ -157,7 +157,7 @@ use smear_parser::graphql::{self, ast::ParseStr};
 
 let invalid = "type User { id: }"; // Missing type
 
-match graphql::ast::TypeSystemDocument::parse_str(invalid) {
+match graphql::ast::TypeSystemDocument::parse_str(invalid).into_result() {
     Ok(ast) => println!("Parsed successfully"),
     Err(errors) => {
         for error in errors {
