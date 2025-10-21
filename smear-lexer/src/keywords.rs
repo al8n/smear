@@ -22,39 +22,39 @@ macro_rules! keyword {
         #[doc = "The `" $kw "` keyword"]
         $(#[$meta])*
         #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
-        pub struct $name<C = ()> {
-          span: $crate::__private::logosky::utils::Span,
+        pub struct $name<S = $crate::__private::logosky::utils::Span, C = ()> {
+          span: S,
           source: C,
         }
 
-        impl<C> ::core::convert::AsRef<::core::primitive::str> for $name<C> {
+        impl<S, C> ::core::convert::AsRef<::core::primitive::str> for $name<S, C> {
           #[inline]
           fn as_ref(&self) -> &str {
             $kw
           }
         }
 
-        impl<C> ::core::borrow::Borrow<str> for $name<C> {
+        impl<S, C> ::core::borrow::Borrow<str> for $name<S, C> {
           #[inline]
           fn borrow(&self) -> &str {
             ::core::convert::AsRef::<str>::as_ref(self)
           }
         }
 
-        impl $name {
+        impl<S> $name<S> {
           /// Creates a new keyword.
           #[doc = "Creates a new `" $kw "` keyword."]
-          #[inline(always)]
-          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
+          #[cfg_attr(not(tarpaulin), inline(always))]
+          pub const fn new(span: S) -> Self {
             Self { span, source: () }
           }
         }
 
-        impl<C> $name<C> {
-          #[doc = "Creates a new `" $kw "` keyword with the given source."]
-          #[inline(always)]
-          pub const fn with_source(span: $crate::__private::logosky::utils::Span, source: C) -> Self {
-            Self { span, source }
+        impl<S, C> $name<S, C> {
+          #[doc = "Creates a new `" $kw "` keyword with the given content."]
+          #[cfg_attr(not(tarpaulin), inline(always))]
+          pub const fn with_content(span: S, content: C) -> Self {
+            Self { span, source: content }
           }
 
           #[doc = "Returns the raw string literal of the `" $kw "` keyword."]
@@ -65,33 +65,33 @@ macro_rules! keyword {
 
           #[doc = "Returns the span of the `" $kw "` keyword."]
           #[inline]
-          pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
+          pub const fn span(&self) -> &S {
             &self.span
           }
 
-          #[doc = "Returns a reference to the source of the `" $kw "` keyword."]
+          #[doc = "Returns a reference to the content of the `" $kw "` keyword."]
           #[inline]
-          pub const fn source(&self) -> &C {
+          pub const fn content(&self) -> &C {
             &self.source
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name<S> {
+        impl<S, C> $crate::__private::logosky::utils::AsSpan<S> for $name<S, C> {
           #[inline]
-          fn as_span(&self) -> &$crate::__private::logosky::utils::Span {
+          fn as_span(&self) -> &S {
             self.span()
           }
         }
 
-       impl<S> $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name<S> {
+       impl<S, C> $crate::__private::logosky::utils::IntoSpan<S> for $name<S, C> {
           #[inline]
-          fn into_span(self) -> $crate::__private::logosky::utils::Span {
+          fn into_span(self) -> S {
             self.span
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::IntoComponents for $name<S> {
-          type Components = ($crate::__private::logosky::utils::Span, S);
+        impl<S, C> $crate::__private::logosky::utils::IntoComponents for $name<S, C> {
+          type Components = (S, C);
 
           #[inline]
           fn into_components(self) -> Self::Components {
@@ -99,21 +99,21 @@ macro_rules! keyword {
           }
         }
 
-        impl<S> ::core::fmt::Display for $name<S> {
-          #[inline(always)]
+        impl<S, C> ::core::fmt::Display for $name<S, C> {
+          #[cfg_attr(not(tarpaulin), inline(always))]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             write!(f, $kw)
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::human_display::DisplayHuman for $name<S> {
+        impl<S, C> $crate::__private::logosky::utils::human_display::DisplayHuman for $name<S, C> {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name<S> {
+        impl<S, C> $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name<S, C> {
           type Options = ();
 
           #[inline]
@@ -122,7 +122,7 @@ macro_rules! keyword {
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name<S> {
+        impl<S, C> $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name<S, C> {
           type Options = ();
 
           #[inline]
@@ -131,7 +131,7 @@ macro_rules! keyword {
           }
         }
 
-        impl<S> $crate::__private::logosky::utils::syntax_tree_display::DisplaySyntaxTree for $name<S> {
+        impl<C> $crate::__private::logosky::utils::syntax_tree_display::DisplaySyntaxTree for $name<$crate::__private::logosky::utils::Span, C> {
           #[inline]
           fn fmt(
             &self,

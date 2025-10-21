@@ -30,6 +30,7 @@
 /// - **Tokens**: Leaf nodes representing individual tokens (identifiers, punctuation, literals)
 /// - **Trivia**: Whitespace, comments, commas (preserved in lossless parsing)
 /// - **Composite Nodes**: Branch nodes representing grammatical constructs (types, fields, operations)
+#[allow(clippy::upper_case_acronyms, bad_style)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
@@ -37,80 +38,128 @@ pub enum SyntaxKind {
   // ============================================================================
   // Tokens (Leaf Nodes)
   // ============================================================================
-  /// Identifier token (e.g., `User`, `query`, `id`)
+  /// Identifier (e.g., `User`, `query`, `id`)
   Identifier,
 
-  /// Integer literal token (e.g., `42`, `-10`)
+  /// Name
+  Name,
+
+  /// Integer literal (e.g., `42`, `-10`)
   Int,
 
-  /// Float literal token (e.g., `3.14`, `-2.5e10`)
+  /// Float literal (e.g., `3.14`, `-2.5e10`)
   Float,
 
-  /// Inline string literal token (e.g., `"hello"`)
+  /// Inline string literal (e.g., `"hello"`)
   InlineString,
 
-  /// Block string literal token (e.g., `"""multi\nline"""`)
+  /// Block string literal (e.g., `"""multi\nline"""`)
   BlockString,
+
+  /// String literal (either inline or block)
+  String,
 
   // ============================================================================
   // Keyword Tokens
   // ============================================================================
   /// `query` keyword
-  QueryKw,
+  query_KW,
 
   /// `mutation` keyword
-  MutationKw,
+  mutation_KW,
 
   /// `subscription` keyword
-  SubscriptionKw,
+  subscription_KW,
 
   /// `fragment` keyword
-  FragmentKw,
+  fragment_KW,
 
   /// `on` keyword
-  OnKw,
+  on_KW,
 
   /// `null` keyword
-  NullKw,
+  null_KW,
 
   /// `true` keyword
-  TrueKw,
+  true_KW,
 
   /// `false` keyword
-  FalseKw,
+  false_KW,
 
   /// `type` keyword
-  TypeKw,
+  type_KW,
 
   /// `interface` keyword
-  InterfaceKw,
+  interface_KW,
 
   /// `union` keyword
-  UnionKw,
+  union_KW,
 
   /// `enum` keyword
-  EnumKw,
+  enum_KW,
 
   /// `input` keyword
-  InputKw,
+  input_KW,
 
   /// `scalar` keyword
-  ScalarKw,
+  scalar_KW,
 
   /// `schema` keyword
-  SchemaKw,
+  schema_KW,
 
   /// `directive` keyword
-  DirectiveKw,
+  directive_KW,
 
   /// `extend` keyword
-  ExtendKw,
+  extend_KW,
 
   /// `implements` keyword
-  ImplementsKw,
+  implements_KW,
 
   /// `repeatable` keyword
-  RepeatableKw,
+  repeatable_KW,
+
+  // ============================================================================
+  // Directive Locations Keywords
+  // ============================================================================
+  /// `QUERY` directive location
+  QUERY_KW,
+  /// `MUTATION` directive location
+  MUTATION_KW,
+  /// `SUBSCRIPTION` directive location
+  SUBSCRIPTION_KW,
+  /// `FIELD` directive location
+  FIELD_KW,
+  /// `FRAGMENT_DEFINITION` directive location
+  FRAGMENT_DEFINITION_KW,
+  /// `FRAGMENT_SPREAD` directive location
+  FRAGMENT_SPREAD_KW,
+  /// `INLINE_FRAGMENT` directive location
+  INLINE_FRAGMENT_KW,
+  /// `VARIABLE_DEFINITION` directive location
+  VARIABLE_DEFINITION_KW,
+  /// `SCHEMA` directive location
+  SCHEMA_KW,
+  /// `SCALAR` directive location
+  SCALAR_KW,
+  /// `OBJECT` directive location
+  OBJECT_KW,
+  /// `FIELD_DEFINITION` directive location
+  FIELD_DEFINITION_KW,
+  /// `ARGUMENT_DEFINITION` directive location
+  ARGUMENT_DEFINITION_KW,
+  /// `INTERFACE` directive location
+  INTERFACE_KW,
+  /// `UNION` directive location
+  UNION_KW,
+  /// `ENUM` directive location
+  ENUM_KW,
+  /// `ENUM_VALUE` directive location
+  ENUM_VALUE_KW,
+  /// `INPUT_OBJECT` directive location
+  INPUT_OBJECT_KW,
+  /// `INPUT_FIELD_DEFINITION` directive location
+  INPUT_FIELD_DEFINITION_KW,
 
   // ============================================================================
   // Punctuation Tokens
@@ -160,8 +209,20 @@ pub enum SyntaxKind {
   // ============================================================================
   // Trivia Nodes (Whitespace, Comments, Commas)
   // ============================================================================
-  /// Whitespace (spaces, tabs, newlines)
+  /// Whitespace
   Whitespace,
+
+  /// Tab
+  Tab,
+
+  /// Newline
+  Newline,
+
+  /// Carriage return
+  CarriageReturn,
+
+  /// Carriage return + Newline
+  CarriageReturnNewline,
 
   /// Comment (from `#` to end of line)
   Comment,
@@ -428,85 +489,6 @@ impl SyntaxKind {
   #[inline]
   pub const fn is_trivia(self) -> bool {
     matches!(self, Self::Whitespace | Self::Comment | Self::Comma)
-  }
-
-  /// Returns `true` if this kind represents a keyword token.
-  #[inline]
-  pub const fn is_keyword(self) -> bool {
-    matches!(
-      self,
-      Self::QueryKw
-        | Self::MutationKw
-        | Self::SubscriptionKw
-        | Self::FragmentKw
-        | Self::OnKw
-        | Self::NullKw
-        | Self::TrueKw
-        | Self::FalseKw
-        | Self::TypeKw
-        | Self::InterfaceKw
-        | Self::UnionKw
-        | Self::EnumKw
-        | Self::InputKw
-        | Self::ScalarKw
-        | Self::SchemaKw
-        | Self::DirectiveKw
-        | Self::ExtendKw
-        | Self::ImplementsKw
-        | Self::RepeatableKw
-    )
-  }
-
-  /// Returns `true` if this kind represents a token (leaf node).
-  #[inline]
-  pub const fn is_token(self) -> bool {
-    matches!(
-      self,
-      Self::Identifier
-        | Self::Int
-        | Self::Float
-        | Self::InlineString
-        | Self::BlockString
-        // Keywords
-        | Self::QueryKw
-        | Self::MutationKw
-        | Self::SubscriptionKw
-        | Self::FragmentKw
-        | Self::OnKw
-        | Self::NullKw
-        | Self::TrueKw
-        | Self::FalseKw
-        | Self::TypeKw
-        | Self::InterfaceKw
-        | Self::UnionKw
-        | Self::EnumKw
-        | Self::InputKw
-        | Self::ScalarKw
-        | Self::SchemaKw
-        | Self::DirectiveKw
-        | Self::ExtendKw
-        | Self::ImplementsKw
-        | Self::RepeatableKw
-        // Punctuation
-        | Self::Dollar
-        | Self::LParen
-        | Self::RParen
-        | Self::Spread
-        | Self::Colon
-        | Self::Equal
-        | Self::At
-        | Self::LBracket
-        | Self::RBracket
-        | Self::LBrace
-        | Self::RBrace
-        | Self::Pipe
-        | Self::Bang
-        | Self::Ampersand
-        // Trivia
-        | Self::Whitespace
-        | Self::Comment
-        | Self::Comma
-    )
   }
 }
 

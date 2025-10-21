@@ -50,17 +50,17 @@ pub(crate) enum StringToken {
   StringCharacters,
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 const fn is_high_surrogate(code_point: u32) -> bool {
   matches!(code_point, 0xD800..=0xDBFF)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 const fn is_low_surrogate(code_point: u32) -> bool {
   matches!(code_point, 0xDC00..=0xDFFF)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn hex_val(b: u8) -> Option<u32> {
   match b {
     b'0'..=b'9' => Some((b - b'0') as u32),
@@ -70,7 +70,7 @@ fn hex_val(b: u8) -> Option<u32> {
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn parse_u4(hex: &[u8]) -> Option<u32> {
   debug_assert!(hex.len() == 4);
   Some(
@@ -81,7 +81,7 @@ fn parse_u4(hex: &[u8]) -> Option<u32> {
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn try_parse_next_unicode_escape(remainder: &[u8]) -> Option<u32> {
   if remainder.len() < 6 {
     return None;
@@ -92,7 +92,7 @@ fn try_parse_next_unicode_escape(remainder: &[u8]) -> Option<u32> {
   parse_u4(&remainder[2..6])
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_unicode_escape<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<u8>> {
   let slice = lexer.slice(); // b"\\uXXXX"
   debug_assert!(slice.len() == 6);
@@ -221,7 +221,7 @@ fn handle_invalid_escaped_unicode<'a>(
   Err(StringError::Unicode(err))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_invalid_escaped_character<'a>(
   lexer: &mut Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -237,7 +237,7 @@ fn handle_invalid_escaped_character<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_semi_braced_escape_unicode<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -252,7 +252,7 @@ fn handle_semi_braced_escape_unicode<'a>(
   })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn empty_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -261,7 +261,7 @@ fn empty_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn too_many_hex_digits_in_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -272,7 +272,7 @@ fn too_many_hex_digits_in_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn unclosed_brace_in_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -281,7 +281,7 @@ fn unclosed_brace_in_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_braced_escape_unicode<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<u8>> {
@@ -290,7 +290,7 @@ fn handle_braced_escape_unicode<'a>(
 
   let hex = &s[3..s.len() - 1]; // 1..=6 ASCII hex bytes
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn hex_val(b: u8) -> u32 {
     match b {
       b'0'..=b'9' => (b - b'0') as u32,

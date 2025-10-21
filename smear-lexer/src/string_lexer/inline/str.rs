@@ -50,17 +50,17 @@ pub(crate) enum StringToken {
   StringCharacters,
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 const fn is_high_surrogate(code_point: u32) -> bool {
   matches!(code_point, 0xD800..=0xDBFF)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 const fn is_low_surrogate(code_point: u32) -> bool {
   matches!(code_point, 0xDC00..=0xDFFF)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
   match (remainder.len() >= 6, remainder.strip_prefix("\\u")) {
     (true, Some(src)) => {
@@ -73,7 +73,7 @@ fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_fixed_width_escape_unicode<'a>(
   lexer: &mut Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -220,7 +220,7 @@ fn handle_invalid_escaped_unicode<'a>(
   }))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_braced_escape_unicode<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -248,7 +248,7 @@ fn handle_braced_escape_unicode<'a>(
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_semi_braced_escape_unicode<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -263,7 +263,7 @@ fn handle_semi_braced_escape_unicode<'a>(
   })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn empty_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -272,7 +272,7 @@ fn empty_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn too_many_hex_digits_in_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -283,7 +283,7 @@ fn too_many_hex_digits_in_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn unclosed_brace_in_braced_unicode_escape<'a>(
   lexer: &mut logosky::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
@@ -292,7 +292,7 @@ fn unclosed_brace_in_braced_unicode_escape<'a>(
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_invalid_escaped_character<'a>(
   lexer: &mut Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {

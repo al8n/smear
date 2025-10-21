@@ -1,0 +1,41 @@
+/// Generic definitions scaffold.
+pub mod generic;
+/// Type definitions scaffold.
+pub mod ty;
+
+mod arguments_definition;
+mod described;
+mod directives_definition;
+mod document;
+mod enum_definition;
+mod fields_definition;
+mod fragment_definition;
+mod import;
+mod input_fields_definition;
+mod input_object_definition;
+mod input_value_definition;
+mod interface_definition;
+mod object_definition;
+mod operation_definition;
+mod operation_type;
+mod operation_type_definition;
+mod path;
+mod scalar_definition;
+mod schema_definition;
+mod type_system;
+mod union_definition;
+mod variable_definition;
+
+pub use arguments_definition::*;
+pub use described::*;
+pub use directives_definition::*;
+pub use document::*;
+pub use fields_definition::*;
+pub use fragment_definition::*;
+pub use input_fields_definition::*;
+pub use input_value_definition::*;
+pub use operation_definition::*;
+pub use operation_type::*;
+pub use operation_type_definition::*;
+pub use path::*;
+pub use variable_definition::*;

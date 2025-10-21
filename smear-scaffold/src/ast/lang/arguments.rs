@@ -180,9 +180,7 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct Arguments<Arg, Container = Vec<Arg>> {
   span: Span,
-  l_paren: LParen,
   arguments: Container,
-  r_paren: RParen,
   _arg: PhantomData<Arg>,
 }
 
@@ -201,11 +199,11 @@ impl<Arg, Container> IntoSpan<Span> for Arguments<Arg, Container> {
 }
 
 impl<Arg, Container> IntoComponents for Arguments<Arg, Container> {
-  type Components = (Span, LParen, Container, RParen);
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.l_paren, self.arguments, self.r_paren)
+    (self.span, self.arguments)
   }
 }
 
@@ -218,26 +216,6 @@ impl<Arg, Container> Arguments<Arg, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns the opening parenthesis token.
-  ///
-  /// This provides access to the `(` character that begins the argument list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// parenthesis matching, and precise error reporting at argument boundaries.
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen {
-    &self.l_paren
-  }
-
-  /// Returns the closing parenthesis token.
-  ///
-  /// This provides access to the `)` character that ends the argument list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// parenthesis matching, and detecting incomplete argument lists.
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen {
-    &self.r_paren
   }
 
   /// Returns the container holding the arguments.
@@ -267,13 +245,11 @@ where
     Error: 'a,
   {
     LParen::parser()
-      .then(Arg::parser().repeated().at_least(1).collect())
-      .then(RParen::parser())
-      .map_with(|((l_paren, arguments), r_paren), exa| Self {
+      .ignore_then(Arg::parser().repeated().at_least(1).collect())
+      .then_ignore(RParen::parser())
+      .map_with(|arguments, exa| Self {
         span: exa.span(),
-        l_paren,
         arguments,
-        r_paren,
         _arg: PhantomData,
       })
   }

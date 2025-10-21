@@ -266,7 +266,7 @@ where
   FieldsDefinition: Parseable<'a, I, T, Error>,
   Input: Parseable<'a, I, T, Error>,
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
@@ -556,7 +556,7 @@ where
   Extend: Parseable<'a, I, T, Error>,
   Input: Parseable<'a, I, T, Error>,
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,

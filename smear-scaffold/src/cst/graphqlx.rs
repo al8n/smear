@@ -39,6 +39,7 @@
 /// - **Import System**: Import statements, import specifiers
 /// - **Type Paths**: Namespaced type references (e.g., `user::User`, `::Global`)
 /// - **Extended Collections**: Map types (`<K => V>`), set types (`<T>`)
+#[allow(clippy::upper_case_acronyms, bad_style)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
@@ -77,79 +78,121 @@ pub enum SyntaxKind {
   // Keyword Tokens
   // ============================================================================
   /// `query` keyword
-  QueryKw,
+  query_KW,
 
   /// `mutation` keyword
-  MutationKw,
+  mutation_KW,
 
   /// `subscription` keyword
-  SubscriptionKw,
+  subscription_KW,
 
   /// `fragment` keyword
-  FragmentKw,
+  fragment_KW,
 
   /// `on` keyword
-  OnKw,
+  on_KW,
 
   /// `null` keyword
-  NullKw,
+  null_KW,
 
   /// `true` keyword
-  TrueKw,
+  true_KW,
 
   /// `false` keyword
-  FalseKw,
+  false_KW,
 
   /// `type` keyword
-  TypeKw,
+  type_KW,
 
   /// `interface` keyword
-  InterfaceKw,
+  interface_KW,
 
   /// `union` keyword
-  UnionKw,
+  union_KW,
 
   /// `enum` keyword
-  EnumKw,
+  enum_KW,
 
   /// `input` keyword
-  InputKw,
+  input_KW,
 
   /// `scalar` keyword
-  ScalarKw,
+  scalar_KW,
 
   /// `schema` keyword
-  SchemaKw,
+  schema_KW,
 
   /// `directive` keyword
-  DirectiveKw,
+  directive_KW,
 
   /// `extend` keyword
-  ExtendKw,
+  extend_KW,
 
   /// `implements` keyword
-  ImplementsKw,
+  implements_KW,
 
   /// `repeatable` keyword
-  RepeatableKw,
+  repeatable_KW,
 
   /// `import` keyword (GraphQLx extension)
-  ImportKw,
+  import_KW,
 
   /// `from` keyword (GraphQLx extension)
-  FromKw,
+  from_KW,
 
   /// `as` keyword (GraphQLx extension)
-  AsKw,
+  as_KW,
 
   /// `where` keyword (GraphQLx extension)
-  WhereKw,
+  where_KW,
 
   /// `set` keyword (GraphQLx extension)
-  SetKw,
+  set_KW,
 
   /// `map` keyword (GraphQLx extension)
-  MapKw,
+  map_KW,
+
+  // ============================================================================
+  // Directive Locations Keywords
+  // ============================================================================
+  /// `QUERY` directive location
+  QUERY_KW,
+  /// `MUTATION` directive location
+  MUTATION_KW,
+  /// `SUBSCRIPTION` directive location
+  SUBSCRIPTION_KW,
+  /// `FIELD` directive location
+  FIELD_KW,
+  /// `FRAGMENT_DEFINITION` directive location
+  FRAGMENT_DEFINITION_KW,
+  /// `FRAGMENT_SPREAD` directive location
+  FRAGMENT_SPREAD_KW,
+  /// `INLINE_FRAGMENT` directive location
+  INLINE_FRAGMENT_KW,
+  /// `VARIABLE_DEFINITION` directive location
+  VARIABLE_DEFINITION_KW,
+  /// `SCHEMA` directive location
+  SCHEMA_KW,
+  /// `SCALAR` directive location
+  SCALAR_KW,
+  /// `OBJECT` directive location
+  OBJECT_KW,
+  /// `FIELD_DEFINITION` directive location
+  FIELD_DEFINITION_KW,
+  /// `ARGUMENT_DEFINITION` directive location
+  ARGUMENT_DEFINITION_KW,
+  /// `INTERFACE` directive location
+  INTERFACE_KW,
+  /// `UNION` directive location
+  UNION_KW,
+  /// `ENUM` directive location
+  ENUM_KW,
+  /// `ENUM_VALUE` directive location
+  ENUM_VALUE_KW,
+  /// `INPUT_OBJECT` directive location
+  INPUT_OBJECT_KW,
+  /// `INPUT_FIELD_DEFINITION` directive location
+  INPUT_FIELD_DEFINITION_KW,
 
   // ============================================================================
   // Punctuation Tokens
@@ -220,8 +263,20 @@ pub enum SyntaxKind {
   // ============================================================================
   // Trivia Nodes (Whitespace, Comments, Commas)
   // ============================================================================
-  /// Whitespace (spaces, tabs, newlines)
+  /// Whitespace
   Whitespace,
+
+  /// Tab
+  Tab,
+
+  /// Newline
+  Newline,
+
+  /// Carriage return
+  CarriageReturn,
+
+  /// Carriage return + Newline
+  CarriageReturnNewline,
 
   /// Comment (from `#` to end of line)
   Comment,
@@ -589,39 +644,6 @@ impl SyntaxKind {
     matches!(self, Self::Whitespace | Self::Comment | Self::Comma)
   }
 
-  /// Returns `true` if this kind represents a keyword token.
-  #[inline]
-  pub const fn is_keyword(self) -> bool {
-    matches!(
-      self,
-      Self::QueryKw
-        | Self::MutationKw
-        | Self::SubscriptionKw
-        | Self::FragmentKw
-        | Self::OnKw
-        | Self::NullKw
-        | Self::TrueKw
-        | Self::FalseKw
-        | Self::TypeKw
-        | Self::InterfaceKw
-        | Self::UnionKw
-        | Self::EnumKw
-        | Self::InputKw
-        | Self::ScalarKw
-        | Self::SchemaKw
-        | Self::DirectiveKw
-        | Self::ExtendKw
-        | Self::ImplementsKw
-        | Self::RepeatableKw
-        | Self::ImportKw
-        | Self::FromKw
-        | Self::AsKw
-        | Self::WhereKw
-        | Self::SetKw
-        | Self::MapKw
-    )
-  }
-
   /// Returns `true` if this kind represents an integer literal token.
   #[inline]
   pub const fn is_int_literal(self) -> bool {
@@ -638,133 +660,6 @@ impl SyntaxKind {
   #[inline]
   pub const fn is_numeric_literal(self) -> bool {
     self.is_int_literal() || self.is_float_literal()
-  }
-
-  /// Returns `true` if this kind represents a token (leaf node).
-  #[inline]
-  pub const fn is_token(self) -> bool {
-    matches!(
-      self,
-      Self::Identifier
-        | Self::Int
-        | Self::Hex
-        | Self::Binary
-        | Self::Octal
-        | Self::Float
-        | Self::HexFloat
-        | Self::InlineString
-        | Self::BlockString
-        // Keywords
-        | Self::QueryKw
-        | Self::MutationKw
-        | Self::SubscriptionKw
-        | Self::FragmentKw
-        | Self::OnKw
-        | Self::NullKw
-        | Self::TrueKw
-        | Self::FalseKw
-        | Self::TypeKw
-        | Self::InterfaceKw
-        | Self::UnionKw
-        | Self::EnumKw
-        | Self::InputKw
-        | Self::ScalarKw
-        | Self::SchemaKw
-        | Self::DirectiveKw
-        | Self::ExtendKw
-        | Self::ImplementsKw
-        | Self::RepeatableKw
-        | Self::ImportKw
-        | Self::FromKw
-        | Self::AsKw
-        | Self::WhereKw
-        | Self::SetKw
-        | Self::MapKw
-        // Punctuation
-        | Self::Dollar
-        | Self::LParen
-        | Self::RParen
-        | Self::Spread
-        | Self::Colon
-        | Self::Equal
-        | Self::At
-        | Self::LBracket
-        | Self::RBracket
-        | Self::LBrace
-        | Self::RBrace
-        | Self::Pipe
-        | Self::Bang
-        | Self::Ampersand
-        | Self::LAngle
-        | Self::RAngle
-        | Self::FatArrow
-        | Self::Plus
-        | Self::Minus
-        | Self::PathSeparator
-        | Self::Asterisk
-        // Trivia
-        | Self::Whitespace
-        | Self::Comment
-        | Self::Comma
-    )
-  }
-
-  /// Returns `true` if this kind is a GraphQLx extension (not in standard GraphQL).
-  #[inline]
-  pub const fn is_graphqlx_extension(self) -> bool {
-    matches!(
-      self,
-      // Extended numeric literals
-      Self::Hex
-        | Self::Binary
-        | Self::Octal
-        | Self::HexFloat
-        // Extended keywords
-        | Self::ImportKw
-        | Self::FromKw
-        | Self::AsKw
-        | Self::WhereKw
-        | Self::SetKw
-        | Self::MapKw
-        // Type paths
-        | Self::TypePath
-        | Self::PathSegment
-        | Self::FullyQualifiedPath
-        // Generics
-        | Self::TypeParameter
-        | Self::TypeParameters
-        | Self::TypeGenerics
-        | Self::DefinitionTypeGenerics
-        | Self::ExtensionTypeGenerics
-        | Self::ExecutableDefinitionTypeGenerics
-        | Self::WhereClause
-        | Self::WherePredicate
-        | Self::TypeBound
-        | Self::TypeConstraint
-        | Self::DefaultType
-        // Imports
-        | Self::ImportDefinition
-        | Self::ImportClause
-        | Self::ImportList
-        | Self::ImportMember
-        | Self::NamedSpecifier
-        | Self::WildcardSpecifier
-        | Self::ImportAlias
-        // Extended collections
-        | Self::SetType
-        | Self::MapType
-        | Self::SetValue
-        | Self::MapValue
-        | Self::MapEntry
-        // Extended punctuation
-        | Self::LAngle
-        | Self::RAngle
-        | Self::FatArrow
-        | Self::Plus
-        | Self::Minus
-        | Self::PathSeparator
-        | Self::Asterisk
-    )
   }
 }
 

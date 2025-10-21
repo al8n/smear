@@ -41,7 +41,7 @@ macro_rules! variant_type {
     }
 
     impl<S> $name<S> {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       #[allow(clippy::too_many_arguments)]
       pub(crate) const fn new(source: S, $($field: $ty),*) -> Self {
         Self { source, $($field),* }
@@ -49,26 +49,26 @@ macro_rules! variant_type {
 
       $(
         $( #[$field_meta] )*
-        #[inline(always)]
+        #[cfg_attr(not(tarpaulin), inline(always))]
         pub const fn $field(&self) -> $ty {
           self.$field
         }
       )*
 
       /// Returns the source of the simple escape string.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub const fn source_ref(&self) -> &S {
         &self.source
       }
 
       /// Returns the underlying source.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub const fn source(&self) -> S where S: Copy {
         self.source
       }
 
       /// Converts this to an equivalent type.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub fn to_equivalent<T>(&self) -> $name<T>
       where
         S: logosky::utils::ToEquivalent<T>,
@@ -77,7 +77,7 @@ macro_rules! variant_type {
       }
 
       /// Converts this to an equivalent type.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub fn into_equivalent<T>(self) -> $name<T>
       where
         S: logosky::utils::IntoEquivalent<T>,
@@ -95,7 +95,7 @@ macro_rules! variant_type {
 
     impl<'a> $name<&'a str> {
       /// Returns the str representation.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub const fn as_str(&self) -> &'a str {
         self.source
       }
@@ -103,7 +103,7 @@ macro_rules! variant_type {
 
     impl<'a> $name<&'a [u8]> {
       /// Returns the byte slice representation.
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       pub const fn as_bytes(&self) -> &'a [u8] {
         self.source
       }
@@ -114,42 +114,42 @@ macro_rules! variant_type {
 macro_rules! impl_common_traits {
   ($name:ident::<&$lt:lifetime $ty:ty>::$fn:ident) => {
     impl<$lt> PartialEq<$ty> for $name<&$lt $ty> {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn eq(&self, other: &$ty) -> bool {
         self.$fn().eq(other)
       }
     }
 
     impl<$lt> PartialEq<$name<&$lt $ty>> for $ty {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn eq(&self, other: &$name<&$lt $ty>) -> bool {
         other.eq(self)
       }
     }
 
     impl<$lt> PartialOrd<$ty> for $name<&$lt $ty> {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn partial_cmp(&self, other: &$ty) -> Option<core::cmp::Ordering> {
         self.$fn().partial_cmp(other)
       }
     }
 
     impl<$lt> PartialOrd<$name<&$lt $ty>> for $ty {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn partial_cmp(&self, other: &$name<&$lt $ty>) -> Option<core::cmp::Ordering> {
         other.partial_cmp(self).map(core::cmp::Ordering::reverse)
       }
     }
 
     impl<$lt> core::borrow::Borrow<$ty> for $name<&$lt $ty> {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn borrow(&self) -> &$ty {
         self
       }
     }
 
     impl<$lt> AsRef<$ty> for $name<&$lt $ty> {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn as_ref(&self) -> &$ty {
         core::borrow::Borrow::borrow(self)
       }
@@ -158,14 +158,14 @@ macro_rules! impl_common_traits {
     impl<$lt> core::ops::Deref for $name<&$lt $ty> {
       type Target = $ty;
 
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn deref(&self) -> &Self::Target {
         self.$fn()
       }
     }
 
     impl<$lt> From<$name<&$lt $ty>> for &$lt $ty {
-      #[inline(always)]
+      #[cfg_attr(not(tarpaulin), inline(always))]
       fn from(s: $name<&$lt $ty>) -> Self {
         s.$fn()
       }
@@ -237,7 +237,7 @@ impl<S: DisplayHuman> DisplayHuman for LitStr<S> {
 
 impl<S> LitStr<S> {
   /// Returns the underlying source
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -249,7 +249,7 @@ impl<S> LitStr<S> {
   }
 
   /// Returns the reference to the underlying source
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     match self {
       Self::Inline(s) => s.source_ref(),
@@ -258,7 +258,7 @@ impl<S> LitStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn to_equivalent<T>(&self) -> LitStr<T>
   where
     S: logosky::utils::ToEquivalent<T>,
@@ -270,7 +270,7 @@ impl<S> LitStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn into_equivalent<T>(self) -> LitStr<T>
   where
     S: logosky::utils::IntoEquivalent<T>,
@@ -287,7 +287,7 @@ impl<S> LitStr<S> {
 pub(super) struct SealedWrapper<L: ?Sized>(L);
 
 impl<T> SealedWrapper<T> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn from_mut(t: &mut T) -> &mut Self {
     // Safety: This is safe because SealedWrapper is repr(transparent) over T
     unsafe { &mut *(t as *mut T as *mut Self) }
