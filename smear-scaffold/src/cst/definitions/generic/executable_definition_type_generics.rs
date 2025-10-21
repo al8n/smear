@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
     cast::{child, children},
   },
 };
@@ -30,7 +30,7 @@ impl<Ident, Lang> ExecutableDefinitionTypeParam<Ident, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -44,7 +44,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -64,7 +64,7 @@ where
   #[inline]
   pub fn ident(&self) -> Ident
   where
-    Ident: Node<Language = Lang>,
+    Ident: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -76,7 +76,7 @@ where
   Ident: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -113,7 +113,7 @@ impl<Ident, Type, Lang> ExecutableDefinitionTypeGenerics<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -128,7 +128,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -148,7 +148,7 @@ where
   #[inline]
   pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
   where
-    LAngle<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    LAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
       .map(|t| LAngle::with_content(t.text_range(), t))
@@ -161,7 +161,7 @@ where
     &self,
   ) -> logosky::cst::SyntaxNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>>
   where
-    ExecutableDefinitionTypeParam<Ident, Lang>: Node<Language = Lang>,
+    ExecutableDefinitionTypeParam<Ident, Lang>: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -170,7 +170,7 @@ where
   #[inline]
   pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
   where
-    RAngle<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    RAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
       .map(|t| RAngle::with_content(t.text_range(), t))
@@ -186,7 +186,7 @@ where
   RAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

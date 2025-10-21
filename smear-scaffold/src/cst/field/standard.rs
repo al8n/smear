@@ -1,4 +1,4 @@
-use logosky::cst::Node;
+use logosky::cst::CstNode;
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::super::{Field, FragmentSpread, InlineFragment, SelectionSet};
@@ -63,12 +63,12 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   /// Tries to create a `StandardSelection` from the given syntax node.
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -112,10 +112,10 @@ where
 //   FragmentName: Parseable<'a, I, T, Error, Language = Lang> + 'a,
 //   Arguments: Parseable<'a, I, T, Error, Language = Lang> + 'a,
 //   Directives: Parseable<'a, I, T, Error, Language = Lang> + 'a,
-//   InlineFragment<TypeCondition, Directives, StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>, Lang>: Node<Language = Lang> + 'a,
-//   FragmentSpread<FragmentName, Directives, Lang>: Node<Language = Lang> + 'a,
-//   StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: Node<Language = Lang> + 'a,
-//   StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: Node<Language = Lang> + 'a,
+//   InlineFragment<TypeCondition, Directives, StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>, Lang>: CstNode<Language = Lang> + 'a,
+//   FragmentSpread<FragmentName, Directives, Lang>: CstNode<Language = Lang> + 'a,
+//   StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Language = Lang> + 'a,
+//   StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Language = Lang> + 'a,
 //   Lang: Language,
 //   Lang::Kind: Into<rowan::SyntaxKind>,
 // {

@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -29,7 +29,7 @@ impl<Ident, Type, Lang> DefinitionTypeParam<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -44,7 +44,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -64,7 +64,7 @@ where
   #[inline]
   pub fn ident(&self) -> Ident
   where
-    Ident: Node<Language = Lang>,
+    Ident: CstNode<Language = Lang>,
   {
     logosky::cst::cast::child(self.syntax()).unwrap()
   }
@@ -73,7 +73,7 @@ where
   #[inline]
   pub fn default(&self) -> Option<Type>
   where
-    Type: Node<Language = Lang>,
+    Type: CstNode<Language = Lang>,
   {
     logosky::cst::cast::child(self.syntax())
   }
@@ -82,7 +82,7 @@ where
   #[inline]
   pub fn equal_token(&self) -> Option<Equal<TextRange, SyntaxToken<Lang>>>
   where
-    Equal<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Equal<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Equal::KIND)
       .map(|t| Equal::with_content(t.text_range(), t))
@@ -97,7 +97,7 @@ where
   Equal<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -144,7 +144,7 @@ impl<Ident, Type, Lang> DefinitionTypeGenerics<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -159,7 +159,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -179,7 +179,7 @@ where
   #[inline]
   pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
   where
-    LAngle<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    LAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
       .map(|t| LAngle::with_content(t.text_range(), t))
@@ -190,7 +190,7 @@ where
   #[inline]
   pub fn params(&self) -> logosky::cst::SyntaxNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>
   where
-    DefinitionTypeParam<Ident, Type, Lang>: Node<Language = Lang>,
+    DefinitionTypeParam<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -199,7 +199,7 @@ where
   #[inline]
   pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
   where
-    RAngle<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    RAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
       .map(|t| RAngle::with_content(t.text_range(), t))
@@ -215,7 +215,7 @@ where
   RAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
     cast::{child, children},
   },
 };
@@ -35,7 +35,7 @@ impl<Ident, Type, Lang> WherePredicate<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -50,7 +50,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -70,7 +70,7 @@ where
   #[inline]
   pub fn bounded_type(&self) -> TypePath<Ident, Type, Lang>
   where
-    TypePath<Ident, Type, Lang>: Node<Language = Lang>,
+    TypePath<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     // First TypePath child is the bounded type
     children::<TypePath<Ident, Type, Lang>>(self.syntax())
@@ -82,7 +82,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -93,7 +93,7 @@ where
   #[inline]
   pub fn bounds(&self) -> impl Iterator<Item = TypePath<Ident, Type, Lang>>
   where
-    TypePath<Ident, Type, Lang>: Node<Language = Lang>,
+    TypePath<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     // Skip the first TypePath (bounded_type), rest are bounds
     children::<TypePath<Ident, Type, Lang>>(self.syntax()).skip(1)
@@ -108,7 +108,7 @@ where
   Ampersand<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -157,7 +157,7 @@ impl<Ident, Type, Lang> WhereClause<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -172,7 +172,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -192,7 +192,7 @@ where
   #[inline]
   pub fn where_token(&self) -> Where<TextRange, SyntaxToken<Lang>>
   where
-    Where<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Where<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Where::KIND)
       .map(|t| Where::with_content(t.text_range(), t))
@@ -203,7 +203,7 @@ where
   #[inline]
   pub fn predicates(&self) -> logosky::cst::SyntaxNodeChildren<WherePredicate<Ident, Type, Lang>>
   where
-    WherePredicate<Ident, Type, Lang>: Node<Language = Lang>,
+    WherePredicate<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -216,7 +216,7 @@ where
   Where<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -266,7 +266,7 @@ impl<Ident, Type, Target, Lang> Constrained<Ident, Type, Target, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -282,7 +282,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -302,7 +302,7 @@ where
   #[inline]
   pub fn where_clause(&self) -> Option<WhereClause<Ident, Type, Lang>>
   where
-    WhereClause<Ident, Type, Lang>: Node<Language = Lang>,
+    WhereClause<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -311,7 +311,7 @@ where
   #[inline]
   pub fn target(&self) -> Target
   where
-    Target: Node<Language = Lang>,
+    Target: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -324,7 +324,7 @@ where
   Target: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

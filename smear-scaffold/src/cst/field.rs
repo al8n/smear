@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
     cast::{child, token},
   },
 };
@@ -41,7 +41,7 @@ impl<Name, Lang> Alias<Name, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -53,10 +53,10 @@ where
 
   /// Tries to create an `Alias` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>>
   where
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: crate::cst::Node<Language = Lang>,
+    Self: CstNode<Language = Lang>,
   {
     Self::try_cast(syntax)
   }
@@ -77,7 +77,7 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: Node<Language = Lang>,
+    Name: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -86,7 +86,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -122,7 +122,7 @@ where
   Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -185,7 +185,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -201,7 +201,7 @@ where
 
   /// Tries to create a `Field` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -215,7 +215,7 @@ where
   #[inline]
   pub fn alias(&self) -> Option<Alias>
   where
-    Alias: Node<Language = Lang>,
+    Alias: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -224,7 +224,7 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: Node<Language = Lang>,
+    Name: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -233,7 +233,7 @@ where
   #[inline]
   pub fn arguments(&self) -> Option<Arguments>
   where
-    Arguments: Node<Language = Lang>,
+    Arguments: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -242,7 +242,7 @@ where
   #[inline]
   pub fn directives(&self) -> Option<Directives>
   where
-    Directives: Node<Language = Lang>,
+    Directives: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -251,7 +251,7 @@ where
   #[inline]
   pub fn selection_set(&self) -> Option<SelectionSet>
   where
-    SelectionSet: Node<Language = Lang>,
+    SelectionSet: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -300,7 +300,7 @@ where
   SelectionSet: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang> + 'a,
+  Self: CstNode<Language = Lang> + 'a,
 {
   type Language = Lang;
 

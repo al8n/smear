@@ -11,3 +11,4 @@ impl_graphql_node! {
   for<Type> ListType<Type, GraphQLLanguage> => ListType(ListType::new)
   where Type: Debug
 }
+

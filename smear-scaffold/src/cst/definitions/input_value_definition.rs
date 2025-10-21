@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -37,7 +37,7 @@ impl<Name, Type, DefaultValue, Directives, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -54,7 +54,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -74,7 +74,7 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: Node<Language = Lang>,
+    Name: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -83,7 +83,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -94,7 +94,7 @@ where
   #[inline]
   pub fn ty(&self) -> Type
   where
-    Type: Node<Language = Lang>,
+    Type: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -103,7 +103,7 @@ where
   #[inline]
   pub fn default_value(&self) -> Option<DefaultValue>
   where
-    DefaultValue: Node<Language = Lang>,
+    DefaultValue: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -112,7 +112,7 @@ where
   #[inline]
   pub fn directives(&self) -> Option<Directives>
   where
-    Directives: Node<Language = Lang>,
+    Directives: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -128,7 +128,7 @@ where
   Directives: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

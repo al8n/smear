@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -28,7 +28,7 @@ impl<Ident, Lang> Path<Ident, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -42,7 +42,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -62,7 +62,7 @@ where
   #[inline]
   pub fn is_fully_qualified(&self) -> bool
   where
-    PathSeparator<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    PathSeparator<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     // Check if first child is a PathSeparator token
     self
@@ -83,7 +83,7 @@ where
   #[inline]
   pub fn segments(&self) -> logosky::cst::SyntaxNodeChildren<Ident>
   where
-    Ident: Node<Language = Lang>,
+    Ident: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -95,7 +95,7 @@ where
   PathSeparator<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

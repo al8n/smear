@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -34,7 +34,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -51,7 +51,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -71,7 +71,7 @@ where
   #[inline]
   pub fn fragment_keyword(&self) -> Fragment<TextRange, SyntaxToken<Lang>>
   where
-    Fragment<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Fragment<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Fragment::KIND)
       .map(|t| Fragment::with_content(t.text_range(), t))
@@ -82,7 +82,7 @@ where
   #[inline]
   pub fn name(&self) -> FragmentName
   where
-    FragmentName: Node<Language = Lang>,
+    FragmentName: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -91,7 +91,7 @@ where
   #[inline]
   pub fn type_condition(&self) -> TypeCondition
   where
-    TypeCondition: Node<Language = Lang>,
+    TypeCondition: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -100,7 +100,7 @@ where
   #[inline]
   pub fn directives(&self) -> Option<Directives>
   where
-    Directives: Node<Language = Lang>,
+    Directives: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -109,7 +109,7 @@ where
   #[inline]
   pub fn selection_set(&self) -> SelectionSet
   where
-    SelectionSet: Node<Language = Lang>,
+    SelectionSet: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -126,7 +126,7 @@ where
   SelectionSet: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

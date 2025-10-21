@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -31,7 +31,7 @@ impl<Ident, Type, Lang> DefinitionTypePath<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -46,7 +46,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -66,7 +66,7 @@ where
   #[inline]
   pub fn path(&self) -> Option<Path<Ident, Lang>>
   where
-    Path<Ident, Lang>: Node<Language = Lang>,
+    Path<Ident, Lang>: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -75,7 +75,7 @@ where
   #[inline]
   pub fn name(&self) -> DefinitionName<Ident, Type, Lang>
   where
-    DefinitionName<Ident, Type, Lang>: Node<Language = Lang>,
+    DefinitionName<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -88,7 +88,7 @@ where
   DefinitionName<Ident, Type, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

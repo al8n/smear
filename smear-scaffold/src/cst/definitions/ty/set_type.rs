@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -30,7 +30,7 @@ impl<Type, Lang> SetType<Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -44,7 +44,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -64,7 +64,7 @@ where
   #[inline]
   pub fn set_keyword(&self) -> Set<TextRange, SyntaxToken<Lang>>
   where
-    Set<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Set<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Set::KIND)
       .map(|t| Set::with_content(t.text_range(), t))
@@ -75,7 +75,7 @@ where
   #[inline]
   pub fn ty(&self) -> Type
   where
-    Type: Node<Language = Lang>,
+    Type: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -84,7 +84,7 @@ where
   #[inline]
   pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
   where
-    Bang<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Bang::KIND)
       .map(|t| Bang::with_content(t.text_range(), t))
@@ -94,7 +94,7 @@ where
   #[inline]
   pub fn required(&self) -> bool
   where
-    Bang<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     self.bang_token().is_some()
   }
@@ -109,7 +109,7 @@ where
   Bang<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

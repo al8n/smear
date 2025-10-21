@@ -2,7 +2,7 @@ use super::*;
 
 macro_rules! impl_graphql_node {
   (for<$($generics:tt),*> $ty:ty => $kind:ident($expr:expr) $(where $($where:tt)+)?) => {
-    impl<$($generics),*> $crate::cst::Node for $ty
+    impl<$($generics),*> $crate::cst::CstElement for $ty
     $(where
       $($where)+
     )?
@@ -18,18 +18,24 @@ macro_rules! impl_graphql_node {
       {
         matches!(kind, $crate::cst::graphql::SyntaxKind::$kind)
       }
+    }
 
+    impl<$($generics),*> $crate::cst::CstNode for $ty
+    $(where
+      $($where)+
+    )?
+    {
       #[cfg_attr(not(tarpaulin), inline(always))]
       fn try_cast(
         syntax: rowan::SyntaxNode<Self::Language>,
-      ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>>
+      ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>>
       where
         Self: Sized,
       {
-        if Self::can_cast(syntax.kind()) {
+        if <Self as $crate::cst::CstElement>::can_cast(syntax.kind()) {
           Ok($expr(syntax))
         } else {
-          Err(logosky::cst::error::SyntaxNodeMismatch::new(Self::KIND, syntax))
+          Err(logosky::cst::error::CstNodeMismatch::new(<Self as $crate::cst::CstElement>::KIND, syntax))
         }
       }
 

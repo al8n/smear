@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
     cast::{child, token},
   },
 };
@@ -38,7 +38,7 @@ impl<Name, Lang> FragmentName<Name, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -50,7 +50,7 @@ where
 
   /// Tries to create a `FragmentName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -70,7 +70,7 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: Node<Language = Lang>,
+    Name: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -102,7 +102,7 @@ impl<Name, Lang> TypeCondition<Name, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -114,7 +114,7 @@ where
 
   /// Tries to create a `TypeCondition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -134,7 +134,7 @@ where
   #[inline]
   pub fn on_keyword(&self) -> On<TextRange, SyntaxToken<Lang>>
   where
-    On<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    On<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &On::KIND)
       .map(|t| On::with_content(t.text_range(), t))
@@ -145,7 +145,7 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: Node<Language = Lang>,
+    Name: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -179,7 +179,7 @@ where
   On<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang> + 'a,
+  Self: CstNode<Language = Lang> + 'a,
 {
   type Language = Lang;
 
@@ -237,7 +237,7 @@ impl<FragmentName, Directives, Lang> FragmentSpread<FragmentName, Directives, La
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -250,7 +250,7 @@ where
 
   /// Tries to create a `FragmentSpread` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -264,7 +264,7 @@ where
   #[inline]
   pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
   where
-    Spread<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Spread<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &Spread::KIND)
       .map(|t| Spread::with_content(t.text_range(), t))
@@ -275,7 +275,7 @@ where
   #[inline]
   pub fn name(&self) -> FragmentName
   where
-    FragmentName: Node<Language = Lang>,
+    FragmentName: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -284,7 +284,7 @@ where
   #[inline]
   pub fn directives(&self) -> Directives
   where
-    Directives: Node<Language = Lang>,
+    Directives: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -323,7 +323,7 @@ where
   Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang> + 'a,
+  Self: CstNode<Language = Lang> + 'a,
 {
   type Language = Lang;
 
@@ -384,7 +384,7 @@ impl<TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -398,7 +398,7 @@ where
 
   /// Tries to create an `InlineFragment` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -412,7 +412,7 @@ where
   #[inline]
   pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
   where
-    Spread<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    Spread<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &Spread::KIND)
       .map(|t| Spread::with_content(t.text_range(), t))
@@ -423,7 +423,7 @@ where
   #[inline]
   pub fn type_condition(&self) -> Option<TypeCondition>
   where
-    TypeCondition: Node<Language = Lang>,
+    TypeCondition: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -432,7 +432,7 @@ where
   #[inline]
   pub fn directives(&self) -> Option<Directives>
   where
-    Directives: Node<Language = Lang>,
+    Directives: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -441,7 +441,7 @@ where
   #[inline]
   pub fn selection_set(&self) -> SelectionSet
   where
-    SelectionSet: Node<Language = Lang>,
+    SelectionSet: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -484,7 +484,7 @@ where
   Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang> + 'a,
+  Self: CstNode<Language = Lang> + 'a,
 {
   type Language = Lang;
 

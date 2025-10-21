@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -22,7 +22,7 @@ impl<Type, Lang> TypeGenerics<Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -36,7 +36,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -56,7 +56,7 @@ where
   #[inline]
   pub fn params(&self) -> logosky::cst::SyntaxNodeChildren<Type>
   where
-    Type: Node<Language = Lang>,
+    Type: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -69,7 +69,7 @@ where
   RAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

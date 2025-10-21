@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
     cast::{child, children, token},
   },
 };
@@ -30,7 +30,7 @@ impl<Key, Value, Lang> MapEntry<Key, Value, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -45,7 +45,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -65,7 +65,7 @@ where
   #[inline]
   pub fn key(&self) -> Key
   where
-    Key: Node<Language = Lang>,
+    Key: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -74,7 +74,7 @@ where
   #[inline]
   pub fn fat_arrow_token(&self) -> FatArrow<TextRange, SyntaxToken<Lang>>
   where
-    FatArrow<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    FatArrow<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &FatArrow::KIND)
       .map(|t| FatArrow::with_content(t.text_range(), t))
@@ -85,7 +85,7 @@ where
   #[inline]
   pub fn value(&self) -> Value
   where
-    Value: Node<Language = Lang>,
+    Value: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -123,7 +123,7 @@ where
   FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
@@ -169,7 +169,7 @@ impl<Key, Value, Lang> Map<Key, Value, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -184,7 +184,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -204,7 +204,7 @@ where
   #[inline]
   pub fn map_keyword_token(&self) -> keywords::Map<TextRange, SyntaxToken<Lang>>
   where
-    keywords::Map<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    keywords::Map<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &keywords::Map::KIND)
       .map(|t| keywords::Map::with_content(t.text_range(), t))
@@ -215,7 +215,7 @@ where
   #[inline]
   pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
   where
-    LBrace<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    LBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &LBrace::KIND)
       .map(|t| LBrace::with_content(t.text_range(), t))
@@ -226,7 +226,7 @@ where
   #[inline]
   pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
   where
-    RBrace<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    RBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &RBrace::KIND)
       .map(|t| RBrace::with_content(t.text_range(), t))
@@ -237,7 +237,7 @@ where
   #[inline]
   pub fn entries(&self) -> logosky::cst::SyntaxNodeChildren<MapEntry<Key, Value, Lang>>
   where
-    MapEntry<Key, Value, Lang>: Node<Language = Lang>,
+    MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -260,7 +260,7 @@ where
     FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     KP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
-    MapEntry<Key, Value, Lang>: Node<Language = Lang>,
+    MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     keywords::Map::parser(builder)
@@ -285,10 +285,10 @@ where
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  MapEntry<Key, Value, Lang>: Parseable<'a, I, T, Error, Language = Lang> + Node<Language = Lang>,
+  MapEntry<Key, Value, Lang>: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

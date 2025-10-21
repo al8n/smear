@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    Node, Parseable, SyntaxTreeBuilder,
+    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
     cast::{children, token},
   },
 };
@@ -38,7 +38,7 @@ impl<Value, Lang> List<Value, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -52,7 +52,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -72,7 +72,7 @@ where
   #[inline]
   pub fn l_bracket_token(&self) -> LBracket<TextRange, SyntaxToken<Lang>>
   where
-    LBracket<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    LBracket<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &LBracket::KIND)
       .map(|t| LBracket::with_content(t.text_range(), t))
@@ -83,7 +83,7 @@ where
   #[inline]
   pub fn r_bracket_token(&self) -> RBracket<TextRange, SyntaxToken<Lang>>
   where
-    RBracket<TextRange, SyntaxToken<Lang>>: Node<Language = Lang>,
+    RBracket<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
   {
     token(self.syntax(), &RBracket::KIND)
       .map(|t| RBracket::with_content(t.text_range(), t))
@@ -94,7 +94,7 @@ where
   #[inline]
   pub fn values(&self) -> logosky::cst::SyntaxNodeChildren<Value>
   where
-    Value: Node<Language = Lang>,
+    Value: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -131,7 +131,7 @@ where
   RBracket<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

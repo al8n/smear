@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -21,13 +21,13 @@ impl<Directive, Lang> DirectivesDefinition<Directive, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   /// Tries to create a `DirectivesDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -47,7 +47,7 @@ where
   #[inline]
   pub fn directives(&self) -> logosky::cst::SyntaxNodeChildren<Directive>
   where
-    Directive: Node<Language = Lang>,
+    Directive: CstNode<Language = Lang>,
   {
     children(self.syntax())
   }
@@ -59,7 +59,7 @@ where
   Directive: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 

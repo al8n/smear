@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{Node, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -25,7 +25,7 @@ impl<T, Description, Lang> Described<T, Description, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
@@ -40,7 +40,7 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::SyntaxNodeMismatch<Self>> {
+  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
@@ -60,7 +60,7 @@ where
   #[inline]
   pub fn description(&self) -> Option<Description>
   where
-    Description: Node<Language = Lang>,
+    Description: CstNode<Language = Lang>,
   {
     child(self.syntax())
   }
@@ -69,7 +69,7 @@ where
   #[inline]
   pub fn node(&self) -> T
   where
-    T: Node<Language = Lang>,
+    T: CstNode<Language = Lang>,
   {
     child(self.syntax()).unwrap()
   }
@@ -82,7 +82,7 @@ where
   Description: Parseable<'a, I, Token, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
+  Self: CstNode<Language = Lang>,
 {
   type Language = Lang;
 
