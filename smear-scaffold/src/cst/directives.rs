@@ -34,7 +34,7 @@ where
   Lang: Language,
 {
   /// Returns the syntax node of this directive.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.node
   }
@@ -46,8 +46,17 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      node: syntax,
+      _name: PhantomData,
+      _args: PhantomData,
+    }
+  }
+
   /// Tries to create a `Directive` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
@@ -158,18 +167,32 @@ impl<Directive, Lang> Directives<Directive, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: Node<Language = Lang>,
 {
-  /// Tries to create a `Directives` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
-    Self::try_cast(syntax)
-  }
-
   /// Returns the syntax node of this directives collection.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
+  }
+}
+
+impl<Directive, Lang> Directives<Directive, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: Node<Language = Lang>,
+{
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _directive: PhantomData,
+    }
+  }
+
+  /// Tries to create a `Directives` from the given syntax node.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
+    Self::try_cast(syntax)
   }
 
   /// Returns the collection of directives.

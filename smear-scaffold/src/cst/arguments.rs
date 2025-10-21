@@ -41,8 +41,17 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _name: PhantomData,
+      _value: PhantomData,
+    }
+  }
+
   /// Tries to create an `Argument` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>>
   where
     Lang::Kind: Into<rowan::SyntaxKind>,
@@ -56,13 +65,13 @@ where
   /// This span covers from the first character of the argument name through
   /// the last character of the argument value, providing the complete source
   /// location for error reporting and source mapping.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the entire argument.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
@@ -217,6 +226,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _arg: PhantomData,
+    }
+  }
+
   /// Tries to create a `Arguments` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {

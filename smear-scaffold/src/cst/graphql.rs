@@ -19,6 +19,8 @@
 //! assert!(!SyntaxKind::Identifier.is_keyword());
 //! ```
 
+mod r#impl;
+
 /// GraphQL Concrete Syntax Tree node kind.
 ///
 /// Represents all possible node types in a GraphQL CST, including both tokens
@@ -310,6 +312,9 @@ pub enum SyntaxKind {
 
   /// Directive application (e.g., `@deprecated`)
   Directive,
+
+  /// List of directives (e.g., `@auth @log`)
+  Directives,
 
   /// Directive locations (e.g., `on FIELD | ARGUMENT_DEFINITION`)
   DirectiveLocations,
