@@ -331,6 +331,9 @@ pub enum SyntaxKind {
   /// Root operation type definition (e.g., `query: Query`)
   RootOperationTypeDefinition,
 
+  /// Root operation types definition list
+  RootOperationTypesDefinition,
+
   // ============================================================================
   // Enum Nodes
   // ============================================================================
@@ -360,6 +363,9 @@ pub enum SyntaxKind {
 
   /// Named operation definition (e.g., `query GetUser { ... }`)
   NamedOperationDefinition,
+
+  /// Fragment name
+  FragmentName,
 
   /// Fragment definition (e.g., `fragment UserFields on User { ... }`)
   FragmentDefinition,

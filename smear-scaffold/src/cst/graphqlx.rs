@@ -25,6 +25,8 @@
 //! assert!(SyntaxKind::Binary.is_graphqlx_extension());
 //! ```
 
+mod r#impl;
+
 /// GraphQLx Concrete Syntax Tree node kind.
 ///
 /// Represents all possible node types in a GraphQLx CST, including standard GraphQL nodes
@@ -305,8 +307,14 @@ pub enum SyntaxKind {
   // ============================================================================
   // Type Path Nodes (GraphQLx Extension)
   // ============================================================================
-  /// Type path (e.g., `user::User`, `::Global`, `std::Option<T>`)
+  /// Path (e.g., `user::profile`, `::std`)
+  Path,
+
+  /// Type path (e.g., `user::User`, `std::Option<T>`)
   TypePath,
+
+  /// Definition type path (e.g., `v1::User<ID>`)
+  DefinitionTypePath,
 
   /// Path segment (single identifier in a path)
   PathSegment,
@@ -442,6 +450,8 @@ pub enum SyntaxKind {
 
   /// Directive application (e.g., `@deprecated`, `@auth<User>`)
   Directive,
+  /// Directives list
+  Directives,
 
   /// Directive locations (e.g., `on FIELD | ARGUMENT_DEFINITION`)
   DirectiveLocations,
@@ -457,6 +467,8 @@ pub enum SyntaxKind {
 
   /// Root operation type definition (e.g., `query: Query`)
   RootOperationTypeDefinition,
+  /// Root operation types definition list
+  RootOperationTypesDefinition,
 
   // ============================================================================
   // Enum Nodes

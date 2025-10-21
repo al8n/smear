@@ -1,22 +1,22 @@
 use super::*;
 
-macro_rules! impl_graphql_node {
+macro_rules! impl_graphqlx_node {
   (for<$($generics:tt),*> $ty:ty => $kind:ident($expr:expr) $(where $($where:tt)+)?) => {
     impl<$($generics),*> $crate::cst::Node for $ty
     $(where
       $($where)+
     )?
     {
-      type Language = $crate::cst::graphql::GraphQLLanguage;
+      type Language = $crate::cst::graphqlx::GraphQLxLanguage;
 
-      const KIND: $crate::cst::graphql::SyntaxKind = $crate::cst::graphql::SyntaxKind::$kind;
+      const KIND: $crate::cst::graphqlx::SyntaxKind = $crate::cst::graphqlx::SyntaxKind::$kind;
 
       #[cfg_attr(not(tarpaulin), inline(always))]
       fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool
       where
         Self: Sized,
       {
-        matches!(kind, $crate::cst::graphql::SyntaxKind::$kind)
+        matches!(kind, $crate::cst::graphqlx::SyntaxKind::$kind)
       }
 
       #[cfg_attr(not(tarpaulin), inline(always))]

@@ -42,6 +42,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _value: PhantomData,
+    }
+  }
+
   /// Tries to create a `Set` from the given syntax node.
   #[inline]
   pub fn try_new(

@@ -39,6 +39,17 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _variable: PhantomData,
+      _ty: PhantomData,
+      _default_value: PhantomData,
+      _directives: PhantomData,
+    }
+  }
+
   /// Tries to create a `VariableDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(
@@ -164,6 +175,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _variable_definition: PhantomData,
+    }
+  }
+
   /// Tries to create a `VariablesDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(

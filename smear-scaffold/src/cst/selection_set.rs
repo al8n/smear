@@ -45,24 +45,38 @@ impl<Selection, Lang> SelectionSet<Selection, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
+{
+  /// Returns the syntax node representing the selection set.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+}
+
+impl<Selection, Lang> SelectionSet<Selection, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _selection: PhantomData,
+    }
+  }
+
   /// Tries to create a `SelectionSet` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
     Self::try_cast(syntax)
   }
 
   /// Returns the source span of the entire selection set.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
-  }
-
-  /// Returns the syntax node representing the selection set.
-  #[inline]
-  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
-    &self.syntax
   }
 
   /// Returns the left brace token.

@@ -40,6 +40,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _name: PhantomData,
+    }
+  }
+
   /// Tries to create a `FragmentName` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
@@ -96,6 +104,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _name: PhantomData,
+    }
+  }
+
   /// Tries to create a `TypeCondition` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
@@ -223,6 +239,15 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _fragment_name: PhantomData,
+      _directives: PhantomData,
+    }
+  }
+
   /// Tries to create a `FragmentSpread` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {
@@ -361,6 +386,16 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _type_condition: PhantomData,
+      _directives: PhantomData,
+      _selection_set: PhantomData,
+    }
+  }
+
   /// Tries to create an `InlineFragment` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::SyntaxNodeMismatch<Self>> {

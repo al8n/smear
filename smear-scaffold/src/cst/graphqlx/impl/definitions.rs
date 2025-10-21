@@ -3,15 +3,15 @@ use core::fmt::Debug;
 use crate::cst::{
   ArgumentsDefinition, Described, Document, FieldsDefinition, FragmentDefinition,
   InputFieldsDefinition, InputValueDefinition, NamedOperationDefinition,
-  RootOperationTypeDefinition, RootOperationTypesDefinition, VariableDefinition, VariablesDefinition, graphql::GraphQLLanguage,
+  RootOperationTypeDefinition, RootOperationTypesDefinition, VariableDefinition, VariablesDefinition, graphqlx::GraphQLxLanguage,
 };
 
-impl_graphql_node! {
-  for<Definition> Document<Definition, GraphQLLanguage> => Document(Document::new)
+impl_graphqlx_node! {
+  for<Definition> Document<Definition, GraphQLxLanguage> => Document(Document::new)
   where Definition: Debug
 }
 
-impl_graphql_node! {
+impl_graphqlx_node! {
   for<Name, OperationType, VariablesDef, Directives, SelectionSet>
     NamedOperationDefinition<
       Name,
@@ -19,7 +19,7 @@ impl_graphql_node! {
       VariablesDef,
       Directives,
       SelectionSet,
-      GraphQLLanguage,
+      GraphQLxLanguage,
     > => NamedOperationDefinition(NamedOperationDefinition::new)
   where
     Name: Debug,
@@ -29,9 +29,9 @@ impl_graphql_node! {
     SelectionSet: Debug
 }
 
-impl_graphql_node! {
+impl_graphqlx_node! {
   for<Name, Type, DefaultValue, Directives>
-    InputValueDefinition<Name, Type, DefaultValue, Directives, GraphQLLanguage> =>
+    InputValueDefinition<Name, Type, DefaultValue, Directives, GraphQLxLanguage> =>
       InputValueDefinition(InputValueDefinition::new)
   where
     Name: Debug,
@@ -40,26 +40,26 @@ impl_graphql_node! {
     Directives: Debug
 }
 
-impl_graphql_node! {
-  for<InputValueDef> ArgumentsDefinition<InputValueDef, GraphQLLanguage> =>
+impl_graphqlx_node! {
+  for<InputValueDef> ArgumentsDefinition<InputValueDef, GraphQLxLanguage> =>
     ArgumentsDefinition(ArgumentsDefinition::new)
   where InputValueDef: Debug
 }
 
-impl_graphql_node! {
-  for<InputValueDef> InputFieldsDefinition<InputValueDef, GraphQLLanguage> =>
+impl_graphqlx_node! {
+  for<InputValueDef> InputFieldsDefinition<InputValueDef, GraphQLxLanguage> =>
     InputFieldsDefinition(InputFieldsDefinition::new)
   where InputValueDef: Debug
 }
 
-impl_graphql_node! {
-  for<FieldDef> FieldsDefinition<FieldDef, GraphQLLanguage> => FieldsDefinition(FieldsDefinition::new)
+impl_graphqlx_node! {
+  for<FieldDef> FieldsDefinition<FieldDef, GraphQLxLanguage> => FieldsDefinition(FieldsDefinition::new)
   where FieldDef: Debug
 }
 
-impl_graphql_node! {
+impl_graphqlx_node! {
   for<FragmentName, TypeCond, Directives, SelectionSet>
-    FragmentDefinition<FragmentName, TypeCond, Directives, SelectionSet, GraphQLLanguage> =>
+    FragmentDefinition<FragmentName, TypeCond, Directives, SelectionSet, GraphQLxLanguage> =>
       FragmentDefinition(FragmentDefinition::new)
   where
     FragmentName: Debug,
@@ -68,24 +68,24 @@ impl_graphql_node! {
     SelectionSet: Debug
 }
 
-impl_graphql_node! {
+impl_graphqlx_node! {
   for<OperationType, Name>
-    RootOperationTypeDefinition<OperationType, Name, GraphQLLanguage> =>
+    RootOperationTypeDefinition<OperationType, Name, GraphQLxLanguage> =>
       RootOperationTypeDefinition(RootOperationTypeDefinition::new)
   where
     OperationType: Debug,
     Name: Debug
 }
 
-impl_graphql_node! {
-  for<RootOpTypeDef> RootOperationTypesDefinition<RootOpTypeDef, GraphQLLanguage> =>
+impl_graphqlx_node! {
+  for<RootOpTypeDef> RootOperationTypesDefinition<RootOpTypeDef, GraphQLxLanguage> =>
     RootOperationTypesDefinition(RootOperationTypesDefinition::new)
   where RootOpTypeDef: Debug
 }
 
-impl_graphql_node! {
+impl_graphqlx_node! {
   for<Variable, Type, DefaultValue, Directives>
-    VariableDefinition<Variable, Type, DefaultValue, Directives, GraphQLLanguage> =>
+    VariableDefinition<Variable, Type, DefaultValue, Directives, GraphQLxLanguage> =>
       VariableDefinition(VariableDefinition::new)
   where
     Variable: Debug,
@@ -94,17 +94,18 @@ impl_graphql_node! {
     Directives: Debug
 }
 
-impl_graphql_node! {
-  for<VariableDef> VariablesDefinition<VariableDef, GraphQLLanguage> =>
+impl_graphqlx_node! {
+  for<VariableDef> VariablesDefinition<VariableDef, GraphQLxLanguage> =>
     VariablesDefinition(VariablesDefinition::new)
   where VariableDef: Debug
 }
 
-impl_graphql_node! {
-  for<T, Description> Described<T, Description, GraphQLLanguage> => Description(Described::new)
+impl_graphqlx_node! {
+  for<T, Description> Described<T, Description, GraphQLxLanguage> => Description(Described::new)
   where
     T: Debug,
     Description: Debug
 }
 
+mod generic;
 mod ty;

@@ -1,8 +1,7 @@
 /// Generic definitions scaffold.
 pub mod generic;
-/// Type definitions scaffold.
-pub mod ty;
 
+mod ty;
 mod arguments_definition;
 mod described;
 mod directives_definition;
@@ -39,3 +38,4 @@ pub use operation_type::*;
 pub use operation_type_definition::*;
 pub use path::*;
 pub use variable_definition::*;
+pub use ty::*;

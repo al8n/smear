@@ -27,6 +27,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _input_value_definition: PhantomData,
+    }
+  }
+
   /// Tries to create an `InputFieldsDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(

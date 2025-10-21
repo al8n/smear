@@ -35,6 +35,15 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _operation_type: PhantomData,
+      _name: PhantomData,
+    }
+  }
+
   /// Tries to create a `RootOperationTypeDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(
@@ -138,6 +147,14 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _root_operation_type_definition: PhantomData,
+    }
+  }
+
   /// Tries to create a `RootOperationTypesDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(

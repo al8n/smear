@@ -43,6 +43,18 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _name: PhantomData,
+      _operation_type: PhantomData,
+      _variables_definition: PhantomData,
+      _directives: PhantomData,
+      _selection_set: PhantomData,
+    }
+  }
+
   /// Tries to create a `NamedOperationDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxNodeMismatch<Self>> {

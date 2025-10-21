@@ -33,6 +33,15 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _key_ty: PhantomData,
+      _value_ty: PhantomData,
+    }
+  }
+
   /// Tries to create a new `MapType` from a syntax node.
   #[inline]
   pub fn try_new(

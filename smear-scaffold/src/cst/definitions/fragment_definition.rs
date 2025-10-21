@@ -36,6 +36,17 @@ where
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: Node<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+    Self {
+      syntax,
+      _fragment_name: PhantomData,
+      _type_condition: PhantomData,
+      _directives: PhantomData,
+      _selection_set: PhantomData,
+    }
+  }
+
   /// Tries to create a `FragmentDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(
