@@ -1,7 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
+  cst::{
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
+  },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -44,9 +46,7 @@ where
 
   /// Tries to create a new `MapType` from a syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -91,7 +91,9 @@ where
   {
     // Second child after key type
     let mut children = self.syntax().children();
-    children.find_map(|n| ValueType::try_cast_node(n).ok()).unwrap()
+    children
+      .find_map(|n| ValueType::try_cast_node(n).ok())
+      .unwrap()
   }
 
   /// Returns the bang token if present.

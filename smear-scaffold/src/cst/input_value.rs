@@ -1,15 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
-    cast::{child, token},
-    error::CastNodeError,
-  },
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::punctuator::Equal;
 
@@ -41,59 +35,58 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _value: PhantomData<Value>,
+  equal: Equal<TextRange, SyntaxToken<Lang>>,
+  value: Value,
 }
 
 impl<Value, Lang> DefaultInputValue<Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    equal: Equal<TextRange, SyntaxToken<Lang>>,
+    value: Value,
+  ) -> Self {
     Self {
       syntax,
-      _value: PhantomData,
+      equal,
+      value,
     }
   }
 
   /// Tries to create a `DefaultInputValue` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire default value assignment.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the default value assignment.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the equal sign token.
-  #[inline]
-  pub fn equal_token(&self) -> Equal<TextRange, SyntaxToken<Lang>>
-  where
-    Equal<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Equal::KIND)
-      .map(|t| Equal::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn equal_token(&self) -> &Equal<TextRange, SyntaxToken<Lang>> {
+    &self.equal
   }
 
   /// Returns the default value expression.
-  #[inline]
-  pub fn value(&self) -> Value
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn value(&self) -> &Value {
+    &self.value
   }
 
   /// Creates a parser for default value assignments with constant validation.
@@ -109,6 +102,8 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Equal<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     VP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     Equal::parser(builder)

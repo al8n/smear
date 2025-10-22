@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -41,9 +41,7 @@ where
 
   /// Tries to create `ExtensionTypeGenerics` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -72,7 +70,7 @@ where
 
   /// Returns the type parameters as children.
   #[inline]
-  pub fn params(&self) -> logosky::cst::SyntaxNodeChildren<Type>
+  pub fn params(&self) -> logosky::cst::CstNodeChildren<Type>
   where
     Type: CstNode<Language = Lang>,
   {

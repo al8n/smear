@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children, error::CastNodeError},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::children, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -36,9 +36,7 @@ where
 
   /// Tries to create a `Document` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -56,7 +54,7 @@ where
 
   /// Returns the definitions in the document.
   #[inline]
-  pub fn definitions(&self) -> logosky::cst::SyntaxNodeChildren<Definition>
+  pub fn definitions(&self) -> logosky::cst::CstNodeChildren<Definition>
   where
     Definition: CstNode<Language = Lang>,
   {

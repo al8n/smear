@@ -1,14 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{child, children, token},
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::{
   keywords,
@@ -22,8 +17,9 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _key: PhantomData<Key>,
-  _value: PhantomData<Value>,
+  key: Key,
+  fat_arrow: FatArrow<TextRange, SyntaxToken<Lang>>,
+  value: Value,
 }
 
 impl<Key, Value, Lang> MapEntry<Key, Value, Lang>
@@ -33,61 +29,54 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    key: Key,
+    fat_arrow: FatArrow<TextRange, SyntaxToken<Lang>>,
+    value: Value,
+  ) -> Self {
     Self {
       syntax,
-      _key: PhantomData,
-      _value: PhantomData,
+      key,
+      fat_arrow,
+      value,
     }
   }
 
   /// Tries to create a `MapEntry` from the given syntax node.
-  #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the span of the map entry.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the map entry.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the key of the map entry.
-  #[inline]
-  pub fn key(&self) -> Key
-  where
-    Key: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn key(&self) -> &Key {
+    &self.key
   }
 
   /// Returns the fat arrow token.
-  #[inline]
-  pub fn fat_arrow_token(&self) -> FatArrow<TextRange, SyntaxToken<Lang>>
-  where
-    FatArrow<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &FatArrow::KIND)
-      .map(|t| FatArrow::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn fat_arrow_token(&self) -> &FatArrow<TextRange, SyntaxToken<Lang>> {
+    &self.fat_arrow
   }
 
   /// Returns the value of the map entry.
-  #[inline]
-  pub fn value(&self) -> Value
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn value(&self) -> &Value {
+    &self.value
   }
 
   /// Creates a parser for a single map entry.
@@ -155,36 +144,47 @@ where
 /// MapEntries ::= MapEntry+
 /// MapEntry ::= Key '=>' Value
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Map<Key, Value, Lang>
 where
   Lang: Language,
+  MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _key: PhantomData<Key>,
-  _value: PhantomData<Value>,
+  map_keyword: keywords::Map<TextRange, SyntaxToken<Lang>>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  entries: CstNodeChildren<MapEntry<Key, Value, Lang>>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Key, Value, Lang> Map<Key, Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    map_keyword: keywords::Map<TextRange, SyntaxToken<Lang>>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    entries: CstNodeChildren<MapEntry<Key, Value, Lang>>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _key: PhantomData,
-      _value: PhantomData,
+      map_keyword,
+      l_brace,
+      entries,
+      r_brace,
     }
   }
 
   /// Tries to create a `Map` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -200,46 +200,28 @@ where
     &self.syntax
   }
 
-  /// Returns the map keyword token.
+  /// Returns the map keyword.
   #[inline]
-  pub fn map_keyword_token(&self) -> keywords::Map<TextRange, SyntaxToken<Lang>>
-  where
-    keywords::Map<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &keywords::Map::KIND)
-      .map(|t| keywords::Map::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn map_keyword(&self) -> &keywords::Map<TextRange, SyntaxToken<Lang>> {
+    &self.map_keyword
   }
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the entries contained in the map.
   #[inline]
-  pub fn entries(&self) -> logosky::cst::SyntaxNodeChildren<MapEntry<Key, Value, Lang>>
-  where
-    MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn entries(&self) -> &CstNodeChildren<MapEntry<Key, Value, Lang>> {
+    &self.entries
   }
 
   /// Creates a parser for GraphQLx map literals.
@@ -261,6 +243,8 @@ where
     KP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
     MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     keywords::Map::parser(builder)
@@ -285,7 +269,8 @@ where
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  MapEntry<Key, Value, Lang>: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  MapEntry<Key, Value, Lang>:
+    Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Language = Lang>,

@@ -2,8 +2,9 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
     cast::{child, children, token},
+    error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -46,9 +47,7 @@ where
 
   /// Tries to create a `RootOperationTypeDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -157,9 +156,7 @@ where
 
   /// Tries to create a `RootOperationTypesDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -201,7 +198,7 @@ where
   #[inline]
   pub fn root_operation_type_definitions(
     &self,
-  ) -> logosky::cst::SyntaxNodeChildren<RootOperationTypeDefinition>
+  ) -> logosky::cst::CstNodeChildren<RootOperationTypeDefinition>
   where
     RootOperationTypeDefinition: CstNode<Language = Lang>,
   {

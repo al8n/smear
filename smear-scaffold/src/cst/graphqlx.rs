@@ -25,7 +25,7 @@
 //! assert!(SyntaxKind::Binary.is_graphqlx_extension());
 //! ```
 
-// mod r#impl;
+mod r#impl;
 
 /// GraphQLx Concrete Syntax Tree node kind.
 ///

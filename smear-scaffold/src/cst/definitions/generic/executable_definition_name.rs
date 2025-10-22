@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -41,9 +41,7 @@ where
 
   /// Tries to create an `ExecutableDefinitionName` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 

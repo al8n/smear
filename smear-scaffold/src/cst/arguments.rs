@@ -1,14 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{child, children, token},
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 use smear_lexer::punctuator::{Colon, LParen, RParen};
 
@@ -25,36 +22,40 @@ use smear_lexer::punctuator::{Colon, LParen, RParen};
 /// ```
 ///
 /// Spec: [Argument](https://spec.graphql.org/draft/#Argument)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Argument<Name, Value, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _value: PhantomData<Value>,
+  name: Name,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  value: Value,
 }
 
 impl<Name, Value, Lang> Argument<Name, Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    value: Value,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
-      _value: PhantomData,
+      name,
+      colon,
+      value,
     }
   }
 
   /// Tries to create an `Argument` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
   where
-    Lang::Kind: Into<rowan::SyntaxKind>,
     Self: CstNode<Language = Lang>,
   {
     Self::try_cast_node(syntax)
@@ -77,23 +78,15 @@ where
   }
 
   /// Returns the argument name.
-  #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the colon token separating the name and value.
-  #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
+    &self.colon
   }
 
   /// Returns the argument value.
@@ -101,12 +94,9 @@ where
   /// This provides access to the value assigned to this argument. The value
   /// can be any valid GraphQL input value including scalars, enums, objects,
   /// lists, variables, or null depending on the argument's expected type.
-  #[inline]
-  pub fn value(&self) -> Value
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn value(&self) -> &Value {
+    &self.value
   }
 
   /// Creates a parser for arguments with custom name and value parsers.
@@ -130,6 +120,8 @@ where
     Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
+    Self: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
     name_parser(builder)
@@ -143,9 +135,9 @@ where
 
 impl<'a, Name, Value, Lang, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value, Lang>
 where
-  Name: Parseable<'a, I, T, Error, Language = Lang>,
+  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + Clone,
   Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  Value: Parseable<'a, I, T, Error, Language = Lang>,
+  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + Clone,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Language = Lang>,
@@ -211,32 +203,42 @@ where
 /// - **Arguments**: The collection of parsed arguments
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Arguments<Arg, Lang>
 where
   Lang: Language,
+  Arg: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _arg: PhantomData<Arg>,
+  arguments: CstNodeChildren<Arg>,
+  l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+  r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Arg, Lang> Arguments<Arg, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
+  Arg: CstNode<Language = Lang>,
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+    arguments: CstNodeChildren<Arg>,
+    r_paren: RParen<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _arg: PhantomData,
+      arguments,
+      l_paren,
+      r_paren,
     }
   }
 
   /// Tries to create a `Arguments` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -262,13 +264,8 @@ where
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and precise error reporting at argument boundaries.
   #[inline]
-  pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
-  where
-    LParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LParen::KIND)
-      .map(|t| LParen::with_content(t.text_range(), t))
-      .unwrap()
+  pub fn l_paren_token(&self) -> &LParen<TextRange, SyntaxToken<Lang>> {
+    &self.l_paren
   }
 
   /// Returns the closing parenthesis token.
@@ -277,13 +274,8 @@ where
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and detecting incomplete argument lists.
   #[inline]
-  pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
-  where
-    RParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RParen::KIND)
-      .map(|t| RParen::with_content(t.text_range(), t))
-      .unwrap()
+  pub fn r_paren_token(&self) -> &RParen<TextRange, SyntaxToken<Lang>> {
+    &self.r_paren
   }
 
   /// Returns the collection of arguments.
@@ -291,11 +283,8 @@ where
   /// This provides access to all arguments that were successfully parsed
   /// from the argument list.
   #[inline]
-  pub fn arguments(&self) -> logosky::cst::SyntaxNodeChildren<Arg>
-  where
-    Arg: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub fn arguments(&self) -> &CstNodeChildren<Arg> {
+    &self.arguments
   }
 
   /// Creates a parser for arguments using the provided argument parser.
@@ -313,6 +302,8 @@ where
     LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     AP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     LParen::parser(builder)
@@ -326,7 +317,7 @@ where
 
 impl<'a, Arg, Lang, I, T, Error> Parseable<'a, I, T, Error> for Arguments<Arg, Lang>
 where
-  Arg: Parseable<'a, I, T, Error, Language = Lang>,
+  Arg: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,

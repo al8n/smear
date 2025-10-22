@@ -1,17 +1,14 @@
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::cast::children,
+  cst::CstNodeChildren,
 };
 
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 use smear_lexer::punctuator::At;
 
-use super::{
-  CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-  cast::{child, token},
-};
+use super::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError};
 
 /// Represents a single directive in a GraphQL-style syntax.
 ///
@@ -19,14 +16,15 @@ use super::{
 /// For example: `@deprecated`, `@include(if: true)`, `@customDirective(arg1: "value", arg2: 42)`
 ///
 /// Spec: [Directive](https://spec.graphql.org/draft/#Directive)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Directive<Name, Args, Lang>
 where
   Lang: Language,
 {
-  node: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _args: PhantomData<Args>,
+  syntax: SyntaxNode<Lang>,
+  at: At<TextRange, SyntaxToken<Lang>>,
+  name: Name,
+  arguments: Option<Args>,
 }
 
 impl<Name, Args, Lang> Directive<Name, Args, Lang>
@@ -36,7 +34,7 @@ where
   /// Returns the syntax node of this directive.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
-    &self.node
+    &self.syntax
   }
 }
 
@@ -47,45 +45,42 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    at: At<TextRange, SyntaxToken<Lang>>,
+    name: Name,
+    arguments: Option<Args>,
+  ) -> Self {
     Self {
-      node: syntax,
-      _name: PhantomData,
-      _args: PhantomData,
+      syntax,
+      at,
+      name,
+      arguments,
     }
   }
 
   /// Tries to create a `Directive` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the at symbol token, if present.
-  #[inline]
-  pub fn at(&self) -> Option<At<TextRange, SyntaxToken<Lang>>>
-  where
-    At<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &At::KIND).map(|t| At::with_content(t.text_range(), t))
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn at(&self) -> &At<TextRange, SyntaxToken<Lang>> {
+    &self.at
   }
 
   /// Returns the directive name.
-  #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the optional arguments.
-  #[inline]
-  pub fn arguments(&self) -> Option<Args>
-  where
-    Args: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn arguments(&self) -> Option<&Args> {
+    self.arguments.as_ref()
   }
 
   /// Creates a parser for a directive using the provided name and arguments parsers.
@@ -154,19 +149,20 @@ where
 /// and providing access to all individual directives.
 ///
 /// Spec: [Directives](https://spec.graphql.org/draft/#Directives)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Directives<Directive, Lang>
 where
   Lang: Language,
+  Directive: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _directive: PhantomData<Directive>,
+  directives: CstNodeChildren<Directive>,
 }
 
 impl<Directive, Lang> Directives<Directive, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
+  Directive: CstNode<Language = Lang>,
 {
   /// Returns the syntax node of this directives collection.
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -178,30 +174,29 @@ where
 impl<Directive, Lang> Directives<Directive, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Directive: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _directive: PhantomData,
-    }
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    directives: CstNodeChildren<Directive>,
+  ) -> Self {
+    Self { syntax, directives }
   }
 
   /// Tries to create a `Directives` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the collection of directives.
   #[inline]
-  pub fn directives(&self) -> logosky::cst::SyntaxNodeChildren<Directive>
-  where
-    Directive: CstNode<Language = Lang>,
-  {
-    children::<Directive>(self.syntax())
+  pub fn directives(&self) -> &CstNodeChildren<Directive> {
+    &self.directives
   }
 
   /// Creates a parser for a collection of directives using the provided directive parser.
@@ -217,6 +212,7 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
     DP: Parser<'a, I, (), E> + Clone,
     Self: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
     directive_parser(builder).repeated().at_least(1).map(|_| {
@@ -227,7 +223,7 @@ where
 
 impl<'a, Directive, Lang, I, T, Error> Parseable<'a, I, T, Error> for Directives<Directive, Lang>
 where
-  Directive: Parseable<'a, I, T, Error, Language = Lang> + 'a,
+  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + 'a,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Language = Lang> + 'a,

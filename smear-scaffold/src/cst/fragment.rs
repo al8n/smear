@@ -1,14 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{child, token},
-  },
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 use smear_lexer::{keywords::On, punctuator::Spread};
 
@@ -25,54 +22,49 @@ use smear_lexer::{keywords::On, punctuator::Spread};
 /// ```
 ///
 /// Spec: [Fragment Name](https://spec.graphql.org/draft/#FragmentName)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FragmentName<Name, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
+  name: Name,
 }
 
 impl<Name, Lang> FragmentName<Name, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _name: PhantomData,
-    }
+  pub(super) const fn new(syntax: SyntaxNode<Lang>, name: Name) -> Self {
+    Self { syntax, name }
   }
 
   /// Tries to create a `FragmentName` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the fragment name.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the fragment name.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the underlying name value.
-  #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 }
 
@@ -89,65 +81,60 @@ where
 /// ```
 ///
 /// Spec: [Type Conditions](https://spec.graphql.org/draft/#sec-Type-Conditions)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct TypeCondition<Name, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
+  on: On<TextRange, SyntaxToken<Lang>>,
+  name: Name,
 }
 
 impl<Name, Lang> TypeCondition<Name, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _name: PhantomData,
-    }
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    on: On<TextRange, SyntaxToken<Lang>>,
+    name: Name,
+  ) -> Self {
+    Self { syntax, on, name }
   }
 
   /// Tries to create a `TypeCondition` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire type condition.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the type condition.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the type condition that follows the `on` keyword.
-  #[inline]
-  pub fn on_keyword(&self) -> On<TextRange, SyntaxToken<Lang>>
-  where
-    On<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &On::KIND)
-      .map(|t| On::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn on_keyword(&self) -> &On<TextRange, SyntaxToken<Lang>> {
+    &self.on
   }
 
   /// Returns the type name that follows the `on` keyword.
-  #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Creates a parser that can parse a type condition with a custom name parser.
@@ -163,6 +150,8 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
     NP: Parser<'a, I, (), E> + Clone,
     On<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     On::parser(builder)
@@ -211,20 +200,20 @@ where
 /// ```
 ///
 /// Spec: [Fragment Spreads](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Spreads)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FragmentSpread<FragmentName, Directives, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _fragment_name: PhantomData<FragmentName>,
-  _directives: PhantomData<Directives>,
+  spread: Spread<TextRange, SyntaxToken<Lang>>,
+  name: FragmentName,
+  directives: Option<Directives>,
 }
 
 impl<FragmentName, Directives, Lang> FragmentSpread<FragmentName, Directives, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
 {
   /// Returns the syntax node representing the fragment spread.
   #[inline]
@@ -236,57 +225,53 @@ where
 impl<FragmentName, Directives, Lang> FragmentSpread<FragmentName, Directives, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    spread: Spread<TextRange, SyntaxToken<Lang>>,
+    name: FragmentName,
+    directives: Option<Directives>,
+  ) -> Self {
     Self {
       syntax,
-      _fragment_name: PhantomData,
-      _directives: PhantomData,
+      spread,
+      name,
+      directives,
     }
   }
 
   /// Tries to create a `FragmentSpread` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire fragment spread.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the spread operator (`...`) token.
-  #[inline]
-  pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
-  where
-    Spread<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Spread::KIND)
-      .map(|t| Spread::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn spread_token(&self) -> &Spread<TextRange, SyntaxToken<Lang>> {
+    &self.spread
   }
 
   /// Returns the fragment name being spread.
-  #[inline]
-  pub fn name(&self) -> FragmentName
-  where
-    FragmentName: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn name(&self) -> &FragmentName {
+    &self.name
   }
 
   /// Returns the directives applied to this fragment spread, if any.
-  #[inline]
-  pub fn directives(&self) -> Directives
-  where
-    Directives: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 
   /// Creates a parser that can parse a fragment spread with custom parsers.
@@ -304,6 +289,8 @@ where
     Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     FP: Parser<'a, I, (), E> + Clone,
     DP: Parser<'a, I, (), E> + Clone,
+    Self: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
     Spread::parser(builder)
@@ -355,25 +342,25 @@ where
 /// ```
 ///
 /// Spec: [Inline Fragments](https://spec.graphql.org/draft/#sec-Inline-Fragments)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _type_condition: PhantomData<TypeCondition>,
-  _directives: PhantomData<Directives>,
-  _selection_set: PhantomData<SelectionSet>,
+  spread: Spread<TextRange, SyntaxToken<Lang>>,
+  type_condition: Option<TypeCondition>,
+  directives: Option<Directives>,
+  selection_set: SelectionSet,
 }
 
 impl<TypeCondition, Directives, SelectionSet, Lang>
   InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
 {
   /// Returns the syntax node representing the inline fragment.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
@@ -383,67 +370,61 @@ impl<TypeCondition, Directives, SelectionSet, Lang>
   InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    spread: Spread<TextRange, SyntaxToken<Lang>>,
+    type_condition: Option<TypeCondition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
     Self {
       syntax,
-      _type_condition: PhantomData,
-      _directives: PhantomData,
-      _selection_set: PhantomData,
+      spread,
+      type_condition,
+      directives,
+      selection_set,
     }
   }
 
   /// Tries to create an `InlineFragment` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire inline fragment.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the spread operator (`...`) token.
-  #[inline]
-  pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
-  where
-    Spread<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Spread::KIND)
-      .map(|t| Spread::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn spread_token(&self) -> &Spread<TextRange, SyntaxToken<Lang>> {
+    &self.spread
   }
 
-  /// Returns the type condition, if present.
-  #[inline]
-  pub fn type_condition(&self) -> Option<TypeCondition>
-  where
-    TypeCondition: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  /// Returns the optional type condition.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn type_condition(&self) -> Option<&TypeCondition> {
+    self.type_condition.as_ref()
   }
 
   /// Returns the directives applied to this inline fragment, if any.
-  #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 
   /// Returns the selection set containing the fields to be selected.
-  #[inline]
-  pub fn selection_set(&self) -> SelectionSet
-  where
-    SelectionSet: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn selection_set(&self) -> &SelectionSet {
+    &self.selection_set
   }
 
   /// Creates a parser that can parse an inline fragment with custom component parsers.
@@ -463,6 +444,8 @@ where
     TP: Parser<'a, I, (), E> + Clone,
     DP: Parser<'a, I, (), E> + Clone,
     SP: Parser<'a, I, (), E> + Clone,
+    Self: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
     Spread::parser(builder)
@@ -478,7 +461,7 @@ where
 impl<'a, TypeCondition, Directives, SelectionSet, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 where
-  TypeCondition: Parseable<'a, I, T, Error, Language = Lang> + 'a,
+  TypeCondition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + 'a,
   Directives: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   SelectionSet: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,

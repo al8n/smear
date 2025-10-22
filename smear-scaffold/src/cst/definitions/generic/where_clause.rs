@@ -2,9 +2,9 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
     cast::{child, children},
-    error::CastNodeError,
+    error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -49,9 +49,7 @@ where
 
   /// Tries to create a `WherePredicate` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -171,9 +169,7 @@ where
 
   /// Tries to create a `WhereClause` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -202,7 +198,7 @@ where
 
   /// Returns the where predicates.
   #[inline]
-  pub fn predicates(&self) -> logosky::cst::SyntaxNodeChildren<WherePredicate<Ident, Type, Lang>>
+  pub fn predicates(&self) -> logosky::cst::CstNodeChildren<WherePredicate<Ident, Type, Lang>>
   where
     WherePredicate<Ident, Type, Lang>: CstNode<Language = Lang>,
   {
@@ -281,9 +277,7 @@ where
 
   /// Tries to create a `Constrained` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 

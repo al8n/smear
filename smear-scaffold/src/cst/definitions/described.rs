@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -38,9 +38,7 @@ where
 
   /// Tries to create a `Described` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 

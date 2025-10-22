@@ -1,14 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{child, children, token},
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 
@@ -28,30 +23,36 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _value: PhantomData<Value>,
+  name: Name,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  value: Value,
 }
 
 impl<Name, Value, Lang> ObjectField<Name, Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    value: Value,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
-      _value: PhantomData,
+      name,
+      colon,
+      value,
     }
   }
 
   /// Tries to create an `ObjectField` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -69,31 +70,20 @@ where
 
   /// Returns the field name.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the colon token.
   #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
+    &self.colon
   }
 
   /// Returns the field value.
   #[inline]
-  pub fn value(&self) -> Value
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn value(&self) -> &Value {
+    &self.value
   }
 
   /// Creates a parser for object fields.
@@ -111,6 +101,8 @@ where
     Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     name_parser(builder)
@@ -164,36 +156,44 @@ where
 /// ```
 ///
 /// Spec: [Input Object Values](https://spec.graphql.org/draft/#sec-Input-Object-Values)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Object<Name, Value, Lang>
 where
   Lang: Language,
+  ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _value: PhantomData<Value>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  fields: CstNodeChildren<ObjectField<Name, Value, Lang>>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Name, Value, Lang> Object<Name, Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    fields: CstNodeChildren<ObjectField<Name, Value, Lang>>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
-      _value: PhantomData,
+      l_brace,
+      fields,
+      r_brace,
     }
   }
 
   /// Tries to create an `Object` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -211,33 +211,20 @@ where
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the fields contained in the object.
   #[inline]
-  pub fn fields(&self) -> logosky::cst::SyntaxNodeChildren<ObjectField<Name, Value, Lang>>
-  where
-    ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn fields(&self) -> &CstNodeChildren<ObjectField<Name, Value, Lang>> {
+    &self.fields
   }
 
   /// Creates a parser for GraphQL object literals.
@@ -258,6 +245,8 @@ where
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
     ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     LBrace::parser(builder)

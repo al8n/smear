@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
     cast::{child, children},
   },
 };
@@ -42,9 +42,7 @@ where
 
   /// Tries to create an `ExecutableDefinitionTypeParam` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -126,9 +124,7 @@ where
 
   /// Tries to create `ExecutableDefinitionTypeGenerics` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -157,9 +153,7 @@ where
 
   /// Returns the type parameters.
   #[inline]
-  pub fn params(
-    &self,
-  ) -> logosky::cst::SyntaxNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>>
+  pub fn params(&self) -> logosky::cst::CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>>
   where
     ExecutableDefinitionTypeParam<Ident, Lang>: CstNode<Language = Lang>,
   {

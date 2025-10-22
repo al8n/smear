@@ -1,4 +1,4 @@
-use logosky::cst::{CstNode, CstElement, error::CastNodeError};
+use logosky::cst::{CstElement, CstNode, error::SyntaxError};
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
 use smear_lexer::keywords::{Mutation, Query, Subscription};
@@ -38,7 +38,7 @@ where
   Self: CstNode<Language = Lang>,
 {
   /// Tries to create an `OperationType` from the given syntax node.
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 

@@ -1,14 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{children, token},
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::punctuator::{LBracket, RBracket};
 
@@ -25,34 +20,44 @@ use smear_lexer::punctuator::{LBracket, RBracket};
 /// ```
 ///
 /// Spec: [List Value](https://spec.graphql.org/draft/#sec-List-Value)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct List<Value, Lang>
 where
   Lang: Language,
+  Value: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _value: PhantomData<Value>,
+  l_bracket: LBracket<TextRange, SyntaxToken<Lang>>,
+  values: CstNodeChildren<Value>,
+  r_bracket: RBracket<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Value, Lang> List<Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Value: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_bracket: LBracket<TextRange, SyntaxToken<Lang>>,
+    values: CstNodeChildren<Value>,
+    r_bracket: RBracket<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _value: PhantomData,
+      l_bracket,
+      values,
+      r_bracket,
     }
   }
 
   /// Tries to create a `List` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -70,33 +75,20 @@ where
 
   /// Returns the left bracket token.
   #[inline]
-  pub fn l_bracket_token(&self) -> LBracket<TextRange, SyntaxToken<Lang>>
-  where
-    LBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LBracket::KIND)
-      .map(|t| LBracket::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_bracket_token(&self) -> &LBracket<TextRange, SyntaxToken<Lang>> {
+    &self.l_bracket
   }
 
   /// Returns the right bracket token.
   #[inline]
-  pub fn r_bracket_token(&self) -> RBracket<TextRange, SyntaxToken<Lang>>
-  where
-    RBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RBracket::KIND)
-      .map(|t| RBracket::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_bracket_token(&self) -> &RBracket<TextRange, SyntaxToken<Lang>> {
+    &self.r_bracket
   }
 
   /// Returns the values contained in the list.
   #[inline]
-  pub fn values(&self) -> logosky::cst::SyntaxNodeChildren<Value>
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn values(&self) -> &CstNodeChildren<Value> {
+    &self.values
   }
 
   /// Creates a parser for GraphQL list literals with customizable value parsing.
@@ -113,6 +105,8 @@ where
     LBracket<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     RBracket<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     VP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     LBracket::parser(builder)
@@ -126,7 +120,7 @@ where
 
 impl<'a, Value, Lang, I, T, Error> Parseable<'a, I, T, Error> for List<Value, Lang>
 where
-  Value: Parseable<'a, I, T, Error, Language = Lang>,
+  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LBracket<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBracket<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

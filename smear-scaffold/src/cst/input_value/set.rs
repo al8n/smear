@@ -2,13 +2,12 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
+    CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder,
     cast::{children, token},
+    error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::{
   keywords,
@@ -27,34 +26,47 @@ use smear_lexer::{
 /// Set ::= 'set' '{' Values? '}'
 /// Values ::= Value+
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Set<Value, Lang>
 where
   Lang: Language,
+  Value: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _value: PhantomData<Value>,
+  set_keyword: keywords::Set<TextRange, SyntaxToken<Lang>>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  values: CstNodeChildren<Value>,
 }
 
 impl<Value, Lang> Set<Value, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Value: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    set_keyword: keywords::Set<TextRange, SyntaxToken<Lang>>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    values: CstNodeChildren<Value>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _value: PhantomData,
+      set_keyword,
+      l_brace,
+      values,
+      r_brace,
     }
   }
 
   /// Tries to create a `Set` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -105,7 +117,7 @@ where
 
   /// Returns the values contained in the set.
   #[inline]
-  pub fn values(&self) -> logosky::cst::SyntaxNodeChildren<Value>
+  pub fn values(&self) -> logosky::cst::CstNodeChildren<Value>
   where
     Value: CstNode<Language = Lang>,
   {
@@ -127,6 +139,8 @@ where
     LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     VP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     keywords::Set::parser(builder)
@@ -141,7 +155,7 @@ where
 
 impl<'a, Value, Lang, I, T, Error> Parseable<'a, I, T, Error> for Set<Value, Lang>
 where
-  Value: Parseable<'a, I, T, Error, Language = Lang>,
+  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   keywords::Set<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,

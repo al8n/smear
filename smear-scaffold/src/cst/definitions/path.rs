@@ -1,7 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError, cast::children},
+  cst::{
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::children, error::SyntaxError,
+  },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -40,9 +42,7 @@ where
 
   /// Tries to create a `Path` from the given syntax node.
   #[inline]
-  pub fn try_new(
-    syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -81,7 +81,7 @@ where
 
   /// Returns the path segments as children.
   #[inline]
-  pub fn segments(&self) -> logosky::cst::SyntaxNodeChildren<Ident>
+  pub fn segments(&self) -> logosky::cst::CstNodeChildren<Ident>
   where
     Ident: CstNode<Language = Lang>,
   {

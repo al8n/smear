@@ -2,17 +2,30 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::{children, token}, error::CastNodeError
+    CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder,
+    error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::punctuator::{LBrace, RBrace};
 
 /// The standard selection set implementations.
 pub mod standard;
+
+/// The components of a [`SelectionSet`] syntax.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum SelectionSetSyntax {
+  /// The left brace token.
+  #[display("'{{'")]
+  LBrace,
+  /// The selections node.
+  #[display("selections")]
+  Selections,
+  /// The right brace token.
+  #[display("'}}'")]
+  RBrace,
+}
 
 /// Represents a selection set in GraphQL syntax.
 ///
@@ -31,19 +44,23 @@ pub mod standard;
 /// Empty selection sets `{}` are not valid in GraphQL.
 ///
 /// Spec: [Selection Sets](https://spec.graphql.org/draft/#sec-Selection-Sets)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct SelectionSet<Selection, Lang>
 where
   Lang: Language,
+  Selection: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _selection: PhantomData<Selection>,
+  selections: CstNodeChildren<Selection>,
+  lbrace: LBrace<TextRange, SyntaxToken<Lang>>,
+  rbrace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Selection, Lang> SelectionSet<Selection, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
+  Selection: CstNode<Language = Lang>,
 {
   /// Returns the syntax node representing the selection set.
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -56,19 +73,27 @@ impl<Selection, Lang> SelectionSet<Selection, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
+  Selection: CstNode<Language = Lang>,
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    selections: CstNodeChildren<Selection>,
+    lbrace: LBrace<TextRange, SyntaxToken<Lang>>,
+    rbrace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _selection: PhantomData,
+      selections,
+      lbrace,
+      rbrace,
     }
   }
 
   /// Tries to create a `SelectionSet` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -80,33 +105,26 @@ where
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
+  pub fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>>
   where
     LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+    &self.lbrace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
+  pub fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>>
   where
     RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+    &self.rbrace
   }
 
   /// Returns the container holding all selections.
   #[inline]
-  pub fn selections(&self) -> logosky::cst::SyntaxNodeChildren<Selection>
-  where
-    Selection: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub fn selections(&self) -> &CstNodeChildren<Selection> {
+    &self.selections
   }
 
   /// Creates a parser that can parse a selection set with a custom selection parser.
@@ -136,7 +154,7 @@ where
 
 impl<'a, Selection, Lang, I, T, Error> Parseable<'a, I, T, Error> for SelectionSet<Selection, Lang>
 where
-  Selection: Parseable<'a, I, T, Error, Language = Lang>,
+  Selection: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

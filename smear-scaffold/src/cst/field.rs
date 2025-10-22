@@ -1,14 +1,9 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
-  cst::{
-    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
-    cast::{child, token},
-  },
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
-
-use core::marker::PhantomData;
 
 use smear_lexer::punctuator::Colon;
 
@@ -28,32 +23,36 @@ pub mod standard;
 /// ```
 ///
 /// Spec: [Field Alias](https://spec.graphql.org/draft/#sec-Field-Alias)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Alias<Name, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
+  name: Name,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Name, Lang> Alias<Name, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
+      name,
+      colon,
     }
   }
 
   /// Tries to create an `Alias` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
   where
     Lang::Kind: Into<rowan::SyntaxKind>,
     Self: CstNode<Language = Lang>,
@@ -75,22 +74,14 @@ where
 
   /// Attempts to cast a syntax node to a `Name`.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the colon token separating the alias and the field name.
   #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
+    &self.colon
   }
 
   /// Creates a parser for an alias using the provided name parser.
@@ -106,6 +97,8 @@ where
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
+    Lang::Kind: Into<rowan::SyntaxKind>,
+    Self: CstNode<Language = Lang>,
   {
     builder.start_node(Self::KIND);
     name_parser(builder)
@@ -154,24 +147,23 @@ where
 /// ```
 ///
 /// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _alias: PhantomData<Alias>,
-  _name: PhantomData<Name>,
-  _arguments: PhantomData<Arguments>,
-  _directives: PhantomData<Directives>,
-  _selection_set: PhantomData<SelectionSet>,
+  alias: Option<Alias>,
+  name: Name,
+  arguments: Option<Arguments>,
+  directives: Option<Directives>,
+  selection_set: Option<SelectionSet>,
 }
 
 impl<Alias, Name, Arguments, Directives, SelectionSet, Lang>
   Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
 {
   /// Returns the syntax node representing the entire field.
   #[inline]
@@ -188,20 +180,27 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(super) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(super) const fn new(
+    syntax: SyntaxNode<Lang>,
+    alias: Option<Alias>,
+    name: Name,
+    arguments: Option<Arguments>,
+    directives: Option<Directives>,
+    selection_set: Option<SelectionSet>,
+  ) -> Self {
     Self {
       syntax,
-      _alias: PhantomData,
-      _name: PhantomData,
-      _arguments: PhantomData,
-      _directives: PhantomData,
-      _selection_set: PhantomData,
+      alias,
+      name,
+      arguments,
+      directives,
+      selection_set,
     }
   }
 
   /// Tries to create a `Field` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
@@ -213,47 +212,32 @@ where
 
   /// Returns the field's alias, if present.
   #[inline]
-  pub fn alias(&self) -> Option<Alias>
-  where
-    Alias: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn alias(&self) -> Option<&Alias> {
+    self.alias.as_ref()
   }
 
   /// Returns the field's name.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the field's arguments, if present.
   #[inline]
-  pub fn arguments(&self) -> Option<Arguments>
-  where
-    Arguments: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub fn arguments(&self) -> Option<&Arguments> {
+    self.arguments.as_ref()
   }
 
   /// Returns the field's directives, if present.
   #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 
   /// Returns the field's selection set, if present.
   #[inline]
-  pub fn selection_set(&self) -> Option<SelectionSet>
-  where
-    SelectionSet: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub fn selection_set(&self) -> Option<&SelectionSet> {
+    self.selection_set.as_ref()
   }
 
   /// Creates a parser that can parse a complete field with custom component parsers.
