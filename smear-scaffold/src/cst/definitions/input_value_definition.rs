@@ -1,13 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use smear_lexer::punctuator::Colon;
 
 /// Represents a GraphQL input value definition in CST.
@@ -22,16 +20,17 @@ use smear_lexer::punctuator::Colon;
 /// ```
 ///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _ty: PhantomData<Type>,
-  _default_value: PhantomData<DefaultValue>,
-  _directives: PhantomData<Directives>,
+  name: Name,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  ty: Type,
+  default_value: Option<DefaultValue>,
+  directives: Option<Directives>,
 }
 
 impl<Name, Type, DefaultValue, Directives, Lang>
@@ -42,13 +41,21 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    ty: Type,
+    default_value: Option<DefaultValue>,
+    directives: Option<Directives>,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
-      _ty: PhantomData,
-      _default_value: PhantomData,
-      _directives: PhantomData,
+      name,
+      colon,
+      ty,
+      default_value,
+      directives,
     }
   }
 
@@ -74,47 +81,45 @@ where
   #[inline]
   pub fn name(&self) -> Name
   where
-    Name: CstNode<Language = Lang>,
+    Name: Clone,
   {
-    child(self.syntax()).unwrap()
+    self.name.clone()
   }
 
   /// Returns the colon token.
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: Clone,
   {
-    logosky::cst::cast::token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+    self.colon.clone()
   }
 
   /// Returns the type.
   #[inline]
   pub fn ty(&self) -> Type
   where
-    Type: CstNode<Language = Lang>,
+    Type: Clone,
   {
-    child(self.syntax()).unwrap()
+    self.ty.clone()
   }
 
   /// Returns the optional default value.
   #[inline]
   pub fn default_value(&self) -> Option<DefaultValue>
   where
-    DefaultValue: CstNode<Language = Lang>,
+    DefaultValue: Clone,
   {
-    child(self.syntax())
+    self.default_value.clone()
   }
 
   /// Returns the optional directives.
   #[inline]
   pub fn directives(&self) -> Option<Directives>
   where
-    Directives: CstNode<Language = Lang>,
+    Directives: Clone,
   {
-    child(self.syntax())
+    self.directives.clone()
   }
 }
 

@@ -1,44 +1,52 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
-    cast::{children, token},
-    error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use smear_lexer::punctuator::{LBrace, RBrace};
 
 /// Represents a fields definition in GraphQL schema.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FieldsDefinition<FieldDefinition, Lang>
 where
   Lang: Language,
+  FieldDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _field_definition: PhantomData<FieldDefinition>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  fields: CstNodeChildren<FieldDefinition>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<FieldDefinition, Lang> FieldsDefinition<FieldDefinition, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  FieldDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    fields: CstNodeChildren<FieldDefinition>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _field_definition: PhantomData,
+      l_brace,
+      fields,
+      r_brace,
     }
   }
 
   /// Tries to create a `FieldsDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -56,40 +64,30 @@ where
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the collection of field definitions.
   #[inline]
-  pub fn field_definitions(&self) -> logosky::cst::CstNodeChildren<FieldDefinition>
+  pub const fn field_definitions(&self) -> &CstNodeChildren<FieldDefinition>
   where
-    FieldDefinition: CstNode<Language = Lang>,
+    CstNodeChildren<FieldDefinition>: Clone,
   {
-    children(self.syntax())
+    &self.fields
   }
 }
 
 impl<'a, FieldDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for FieldsDefinition<FieldDefinition, Lang>
 where
-  FieldDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  FieldDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

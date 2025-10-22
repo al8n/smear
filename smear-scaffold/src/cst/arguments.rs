@@ -79,14 +79,20 @@ where
 
   /// Returns the argument name.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn name(&self) -> &Name {
-    &self.name
+  pub fn name(&self) -> Name
+  where
+    Name: Clone,
+  {
+    self.name.clone()
   }
 
   /// Returns the colon token separating the name and value.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
-    &self.colon
+  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
+  where
+    Colon<TextRange, SyntaxToken<Lang>>: Clone,
+  {
+    self.colon.clone()
   }
 
   /// Returns the argument value.
@@ -95,8 +101,11 @@ where
   /// can be any valid GraphQL input value including scalars, enums, objects,
   /// lists, variables, or null depending on the argument's expected type.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn value(&self) -> &Value {
-    &self.value
+  pub fn value(&self) -> Value
+  where
+    Value: Clone,
+  {
+    self.value.clone()
   }
 
   /// Creates a parser for arguments with custom name and value parsers.
@@ -264,8 +273,11 @@ where
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and precise error reporting at argument boundaries.
   #[inline]
-  pub fn l_paren_token(&self) -> &LParen<TextRange, SyntaxToken<Lang>> {
-    &self.l_paren
+  pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
+  where
+    LParen<TextRange, SyntaxToken<Lang>>: Clone,
+  {
+    self.l_paren.clone()
   }
 
   /// Returns the closing parenthesis token.
@@ -274,8 +286,11 @@ where
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and detecting incomplete argument lists.
   #[inline]
-  pub fn r_paren_token(&self) -> &RParen<TextRange, SyntaxToken<Lang>> {
-    &self.r_paren
+  pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
+  where
+    RParen<TextRange, SyntaxToken<Lang>>: Clone,
+  {
+    self.r_paren.clone()
   }
 
   /// Returns the collection of arguments.
@@ -283,8 +298,11 @@ where
   /// This provides access to all arguments that were successfully parsed
   /// from the argument list.
   #[inline]
-  pub fn arguments(&self) -> &CstNodeChildren<Arg> {
-    &self.arguments
+  pub fn arguments(&self) -> CstNodeChildren<Arg>
+  where
+    CstNodeChildren<Arg>: Clone,
+  {
+    self.arguments.clone()
   }
 
   /// Creates a parser for arguments using the provided argument parser.

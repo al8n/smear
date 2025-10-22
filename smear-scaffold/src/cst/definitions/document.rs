@@ -1,23 +1,22 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::children, error::SyntaxError},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
-
-use core::marker::PhantomData;
 
 /// A document consisting of a series of definitions.
 ///
 /// This is the top-level container for GraphQL documents. It holds a collection of definitions
 /// (type system definitions, executable definitions, or both) and tracks the source span.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Document<Definition, Lang>
 where
   Lang: Language,
+  Definition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _definition: PhantomData<Definition>,
+  definitions: CstNodeChildren<Definition>,
 }
 
 impl<Definition, Lang> Document<Definition, Lang>
@@ -25,12 +24,16 @@ where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Language = Lang>,
+  Definition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    definitions: CstNodeChildren<Definition>,
+  ) -> Self {
     Self {
       syntax,
-      _definition: PhantomData,
+      definitions,
     }
   }
 
@@ -54,11 +57,11 @@ where
 
   /// Returns the definitions in the document.
   #[inline]
-  pub fn definitions(&self) -> logosky::cst::CstNodeChildren<Definition>
+  pub fn definitions(&self) -> CstNodeChildren<Definition>
   where
-    Definition: CstNode<Language = Lang>,
+    CstNodeChildren<Definition>: Clone,
   {
-    children(self.syntax())
+    self.definitions.clone()
   }
 }
 
@@ -68,6 +71,7 @@ where
   Definition: Parseable<'a, I, Token, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
+  Definition: CstNode<Language = Lang>,
   Self: CstNode<Language = Lang>,
 {
   type Language = Lang;

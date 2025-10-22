@@ -1,15 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
-    cast::{children, token},
-    error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use smear_lexer::punctuator::{LParen, RParen};
 
 /// Represents an arguments definition in GraphQL schema syntax.
@@ -24,32 +20,44 @@ use smear_lexer::punctuator::{LParen, RParen};
 /// ```
 ///
 /// Spec: [ArgumentsDefinition](https://spec.graphql.org/draft/#ArgumentsDefinition)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct ArgumentsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
+  InputValueDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _input_value_definition: PhantomData<InputValueDefinition>,
+  l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+  arguments: CstNodeChildren<InputValueDefinition>,
+  r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<InputValueDefinition, Lang> ArgumentsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  InputValueDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+    arguments: CstNodeChildren<InputValueDefinition>,
+    r_paren: RParen<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _input_value_definition: PhantomData,
+      l_paren,
+      arguments,
+      r_paren,
     }
   }
 
   /// Tries to create an `ArgumentsDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -67,40 +75,27 @@ where
 
   /// Returns the left parenthesis token.
   #[inline]
-  pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
-  where
-    LParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LParen::KIND)
-      .map(|t| LParen::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_paren_token(&self) -> &LParen<TextRange, SyntaxToken<Lang>> {
+    &self.l_paren
   }
 
   /// Returns the right parenthesis token.
   #[inline]
-  pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
-  where
-    RParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RParen::KIND)
-      .map(|t| RParen::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_paren_token(&self) -> &RParen<TextRange, SyntaxToken<Lang>> {
+    &self.r_paren
   }
 
   /// Returns all input value definitions.
   #[inline]
-  pub fn input_value_definitions(&self) -> logosky::cst::CstNodeChildren<InputValueDefinition>
-  where
-    InputValueDefinition: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition> {
+    &self.arguments
   }
 }
 
 impl<'a, InputValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for ArgumentsDefinition<InputValueDefinition, Lang>
 where
-  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

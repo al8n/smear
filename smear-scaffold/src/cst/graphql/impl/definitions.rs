@@ -8,6 +8,8 @@ use logosky::cst::{
 };
 use rowan::SyntaxNode;
 
+use smear_lexer::punctuator::{Colon, LBrace, LParen, RBrace, RParen};
+
 use crate::cst::{
   ArgumentsDefinition, Described, Document, FieldsDefinition, FragmentDefinition,
   InputFieldsDefinition, InputValueDefinition, NamedOperationDefinition,
@@ -17,6 +19,18 @@ use crate::cst::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum DocumentSyntax {
+  #[display("definitions")]
+  Definitions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum TypeSystemDocumentSyntax {
+  #[display("definitions")]
+  Definitions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum ExecutableDocumentSyntax {
   #[display("definitions")]
   Definitions,
 }
@@ -140,15 +154,11 @@ impl_graphql_node! {
     type Component = DocumentSyntax;
     type COMPONENTS = U1;
   } => Document(|syntax: SyntaxNode<GraphQLLanguage>| {
-    if children::<Definition>(&syntax).next().is_some() {
-      Ok(Document::new(syntax))
-    } else {
-      let missing = IncompleteSyntax::new(DocumentSyntax::Definitions);
-      Err(missing.into())
-    }
+    let definitions = children::<Definition>(&syntax);
+    Ok(Document::new(syntax, definitions))
   })
   where
-    Definition: Debug + CstNode<Language = GraphQLLanguage>,
+    Definition: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -172,11 +182,11 @@ impl_graphql_node! {
       }
     })
   where
-    Name: Debug + CstNode<Language = GraphQLLanguage>,
-    OperationType: Debug + CstNode<Language = GraphQLLanguage>,
-    VariablesDef: Debug + CstNode<Language = GraphQLLanguage>,
-    Directives: Debug + CstNode<Language = GraphQLLanguage>,
-    SelectionSet: Debug + CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<Language = GraphQLLanguage>,
+    OperationType: CstNode<Language = GraphQLLanguage>,
+    VariablesDef: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    SelectionSet: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -185,27 +195,36 @@ impl_graphql_node! {
       type Component = InputValueDefinitionSyntax;
       type COMPONENTS = U5;
     } => InputValueDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let name_missing = child::<Name>(&syntax).is_none();
-      let colon_missing = token(&syntax, &SyntaxKind::Colon).is_none();
-      let type_missing = child::<Type>(&syntax).is_none();
+      let name = child::<Name>(&syntax);
+      let colon = token(&syntax, &SyntaxKind::Colon)
+        .map(|t| Colon::with_content(t.text_range(), t));
+      let ty = child::<Type>(&syntax);
+      let default_value = child::<DefaultValue>(&syntax);
+      let directives = child::<Directives>(&syntax);
 
-      if name_missing || colon_missing || type_missing {
-        let missing = [
-          name_missing.then_some(InputValueDefinitionSyntax::Name),
-          colon_missing.then_some(InputValueDefinitionSyntax::Colon),
-          type_missing.then_some(InputValueDefinitionSyntax::Type),
-        ];
-        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-        Err(missing.into())
-      } else {
-        Ok(InputValueDefinition::new(syntax))
+      match (name, colon, ty) {
+        (Some(name), Some(colon), Some(ty)) => Ok(InputValueDefinition::new(
+          syntax,
+          name,
+          colon,
+          ty,
+          default_value,
+          directives,
+        )),
+        (name, colon, ty) => {
+          Err(IncompleteSyntax::from_iter([
+            name.is_none().then_some(InputValueDefinitionSyntax::Name),
+            colon.is_none().then_some(InputValueDefinitionSyntax::Colon),
+            ty.is_none().then_some(InputValueDefinitionSyntax::Type),
+          ].into_iter().flatten()).unwrap().into())
+        }
       }
     })
   where
-    Name: Debug + CstNode<Language = GraphQLLanguage>,
-    Type: Debug + CstNode<Language = GraphQLLanguage>,
-    DefaultValue: Debug + CstNode<Language = GraphQLLanguage>,
-    Directives: Debug + CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<Language = GraphQLLanguage>,
+    Type: CstNode<Language = GraphQLLanguage>,
+    DefaultValue: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -213,24 +232,31 @@ impl_graphql_node! {
     type Component = ArgumentsDefinitionSyntax;
     type COMPONENTS = U3;
   } => ArgumentsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let l_paren_missing = token(&syntax, &SyntaxKind::LParen).is_none();
-    let has_arguments = children::<InputValueDef>(&syntax).next().is_some();
-    let r_paren_missing = token(&syntax, &SyntaxKind::RParen).is_none();
+    let l_paren = token(&syntax, &SyntaxKind::LParen)
+      .map(|t| LParen::with_content(t.text_range(), t));
+    let arguments = children::<InputValueDef>(&syntax);
+    let has_arguments = arguments.clone().next().is_some();
+    let r_paren = token(&syntax, &SyntaxKind::RParen)
+      .map(|t| RParen::with_content(t.text_range(), t));
 
-    if l_paren_missing || !has_arguments || r_paren_missing {
-      let missing = [
-        l_paren_missing.then_some(ArgumentsDefinitionSyntax::LParen),
-        (!has_arguments).then_some(ArgumentsDefinitionSyntax::Arguments),
-        r_paren_missing.then_some(ArgumentsDefinitionSyntax::RParen),
-      ];
-      let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-      Err(missing.into())
-    } else {
-      Ok(ArgumentsDefinition::new(syntax))
+    match (l_paren, has_arguments, r_paren) {
+      (Some(l_paren), true, Some(r_paren)) => Ok(ArgumentsDefinition::new(
+        syntax,
+        l_paren,
+        arguments,
+        r_paren,
+      )),
+      (l_paren, has_arguments, r_paren) => {
+        Err(IncompleteSyntax::from_iter([
+          l_paren.is_none().then_some(ArgumentsDefinitionSyntax::LParen),
+          (!has_arguments).then_some(ArgumentsDefinitionSyntax::Arguments),
+          r_paren.is_none().then_some(ArgumentsDefinitionSyntax::RParen),
+        ].into_iter().flatten()).unwrap().into())
+      }
     }
   })
   where
-    InputValueDef: Debug + CstNode<Language = GraphQLLanguage>,
+    InputValueDef: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -238,20 +264,27 @@ impl_graphql_node! {
     type Component = InputFieldsDefinitionSyntax;
     type COMPONENTS = U3;
   } => InputFieldsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let l_brace_missing = token(&syntax, &SyntaxKind::LBrace).is_none();
-    let fields_missing = children::<InputValueDef>(&syntax).next().is_none();
-    let r_brace_missing = token(&syntax, &SyntaxKind::RBrace).is_none();
+    let l_brace = token(&syntax, &SyntaxKind::LBrace)
+      .map(|t| LBrace::with_content(t.text_range(), t));
+    let fields = children::<InputValueDef>(&syntax);
+    let has_fields = fields.clone().next().is_some();
+    let r_brace = token(&syntax, &SyntaxKind::RBrace)
+      .map(|t| RBrace::with_content(t.text_range(), t));
 
-    if l_brace_missing || fields_missing || r_brace_missing {
-      let missing = [
-        l_brace_missing.then_some(InputFieldsDefinitionSyntax::LBrace),
-        fields_missing.then_some(InputFieldsDefinitionSyntax::Fields),
-        r_brace_missing.then_some(InputFieldsDefinitionSyntax::RBrace),
-      ];
-      let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-      Err(missing.into())
-    } else {
-      Ok(InputFieldsDefinition::new(syntax))
+    match (l_brace, has_fields, r_brace) {
+      (Some(l_brace), true, Some(r_brace)) => Ok(InputFieldsDefinition::new(
+        syntax,
+        l_brace,
+        fields,
+        r_brace,
+      )),
+      (l_brace, has_fields, r_brace) => {
+        Err(IncompleteSyntax::from_iter([
+          l_brace.is_none().then_some(InputFieldsDefinitionSyntax::LBrace),
+          (!has_fields).then_some(InputFieldsDefinitionSyntax::Fields),
+          r_brace.is_none().then_some(InputFieldsDefinitionSyntax::RBrace),
+        ].into_iter().flatten()).unwrap().into())
+      }
     }
   })
   where
@@ -263,24 +296,31 @@ impl_graphql_node! {
     type Component = FieldsDefinitionSyntax;
     type COMPONENTS = U3;
   } => FieldsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let l_brace_missing = token(&syntax, &SyntaxKind::LBrace).is_none();
-    let fields_missing = children::<FieldDef>(&syntax).next().is_none();
-    let r_brace_missing = token(&syntax, &SyntaxKind::RBrace).is_none();
+    let l_brace = token(&syntax, &SyntaxKind::LBrace)
+      .map(|t| LBrace::with_content(t.text_range(), t));
+    let fields = children::<FieldDef>(&syntax);
+    let has_fields = fields.clone().next().is_some();
+    let r_brace = token(&syntax, &SyntaxKind::RBrace)
+      .map(|t| RBrace::with_content(t.text_range(), t));
 
-    if l_brace_missing || fields_missing || r_brace_missing {
-      let missing = [
-        l_brace_missing.then_some(FieldsDefinitionSyntax::LBrace),
-        fields_missing.then_some(FieldsDefinitionSyntax::Fields),
-        r_brace_missing.then_some(FieldsDefinitionSyntax::RBrace),
-      ];
-      let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-      Err(missing.into())
-    } else {
-      Ok(FieldsDefinition::new(syntax))
+    match (l_brace, has_fields, r_brace) {
+      (Some(l_brace), true, Some(r_brace)) => Ok(FieldsDefinition::new(
+        syntax,
+        l_brace,
+        fields,
+        r_brace,
+      )),
+      (l_brace, has_fields, r_brace) => {
+        Err(IncompleteSyntax::from_iter([
+          l_brace.is_none().then_some(FieldsDefinitionSyntax::LBrace),
+          (!has_fields).then_some(FieldsDefinitionSyntax::Fields),
+          r_brace.is_none().then_some(FieldsDefinitionSyntax::RBrace),
+        ].into_iter().flatten()).unwrap().into())
+      }
     }
   })
   where
-    FieldDef: Debug + CstNode<Language = GraphQLLanguage>,
+    FieldDef: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -308,10 +348,10 @@ impl_graphql_node! {
       }
     })
   where
-    FragmentName: Debug + CstNode<Language = GraphQLLanguage>,
-    TypeCond: Debug + CstNode<Language = GraphQLLanguage>,
-    Directives: Debug + CstNode<Language = GraphQLLanguage>,
-    SelectionSet: Debug + CstNode<Language = GraphQLLanguage>,
+    FragmentName: CstNode<Language = GraphQLLanguage>,
+    TypeCond: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    SelectionSet: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -337,8 +377,8 @@ impl_graphql_node! {
       }
     })
   where
-    OperationType: Debug + CstNode<Language = GraphQLLanguage>,
-    Name: Debug + CstNode<Language = GraphQLLanguage>,
+    OperationType: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -392,7 +432,7 @@ impl_graphql_node! {
     }
   })
   where
-    VariableDef: Debug + CstNode<Language = GraphQLLanguage>,
+    VariableDef: CstNode<Language = GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -408,8 +448,8 @@ impl_graphql_node! {
     }
   })
   where
-    T: Debug + CstNode<Language = GraphQLLanguage>,
-    Description: Debug + CstNode<Language = GraphQLLanguage>,
+    T: CstNode<Language = GraphQLLanguage>,
+    Description: CstNode<Language = GraphQLLanguage>,
 }
 
 mod ty;

@@ -127,7 +127,7 @@ where
 
   /// Returns the type condition that follows the `on` keyword.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn on_keyword(&self) -> &On<TextRange, SyntaxToken<Lang>> {
+  pub const fn on_keyword(&self) -> &On<TextRange, SyntaxToken<Lang>> {
     &self.on
   }
 
@@ -258,20 +258,29 @@ where
 
   /// Returns the spread operator (`...`) token.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn spread_token(&self) -> &Spread<TextRange, SyntaxToken<Lang>> {
-    &self.spread
+  pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
+  where
+    Spread<TextRange, SyntaxToken<Lang>>: Clone,
+  {
+    self.spread.clone()
   }
 
   /// Returns the fragment name being spread.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn name(&self) -> &FragmentName {
-    &self.name
+  pub fn name(&self) -> FragmentName
+  where
+    FragmentName: Clone,
+  {
+    self.name.clone()
   }
 
   /// Returns the directives applied to this fragment spread, if any.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
+  pub fn directives(&self) -> Option<Directives>
+  where
+    Directives: Clone,
+  {
+    self.directives.clone()
   }
 
   /// Creates a parser that can parse a fragment spread with custom parsers.
