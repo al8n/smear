@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -44,8 +44,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire type parameter.
@@ -82,7 +82,7 @@ where
   #[inline]
   pub fn equal_token(&self) -> Option<Equal<TextRange, SyntaxToken<Lang>>>
   where
-    Equal<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Equal<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Equal::KIND)
       .map(|t| Equal::with_content(t.text_range(), t))
@@ -159,8 +159,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, logosky::cst::error::CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire type generics.
@@ -179,7 +179,7 @@ where
   #[inline]
   pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
   where
-    LAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
       .map(|t| LAngle::with_content(t.text_range(), t))
@@ -199,7 +199,7 @@ where
   #[inline]
   pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
   where
-    RAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
       .map(|t| RAngle::with_content(t.text_range(), t))

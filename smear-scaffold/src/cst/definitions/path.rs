@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch, cast::children},
+  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError, cast::children},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -42,8 +42,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire path.
@@ -62,7 +62,7 @@ where
   #[inline]
   pub fn is_fully_qualified(&self) -> bool
   where
-    PathSeparator<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    PathSeparator<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     // Check if first child is a PathSeparator token
     self

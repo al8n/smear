@@ -2,8 +2,9 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
     cast::{child, token},
+    error::CastNodeError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -59,8 +60,8 @@ where
 
   /// Tries to create a `DefaultInputValue` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire default value assignment.
@@ -79,7 +80,7 @@ where
   #[inline]
   pub fn equal_token(&self) -> Equal<TextRange, SyntaxToken<Lang>>
   where
-    Equal<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Equal<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &Equal::KIND)
       .map(|t| Equal::with_content(t.text_range(), t))

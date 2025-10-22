@@ -2,8 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
-    cast::{children, token},
+    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::{children, token}, error::CastNodeError
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -69,8 +68,8 @@ where
 
   /// Tries to create a `SelectionSet` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire selection set.
@@ -83,7 +82,7 @@ where
   #[inline]
   pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
   where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &LBrace::KIND)
       .map(|t| LBrace::with_content(t.text_range(), t))
@@ -94,7 +93,7 @@ where
   #[inline]
   pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
   where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &RBrace::KIND)
       .map(|t| RBrace::with_content(t.text_range(), t))

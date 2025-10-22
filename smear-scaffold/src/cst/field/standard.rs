@@ -68,8 +68,8 @@ where
   /// Tries to create a `StandardSelection` from the given syntax node.
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, super::CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the selection.

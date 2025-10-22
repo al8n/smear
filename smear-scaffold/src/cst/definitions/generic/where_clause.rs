@@ -2,8 +2,9 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
     cast::{child, children},
+    error::CastNodeError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -50,8 +51,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire where predicate.
@@ -82,7 +83,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -172,8 +173,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire where clause.
@@ -192,7 +193,7 @@ where
   #[inline]
   pub fn where_token(&self) -> Where<TextRange, SyntaxToken<Lang>>
   where
-    Where<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Where<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Where::KIND)
       .map(|t| Where::with_content(t.text_range(), t))
@@ -282,8 +283,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire constrained definition.

@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
     cast::{child, children, token},
   },
 };
@@ -54,8 +54,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this variable definition.
@@ -83,7 +83,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -187,8 +187,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this variables definition.
@@ -207,7 +207,7 @@ where
   #[inline]
   pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
   where
-    LParen<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &LParen::KIND)
       .map(|t| LParen::with_content(t.text_range(), t))
@@ -218,7 +218,7 @@ where
   #[inline]
   pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
   where
-    RParen<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &RParen::KIND)
       .map(|t| RParen::with_content(t.text_range(), t))

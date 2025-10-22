@@ -1,4 +1,4 @@
-use logosky::cst::{CstNode, CstElement, error::CstNodeMismatch};
+use logosky::cst::{CstNode, CstElement, error::CastNodeError};
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
 use smear_lexer::keywords::{Mutation, Query, Subscription};
@@ -38,8 +38,8 @@ where
   Self: CstNode<Language = Lang>,
 {
   /// Tries to create an `OperationType` from the given syntax node.
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span of the operation type keyword.

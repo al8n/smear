@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::children, error::CastNodeError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -27,8 +27,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this directives definition.

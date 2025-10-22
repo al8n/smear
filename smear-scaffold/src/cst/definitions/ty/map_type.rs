@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -46,8 +46,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire map type.
@@ -66,7 +66,7 @@ where
   #[inline]
   pub fn map_keyword(&self) -> Map<TextRange, SyntaxToken<Lang>>
   where
-    Map<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Map<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Map::KIND)
       .map(|t| Map::with_content(t.text_range(), t))
@@ -91,14 +91,14 @@ where
   {
     // Second child after key type
     let mut children = self.syntax().children();
-    children.find_map(|n| ValueType::try_cast(n).ok()).unwrap()
+    children.find_map(|n| ValueType::try_cast_node(n).ok()).unwrap()
   }
 
   /// Returns the bang token if present.
   #[inline]
   pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
   where
-    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Bang::KIND)
       .map(|t| Bang::with_content(t.text_range(), t))
@@ -108,7 +108,7 @@ where
   #[inline]
   pub fn required(&self) -> bool
   where
-    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     self.bang_token().is_some()
   }

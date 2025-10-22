@@ -19,7 +19,7 @@
 //! assert!(!SyntaxKind::Identifier.is_keyword());
 //! ```
 
-mod r#impl;
+// mod r#impl;
 
 /// GraphQL Concrete Syntax Tree node kind.
 ///

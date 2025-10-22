@@ -19,6 +19,9 @@ mod selection_set;
 
 pub use logosky::cst::*;
 
+/// Common components used across various CST nodes.
+pub mod components;
+
 #[cfg(feature = "smallvec")]
 type DefaultTriviaContainer<T> = logosky::utils::container::FourOrMore<T>;
 

@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
     cast::{children, token},
   },
 };
@@ -54,8 +54,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire set literal.
@@ -74,7 +74,7 @@ where
   #[inline]
   pub fn set_keyword_token(&self) -> keywords::Set<TextRange, SyntaxToken<Lang>>
   where
-    keywords::Set<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    keywords::Set<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &keywords::Set::KIND)
       .map(|t| keywords::Set::with_content(t.text_range(), t))
@@ -85,7 +85,7 @@ where
   #[inline]
   pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
   where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &LBrace::KIND)
       .map(|t| LBrace::with_content(t.text_range(), t))
@@ -96,7 +96,7 @@ where
   #[inline]
   pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
   where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &RBrace::KIND)
       .map(|t| RBrace::with_content(t.text_range(), t))

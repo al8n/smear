@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
     cast::{children, token},
   },
 };
@@ -52,8 +52,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire list literal.
@@ -72,7 +72,7 @@ where
   #[inline]
   pub fn l_bracket_token(&self) -> LBracket<TextRange, SyntaxToken<Lang>>
   where
-    LBracket<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &LBracket::KIND)
       .map(|t| LBracket::with_content(t.text_range(), t))
@@ -83,7 +83,7 @@ where
   #[inline]
   pub fn r_bracket_token(&self) -> RBracket<TextRange, SyntaxToken<Lang>>
   where
-    RBracket<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &RBracket::KIND)
       .map(|t| RBracket::with_content(t.text_range(), t))

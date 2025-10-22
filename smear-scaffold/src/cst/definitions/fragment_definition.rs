@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -51,8 +51,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this fragment definition.
@@ -71,7 +71,7 @@ where
   #[inline]
   pub fn fragment_keyword(&self) -> Fragment<TextRange, SyntaxToken<Lang>>
   where
-    Fragment<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Fragment<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Fragment::KIND)
       .map(|t| Fragment::with_content(t.text_range(), t))

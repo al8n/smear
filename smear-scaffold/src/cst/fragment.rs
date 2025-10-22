@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
     cast::{child, token},
   },
 };
@@ -50,8 +50,8 @@ where
 
   /// Tries to create a `FragmentName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the fragment name.
@@ -114,8 +114,8 @@ where
 
   /// Tries to create a `TypeCondition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire type condition.
@@ -134,7 +134,7 @@ where
   #[inline]
   pub fn on_keyword(&self) -> On<TextRange, SyntaxToken<Lang>>
   where
-    On<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    On<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &On::KIND)
       .map(|t| On::with_content(t.text_range(), t))
@@ -250,8 +250,8 @@ where
 
   /// Tries to create a `FragmentSpread` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire fragment spread.
@@ -264,7 +264,7 @@ where
   #[inline]
   pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
   where
-    Spread<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Spread<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &Spread::KIND)
       .map(|t| Spread::with_content(t.text_range(), t))
@@ -398,8 +398,8 @@ where
 
   /// Tries to create an `InlineFragment` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire inline fragment.
@@ -412,7 +412,7 @@ where
   #[inline]
   pub fn spread_token(&self) -> Spread<TextRange, SyntaxToken<Lang>>
   where
-    Spread<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Spread<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &Spread::KIND)
       .map(|t| Spread::with_content(t.text_range(), t))

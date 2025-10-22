@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CstNodeMismatch},
+  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -57,8 +57,8 @@ where
 
   /// Tries to create a `NamedOperationDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span of the named operation definition.

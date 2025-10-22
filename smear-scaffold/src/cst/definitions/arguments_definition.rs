@@ -2,8 +2,9 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder,
     cast::{children, token},
+    error::CastNodeError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -50,8 +51,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, super::super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire arguments definition.
@@ -70,7 +71,7 @@ where
   #[inline]
   pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
   where
-    LParen<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &LParen::KIND)
       .map(|t| LParen::with_content(t.text_range(), t))
@@ -81,7 +82,7 @@ where
   #[inline]
   pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
   where
-    RParen<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &RParen::KIND)
       .map(|t| RParen::with_content(t.text_range(), t))

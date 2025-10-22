@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+    CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
     cast::{child, token},
   },
 };
@@ -53,12 +53,12 @@ where
 
   /// Tries to create an `Alias` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>>
   where
     Lang::Kind: Into<rowan::SyntaxKind>,
     Self: CstNode<Language = Lang>,
   {
-    Self::try_cast(syntax)
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire alias.
@@ -86,7 +86,7 @@ where
   #[inline]
   pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
   where
-    Colon<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &Colon::KIND)
       .map(|t| Colon::with_content(t.text_range(), t))
@@ -201,8 +201,8 @@ where
 
   /// Tries to create a `Field` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire field.

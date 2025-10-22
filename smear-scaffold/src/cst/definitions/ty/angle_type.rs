@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstNode, CstElement, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, cast::child, error::CastNodeError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -41,8 +41,8 @@ where
   #[inline]
   pub fn try_new(
     syntax: SyntaxNode<Lang>,
-  ) -> Result<Self, logosky::cst::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  ) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering the entire angle type.
@@ -61,7 +61,7 @@ where
   #[inline]
   pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
   where
-    LAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    LAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
       .map(|t| LAngle::with_content(t.text_range(), t))
@@ -81,7 +81,7 @@ where
   #[inline]
   pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
   where
-    RAngle<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    RAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
       .map(|t| RAngle::with_content(t.text_range(), t))
@@ -92,7 +92,7 @@ where
   #[inline]
   pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
   where
-    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     logosky::cst::cast::token(self.syntax(), &Bang::KIND)
       .map(|t| Bang::with_content(t.text_range(), t))
@@ -102,7 +102,7 @@ where
   #[inline]
   pub fn required(&self) -> bool
   where
-    Bang<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     self.bang_token().is_some()
   }

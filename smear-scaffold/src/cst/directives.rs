@@ -9,7 +9,7 @@ use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 use smear_lexer::punctuator::At;
 
 use super::{
-  CstNode, CstElement, Parseable, SyntaxTreeBuilder, error::CstNodeMismatch,
+  CstNode, CstToken, CstElement, Parseable, SyntaxTreeBuilder, error::CastNodeError,
   cast::{child, token},
 };
 
@@ -57,15 +57,15 @@ where
 
   /// Tries to create a `Directive` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the at symbol token, if present.
   #[inline]
   pub fn at(&self) -> Option<At<TextRange, SyntaxToken<Lang>>>
   where
-    At<TextRange, SyntaxToken<Lang>>: CstNode<Language = Lang>,
+    At<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
   {
     token(self.syntax(), &At::KIND).map(|t| At::with_content(t.text_range(), t))
   }
@@ -191,8 +191,8 @@ where
 
   /// Tries to create a `Directives` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, super::error::CstNodeMismatch<Self>> {
-    Self::try_cast(syntax)
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, CastNodeError<Self>> {
+    Self::try_cast_node(syntax)
   }
 
   /// Returns the collection of directives.
