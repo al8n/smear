@@ -25,7 +25,7 @@
 //! assert!(SyntaxKind::Binary.is_graphqlx_extension());
 //! ```
 
-mod r#impl;
+// mod r#impl;
 
 /// GraphQLx Concrete Syntax Tree node kind.
 ///
@@ -307,6 +307,7 @@ pub enum SyntaxKind {
   // ============================================================================
   // Type Path Nodes (GraphQLx Extension)
   // ============================================================================
+
   /// Path (e.g., `user::profile`, `::std`)
   Path,
 
@@ -316,11 +317,8 @@ pub enum SyntaxKind {
   /// Definition type path (e.g., `v1::User<ID>`)
   DefinitionTypePath,
 
-  /// Path segment (single identifier in a path)
+  /// Path segment (single identifier in a path with optional separator for leading segment and required separator for following segments)
   PathSegment,
-
-  /// Fully qualified path (starts with `::`)
-  FullyQualifiedPath,
 
   // ============================================================================
   // Generic Type System Nodes (GraphQLx Extension)
@@ -328,7 +326,7 @@ pub enum SyntaxKind {
   /// Type parameter (e.g., `T`, `K`, `V`)
   TypeParameter,
 
-  /// Type parameters list (e.g., `<T, K, V>`)
+  /// Type parameters list (e.g., `T, K, V`)
   TypeParameters,
 
   /// Type generics (type parameters with constraints)

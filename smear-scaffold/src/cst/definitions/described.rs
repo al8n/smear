@@ -1,24 +1,24 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 /// A node with an optional description.
 ///
 /// In GraphQL, many definitions can have an optional description string that provides
 /// documentation. This wrapper type represents any node that may be preceded by a description.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Described<T, Description, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _node: PhantomData<T>,
-  _description: PhantomData<Description>,
+  description: Option<Description>,
+  node: T,
 }
 
 impl<T, Description, Lang> Described<T, Description, Lang>
@@ -28,11 +28,15 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    description: Option<Description>,
+    node: T,
+  ) -> Self {
     Self {
       syntax,
-      _node: PhantomData,
-      _description: PhantomData,
+      description,
+      node,
     }
   }
 
@@ -56,20 +60,14 @@ where
 
   /// Returns the description of the described node, if any.
   #[inline]
-  pub fn description(&self) -> Option<Description>
-  where
-    Description: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn description(&self) -> Option<&Description> {
+    self.description.as_ref()
   }
 
   /// Returns the inner node.
   #[inline]
-  pub fn node(&self) -> T
-  where
-    T: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn node(&self) -> &T {
+    &self.node
   }
 }
 

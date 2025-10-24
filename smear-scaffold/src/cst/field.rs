@@ -51,7 +51,7 @@ where
   }
 
   /// Tries to create an `Alias` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
   where
     Lang::Kind: Into<rowan::SyntaxKind>,
@@ -61,25 +61,25 @@ where
   }
 
   /// Returns the source span of the entire alias.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the entire alias.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Attempts to cast a syntax node to a `Name`.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn name(&self) -> &Name {
     &self.name
   }
 
   /// Returns the colon token separating the alias and the field name.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
     &self.colon
   }
@@ -119,7 +119,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone
@@ -166,7 +166,7 @@ where
   Lang: Language,
 {
   /// Returns the syntax node representing the entire field.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
@@ -199,44 +199,44 @@ where
   }
 
   /// Tries to create a `Field` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the source span of the entire field.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the field's alias, if present.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn alias(&self) -> Option<&Alias> {
     self.alias.as_ref()
   }
 
   /// Returns the field's name.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn name(&self) -> &Name {
     &self.name
   }
 
   /// Returns the field's arguments, if present.
-  #[inline]
-  pub fn arguments(&self) -> Option<&Arguments> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn arguments(&self) -> Option<&Arguments> {
     self.arguments.as_ref()
   }
 
   /// Returns the field's directives, if present.
-  #[inline]
-  pub fn directives(&self) -> Option<&Directives> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
 
   /// Returns the field's selection set, if present.
-  #[inline]
-  pub fn selection_set(&self) -> Option<&SelectionSet> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn selection_set(&self) -> Option<&SelectionSet> {
     self.selection_set.as_ref()
   }
 
@@ -288,7 +288,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone

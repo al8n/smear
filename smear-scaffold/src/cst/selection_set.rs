@@ -104,26 +104,22 @@ where
   }
 
   /// Returns the left brace token.
-  #[inline]
-  pub fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>>
   {
     &self.lbrace
   }
 
   /// Returns the right brace token.
-  #[inline]
-  pub fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>>
   {
     &self.rbrace
   }
 
   /// Returns the container holding all selections.
-  #[inline]
-  pub fn selections(&self) -> &CstNodeChildren<Selection> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn selections(&self) -> &CstNodeChildren<Selection> {
     &self.selections
   }
 
@@ -163,7 +159,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone

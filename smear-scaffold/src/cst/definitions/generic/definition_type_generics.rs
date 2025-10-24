@@ -1,11 +1,10 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::{Equal, LAngle, RAngle};
 
 /// A definition type parameter with an optional default type in CST.
@@ -21,8 +20,9 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  ident: Ident,
+  equal: Option<Equal<TextRange, SyntaxToken<Lang>>>,
+  default_ty: Option<Type>,
 }
 
 impl<Ident, Type, Lang> DefinitionTypeParam<Ident, Type, Lang>
@@ -32,11 +32,17 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    ident: Ident,
+    equal: Option<Equal<TextRange, SyntaxToken<Lang>>>,
+    default_ty: Option<Type>,
+  ) -> Self {
     Self {
       syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
+      ident,
+      equal,
+      default_ty,
     }
   }
 
@@ -60,30 +66,20 @@ where
 
   /// Returns the identifier of the type parameter.
   #[inline]
-  pub fn ident(&self) -> Ident
-  where
-    Ident: CstNode<Language = Lang>,
-  {
-    logosky::cst::cast::child(self.syntax()).unwrap()
+  pub const fn ident(&self) -> &Ident {
+    &self.ident
   }
 
   /// Returns the optional default type of the type parameter.
   #[inline]
-  pub fn default(&self) -> Option<Type>
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    logosky::cst::cast::child(self.syntax())
+  pub const fn default(&self) -> Option<&Type> {
+    self.default_ty.as_ref()
   }
 
   /// Returns the optional equals token.
   #[inline]
-  pub fn equal_token(&self) -> Option<Equal<TextRange, SyntaxToken<Lang>>>
-  where
-    Equal<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Equal::KIND)
-      .map(|t| Equal::with_content(t.text_range(), t))
+  pub const fn equal_token(&self) -> Option<&Equal<TextRange, SyntaxToken<Lang>>> {
+    self.equal.as_ref()
   }
 }
 
@@ -134,8 +130,9 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+  params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>,
+  r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Ident, Type, Lang> DefinitionTypeGenerics<Ident, Type, Lang>
@@ -145,11 +142,17 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+    params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>,
+    r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
+      l_angle,
+      params,
+      r_angle,
     }
   }
 
@@ -173,33 +176,22 @@ where
 
   /// Returns the left angle bracket token.
   #[inline]
-  pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
-  where
-    LAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
-      .map(|t| LAngle::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_angle_token(&self) -> &LAngle<TextRange, SyntaxToken<Lang>> {
+    &self.l_angle
   }
 
   /// Returns the type parameters.
   #[inline]
-  pub fn params(&self) -> logosky::cst::CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>
-  where
-    DefinitionTypeParam<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn params(
+    &self,
+  ) -> &CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>> {
+    &self.params
   }
 
   /// Returns the right angle bracket token.
   #[inline]
-  pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
-  where
-    RAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
-      .map(|t| RAngle::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_angle_token(&self) -> &RAngle<TextRange, SyntaxToken<Lang>> {
+    &self.r_angle
   }
 }
 

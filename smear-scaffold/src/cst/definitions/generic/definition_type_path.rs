@@ -1,13 +1,12 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::DefinitionName;
-use crate::cst::Path;
-use core::marker::PhantomData;
+use crate::cst::{Path, PathSegment, generic::TypeGenerics};
 
 /// A GraphQLx definition type path in CST.
 ///
@@ -15,16 +14,18 @@ use core::marker::PhantomData;
 ///
 /// ## Example
 /// ```text
-/// v1::User<ID, Name>
+/// User<ID, Name>
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct DefinitionTypePath<Ident, Type, Lang>
 where
   Lang: Language,
+  PathSegment<Ident, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  path: Path<Ident, Lang>,
+  generics: Option<TypeGenerics<Type, Lang>>,
+  required: bool,
 }
 
 impl<Ident, Type, Lang> DefinitionTypePath<Ident, Type, Lang>
@@ -34,12 +35,12 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
-    }
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    path: Option<Path<Ident, Lang>>,
+    name: DefinitionName<Ident, Type, Lang>,
+  ) -> Self {
+    Self { syntax, path, name }
   }
 
   /// Tries to create a `DefinitionTypePath` from the given syntax node.
@@ -62,20 +63,14 @@ where
 
   /// Returns the optional path prefix.
   #[inline]
-  pub fn path(&self) -> Option<Path<Ident, Lang>>
-  where
-    Path<Ident, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn path(&self) -> Option<&Path<Ident, Lang>> {
+    self.path.as_ref()
   }
 
   /// Returns the definition name (with optional generics).
   #[inline]
-  pub fn name(&self) -> DefinitionName<Ident, Type, Lang>
-  where
-    DefinitionName<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &DefinitionName<Ident, Type, Lang> {
+    &self.name
   }
 }
 

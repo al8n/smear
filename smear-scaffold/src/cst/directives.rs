@@ -127,7 +127,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone
@@ -194,8 +194,8 @@ where
   }
 
   /// Returns the collection of directives.
-  #[inline]
-  pub fn directives(&self) -> &CstNodeChildren<Directive> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn directives(&self) -> &CstNodeChildren<Directive> {
     &self.directives
   }
 
@@ -230,7 +230,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone

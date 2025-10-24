@@ -76,10 +76,7 @@ where
 
   /// Returns the collection of field definitions.
   #[inline]
-  pub const fn field_definitions(&self) -> &CstNodeChildren<FieldDefinition>
-  where
-    CstNodeChildren<FieldDefinition>: Clone,
-  {
+  pub const fn field_definitions(&self) -> &CstNodeChildren<FieldDefinition> {
     &self.fields
   }
 }

@@ -1,13 +1,10 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::Bang;
 
 /// Represents a named GraphQL type with optional non-null modifier in CST.
@@ -22,7 +19,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
+  name: Name,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Name, Lang> NamedType<Name, Lang>
@@ -32,11 +30,12 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _name: PhantomData,
-    }
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
+    Self { syntax, name, bang }
   }
 
   /// Tries to create a new `NamedType` from a syntax node.
@@ -59,30 +58,20 @@ where
 
   /// Returns the type name.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the bang token if present.
   #[inline]
-  pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Bang::KIND)
-      .map(|t| Bang::with_content(t.text_range(), t))
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
+    self.bang.as_ref()
   }
 
   /// Returns whether this type is required (non-null).
   #[inline]
-  pub fn required(&self) -> bool
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    self.bang_token().is_some()
+  pub const fn required(&self) -> bool {
+    self.bang.is_some()
   }
 }
 

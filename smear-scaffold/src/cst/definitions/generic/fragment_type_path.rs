@@ -1,13 +1,12 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::TypeGenerics;
 use crate::cst::Path;
-use core::marker::PhantomData;
 
 /// A GraphQLx fragment type path in CST (e.g., `User<ID, Name>` or `v1::Comment<ID>`).
 ///
@@ -24,8 +23,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  path: Path<Ident, Lang>,
+  generics: Option<TypeGenerics<Type, Lang>>,
 }
 
 impl<Ident, Type, Lang> FragmentTypePath<Ident, Type, Lang>
@@ -35,12 +34,12 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
-    }
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    path: Path<Ident, Lang>,
+    generics: Option<TypeGenerics<Type, Lang>>,
+  ) -> Self {
+    Self { syntax, path, generics }
   }
 
   /// Tries to create a `FragmentTypePath` from the given syntax node.
@@ -63,20 +62,14 @@ where
 
   /// Returns the path component.
   #[inline]
-  pub fn path(&self) -> Path<Ident, Lang>
-  where
-    Path<Ident, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn path(&self) -> &Path<Ident, Lang> {
+    &self.path
   }
 
   /// Returns the optional type generics.
   #[inline]
-  pub fn type_generics(&self) -> Option<TypeGenerics<Type, Lang>>
-  where
-    TypeGenerics<Type, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn type_generics(&self) -> Option<&TypeGenerics<Type, Lang>> {
+    self.generics.as_ref()
   }
 }
 

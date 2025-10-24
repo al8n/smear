@@ -2,14 +2,13 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
-    cast::{child, children, token},
+    CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder,
     error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 
 /// Represents a single root operation type definition.
@@ -20,14 +19,15 @@ use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 /// ```
 ///
 /// Spec: [Root Operation Types Definition](https://spec.graphql.org/draft/#sec-Root-Operation-Types)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct RootOperationTypeDefinition<OperationType, Name, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _operation_type: PhantomData<OperationType>,
-  _name: PhantomData<Name>,
+  operation_type: OperationType,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  name: Name,
 }
 
 impl<OperationType, Name, Lang> RootOperationTypeDefinition<OperationType, Name, Lang>
@@ -37,11 +37,17 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    operation_type: OperationType,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    name: Name,
+  ) -> Self {
     Self {
       syntax,
-      _operation_type: PhantomData,
-      _name: PhantomData,
+      operation_type,
+      colon,
+      name,
     }
   }
 
@@ -65,31 +71,20 @@ where
 
   /// Returns the operation type.
   #[inline]
-  pub fn operation_type(&self) -> OperationType
-  where
-    OperationType: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn operation_type(&self) -> &OperationType {
+    &self.operation_type
   }
 
   /// Returns the colon token.
   #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
+    &self.colon
   }
 
   /// Returns the named type.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 }
 
@@ -130,33 +125,45 @@ where
 /// ```text
 /// RootOperationTypesDefinition : { RootOperationTypeDefinition+ }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
   Lang: Language,
+  RootOperationTypeDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _root_operation_type_definition: PhantomData<RootOperationTypeDefinition>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  definitions: CstNodeChildren<RootOperationTypeDefinition>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<RootOperationTypeDefinition, Lang>
   RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  RootOperationTypeDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    definitions: CstNodeChildren<RootOperationTypeDefinition>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _root_operation_type_definition: PhantomData,
+      l_brace,
+      definitions,
+      r_brace,
     }
   }
 
   /// Tries to create a `RootOperationTypesDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -174,42 +181,32 @@ where
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>>
   {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+    &self.l_brace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>>
   {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+    &self.r_brace
   }
 
   /// Returns the collection of root operation type definitions.
   #[inline]
-  pub fn root_operation_type_definitions(
+  pub const fn root_operation_type_definitions(
     &self,
-  ) -> logosky::cst::CstNodeChildren<RootOperationTypeDefinition>
-  where
-    RootOperationTypeDefinition: CstNode<Language = Lang>,
+  ) -> &CstNodeChildren<RootOperationTypeDefinition>
   {
-    children(self.syntax())
+    &self.definitions
   }
 }
 
 impl<'a, RootOperationTypeDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
-  RootOperationTypeDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  RootOperationTypeDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

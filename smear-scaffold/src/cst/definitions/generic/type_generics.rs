@@ -1,40 +1,51 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::children},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::{LAngle, RAngle};
 
 /// Type generics in CST (e.g., `<ID, Username>`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct TypeGenerics<Type, Lang>
 where
   Lang: Language,
+  Type: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _type: PhantomData<Type>,
+  l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+  params: CstNodeChildren<Type>,
+  r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Type, Lang> TypeGenerics<Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Type: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+    params: CstNodeChildren<Type>,
+    r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _type: PhantomData,
+      l_angle,
+      params,
+      r_angle,
     }
   }
 
   /// Tries to create a new `TypeGenerics` from a syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -52,17 +63,26 @@ where
 
   /// Returns the type parameters.
   #[inline]
-  pub fn params(&self) -> logosky::cst::CstNodeChildren<Type>
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn params(&self) -> &CstNodeChildren<Type> {
+    &self.params
+  }
+
+  /// Returns the left angle bracket token.
+  #[inline]
+  pub const fn l_angle_token(&self) -> &LAngle<TextRange, SyntaxToken<Lang>> {
+    &self.l_angle
+  }
+
+  /// Returns the right angle bracket token.
+  #[inline]
+  pub const fn r_angle_token(&self) -> &RAngle<TextRange, SyntaxToken<Lang>> {
+    &self.r_angle
   }
 }
 
 impl<'a, Type, Lang, I, T, Error> Parseable<'a, I, T, Error> for TypeGenerics<Type, Lang>
 where
-  Type: Parseable<'a, I, T, Error, Language = Lang>,
+  Type: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

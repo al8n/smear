@@ -16,7 +16,6 @@ use std::vec::Vec;
 ///
 /// ```graphqlx
 /// User<ID, Name>
-/// v1::Comment<ID, Name>
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionTypePath<

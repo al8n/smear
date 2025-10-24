@@ -1,12 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::DefinitionTypeGenerics;
-use core::marker::PhantomData;
 
 /// The CST for a definition name (e.g., `User<ID, Name = String>`).
 ///
@@ -18,8 +17,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  name: Ident,
+  generics: Option<DefinitionTypeGenerics<Ident, Type, Lang>>,
 }
 
 impl<Ident, Type, Lang> DefinitionName<Ident, Type, Lang>
@@ -29,12 +28,12 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
-    }
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Ident,
+    generics: Option<DefinitionTypeGenerics<Ident, Type, Lang>>,
+  ) -> Self {
+    Self { syntax, name, generics }
   }
 
   /// Tries to create a `DefinitionName` from the given syntax node.
@@ -57,20 +56,16 @@ where
 
   /// Returns the name identifier of the definition.
   #[inline]
-  pub fn name(&self) -> Ident
-  where
-    Ident: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Ident {
+    &self.name
   }
 
   /// Returns the optional type generics of the definition name.
   #[inline]
-  pub fn generics(&self) -> Option<DefinitionTypeGenerics<Ident, Type, Lang>>
-  where
-    DefinitionTypeGenerics<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn generics(
+    &self,
+  ) -> Option<&DefinitionTypeGenerics<Ident, Type, Lang>> {
+    self.generics.as_ref()
   }
 }
 

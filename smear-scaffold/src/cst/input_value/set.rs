@@ -84,44 +84,26 @@ where
 
   /// Returns the set keyword token.
   #[inline]
-  pub fn set_keyword_token(&self) -> keywords::Set<TextRange, SyntaxToken<Lang>>
-  where
-    keywords::Set<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &keywords::Set::KIND)
-      .map(|t| keywords::Set::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn set_keyword(&self) -> &keywords::Set<TextRange, SyntaxToken<Lang>> {
+    &self.set_keyword
   }
 
   /// Returns the left brace token.
   #[inline]
-  pub fn l_brace_token(&self) -> LBrace<TextRange, SyntaxToken<Lang>>
-  where
-    LBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LBrace::KIND)
-      .map(|t| LBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the right brace token.
   #[inline]
-  pub fn r_brace_token(&self) -> RBrace<TextRange, SyntaxToken<Lang>>
-  where
-    RBrace<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RBrace::KIND)
-      .map(|t| RBrace::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the values contained in the set.
   #[inline]
-  pub fn values(&self) -> logosky::cst::CstNodeChildren<Value>
-  where
-    Value: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn values(&self) -> &CstNodeChildren<Value> {
+    &self.values
   }
 
   /// Creates a parser for GraphQLx set literals with customizable value parsing.
@@ -168,13 +150,13 @@ where
   #[inline]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
-  ) -> impl chumsky::Parser<'a, I, (), E> + Clone
+  ) -> impl Parser<'a, I, (), E> + Clone
   where
     I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
     Error: 'a,
-    E: chumsky::extra::ParserExtra<'a, I, Error = Error> + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
     Self::parser_with(builder, Value::parser)
   }

@@ -4,23 +4,47 @@ use logosky::cst::{
   CstNode,
   cast::{child, children, token},
   error::IncompleteSyntax,
-  typenum::{U1, U2, U3, U5},
+  typenum::{U1, U2, U3, U4, U5},
 };
 use rowan::SyntaxNode;
 
-use smear_lexer::punctuator::{Colon, LBrace, LParen, RBrace, RParen};
+use smear_lexer::punctuator::{Colon, Equal, LBrace, LParen, Pipe, RBrace, RParen};
+
+use smear_lexer::keywords::{
+  Enum as EnumKeyword,
+  Fragment as FragmentKeyword,
+  Interface as InterfaceKeyword,
+  Input as InputKeyword,
+  Scalar as ScalarKeyword,
+  Schema as SchemaKeyword,
+  Type as TypeKeyword,
+  Union as UnionKeyword,
+};
 
 use crate::cst::{
-  ArgumentsDefinition, Described, Document, FieldsDefinition, FragmentDefinition,
-  InputFieldsDefinition, InputValueDefinition, NamedOperationDefinition,
-  RootOperationTypeDefinition, VariableDefinition, VariablesDefinition,
+  ArgumentsDefinition, Described, Document, EnumTypeDefinition, EnumValueDefinition,
+  EnumValuesDefinition, FieldsDefinition, FragmentDefinition, InputFieldsDefinition,
+  InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, NamedOperationDefinition,
+  ObjectTypeDefinition, RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
+  SchemaDefinition, UnionMemberTypes, UnionTypeDefinition, VariableDefinition, VariablesDefinition,
   graphql::{GraphQLLanguage, SyntaxKind},
 };
+use std::vec::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum DocumentSyntax {
   #[display("definitions")]
   Definitions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum SchemaDefinitionSyntax {
+  #[display("'schema'")]
+  SchemaKeyword,
+  #[display("directives")]
+  Directives,
+  #[display("root operations")]
+  RootOperations,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
@@ -94,6 +118,106 @@ pub enum FieldsDefinitionSyntax {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum EnumValueDefinitionSyntax {
+  #[display("value")]
+  Value,
+  #[display("directives")]
+  Directives,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum EnumValuesDefinitionSyntax {
+  #[display("'{{'")]
+  LBrace,
+  #[display("values")]
+  Values,
+  #[display("'}}'")]
+  RBrace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum EnumTypeDefinitionSyntax {
+  #[display("'enum'")]
+  EnumKeyword,
+  #[display("name")]
+  Name,
+  #[display("directives")]
+  Directives,
+  #[display("values")]
+  ValuesDefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum ObjectTypeDefinitionSyntax {
+  #[display("'type'")]
+  TypeKeyword,
+  #[display("name")]
+  Name,
+  #[display("implements")]
+  Implements,
+  #[display("directives")]
+  Directives,
+  #[display("fields")]
+  FieldsDefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum InterfaceTypeDefinitionSyntax {
+  #[display("'interface'")]
+  InterfaceKeyword,
+  #[display("name")]
+  Name,
+  #[display("implements")]
+  Implements,
+  #[display("directives")]
+  Directives,
+  #[display("fields")]
+  FieldsDefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum InputObjectTypeDefinitionSyntax {
+  #[display("'input'")]
+  InputKeyword,
+  #[display("name")]
+  Name,
+  #[display("directives")]
+  Directives,
+  #[display("fields")]
+  FieldsDefinition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum UnionMemberTypesSyntax {
+  #[display("members")]
+  Members,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum UnionTypeDefinitionSyntax {
+  #[display("'union'")]
+  UnionKeyword,
+  #[display("name")]
+  Name,
+  #[display("directives")]
+  Directives,
+  #[display("'='")]
+  Equal,
+  #[display("members")]
+  Members,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum ScalarTypeDefinitionSyntax {
+  #[display("'scalar'")]
+  ScalarKeyword,
+  #[display("name")]
+  Name,
+  #[display("directives")]
+  Directives,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum FragmentDefinitionSyntax {
   #[display("'fragment'")]
   FragmentKeyword,
@@ -162,25 +286,75 @@ impl_graphql_node! {
 }
 
 impl_graphql_node! {
+  for<Directives, RootOperations>
+    SchemaDefinition<Directives, RootOperations, GraphQLLanguage> {
+      type Component = SchemaDefinitionSyntax;
+      type COMPONENTS = U3;
+    } => SchemaDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let schema_kw = token(&syntax, &SyntaxKind::schema_KW)
+      .map(|t| SchemaKeyword::with_content(t.text_range(), t));
+    let directives = child::<Directives>(&syntax);
+    let root_operations = child::<RootOperations>(&syntax);
+
+    match (schema_kw, root_operations) {
+      (Some(schema_kw), Some(root_operations)) => Ok(SchemaDefinition::new(
+        syntax,
+        schema_kw,
+        directives,
+        root_operations,
+      )),
+      (schema_kw, root_operations) => {
+        let missing = [
+          schema_kw.is_none().then_some(SchemaDefinitionSyntax::SchemaKeyword),
+          root_operations
+            .is_none()
+            .then_some(SchemaDefinitionSyntax::RootOperations),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Directives: CstNode<Language = GraphQLLanguage>,
+    RootOperations: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
   for<Name, OperationType, VariablesDef, Directives, SelectionSet>
     NamedOperationDefinition<Name, OperationType, VariablesDef, Directives, SelectionSet, GraphQLLanguage> {
       type Component = NamedOperationDefinitionSyntax;
       type COMPONENTS = U5;
     } => NamedOperationDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let operation_missing = child::<OperationType>(&syntax).is_none();
-      let selection_missing = child::<SelectionSet>(&syntax).is_none();
+    let operation_type = child::<OperationType>(&syntax);
+    let name = child::<Name>(&syntax);
+    let variables = child::<VariablesDef>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let selection_set = child::<SelectionSet>(&syntax);
 
-      if operation_missing || selection_missing {
+    match (operation_type, selection_set) {
+      (Some(operation_type), Some(selection_set)) => Ok(NamedOperationDefinition::new(
+        syntax,
+        operation_type,
+        name,
+        variables,
+        directives,
+        selection_set,
+      )),
+      (operation_type, selection_set) => {
         let missing = [
-          operation_missing.then_some(NamedOperationDefinitionSyntax::OperationType),
-          selection_missing.then_some(NamedOperationDefinitionSyntax::SelectionSet),
+          operation_type
+            .is_none()
+            .then_some(NamedOperationDefinitionSyntax::OperationType),
+          selection_set
+            .is_none()
+            .then_some(NamedOperationDefinitionSyntax::SelectionSet),
         ];
         let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
         Err(missing.into())
-      } else {
-        Ok(NamedOperationDefinition::new(syntax))
       }
-    })
+    }
+  })
   where
     Name: CstNode<Language = GraphQLLanguage>,
     OperationType: CstNode<Language = GraphQLLanguage>,
@@ -324,29 +498,349 @@ impl_graphql_node! {
 }
 
 impl_graphql_node! {
+  for<Value, Directives>
+    EnumValueDefinition<Value, Directives, GraphQLLanguage> {
+      type Component = EnumValueDefinitionSyntax;
+      type COMPONENTS = U2;
+    } => EnumValueDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let value = child::<Value>(&syntax);
+    let directives = child::<Directives>(&syntax);
+
+    match value {
+      Some(value) => Ok(EnumValueDefinition::new(syntax, value, directives)),
+      None => {
+        let missing = IncompleteSyntax::new(EnumValueDefinitionSyntax::Value);
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Value: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<ValueDef> EnumValuesDefinition<ValueDef, GraphQLLanguage> {
+    type Component = EnumValuesDefinitionSyntax;
+    type COMPONENTS = U3;
+  } => EnumValuesDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let l_brace = token(&syntax, &SyntaxKind::LBrace)
+      .map(|t| LBrace::with_content(t.text_range(), t));
+    let values = children::<ValueDef>(&syntax);
+    let has_values = values.clone().next().is_some();
+    let r_brace = token(&syntax, &SyntaxKind::RBrace)
+      .map(|t| RBrace::with_content(t.text_range(), t));
+
+    match (l_brace, has_values, r_brace) {
+      (Some(l_brace), true, Some(r_brace)) => Ok(EnumValuesDefinition::new(
+        syntax,
+        l_brace,
+        values,
+        r_brace,
+      )),
+      (l_brace, has_values, r_brace) => {
+        let missing = [
+          l_brace.is_none().then_some(EnumValuesDefinitionSyntax::LBrace),
+          (!has_values).then_some(EnumValuesDefinitionSyntax::Values),
+          r_brace.is_none().then_some(EnumValuesDefinitionSyntax::RBrace),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    ValueDef: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, Directives, ValuesDefinition>
+    EnumTypeDefinition<Name, Directives, ValuesDefinition, GraphQLLanguage> {
+      type Component = EnumTypeDefinitionSyntax;
+      type COMPONENTS = U4;
+    } => EnumTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let enum_kw = token(&syntax, &SyntaxKind::enum_KW)
+      .map(|t| EnumKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let values_definition = child::<ValuesDefinition>(&syntax);
+
+    match (enum_kw, name) {
+      (Some(enum_kw), Some(name)) => Ok(EnumTypeDefinition::new(
+        syntax,
+        enum_kw,
+        name,
+        directives,
+        values_definition,
+      )),
+      (enum_kw, name) => {
+        let missing = [
+          enum_kw.is_none().then_some(EnumTypeDefinitionSyntax::EnumKeyword),
+          name.is_none().then_some(EnumTypeDefinitionSyntax::Name),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    ValuesDefinition: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+    ObjectTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, GraphQLLanguage> {
+      type Component = ObjectTypeDefinitionSyntax;
+      type COMPONENTS = U5;
+    } => ObjectTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let type_kw = token(&syntax, &SyntaxKind::type_KW)
+      .map(|t| TypeKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let implements = child::<ImplementsInterfaces>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let fields_definition = child::<FieldsDefinition>(&syntax);
+
+    match (type_kw, name) {
+      (Some(type_kw), Some(name)) => Ok(ObjectTypeDefinition::new(
+        syntax,
+        type_kw,
+        name,
+        implements,
+        directives,
+        fields_definition,
+      )),
+      (type_kw, name) => {
+        let missing = [
+          type_kw.is_none().then_some(ObjectTypeDefinitionSyntax::TypeKeyword),
+          name.is_none().then_some(ObjectTypeDefinitionSyntax::Name),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    ImplementsInterfaces: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+    InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, GraphQLLanguage> {
+      type Component = InterfaceTypeDefinitionSyntax;
+      type COMPONENTS = U5;
+    } => InterfaceTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let interface_kw = token(&syntax, &SyntaxKind::interface_KW)
+      .map(|t| InterfaceKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let implements = child::<ImplementsInterfaces>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let fields_definition = child::<FieldsDefinition>(&syntax);
+
+    match (interface_kw, name) {
+      (Some(interface_kw), Some(name)) => Ok(InterfaceTypeDefinition::new(
+        syntax,
+        interface_kw,
+        name,
+        implements,
+        directives,
+        fields_definition,
+      )),
+      (interface_kw, name) => {
+        let missing = [
+          interface_kw
+            .is_none()
+            .then_some(InterfaceTypeDefinitionSyntax::InterfaceKeyword),
+          name.is_none().then_some(InterfaceTypeDefinitionSyntax::Name),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    ImplementsInterfaces: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, Directives, FieldsDefinition>
+    InputObjectTypeDefinition<Name, Directives, FieldsDefinition, GraphQLLanguage> {
+      type Component = InputObjectTypeDefinitionSyntax;
+      type COMPONENTS = U4;
+    } => InputObjectTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let input_kw = token(&syntax, &SyntaxKind::input_KW)
+      .map(|t| InputKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let fields_definition = child::<FieldsDefinition>(&syntax);
+
+    match (input_kw, name) {
+      (Some(input_kw), Some(name)) => Ok(InputObjectTypeDefinition::new(
+        syntax,
+        input_kw,
+        name,
+        directives,
+        fields_definition,
+      )),
+      (input_kw, name) => {
+        let missing = [
+          input_kw
+            .is_none()
+            .then_some(InputObjectTypeDefinitionSyntax::InputKeyword),
+          name.is_none().then_some(InputObjectTypeDefinitionSyntax::Name),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Member> UnionMemberTypes<Member, GraphQLLanguage> {
+    type Component = UnionMemberTypesSyntax;
+    type COMPONENTS = U1;
+  } => UnionMembers(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let members = children::<Member>(&syntax);
+    let has_members = members.clone().next().is_some();
+
+    let separators = syntax
+      .children_with_tokens()
+      .filter_map(|element| match element {
+        rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Pipe => {
+          Some(Pipe::with_content(token.text_range(), token))
+        }
+        _ => None,
+      })
+      .collect::<Vec<_>>();
+
+    if has_members {
+      Ok(UnionMemberTypes::new(syntax, members, separators))
+    } else {
+      let missing = IncompleteSyntax::new(UnionMemberTypesSyntax::Members);
+      Err(missing.into())
+    }
+  })
+  where
+    Member: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, Directives, Members>
+    UnionTypeDefinition<Name, Directives, Members, GraphQLLanguage> {
+      type Component = UnionTypeDefinitionSyntax;
+      type COMPONENTS = U5;
+    } => UnionTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let union_kw = token(&syntax, &SyntaxKind::union_KW)
+      .map(|t| UnionKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let equal = token(&syntax, &SyntaxKind::Equal)
+      .map(|t| Equal::with_content(t.text_range(), t));
+    let members = child::<Members>(&syntax);
+
+    match (union_kw, name, equal, members) {
+      (Some(union_kw), Some(name), Some(equal), Some(members)) => Ok(UnionTypeDefinition::new(
+        syntax,
+        union_kw,
+        name,
+        directives,
+        equal,
+        members,
+      )),
+      (union_kw, name, equal, members) => {
+        let missing = [
+          union_kw.is_none().then_some(UnionTypeDefinitionSyntax::UnionKeyword),
+          name.is_none().then_some(UnionTypeDefinitionSyntax::Name),
+          equal.is_none().then_some(UnionTypeDefinitionSyntax::Equal),
+          members.is_none().then_some(UnionTypeDefinitionSyntax::Members),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+    Members: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, Directives>
+    ScalarTypeDefinition<Name, Directives, GraphQLLanguage> {
+      type Component = ScalarTypeDefinitionSyntax;
+      type COMPONENTS = U3;
+    } => ScalarTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let scalar_kw = token(&syntax, &SyntaxKind::scalar_KW)
+      .map(|t| ScalarKeyword::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
+    let directives = child::<Directives>(&syntax);
+
+    match (scalar_kw, name) {
+      (Some(scalar_kw), Some(name)) => Ok(ScalarTypeDefinition::new(
+        syntax,
+        scalar_kw,
+        name,
+        directives,
+      )),
+      (scalar_kw, name) => {
+        let missing = [
+          scalar_kw.is_none().then_some(ScalarTypeDefinitionSyntax::ScalarKeyword),
+          name.is_none().then_some(ScalarTypeDefinitionSyntax::Name),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    Name: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<Language = GraphQLLanguage>,
+}
+
+impl_graphql_node! {
   for<FragmentName, TypeCond, Directives, SelectionSet>
     FragmentDefinition<FragmentName, TypeCond, Directives, SelectionSet, GraphQLLanguage> {
       type Component = FragmentDefinitionSyntax;
       type COMPONENTS = U5;
     } => FragmentDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let fragment_kw_missing = token(&syntax, &SyntaxKind::fragment_KW).is_none();
-      let name_missing = child::<FragmentName>(&syntax).is_none();
-      let type_cond_missing = child::<TypeCond>(&syntax).is_none();
-      let selection_missing = child::<SelectionSet>(&syntax).is_none();
+    let fragment_kw = token(&syntax, &SyntaxKind::fragment_KW)
+      .map(|t| FragmentKeyword::with_content(t.text_range(), t));
+    let name = child::<FragmentName>(&syntax);
+    let type_cond = child::<TypeCond>(&syntax);
+    let directives = child::<Directives>(&syntax);
+    let selection_set = child::<SelectionSet>(&syntax);
 
-      if fragment_kw_missing || name_missing || type_cond_missing || selection_missing {
+    match (fragment_kw, name, type_cond, selection_set) {
+      (Some(fragment_kw), Some(name), Some(type_cond), Some(selection_set)) => Ok(
+        FragmentDefinition::new(syntax, fragment_kw, name, type_cond, directives, selection_set),
+      ),
+      (fragment_kw, name, type_cond, selection_set) => {
         let missing = [
-          fragment_kw_missing.then_some(FragmentDefinitionSyntax::FragmentKeyword),
-          name_missing.then_some(FragmentDefinitionSyntax::FragmentName),
-          type_cond_missing.then_some(FragmentDefinitionSyntax::TypeCondition),
-          selection_missing.then_some(FragmentDefinitionSyntax::SelectionSet),
+          fragment_kw.is_none().then_some(FragmentDefinitionSyntax::FragmentKeyword),
+          name.is_none().then_some(FragmentDefinitionSyntax::FragmentName),
+          type_cond.is_none().then_some(FragmentDefinitionSyntax::TypeCondition),
+          selection_set
+            .is_none()
+            .then_some(FragmentDefinitionSyntax::SelectionSet),
         ];
         let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
         Err(missing.into())
-      } else {
-        Ok(FragmentDefinition::new(syntax))
       }
-    })
+    }
+  })
   where
     FragmentName: CstNode<Language = GraphQLLanguage>,
     TypeCond: CstNode<Language = GraphQLLanguage>,
@@ -360,22 +854,31 @@ impl_graphql_node! {
       type Component = RootOperationTypeDefinitionSyntax;
       type COMPONENTS = U3;
     } => RootOperationTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let operation_missing = child::<OperationType>(&syntax).is_none();
-      let colon_missing = token(&syntax, &SyntaxKind::Colon).is_none();
-      let name_missing = child::<Name>(&syntax).is_none();
+    let operation_type = child::<OperationType>(&syntax);
+    let colon = token(&syntax, &SyntaxKind::Colon)
+      .map(|t| Colon::with_content(t.text_range(), t));
+    let name = child::<Name>(&syntax);
 
-      if operation_missing || colon_missing || name_missing {
+    match (operation_type, colon, name) {
+      (Some(operation_type), Some(colon), Some(name)) => Ok(RootOperationTypeDefinition::new(
+        syntax,
+        operation_type,
+        colon,
+        name,
+      )),
+      (operation_type, colon, name) => {
         let missing = [
-          operation_missing.then_some(RootOperationTypeDefinitionSyntax::OperationType),
-          colon_missing.then_some(RootOperationTypeDefinitionSyntax::Colon),
-          name_missing.then_some(RootOperationTypeDefinitionSyntax::Name),
+          operation_type
+            .is_none()
+            .then_some(RootOperationTypeDefinitionSyntax::OperationType),
+          colon.is_none().then_some(RootOperationTypeDefinitionSyntax::Colon),
+          name.is_none().then_some(RootOperationTypeDefinitionSyntax::Name),
         ];
         let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
         Err(missing.into())
-      } else {
-        Ok(RootOperationTypeDefinition::new(syntax))
       }
-    })
+    }
+  })
   where
     OperationType: CstNode<Language = GraphQLLanguage>,
     Name: CstNode<Language = GraphQLLanguage>,
@@ -387,20 +890,27 @@ impl_graphql_node! {
       type Component = VariableDefinitionSyntax;
       type COMPONENTS = U5;
     } => VariableDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let variable_missing = child::<Variable>(&syntax).is_none();
-      let colon_missing = token(&syntax, &SyntaxKind::Colon).is_none();
-      let type_missing = child::<Type>(&syntax).is_none();
-
-      if variable_missing || colon_missing || type_missing {
-        let missing = [
-          variable_missing.then_some(VariableDefinitionSyntax::Variable),
-          colon_missing.then_some(VariableDefinitionSyntax::Colon),
-          type_missing.then_some(VariableDefinitionSyntax::Type),
-        ];
-        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-        Err(missing.into())
-      } else {
-        Ok(VariableDefinition::new(syntax))
+      let variable = child::<Variable>(&syntax);
+      let colon = token(&syntax, &SyntaxKind::Colon).map(|t| Colon::with_content(t.text_range(), t));
+      let ty = child::<Type>(&syntax);
+      let directives = child::<Directives>(&syntax);
+      let default_value = child::<DefaultValue>(&syntax);
+      match (variable, colon, ty) {
+        (Some(variable), Some(colon), Some(ty)) => Ok(VariableDefinition::new(
+          syntax,
+          variable,
+          colon,
+          ty,
+          default_value,
+          directives,
+        )),
+        (variable, colon, ty) => {
+          Err(IncompleteSyntax::from_iter([
+            variable.is_none().then_some(VariableDefinitionSyntax::Variable),
+            colon.is_none().then_some(VariableDefinitionSyntax::Colon),
+            ty.is_none().then_some(VariableDefinitionSyntax::Type),
+          ].into_iter().flatten()).unwrap().into())
+        }
       }
     })
   where
@@ -415,20 +925,29 @@ impl_graphql_node! {
     type Component = VariablesDefinitionSyntax;
     type COMPONENTS = U3;
   } => VariablesDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let l_paren_missing = token(&syntax, &SyntaxKind::LParen).is_none();
-    let has_variables = children::<VariableDef>(&syntax).next().is_some();
-    let r_paren_missing = token(&syntax, &SyntaxKind::RParen).is_none();
+    let l_paren = token(&syntax, &SyntaxKind::LParen)
+      .map(|t| LParen::with_content(t.text_range(), t));
+    let variables = children::<VariableDef>(&syntax);
+    let has_variables = variables.clone().next().is_some();
+    let r_paren = token(&syntax, &SyntaxKind::RParen)
+      .map(|t| RParen::with_content(t.text_range(), t));
 
-    if l_paren_missing || !has_variables || r_paren_missing {
-      let missing = [
-        l_paren_missing.then_some(VariablesDefinitionSyntax::LParen),
-        (!has_variables).then_some(VariablesDefinitionSyntax::Variables),
-        r_paren_missing.then_some(VariablesDefinitionSyntax::RParen),
-      ];
-      let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-      Err(missing.into())
-    } else {
-      Ok(VariablesDefinition::new(syntax))
+    match (l_paren, has_variables, r_paren) {
+      (Some(l_paren), true, Some(r_paren)) => Ok(VariablesDefinition::new(
+        syntax,
+        l_paren,
+        variables,
+        r_paren,
+      )),
+      (l_paren, has_variables, r_paren) => {
+        let missing = [
+          l_paren.is_none().then_some(VariablesDefinitionSyntax::LParen),
+          (!has_variables).then_some(VariablesDefinitionSyntax::Variables),
+          r_paren.is_none().then_some(VariablesDefinitionSyntax::RParen),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
     }
   })
   where
@@ -440,11 +959,15 @@ impl_graphql_node! {
     type Component = DescribedSyntax;
     type COMPONENTS = U2;
   } => Description(|syntax: SyntaxNode<GraphQLLanguage>| {
-    if child::<T>(&syntax).is_some() {
-      Ok(Described::new(syntax))
-    } else {
-      let missing = IncompleteSyntax::new(DescribedSyntax::Node);
-      Err(missing.into())
+    let description = child::<Description>(&syntax);
+    let node = child::<T>(&syntax);
+
+    match node {
+      Some(node) => Ok(Described::new(syntax, description, node)),
+      None => {
+        let missing = IncompleteSyntax::new(DescribedSyntax::Node);
+        Err(missing.into())
+      }
     }
   })
   where

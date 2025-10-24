@@ -1,12 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::ExecutableDefinitionTypeGenerics;
-use core::marker::PhantomData;
 
 /// An executable definition name in CST (e.g., operation or fragment name with generics).
 ///
@@ -20,8 +19,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  name: Ident,
+  generics: Option<ExecutableDefinitionTypeGenerics<Ident, Type, Lang>>,
 }
 
 impl<Ident, Type, Lang> ExecutableDefinitionName<Ident, Type, Lang>
@@ -31,12 +30,12 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
-    Self {
-      syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
-    }
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Ident,
+    generics: Option<ExecutableDefinitionTypeGenerics<Ident, Type, Lang>>,
+  ) -> Self {
+    Self { syntax, name, generics }
   }
 
   /// Tries to create an `ExecutableDefinitionName` from the given syntax node.
@@ -59,20 +58,16 @@ where
 
   /// Returns the name identifier.
   #[inline]
-  pub fn name(&self) -> Ident
-  where
-    Ident: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &Ident {
+    &self.name
   }
 
   /// Returns the optional type generics.
   #[inline]
-  pub fn generics(&self) -> Option<ExecutableDefinitionTypeGenerics<Ident, Type, Lang>>
-  where
-    ExecutableDefinitionTypeGenerics<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn generics(
+    &self,
+  ) -> Option<&ExecutableDefinitionTypeGenerics<Ident, Type, Lang>> {
+    self.generics.as_ref()
   }
 }
 

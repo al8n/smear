@@ -1,11 +1,10 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child},
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::{Bang, LBracket, RBracket};
 
 /// Represents a GraphQL list type with optional non-null modifier in CST.
@@ -20,7 +19,10 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ty: PhantomData<Type>,
+  l_bracket: LBracket<TextRange, SyntaxToken<Lang>>,
+  ty: Type,
+  r_bracket: RBracket<TextRange, SyntaxToken<Lang>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Type, Lang> ListType<Type, Lang>
@@ -30,10 +32,19 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_bracket: LBracket<TextRange, SyntaxToken<Lang>>,
+    ty: Type,
+    r_bracket: RBracket<TextRange, SyntaxToken<Lang>>,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
     Self {
       syntax,
-      _ty: PhantomData,
+      l_bracket,
+      ty,
+      r_bracket,
+      bang,
     }
   }
 
@@ -57,52 +68,32 @@ where
 
   /// Returns the left bracket token.
   #[inline]
-  pub fn l_bracket_token(&self) -> LBracket<TextRange, SyntaxToken<Lang>>
-  where
-    LBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &LBracket::KIND)
-      .map(|t| LBracket::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_bracket_token(&self) -> &LBracket<TextRange, SyntaxToken<Lang>> {
+    &self.l_bracket
   }
 
   /// Returns the element type.
   #[inline]
-  pub fn ty(&self) -> Type
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn ty(&self) -> &Type {
+    &self.ty
   }
 
   /// Returns the right bracket token.
   #[inline]
-  pub fn r_bracket_token(&self) -> RBracket<TextRange, SyntaxToken<Lang>>
-  where
-    RBracket<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &RBracket::KIND)
-      .map(|t| RBracket::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_bracket_token(&self) -> &RBracket<TextRange, SyntaxToken<Lang>> {
+    &self.r_bracket
   }
 
   /// Returns the bang token if present.
   #[inline]
-  pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Bang::KIND)
-      .map(|t| Bang::with_content(t.text_range(), t))
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
+    self.bang.as_ref()
   }
 
   /// Returns whether this type is required (non-null).
   #[inline]
-  pub fn required(&self) -> bool
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    self.bang_token().is_some()
+  pub const fn required(&self) -> bool {
+    self.bang.is_some()
   }
 }
 

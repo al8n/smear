@@ -2,19 +2,17 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
-    cast::{child, children},
-    error::SyntaxError,
+    CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
 use super::TypePath;
-use core::marker::PhantomData;
 use smear_lexer::{
   keywords::Where,
   punctuator::{Ampersand, Colon},
 };
+use std::vec::Vec;
 
 /// A where predicate in CST, which constrains a type to implement certain interfaces.
 ///
@@ -28,8 +26,10 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  bounded_type: TypePath<Ident, Type, Lang>,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>>,
+  separators: Vec<Ampersand<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Ident, Type, Lang> WherePredicate<Ident, Type, Lang>
@@ -39,11 +39,19 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) fn new(
+    syntax: SyntaxNode<Lang>,
+    bounded_type: TypePath<Ident, Type, Lang>,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>>,
+    separators: Vec<Ampersand<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
     Self {
       syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
+      bounded_type,
+      colon,
+      type_paths,
+      separators,
     }
   }
 
@@ -67,35 +75,36 @@ where
 
   /// Returns the bounded type (the type being constrained).
   #[inline]
-  pub fn bounded_type(&self) -> TypePath<Ident, Type, Lang>
-  where
-    TypePath<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    // First TypePath child is the bounded type
-    children::<TypePath<Ident, Type, Lang>>(self.syntax())
-      .next()
-      .unwrap()
+  pub const fn bounded_type(&self) -> &TypePath<Ident, Type, Lang> {
+    &self.bounded_type
   }
 
   /// Returns the colon token separating the bounded type from the bounds.
   #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>> {
+    &self.colon
   }
 
   /// Returns the bounds (the interfaces/types the bounded type must implement).
   #[inline]
-  pub fn bounds(&self) -> impl Iterator<Item = TypePath<Ident, Type, Lang>>
+  pub fn bounds(
+    &self,
+  ) -> impl Iterator<Item = TypePath<Ident, Type, Lang>> + '_
   where
-    TypePath<Ident, Type, Lang>: CstNode<Language = Lang>,
+    TypePath<Ident, Type, Lang>: Clone,
   {
-    // Skip the first TypePath (bounded_type), rest are bounds
-    children::<TypePath<Ident, Type, Lang>>(self.syntax()).skip(1)
+    let mut iter = self.type_paths.clone();
+    // Skip the bounded type
+    iter.next();
+    iter
+  }
+
+  /// Returns the ampersand tokens separating bounds.
+  #[inline]
+  pub fn ampersand_tokens(
+    &self,
+  ) -> impl ExactSizeIterator<Item = &Ampersand<TextRange, SyntaxToken<Lang>>> {
+    self.separators.iter()
   }
 }
 
@@ -148,8 +157,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
+  where_kw: Where<TextRange, SyntaxToken<Lang>>,
+  predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>>,
 }
 
 impl<Ident, Type, Lang> WhereClause<Ident, Type, Lang>
@@ -159,11 +168,15 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    where_kw: Where<TextRange, SyntaxToken<Lang>>,
+    predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
+      where_kw,
+      predicates,
     }
   }
 
@@ -187,22 +200,16 @@ where
 
   /// Returns the `where` keyword token.
   #[inline]
-  pub fn where_token(&self) -> Where<TextRange, SyntaxToken<Lang>>
-  where
-    Where<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Where::KIND)
-      .map(|t| Where::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn where_token(&self) -> &Where<TextRange, SyntaxToken<Lang>> {
+    &self.where_kw
   }
 
   /// Returns the where predicates.
   #[inline]
-  pub fn predicates(&self) -> logosky::cst::CstNodeChildren<WherePredicate<Ident, Type, Lang>>
-  where
-    WherePredicate<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  pub const fn predicates(
+    &self,
+  ) -> &CstNodeChildren<WherePredicate<Ident, Type, Lang>> {
+    &self.predicates
   }
 }
 
@@ -254,9 +261,8 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ident: PhantomData<Ident>,
-  _type: PhantomData<Type>,
-  _target: PhantomData<Target>,
+  where_clause: Option<WhereClause<Ident, Type, Lang>>,
+  target: Target,
 }
 
 impl<Ident, Type, Target, Lang> Constrained<Ident, Type, Target, Lang>
@@ -266,12 +272,15 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    where_clause: Option<WhereClause<Ident, Type, Lang>>,
+    target: Target,
+  ) -> Self {
     Self {
       syntax,
-      _ident: PhantomData,
-      _type: PhantomData,
-      _target: PhantomData,
+      where_clause,
+      target,
     }
   }
 
@@ -295,20 +304,16 @@ where
 
   /// Returns the optional where clause.
   #[inline]
-  pub fn where_clause(&self) -> Option<WhereClause<Ident, Type, Lang>>
-  where
-    WhereClause<Ident, Type, Lang>: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn where_clause(
+    &self,
+  ) -> Option<&WhereClause<Ident, Type, Lang>> {
+    self.where_clause.as_ref()
   }
 
   /// Returns the target being constrained.
   #[inline]
-  pub fn target(&self) -> Target
-  where
-    Target: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn target(&self) -> &Target {
+    &self.target
   }
 }
 

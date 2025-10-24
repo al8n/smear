@@ -2,14 +2,12 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder,
-    cast::{child, children, token},
+    CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder,
     error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::{Colon, LParen, RParen};
 
 /// Represents a variable definition in a GraphQL operation.
@@ -21,99 +19,93 @@ use smear_lexer::punctuator::{Colon, LParen, RParen};
 /// ```
 ///
 /// Spec: [Variable Definition](https://spec.graphql.org/draft/#sec-Variable-Definition)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _variable: PhantomData<Variable>,
-  _ty: PhantomData<Type>,
-  _default_value: PhantomData<DefaultValue>,
-  _directives: PhantomData<Directives>,
+  colon: Colon<TextRange, SyntaxToken<Lang>>,
+  variable: Variable,
+  ty: Type,
+  default_value: Option<DefaultValue>,
+  directives: Option<Directives>,
 }
 
 impl<Variable, Type, DefaultValue, Directives, Lang>
   VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    variable: Variable,
+    colon: Colon<TextRange, SyntaxToken<Lang>>,
+    ty: Type,
+    default_value: Option<DefaultValue>,
+    directives: Option<Directives>,
+  ) -> Self {
     Self {
       syntax,
-      _variable: PhantomData,
-      _ty: PhantomData,
-      _default_value: PhantomData,
-      _directives: PhantomData,
+      variable,
+      colon,
+      ty,
+      default_value,
+      directives,
     }
   }
 
   /// Tries to create a `VariableDefinition` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this variable definition.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the variable.
-  #[inline]
-  pub fn variable(&self) -> Variable
-  where
-    Variable: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn variable(&self) -> &Variable {
+    &self.variable
   }
 
   /// Returns the colon token.
-  #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>>
   {
-    token(self.syntax(), &Colon::KIND)
-      .map(|t| Colon::with_content(t.text_range(), t))
-      .unwrap()
+    &self.colon
   }
 
   /// Returns the type.
-  #[inline]
-  pub fn ty(&self) -> Type
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn ty(&self) -> &Type {
+    &self.ty
   }
 
   /// Returns the optional default value.
-  #[inline]
-  pub fn default_value(&self) -> Option<DefaultValue>
-  where
-    DefaultValue: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn default_value(&self) -> Option<&DefaultValue> {
+    self.default_value.as_ref()
   }
 
   /// Returns the optional directives.
-  #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 }
 
@@ -131,7 +123,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
   where
     I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
@@ -159,83 +151,82 @@ where
 /// ```text
 /// VariablesDefinition : ( VariableDefinition+ )
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct VariablesDefinition<VariableDefinition, Lang>
 where
   Lang: Language,
+  VariableDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _variable_definition: PhantomData<VariableDefinition>,
+  l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+  variables: CstNodeChildren<VariableDefinition>,
+  r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<VariableDefinition, Lang> VariablesDefinition<VariableDefinition, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  VariableDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_paren: LParen<TextRange, SyntaxToken<Lang>>,
+    variables: CstNodeChildren<VariableDefinition>,
+    r_paren: RParen<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
     Self {
       syntax,
-      _variable_definition: PhantomData,
+      l_paren,
+      variables,
+      r_paren,
     }
   }
 
   /// Tries to create a `VariablesDefinition` from the given syntax node.
-  #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the span covering this variables definition.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
   /// Returns the left parenthesis token.
-  #[inline]
-  pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
-  where
-    LParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &LParen::KIND)
-      .map(|t| LParen::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn l_paren_token(&self) -> &LParen<TextRange, SyntaxToken<Lang>> {
+    &self.l_paren
   }
 
   /// Returns the right parenthesis token.
-  #[inline]
-  pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
-  where
-    RParen<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    token(self.syntax(), &RParen::KIND)
-      .map(|t| RParen::with_content(t.text_range(), t))
-      .unwrap()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn r_paren_token(&self) -> &RParen<TextRange, SyntaxToken<Lang>> {
+    &self.r_paren
   }
 
   /// Returns the collection of variable definitions.
-  #[inline]
-  pub fn variable_definitions(&self) -> logosky::cst::CstNodeChildren<VariableDefinition>
-  where
-    VariableDefinition: CstNode<Language = Lang>,
-  {
-    children(self.syntax())
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn variable_definitions(&self) -> &CstNodeChildren<VariableDefinition> {
+    &self.variables
   }
 }
 
 impl<'a, VariableDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for VariablesDefinition<VariableDefinition, Lang>
 where
-  VariableDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  VariableDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
@@ -244,7 +235,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone

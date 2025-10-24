@@ -88,11 +88,9 @@ where
 
   /// Returns the colon token separating the name and value.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: Clone,
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>>
   {
-    self.colon.clone()
+    &self.colon
   }
 
   /// Returns the argument value.
@@ -101,11 +99,9 @@ where
   /// can be any valid GraphQL input value including scalars, enums, objects,
   /// lists, variables, or null depending on the argument's expected type.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn value(&self) -> Value
-  where
-    Value: Clone,
+  pub const fn value(&self) -> &Value
   {
-    self.value.clone()
+    &self.value
   }
 
   /// Creates a parser for arguments with custom name and value parsers.
@@ -114,7 +110,7 @@ where
   /// colon, and value. It allows for flexible parsing of both the name and
   /// value components by accepting custom parsers for each. This enables
   /// integration with different name and value parsing strategies as needed.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn parser_with<'a, I, T, Error, E, NP, VP>(
     builder: &'a SyntaxTreeBuilder<Lang>,
     name_parser: impl FnOnce(&'a SyntaxTreeBuilder<Lang>) -> NP,
@@ -153,7 +149,7 @@ where
 {
   type Language = Lang;
 
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>(
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone
@@ -246,7 +242,7 @@ where
   }
 
   /// Tries to create a `Arguments` from the given syntax node.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
     Self::try_cast_node(syntax)
   }
@@ -256,13 +252,13 @@ where
   /// This span covers from the opening parenthesis through the closing
   /// parenthesis, including all arguments and whitespace within. Useful for
   /// error reporting, source mapping, and extracting the complete argument text.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
   /// Returns the syntax node representing the entire argument list.
-  #[inline]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
@@ -272,12 +268,9 @@ where
   /// This provides access to the `(` character that begins the argument list,
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and precise error reporting at argument boundaries.
-  #[inline]
-  pub fn l_paren_token(&self) -> LParen<TextRange, SyntaxToken<Lang>>
-  where
-    LParen<TextRange, SyntaxToken<Lang>>: Clone,
-  {
-    self.l_paren.clone()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn l_paren_token(&self) -> &LParen<TextRange, SyntaxToken<Lang>> {
+    &self.l_paren
   }
 
   /// Returns the closing parenthesis token.
@@ -285,24 +278,19 @@ where
   /// This provides access to the `)` character that ends the argument list,
   /// including its exact source position. Useful for syntax highlighting,
   /// parenthesis matching, and detecting incomplete argument lists.
-  #[inline]
-  pub fn r_paren_token(&self) -> RParen<TextRange, SyntaxToken<Lang>>
-  where
-    RParen<TextRange, SyntaxToken<Lang>>: Clone,
-  {
-    self.r_paren.clone()
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn r_paren_token(&self) -> &RParen<TextRange, SyntaxToken<Lang>> {
+    &self.r_paren
   }
 
   /// Returns the collection of arguments.
   ///
   /// This provides access to all arguments that were successfully parsed
   /// from the argument list.
-  #[inline]
-  pub fn arguments(&self) -> CstNodeChildren<Arg>
-  where
-    CstNodeChildren<Arg>: Clone,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn arguments(&self) -> &CstNodeChildren<Arg>
   {
-    self.arguments.clone()
+    &self.arguments
   }
 
   /// Creates a parser for arguments using the provided argument parser.

@@ -8,6 +8,8 @@ use logosky::cst::{
 };
 use rowan::SyntaxNode;
 
+use smear_lexer::punctuator::{Bang, LBracket, RBracket};
+
 use crate::cst::{
   ListType, NamedType,
   graphql::{GraphQLLanguage, SyntaxKind},
@@ -34,11 +36,16 @@ impl_graphql_node! {
     type Component = NamedTypeSyntax;
     type COMPONENTS = U1;
   } => NamedType(|syntax: SyntaxNode<GraphQLLanguage>| {
-    if child::<Name>(&syntax).is_some() {
-      Ok(NamedType::new(syntax))
-    } else {
-      let missing = IncompleteSyntax::new(NamedTypeSyntax::Name);
-      Err(missing.into())
+    let name = child::<Name>(&syntax);
+    let bang = token(&syntax, &SyntaxKind::Bang)
+      .map(|t| Bang::with_content(t.text_range(), t));
+
+    match name {
+      Some(name) => Ok(NamedType::new(syntax, name, bang)),
+      None => {
+        let missing = IncompleteSyntax::new(NamedTypeSyntax::Name);
+        Err(missing.into())
+      }
     }
   })
   where
@@ -50,20 +57,31 @@ impl_graphql_node! {
     type Component = ListTypeSyntax;
     type COMPONENTS = U3;
   } => ListType(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let l_bracket_missing = token(&syntax, &SyntaxKind::LBracket).is_none();
-    let ty_missing = child::<Type>(&syntax).is_none();
-    let r_bracket_missing = token(&syntax, &SyntaxKind::RBracket).is_none();
+    let l_bracket = token(&syntax, &SyntaxKind::LBracket)
+      .map(|t| LBracket::with_content(t.text_range(), t));
+    let ty = child::<Type>(&syntax);
+    let r_bracket = token(&syntax, &SyntaxKind::RBracket)
+      .map(|t| RBracket::with_content(t.text_range(), t));
+    let bang = token(&syntax, &SyntaxKind::Bang)
+      .map(|t| Bang::with_content(t.text_range(), t));
 
-    if l_bracket_missing || ty_missing || r_bracket_missing {
-      let missing = [
-        l_bracket_missing.then_some(ListTypeSyntax::LBracket),
-        ty_missing.then_some(ListTypeSyntax::Type),
-        r_bracket_missing.then_some(ListTypeSyntax::RBracket),
-      ];
-      let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
-      Err(missing.into())
-    } else {
-      Ok(ListType::new(syntax))
+    match (l_bracket, ty, r_bracket) {
+      (Some(l_bracket), Some(ty), Some(r_bracket)) => Ok(ListType::new(
+        syntax,
+        l_bracket,
+        ty,
+        r_bracket,
+        bang,
+      )),
+      (l_bracket, ty, r_bracket) => {
+        let missing = [
+          l_bracket.is_none().then_some(ListTypeSyntax::LBracket),
+          ty.is_none().then_some(ListTypeSyntax::Type),
+          r_bracket.is_none().then_some(ListTypeSyntax::RBracket),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
     }
   })
   where

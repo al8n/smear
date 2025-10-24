@@ -2,12 +2,12 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
+    CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 use smear_lexer::keywords::Fragment;
 
 /// Represents a named fragment definition in GraphQL.
@@ -19,39 +19,49 @@ use smear_lexer::keywords::Fragment;
 /// ```
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _fragment_name: PhantomData<FragmentName>,
-  _type_condition: PhantomData<TypeCondition>,
-  _directives: PhantomData<Directives>,
-  _selection_set: PhantomData<SelectionSet>,
+  fragment_kw: Fragment<TextRange, SyntaxToken<Lang>>,
+  name: FragmentName,
+  type_condition: TypeCondition,
+  directives: Option<Directives>,
+  selection_set: SelectionSet,
 }
 
 impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
   FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    fragment_kw: Fragment<TextRange, SyntaxToken<Lang>>,
+    name: FragmentName,
+    type_condition: TypeCondition,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
     Self {
       syntax,
-      _fragment_name: PhantomData,
-      _type_condition: PhantomData,
-      _directives: PhantomData,
-      _selection_set: PhantomData,
+      fragment_kw,
+      name,
+      type_condition,
+      directives,
+      selection_set,
     }
   }
 
   /// Tries to create a `FragmentDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -69,49 +79,36 @@ where
 
   /// Returns the fragment keyword token.
   #[inline]
-  pub fn fragment_keyword(&self) -> Fragment<TextRange, SyntaxToken<Lang>>
-  where
-    Fragment<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+  pub const fn fragment_keyword(&self) -> &Fragment<TextRange, SyntaxToken<Lang>>
   {
-    logosky::cst::cast::token(self.syntax(), &Fragment::KIND)
-      .map(|t| Fragment::with_content(t.text_range(), t))
-      .unwrap()
+    &self.fragment_kw
   }
 
   /// Returns the fragment name.
   #[inline]
-  pub fn name(&self) -> FragmentName
-  where
-    FragmentName: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn name(&self) -> &FragmentName {
+    &self.name
   }
 
   /// Returns the type condition.
   #[inline]
-  pub fn type_condition(&self) -> TypeCondition
-  where
-    TypeCondition: CstNode<Language = Lang>,
+  pub const fn type_condition(&self) -> &TypeCondition
   {
-    child(self.syntax()).unwrap()
+    &self.type_condition
   }
 
   /// Returns the optional directives.
   #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: CstNode<Language = Lang>,
+  pub const fn directives(&self) -> Option<&Directives>
   {
-    child(self.syntax())
+    self.directives.as_ref()
   }
 
   /// Returns the selection set.
   #[inline]
-  pub fn selection_set(&self) -> SelectionSet
-  where
-    SelectionSet: CstNode<Language = Lang>,
+  pub const fn selection_set(&self) -> &SelectionSet
   {
-    child(self.syntax()).unwrap()
+    &self.selection_set
   }
 }
 

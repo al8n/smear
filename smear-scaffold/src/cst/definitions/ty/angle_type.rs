@@ -1,13 +1,10 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::punctuator::{Bang, LAngle, RAngle};
 
 /// Represents a GraphQLx angle-bracketed type with optional non-null modifier in CST.
@@ -22,7 +19,10 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ty: PhantomData<Type>,
+  l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+  ty: Type,
+  r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Type, Lang> AngleType<Type, Lang>
@@ -32,10 +32,19 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
+    ty: Type,
+    r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
     Self {
       syntax,
-      _ty: PhantomData,
+      l_angle,
+      ty,
+      r_angle,
+      bang,
     }
   }
 
@@ -59,52 +68,32 @@ where
 
   /// Returns the left angle bracket token.
   #[inline]
-  pub fn l_angle_token(&self) -> LAngle<TextRange, SyntaxToken<Lang>>
-  where
-    LAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &LAngle::KIND)
-      .map(|t| LAngle::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn l_angle_token(&self) -> &LAngle<TextRange, SyntaxToken<Lang>> {
+    &self.l_angle
   }
 
   /// Returns the inner type.
   #[inline]
-  pub fn ty(&self) -> Type
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn ty(&self) -> &Type {
+    &self.ty
   }
 
   /// Returns the right angle bracket token.
   #[inline]
-  pub fn r_angle_token(&self) -> RAngle<TextRange, SyntaxToken<Lang>>
-  where
-    RAngle<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &RAngle::KIND)
-      .map(|t| RAngle::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn r_angle_token(&self) -> &RAngle<TextRange, SyntaxToken<Lang>> {
+    &self.r_angle
   }
 
   /// Returns the bang token if present.
   #[inline]
-  pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Bang::KIND)
-      .map(|t| Bang::with_content(t.text_range(), t))
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
+    self.bang.as_ref()
   }
 
   /// Returns whether this type is required (non-null).
   #[inline]
-  pub fn required(&self) -> bool
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    self.bang_token().is_some()
+  pub const fn required(&self) -> bool {
+    self.bang.is_some()
   }
 }
 

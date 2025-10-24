@@ -1,31 +1,42 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::children, error::SyntaxError},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 /// Represents a directives definition in GraphQL schema.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct DirectivesDefinition<Directive, Lang>
 where
   Lang: Language,
+  Directive: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  _directive: PhantomData<Directive>,
+  directives: CstNodeChildren<Directive>,
 }
 
 impl<Directive, Lang> DirectivesDefinition<Directive, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Directive: CstNode<Language = Lang>,
 {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    directives: CstNodeChildren<Directive>,
+  ) -> Self {
+    Self { syntax, directives }
+  }
+
   /// Tries to create a `DirectivesDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -43,18 +54,16 @@ where
 
   /// Returns the collection of directives.
   #[inline]
-  pub fn directives(&self) -> logosky::cst::CstNodeChildren<Directive>
-  where
-    Directive: CstNode<Language = Lang>,
+  pub const fn directives(&self) -> &CstNodeChildren<Directive>
   {
-    children(self.syntax())
+    &self.directives
   }
 }
 
 impl<'a, Directive, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for DirectivesDefinition<Directive, Lang>
 where
-  Directive: Parseable<'a, I, T, Error, Language = Lang>,
+  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Language = Lang>,

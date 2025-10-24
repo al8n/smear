@@ -57,11 +57,8 @@ where
 
   /// Returns the definitions in the document.
   #[inline]
-  pub fn definitions(&self) -> CstNodeChildren<Definition>
-  where
-    CstNodeChildren<Definition>: Clone,
-  {
-    self.definitions.clone()
+  pub const fn definitions(&self) -> &CstNodeChildren<Definition> {
+    &self.definitions
   }
 }
 

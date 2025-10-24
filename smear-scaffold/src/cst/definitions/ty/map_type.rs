@@ -1,16 +1,13 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::{
   keywords::Map,
-  punctuator::{Bang, Colon, LBrace, RBrace},
+  punctuator::{Bang, FatArrow, LBrace, RBrace},
 };
 
 /// Represents a GraphQLx map type with optional non-null modifier in CST.
@@ -25,8 +22,13 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _key_ty: PhantomData<KeyType>,
-  _value_ty: PhantomData<ValueType>,
+  map_kw: Map<TextRange, SyntaxToken<Lang>>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  key_type: KeyType,
+  fat_arrow: FatArrow<TextRange, SyntaxToken<Lang>>,
+  value_type: ValueType,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<KeyType, ValueType, Lang> MapType<KeyType, ValueType, Lang>
@@ -36,11 +38,25 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    map_kw: Map<TextRange, SyntaxToken<Lang>>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    key_type: KeyType,
+    fat_arrow: FatArrow<TextRange, SyntaxToken<Lang>>,
+    value_type: ValueType,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
     Self {
       syntax,
-      _key_ty: PhantomData,
-      _value_ty: PhantomData,
+      map_kw,
+      l_brace,
+      key_type,
+      fat_arrow,
+      value_type,
+      r_brace,
+      bang,
     }
   }
 
@@ -64,55 +80,50 @@ where
 
   /// Returns the map keyword token.
   #[inline]
-  pub fn map_keyword(&self) -> Map<TextRange, SyntaxToken<Lang>>
-  where
-    Map<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Map::KIND)
-      .map(|t| Map::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn map_keyword(&self) -> &Map<TextRange, SyntaxToken<Lang>> {
+    &self.map_kw
+  }
+
+  /// Returns the left brace token.
+  #[inline]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the key type.
   #[inline]
-  pub fn key_type(&self) -> KeyType
-  where
-    KeyType: CstNode<Language = Lang>,
-  {
-    // First child after map keyword
-    child(self.syntax()).unwrap()
+  pub const fn key_type(&self) -> &KeyType {
+    &self.key_type
   }
 
   /// Returns the value type.
   #[inline]
-  pub fn value_type(&self) -> ValueType
-  where
-    ValueType: CstNode<Language = Lang>,
-  {
-    // Second child after key type
-    let mut children = self.syntax().children();
-    children
-      .find_map(|n| ValueType::try_cast_node(n).ok())
-      .unwrap()
+  pub const fn value_type(&self) -> &ValueType {
+    &self.value_type
+  }
+
+  /// Returns the colon token separating key and value types.
+  #[inline]
+  pub const fn fat_arrow_token(&self) -> &FatArrow<TextRange, SyntaxToken<Lang>> {
+    &self.fat_arrow
+  }
+
+  /// Returns the right brace token.
+  #[inline]
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the bang token if present.
   #[inline]
-  pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Bang::KIND)
-      .map(|t| Bang::with_content(t.text_range(), t))
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
+    self.bang.as_ref()
   }
 
   /// Returns whether this type is required (non-null).
   #[inline]
-  pub fn required(&self) -> bool
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    self.bang_token().is_some()
+  pub const fn required(&self) -> bool {
+    self.bang.is_some()
   }
 }
 
@@ -124,7 +135,7 @@ where
   Map<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Bang<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
@@ -147,7 +158,7 @@ where
     Map::parser(builder)
       .ignore_then(LBrace::parser(builder))
       .ignore_then(KeyType::parser(builder))
-      .then_ignore(Colon::parser(builder))
+      .then_ignore(FatArrow::parser(builder))
       .ignore_then(ValueType::parser(builder))
       .then_ignore(RBrace::parser(builder))
       .ignore_then(Bang::parser(builder).or_not())

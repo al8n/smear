@@ -1,13 +1,10 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{
-    CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError,
-  },
+  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use core::marker::PhantomData;
 use smear_lexer::{
   keywords::Set,
   punctuator::{Bang, LBrace, RBrace},
@@ -25,7 +22,11 @@ where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _ty: PhantomData<Type>,
+  set_kw: Set<TextRange, SyntaxToken<Lang>>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  ty: Type,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Type, Lang> SetType<Type, Lang>
@@ -35,10 +36,21 @@ where
   Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    set_kw: Set<TextRange, SyntaxToken<Lang>>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    ty: Type,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
     Self {
       syntax,
-      _ty: PhantomData,
+      set_kw,
+      l_brace,
+      ty,
+      r_brace,
+      bang,
     }
   }
 
@@ -62,41 +74,38 @@ where
 
   /// Returns the set keyword token.
   #[inline]
-  pub fn set_keyword(&self) -> Set<TextRange, SyntaxToken<Lang>>
-  where
-    Set<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Set::KIND)
-      .map(|t| Set::with_content(t.text_range(), t))
-      .unwrap()
+  pub const fn set_keyword(&self) -> &Set<TextRange, SyntaxToken<Lang>> {
+    &self.set_kw
+  }
+
+  /// Returns the left brace token.
+  #[inline]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
   }
 
   /// Returns the element type.
   #[inline]
-  pub fn ty(&self) -> Type
-  where
-    Type: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn ty(&self) -> &Type {
+    &self.ty
+  }
+
+  /// Returns the right brace token.
+  #[inline]
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
   /// Returns the bang token if present.
   #[inline]
-  pub fn bang_token(&self) -> Option<Bang<TextRange, SyntaxToken<Lang>>>
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    logosky::cst::cast::token(self.syntax(), &Bang::KIND)
-      .map(|t| Bang::with_content(t.text_range(), t))
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
+    self.bang.as_ref()
   }
 
   /// Returns whether this type is required (non-null).
   #[inline]
-  pub fn required(&self) -> bool
-  where
-    Bang<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
-  {
-    self.bang_token().is_some()
+  pub const fn required(&self) -> bool {
+    self.bang.is_some()
   }
 }
 

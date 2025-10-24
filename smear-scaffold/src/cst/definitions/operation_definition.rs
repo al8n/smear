@@ -1,11 +1,11 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, cast::child, error::SyntaxError},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 /// Represents a named GraphQL operation definition.
 ///
@@ -17,7 +17,7 @@ use core::marker::PhantomData;
 /// ```
 ///
 /// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct NamedOperationDefinition<
   Name,
   OperationType,
@@ -29,35 +29,43 @@ pub struct NamedOperationDefinition<
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  _name: PhantomData<Name>,
-  _operation_type: PhantomData<OperationType>,
-  _variables_definition: PhantomData<VariablesDefinition>,
-  _directives: PhantomData<Directives>,
-  _selection_set: PhantomData<SelectionSet>,
+  operation_type: OperationType,
+  name: Option<Name>,
+  variables_definition: Option<VariablesDefinition>,
+  directives: Option<Directives>,
+  selection_set: SelectionSet,
 }
 
 impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
   NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>) -> Self {
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    operation_type: OperationType,
+    name: Option<Name>,
+    variables_definition: Option<VariablesDefinition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
     Self {
       syntax,
-      _name: PhantomData,
-      _operation_type: PhantomData,
-      _variables_definition: PhantomData,
-      _directives: PhantomData,
-      _selection_set: PhantomData,
+      operation_type,
+      name,
+      variables_definition,
+      directives,
+      selection_set,
     }
   }
 
   /// Tries to create a `NamedOperationDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  where
+    Self: CstNode<Language = Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -75,47 +83,32 @@ where
 
   /// Returns the operation type of the named operation definition.
   #[inline]
-  pub fn operation_type(&self) -> OperationType
-  where
-    OperationType: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn operation_type(&self) -> &OperationType {
+    &self.operation_type
   }
 
   /// Returns the name of the named operation definition.
   #[inline]
-  pub fn name(&self) -> Option<Name>
-  where
-    Name: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn name(&self) -> Option<&Name> {
+    self.name.as_ref()
   }
 
   /// Returns the variable definitions of the named operation definition.
   #[inline]
-  pub fn variable_definitions(&self) -> Option<VariablesDefinition>
-  where
-    VariablesDefinition: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition> {
+    self.variables_definition.as_ref()
   }
 
   /// Returns the directives of the named operation definition.
   #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: CstNode<Language = Lang>,
-  {
-    child(self.syntax())
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 
   /// Returns the selection set of the named operation definition.
   #[inline]
-  pub fn selection_set(&self) -> SelectionSet
-  where
-    SelectionSet: CstNode<Language = Lang>,
-  {
-    child(self.syntax()).unwrap()
+  pub const fn selection_set(&self) -> &SelectionSet {
+    &self.selection_set
   }
 }
 

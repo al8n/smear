@@ -1,4 +1,4 @@
-use logosky::cst::{CstElement, CstNode, error::SyntaxError};
+use logosky::cst::{CstNode, error::SyntaxError};
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
 use smear_lexer::keywords::{Mutation, Query, Subscription};

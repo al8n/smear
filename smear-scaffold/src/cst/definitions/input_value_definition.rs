@@ -79,47 +79,33 @@ where
 
   /// Returns the name.
   #[inline]
-  pub fn name(&self) -> Name
-  where
-    Name: Clone,
-  {
-    self.name.clone()
+  pub const fn name(&self) -> &Name {
+    &self.name
   }
 
   /// Returns the colon token.
   #[inline]
-  pub fn colon_token(&self) -> Colon<TextRange, SyntaxToken<Lang>>
-  where
-    Colon<TextRange, SyntaxToken<Lang>>: Clone,
+  pub const fn colon_token(&self) -> &Colon<TextRange, SyntaxToken<Lang>>
   {
-    self.colon.clone()
+    &self.colon
   }
 
   /// Returns the type.
   #[inline]
-  pub fn ty(&self) -> Type
-  where
-    Type: Clone,
-  {
-    self.ty.clone()
+  pub const fn ty(&self) -> &Type {
+    &self.ty
   }
 
   /// Returns the optional default value.
   #[inline]
-  pub fn default_value(&self) -> Option<DefaultValue>
-  where
-    DefaultValue: Clone,
-  {
-    self.default_value.clone()
+  pub const fn default_value(&self) -> Option<&DefaultValue> {
+    self.default_value.as_ref()
   }
 
   /// Returns the optional directives.
   #[inline]
-  pub fn directives(&self) -> Option<Directives>
-  where
-    Directives: Clone,
-  {
-    self.directives.clone()
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 }
 
