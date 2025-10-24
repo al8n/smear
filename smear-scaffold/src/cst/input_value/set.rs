@@ -30,26 +30,26 @@ use smear_lexer::{
 pub struct Set<Value, Lang>
 where
   Lang: Language,
-  Value: CstNode<Language = Lang>,
+  Value: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   set_keyword: keywords::Set<TextRange, SyntaxToken<Lang>>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
-  values: CstNodeChildren<Value>,
+  values: CstNodeChildren<Value, Lang>,
 }
 
 impl<Value, Lang> Set<Value, Lang>
 where
   Lang: Language,
-  Value: CstNode<Language = Lang>,
+  Value: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     set_keyword: keywords::Set<TextRange, SyntaxToken<Lang>>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    values: CstNodeChildren<Value>,
+    values: CstNodeChildren<Value, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -63,9 +63,9 @@ where
 
   /// Tries to create a `Set` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -102,7 +102,7 @@ where
 
   /// Returns the values contained in the set.
   #[inline]
-  pub const fn values(&self) -> &CstNodeChildren<Value> {
+  pub const fn values(&self) -> &CstNodeChildren<Value, Lang> {
     &self.values
   }
 
@@ -122,7 +122,7 @@ where
     RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     VP: Parser<'a, I, (), E> + Clone,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     keywords::Set::parser(builder)
@@ -137,13 +137,13 @@ where
 
 impl<'a, Value, Lang, I, T, Error> Parseable<'a, I, T, Error> for Set<Value, Lang>
 where
-  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   keywords::Set<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

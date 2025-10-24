@@ -17,24 +17,24 @@ use std::vec::Vec;
 pub struct UnionMemberTypes<Member, Lang>
 where
   Lang: Language,
-  Member: CstNode<Language = Lang>,
+  Member: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  members: CstNodeChildren<Member>,
+  members: CstNodeChildren<Member, Lang>,
   separators: Vec<Pipe<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Member, Lang> UnionMemberTypes<Member, Lang>
 where
   Lang: Language,
-  Member: CstNode<Language = Lang>,
+  Member: CstNode<Lang>,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) fn new(
     syntax: SyntaxNode<Lang>,
-    members: CstNodeChildren<Member>,
+    members: CstNodeChildren<Member, Lang>,
     separators: Vec<Pipe<TextRange, SyntaxToken<Lang>>>,
   ) -> Self {
     Self {
@@ -45,7 +45,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -60,7 +60,7 @@ where
   }
 
   #[inline]
-  pub const fn members(&self) -> &CstNodeChildren<Member> {
+  pub const fn members(&self) -> &CstNodeChildren<Member, Lang> {
     &self.members
   }
 
@@ -72,11 +72,11 @@ where
 
 impl<'a, Member, Lang, I, T, Error> Parseable<'a, I, T, Error> for UnionMemberTypes<Member, Lang>
 where
-  Member: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Member: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Pipe<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -119,7 +119,7 @@ impl<Name, Directives, MemberTypes, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -141,7 +141,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -191,7 +191,7 @@ where
   MemberTypes: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

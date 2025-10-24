@@ -35,10 +35,10 @@ impl<Lang> OperationType<Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   /// Tries to create an `OperationType` from the given syntax node.
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 

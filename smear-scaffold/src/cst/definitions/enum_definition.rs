@@ -25,7 +25,7 @@ impl<Value, Directives, Lang> EnumValueDefinition<Value, Directives, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -41,7 +41,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -73,7 +73,7 @@ where
   Directives: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -100,24 +100,22 @@ where
 pub struct EnumValuesDefinition<ValueDefinition, Lang>
 where
   Lang: Language,
-  ValueDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  values: CstNodeChildren<ValueDefinition>,
+  values: CstNodeChildren<ValueDefinition, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<ValueDefinition, Lang> EnumValuesDefinition<ValueDefinition, Lang>
 where
   Lang: Language,
-  ValueDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    values: CstNodeChildren<ValueDefinition>,
+    values: CstNodeChildren<ValueDefinition, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -129,9 +127,9 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -152,7 +150,7 @@ where
   }
 
   #[inline]
-  pub const fn values(&self) -> &CstNodeChildren<ValueDefinition> {
+  pub const fn values(&self) -> &CstNodeChildren<ValueDefinition, Lang> {
     &self.values
   }
 
@@ -165,12 +163,12 @@ where
 impl<'a, ValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for EnumValuesDefinition<ValueDefinition, Lang>
 where
-  ValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  ValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -216,7 +214,7 @@ impl<Name, Directives, ValuesDefinition, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -236,7 +234,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -280,7 +278,7 @@ where
   ValuesDefinition: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

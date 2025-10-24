@@ -38,7 +38,7 @@ impl<Name, Type, DefaultValue, Directives, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -61,7 +61,7 @@ where
 
   /// Tries to create an `InputValueDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -119,7 +119,7 @@ where
   Directives: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

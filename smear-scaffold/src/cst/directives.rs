@@ -42,7 +42,7 @@ impl<Name, Args, Lang> Directive<Name, Args, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(
@@ -61,7 +61,7 @@ where
 
   /// Tries to create a `Directive` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -104,7 +104,7 @@ where
     At<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
     AP: Parser<'a, I, (), E> + Clone,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     At::parser(builder)
@@ -123,7 +123,7 @@ where
   Name: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang> + 'a,
+  Self: CstNode<Lang> + 'a,
 {
   type Language = Lang;
 
@@ -153,16 +153,16 @@ where
 pub struct Directives<Directive, Lang>
 where
   Lang: Language,
-  Directive: CstNode<Language = Lang>,
+  Directive: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  directives: CstNodeChildren<Directive>,
+  directives: CstNodeChildren<Directive, Lang>,
 }
 
 impl<Directive, Lang> Directives<Directive, Lang>
 where
   Lang: Language,
-  Directive: CstNode<Language = Lang>,
+  Directive: CstNode<Lang>,
 {
   /// Returns the syntax node of this directives collection.
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -174,28 +174,28 @@ where
 impl<Directive, Lang> Directives<Directive, Lang>
 where
   Lang: Language,
-  Directive: CstNode<Language = Lang>,
+  Directive: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(
     syntax: SyntaxNode<Lang>,
-    directives: CstNodeChildren<Directive>,
+    directives: CstNodeChildren<Directive, Lang>,
   ) -> Self {
     Self { syntax, directives }
   }
 
   /// Tries to create a `Directives` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
 
   /// Returns the collection of directives.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn directives(&self) -> &CstNodeChildren<Directive> {
+  pub const fn directives(&self) -> &CstNodeChildren<Directive, Lang> {
     &self.directives
   }
 
@@ -211,7 +211,7 @@ where
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     DP: Parser<'a, I, (), E> + Clone,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
@@ -223,10 +223,10 @@ where
 
 impl<'a, Directive, Lang, I, T, Error> Parseable<'a, I, T, Error> for Directives<Directive, Lang>
 where
-  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + 'a,
+  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang> + 'a,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang> + 'a,
+  Self: CstNode<Lang> + 'a,
 {
   type Language = Lang;
 

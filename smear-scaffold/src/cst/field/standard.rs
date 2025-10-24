@@ -63,12 +63,12 @@
 // where
 //   Lang: Language,
 //   Lang::Kind: Into<rowan::SyntaxKind>,
-//   Self: CstNode<Language = Lang>,
+//   Self: CstNode<Lang>,
 // {
 //   /// Tries to create a `StandardSelection` from the given syntax node.
 //   pub fn try_new(
 //     syntax: SyntaxNode<Lang>,
-//   ) -> Result<Self, super::SyntaxError<Self>> {
+//   ) -> Result<Self, super::SyntaxError<Self, Lang>> {
 //     Self::try_cast_node(syntax)
 //   }
 
@@ -112,10 +112,10 @@
 // //   FragmentName: Parseable<'a, I, T, Error, Language = Lang> + 'a,
 // //   Arguments: Parseable<'a, I, T, Error, Language = Lang> + 'a,
 // //   Directives: Parseable<'a, I, T, Error, Language = Lang> + 'a,
-// //   InlineFragment<TypeCondition, Directives, StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>, Lang>: CstNode<Language = Lang> + 'a,
-// //   FragmentSpread<FragmentName, Directives, Lang>: CstNode<Language = Lang> + 'a,
-// //   StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Language = Lang> + 'a,
-// //   StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Language = Lang> + 'a,
+// //   InlineFragment<TypeCondition, Directives, StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>, Lang>: CstNode<Lang> + 'a,
+// //   FragmentSpread<FragmentName, Directives, Lang>: CstNode<Lang> + 'a,
+// //   StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Lang> + 'a,
+// //   StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives, Lang>: CstNode<Lang> + 'a,
 // //   Lang: Language,
 // //   Lang::Kind: Into<rowan::SyntaxKind>,
 // // {

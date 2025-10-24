@@ -12,7 +12,7 @@ use smear_lexer::keywords::Schema;
 pub struct SchemaDefinition<Directives, RootOperations, Lang>
 where
   Lang: Language,
-  RootOperations: CstNode<Language = Lang>,
+  RootOperations: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   schema_kw: Schema<TextRange, SyntaxToken<Lang>>,
@@ -23,7 +23,7 @@ where
 impl<Directives, RootOperations, Lang> SchemaDefinition<Directives, RootOperations, Lang>
 where
   Lang: Language,
-  RootOperations: CstNode<Language = Lang>,
+  RootOperations: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -41,9 +41,9 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -74,10 +74,10 @@ impl<'a, Directives, RootOperations, Lang, I, T, Error> Parseable<'a, I, T, Erro
 where
   Schema<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Directives: Parseable<'a, I, T, Error, Language = Lang>,
-  RootOperations: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  RootOperations: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

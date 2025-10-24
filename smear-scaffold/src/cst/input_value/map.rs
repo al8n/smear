@@ -26,7 +26,7 @@ impl<Key, Value, Lang> MapEntry<Key, Value, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -45,7 +45,7 @@ where
 
   /// Tries to create a `MapEntry` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -112,7 +112,7 @@ where
   FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -148,26 +148,24 @@ where
 pub struct Map<Key, Value, Lang>
 where
   Lang: Language,
-  MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   map_keyword: keywords::Map<TextRange, SyntaxToken<Lang>>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  entries: CstNodeChildren<MapEntry<Key, Value, Lang>>,
+  entries: CstNodeChildren<MapEntry<Key, Value, Lang>, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Key, Value, Lang> Map<Key, Value, Lang>
 where
   Lang: Language,
-  MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     map_keyword: keywords::Map<TextRange, SyntaxToken<Lang>>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    entries: CstNodeChildren<MapEntry<Key, Value, Lang>>,
+    entries: CstNodeChildren<MapEntry<Key, Value, Lang>, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -181,9 +179,9 @@ where
 
   /// Tries to create a `Map` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -220,7 +218,7 @@ where
 
   /// Returns the entries contained in the map.
   #[inline]
-  pub const fn entries(&self) -> &CstNodeChildren<MapEntry<Key, Value, Lang>> {
+  pub const fn entries(&self) -> &CstNodeChildren<MapEntry<Key, Value, Lang>, Lang> {
     &self.entries
   }
 
@@ -242,9 +240,9 @@ where
     FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     KP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
-    MapEntry<Key, Value, Lang>: CstNode<Language = Lang>,
+    MapEntry<Key, Value, Lang>: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     keywords::Map::parser(builder)
@@ -270,10 +268,10 @@ where
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   FatArrow<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   MapEntry<Key, Value, Lang>:
-    Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+    Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

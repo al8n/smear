@@ -24,24 +24,24 @@ use smear_lexer::punctuator::{LParen, RParen};
 pub struct ArgumentsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
-  InputValueDefinition: CstNode<Language = Lang>,
+  InputValueDefinition: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_paren: LParen<TextRange, SyntaxToken<Lang>>,
-  arguments: CstNodeChildren<InputValueDefinition>,
+  arguments: CstNodeChildren<InputValueDefinition, Lang>,
   r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<InputValueDefinition, Lang> ArgumentsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
-  InputValueDefinition: CstNode<Language = Lang>,
+  InputValueDefinition: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_paren: LParen<TextRange, SyntaxToken<Lang>>,
-    arguments: CstNodeChildren<InputValueDefinition>,
+    arguments: CstNodeChildren<InputValueDefinition, Lang>,
     r_paren: RParen<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -54,9 +54,9 @@ where
 
   /// Tries to create an `ArgumentsDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -87,7 +87,7 @@ where
 
   /// Returns all input value definitions.
   #[inline]
-  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition> {
+  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition, Lang> {
     &self.arguments
   }
 }
@@ -95,12 +95,12 @@ where
 impl<'a, InputValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for ArgumentsDefinition<InputValueDefinition, Lang>
 where
-  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

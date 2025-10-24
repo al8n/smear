@@ -27,7 +27,7 @@ impl<Ident, Type, Lang> ExecutableDefinitionName<Ident, Type, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -40,7 +40,7 @@ where
 
   /// Tries to create an `ExecutableDefinitionName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -78,7 +78,7 @@ where
   ExecutableDefinitionTypeGenerics<Ident, Type, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

@@ -49,9 +49,9 @@ where
 
   /// Tries to create an `ObjectField` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -102,7 +102,7 @@ where
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     name_parser(builder)
@@ -122,7 +122,7 @@ where
   Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -160,24 +160,22 @@ where
 pub struct Object<Name, Value, Lang>
 where
   Lang: Language,
-  ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  fields: CstNodeChildren<ObjectField<Name, Value, Lang>>,
+  fields: CstNodeChildren<ObjectField<Name, Value, Lang>, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Name, Value, Lang> Object<Name, Value, Lang>
 where
   Lang: Language,
-  ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    fields: CstNodeChildren<ObjectField<Name, Value, Lang>>,
+    fields: CstNodeChildren<ObjectField<Name, Value, Lang>, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -190,9 +188,9 @@ where
 
   /// Tries to create an `Object` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -223,7 +221,7 @@ where
 
   /// Returns the fields contained in the object.
   #[inline]
-  pub const fn fields(&self) -> &CstNodeChildren<ObjectField<Name, Value, Lang>> {
+  pub const fn fields(&self) -> &CstNodeChildren<ObjectField<Name, Value, Lang>, Lang> {
     &self.fields
   }
 
@@ -244,9 +242,9 @@ where
     Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
-    ObjectField<Name, Value, Lang>: CstNode<Language = Lang>,
+    ObjectField<Name, Value, Lang>: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     LBrace::parser(builder)
@@ -270,10 +268,10 @@ where
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   ObjectField<Name, Value, Lang>:
-    Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+    Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

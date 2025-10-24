@@ -20,7 +20,7 @@ where
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  members: CstNodeChildren<ImportMember<Ident, Lang>>,
+  members: CstNodeChildren<ImportMember<Ident, Lang>, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
@@ -28,13 +28,13 @@ impl<Ident, Lang> ImportList<Ident, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    members: CstNodeChildren<ImportMember<Ident, Lang>>,
+    members: CstNodeChildren<ImportMember<Ident, Lang>, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -46,7 +46,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -66,7 +66,7 @@ where
   }
 
   #[inline]
-  pub const fn import_members(&self) -> &CstNodeChildren<ImportMember<Ident, Lang>> {
+  pub const fn import_members(&self) -> &CstNodeChildren<ImportMember<Ident, Lang>, Lang> {
     &self.members
   }
 
@@ -78,12 +78,12 @@ where
 
 impl<'a, Ident, Lang, I, T, Error> Parseable<'a, I, T, Error> for ImportList<Ident, Lang>
 where
-  ImportMember<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  ImportMember<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -126,7 +126,7 @@ impl<Ident, Lang> ImportClause<Ident, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -138,7 +138,7 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -168,7 +168,7 @@ where
   ImportList<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -196,8 +196,6 @@ where
 pub struct ImportDefinition<Clause, PathNode, Lang>
 where
   Lang: Language,
-  Clause: CstNode<Language = Lang>,
-  PathNode: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   import_kw: Import<TextRange, SyntaxToken<Lang>>,
@@ -209,10 +207,6 @@ where
 impl<Clause, PathNode, Lang> ImportDefinition<Clause, PathNode, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Clause: CstNode<Language = Lang>,
-  PathNode: CstNode<Language = Lang>,
-  Self: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -232,7 +226,10 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -271,12 +268,12 @@ impl<'a, Clause, PathNode, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for ImportDefinition<Clause, PathNode, Lang>
 where
   Import<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  Clause: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Clause: Parseable<'a, I, T, Error, Language = Lang>,
   From<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  PathNode: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  PathNode: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -306,7 +303,6 @@ where
 pub struct ImportMember<Name, Lang>
 where
   Lang: Language,
-  PathSegment<Name, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   star: Option<Asterisk<TextRange, SyntaxToken<Lang>>>,
@@ -318,7 +314,6 @@ where
 impl<Name, Lang> ImportMember<Name, Lang>
 where
   Lang: Language,
-  PathSegment<Name, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -338,9 +333,9 @@ where
   }
 
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -378,14 +373,13 @@ where
 
 impl<'a, Name, Lang, I, T, Error> Parseable<'a, I, T, Error> for ImportMember<Name, Lang>
 where
-  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Asterisk<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   As<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  PathSegment<Name, Lang>: CstNode<Language = Lang>,
   Path<Name, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

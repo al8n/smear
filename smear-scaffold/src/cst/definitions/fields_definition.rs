@@ -13,24 +13,22 @@ use smear_lexer::punctuator::{LBrace, RBrace};
 pub struct FieldsDefinition<FieldDefinition, Lang>
 where
   Lang: Language,
-  FieldDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  fields: CstNodeChildren<FieldDefinition>,
+  fields: CstNodeChildren<FieldDefinition, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<FieldDefinition, Lang> FieldsDefinition<FieldDefinition, Lang>
 where
   Lang: Language,
-  FieldDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    fields: CstNodeChildren<FieldDefinition>,
+    fields: CstNodeChildren<FieldDefinition, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -43,9 +41,9 @@ where
 
   /// Tries to create a `FieldsDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -76,7 +74,7 @@ where
 
   /// Returns the collection of field definitions.
   #[inline]
-  pub const fn field_definitions(&self) -> &CstNodeChildren<FieldDefinition> {
+  pub const fn field_definitions(&self) -> &CstNodeChildren<FieldDefinition, Lang> {
     &self.fields
   }
 }
@@ -84,12 +82,12 @@ where
 impl<'a, FieldDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for FieldsDefinition<FieldDefinition, Lang>
 where
-  FieldDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  FieldDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

@@ -6,7 +6,6 @@ use logosky::{
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
 use smear_lexer::punctuator::PathSeparator;
-use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PathSegment<Ident, Lang>
@@ -37,9 +36,9 @@ where
 
   /// Tries to create a `PathSegment` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -81,7 +80,7 @@ where
     PathSeparator<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     IP: Parser<'a, I, (), E> + Clone,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     PathSeparator::parser(builder)
@@ -105,7 +104,7 @@ where
     PathSeparator<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     IP: Parser<'a, I, (), E> + Clone,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     PathSeparator::parser(builder)
@@ -127,22 +126,20 @@ where
 pub struct Path<Ident, Lang>
 where
   Lang: Language,
-  PathSegment<Ident, Lang>: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  segments: CstNodeChildren<PathSegment<Ident, Lang>>,
+  segments: CstNodeChildren<PathSegment<Ident, Lang>, Lang>,
   fqdp: bool,
 }
 
 impl<Ident, Lang> Path<Ident, Lang>
 where
   Lang: Language,
-  PathSegment<Ident, Lang>: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) fn new(
     syntax: SyntaxNode<Lang>,
-    segments: CstNodeChildren<PathSegment<Ident, Lang>>,
+    segments: CstNodeChildren<PathSegment<Ident, Lang>, Lang>,
     fqdp: bool,
   ) -> Self {
     Self {
@@ -154,9 +151,9 @@ where
 
   /// Tries to create a `Path` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -175,7 +172,7 @@ where
 
   /// Returns all path segments.
   #[inline]
-  pub const fn segments(&self) -> &CstNodeChildren<PathSegment<Ident, Lang>>
+  pub const fn segments(&self) -> &CstNodeChildren<PathSegment<Ident, Lang>, Lang>
   {
     &self.segments
   }
@@ -184,7 +181,7 @@ where
   #[inline]
   pub fn is_fully_qualified(&self) -> bool
   where
-    PathSeparator<TextRange, SyntaxToken<Lang>>: CstToken<Language = Lang>,
+    PathSeparator<TextRange, SyntaxToken<Lang>>: CstToken<Lang>,
   {
     self.fqdp
   }
@@ -196,8 +193,8 @@ where
   PathSeparator<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
-  PathSegment<Ident, Lang>: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
+  PathSegment<Ident, Lang>: CstNode<Lang>,
 {
   type Language = Lang;
 

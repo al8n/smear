@@ -34,5 +34,5 @@ impl_graphql_node! {
       }
     }
   })
-  where Selection: Debug + CstNode<Language = GraphQLLanguage>,
+  where Selection: CstNode<GraphQLLanguage>,
 }

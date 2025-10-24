@@ -13,23 +13,23 @@ use rowan::{Language, SyntaxNode, TextRange};
 pub struct Document<Definition, Lang>
 where
   Lang: Language,
-  Definition: CstNode<Language = Lang>,
+  Definition: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  definitions: CstNodeChildren<Definition>,
+  definitions: CstNodeChildren<Definition, Lang>,
 }
 
 impl<Definition, Lang> Document<Definition, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
-  Definition: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
+  Definition: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
-    definitions: CstNodeChildren<Definition>,
+    definitions: CstNodeChildren<Definition, Lang>,
   ) -> Self {
     Self {
       syntax,
@@ -39,7 +39,7 @@ where
 
   /// Tries to create a `Document` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -57,7 +57,7 @@ where
 
   /// Returns the definitions in the document.
   #[inline]
-  pub const fn definitions(&self) -> &CstNodeChildren<Definition> {
+  pub const fn definitions(&self) -> &CstNodeChildren<Definition, Lang> {
     &self.definitions
   }
 }
@@ -68,8 +68,8 @@ where
   Definition: Parseable<'a, I, Token, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Definition: CstNode<Language = Lang>,
-  Self: CstNode<Language = Lang>,
+  Definition: CstNode<Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

@@ -13,24 +13,24 @@ use smear_lexer::punctuator::{LBrace, RBrace};
 pub struct InputFieldsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
-  InputValueDefinition: CstNode<Language = Lang>,
+  InputValueDefinition: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  fields: CstNodeChildren<InputValueDefinition>,
+  fields: CstNodeChildren<InputValueDefinition, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<InputValueDefinition, Lang> InputFieldsDefinition<InputValueDefinition, Lang>
 where
   Lang: Language,
-  InputValueDefinition: CstNode<Language = Lang>,
+  InputValueDefinition: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    fields: CstNodeChildren<InputValueDefinition>,
+    fields: CstNodeChildren<InputValueDefinition, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -43,9 +43,9 @@ where
 
   /// Tries to create an `InputFieldsDefinition` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -76,7 +76,7 @@ where
 
   /// Returns the collection of input value definitions.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition> {
+  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition, Lang> {
     &self.fields
   }
 }
@@ -84,12 +84,12 @@ where
 impl<'a, InputValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for InputFieldsDefinition<InputValueDefinition, Lang>
 where
-  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

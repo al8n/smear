@@ -48,10 +48,10 @@ pub enum SelectionSetSyntax {
 pub struct SelectionSet<Selection, Lang>
 where
   Lang: Language,
-  Selection: CstNode<Language = Lang>,
+  Selection: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  selections: CstNodeChildren<Selection>,
+  selections: CstNodeChildren<Selection, Lang>,
   lbrace: LBrace<TextRange, SyntaxToken<Lang>>,
   rbrace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
@@ -60,7 +60,7 @@ impl<Selection, Lang> SelectionSet<Selection, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Selection: CstNode<Language = Lang>,
+  Selection: CstNode<Lang>,
 {
   /// Returns the syntax node representing the selection set.
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -73,13 +73,13 @@ impl<Selection, Lang> SelectionSet<Selection, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Selection: CstNode<Language = Lang>,
-  Self: CstNode<Language = Lang>,
+  Selection: CstNode<Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(
     syntax: SyntaxNode<Lang>,
-    selections: CstNodeChildren<Selection>,
+    selections: CstNodeChildren<Selection, Lang>,
     lbrace: LBrace<TextRange, SyntaxToken<Lang>>,
     rbrace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
@@ -93,7 +93,7 @@ where
 
   /// Tries to create a `SelectionSet` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -119,7 +119,7 @@ where
 
   /// Returns the container holding all selections.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn selections(&self) -> &CstNodeChildren<Selection> {
+  pub const fn selections(&self) -> &CstNodeChildren<Selection, Lang> {
     &self.selections
   }
 
@@ -150,12 +150,12 @@ where
 
 impl<'a, Selection, Lang, I, T, Error> Parseable<'a, I, T, Error> for SelectionSet<Selection, Lang>
 where
-  Selection: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Selection: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

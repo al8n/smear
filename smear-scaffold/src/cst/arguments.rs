@@ -54,9 +54,9 @@ where
 
   /// Tries to create an `Argument` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -125,7 +125,7 @@ where
     Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     NP: Parser<'a, I, (), E> + Clone,
     VP: Parser<'a, I, (), E> + Clone,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
@@ -140,12 +140,12 @@ where
 
 impl<'a, Name, Value, Lang, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value, Lang>
 where
-  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + Clone,
+  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang> + Clone,
   Colon<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + Clone,
+  Value: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang> + Clone,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -212,10 +212,10 @@ where
 pub struct Arguments<Arg, Lang>
 where
   Lang: Language,
-  Arg: CstNode<Language = Lang>,
+  Arg: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  arguments: CstNodeChildren<Arg>,
+  arguments: CstNodeChildren<Arg, Lang>,
   l_paren: LParen<TextRange, SyntaxToken<Lang>>,
   r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
@@ -223,14 +223,14 @@ where
 impl<Arg, Lang> Arguments<Arg, Lang>
 where
   Lang: Language,
-  Arg: CstNode<Language = Lang>,
-  Self: CstNode<Language = Lang>,
+  Arg: CstNode<Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(super) const fn new(
     syntax: SyntaxNode<Lang>,
     l_paren: LParen<TextRange, SyntaxToken<Lang>>,
-    arguments: CstNodeChildren<Arg>,
+    arguments: CstNodeChildren<Arg, Lang>,
     r_paren: RParen<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -243,7 +243,7 @@ where
 
   /// Tries to create a `Arguments` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -288,7 +288,7 @@ where
   /// This provides access to all arguments that were successfully parsed
   /// from the argument list.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn arguments(&self) -> &CstNodeChildren<Arg>
+  pub const fn arguments(&self) -> &CstNodeChildren<Arg, Lang>
   {
     &self.arguments
   }
@@ -309,7 +309,7 @@ where
     RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     AP: Parser<'a, I, (), E> + Clone,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     LParen::parser(builder)
@@ -323,12 +323,12 @@ where
 
 impl<'a, Arg, Lang, I, T, Error> Parseable<'a, I, T, Error> for Arguments<Arg, Lang>
 where
-  Arg: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Arg: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

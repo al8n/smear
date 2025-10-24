@@ -42,9 +42,9 @@ where
 
   /// Tries to create a `FragmentName` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -106,9 +106,9 @@ where
 
   /// Tries to create a `TypeCondition` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -151,7 +151,7 @@ where
     NP: Parser<'a, I, (), E> + Clone,
     On<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     builder.start_node(Self::KIND);
     On::parser(builder)
@@ -168,7 +168,7 @@ where
   On<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang> + 'a,
+  Self: CstNode<Lang> + 'a,
 {
   type Language = Lang;
 
@@ -243,9 +243,9 @@ where
 
   /// Tries to create a `FragmentSpread` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -298,7 +298,7 @@ where
     Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
     FP: Parser<'a, I, (), E> + Clone,
     DP: Parser<'a, I, (), E> + Clone,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
@@ -319,7 +319,7 @@ where
   Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang> + 'a,
+  Self: CstNode<Lang> + 'a,
 {
   type Language = Lang;
 
@@ -399,9 +399,9 @@ where
 
   /// Tries to create an `InlineFragment` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -453,7 +453,7 @@ where
     TP: Parser<'a, I, (), E> + Clone,
     DP: Parser<'a, I, (), E> + Clone,
     SP: Parser<'a, I, (), E> + Clone,
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
     Lang::Kind: Into<rowan::SyntaxKind>,
   {
     builder.start_node(Self::KIND);
@@ -470,13 +470,13 @@ where
 impl<'a, TypeCondition, Directives, SelectionSet, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 where
-  TypeCondition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang> + 'a,
+  TypeCondition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang> + 'a,
   Directives: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   SelectionSet: Parseable<'a, I, T, Error, Language = Lang> + 'a,
   Spread<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang> + 'a,
+  Self: CstNode<Lang> + 'a,
 {
   type Language = Lang;
 

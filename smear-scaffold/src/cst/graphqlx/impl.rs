@@ -32,7 +32,7 @@ macro_rules! impl_graphqlx_node {
       #[cfg_attr(not(tarpaulin), inline(always))]
       fn try_cast_node(
         syntax: rowan::SyntaxNode<Self::Language>,
-      ) -> Result<Self, logosky::cst::error::SyntaxError<Self>>
+      ) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>>
       where
         Self: Sized,
       {

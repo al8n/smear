@@ -5,17 +5,15 @@ macro_rules! impl_graphql_node {
     type Component = $component:ty;
     type COMPONENTS = $components:ty;
   } => $kind:ident($expr:expr) $(where $($where:tt)+)? ) => {
-    impl<$($generics),*> $crate::cst::CstElement for $ty
+    impl<$($generics),*> $crate::cst::CstElement<$crate::cst::graphql::GraphQLLanguage> for $ty
     $(where
       $($where)+
     )?
     {
-      type Language = $crate::cst::graphql::GraphQLLanguage;
-
       const KIND: $crate::cst::graphql::SyntaxKind = $crate::cst::graphql::SyntaxKind::$kind;
 
       #[cfg_attr(not(tarpaulin), inline(always))]
-      fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool
+      fn can_cast(kind: $crate::cst::graphql::SyntaxKind) -> bool
       where
         Self: Sized,
       {
@@ -23,7 +21,7 @@ macro_rules! impl_graphql_node {
       }
     }
 
-    impl<$($generics),*> $crate::cst::CstNode for $ty
+    impl<$($generics),*> $crate::cst::CstNode<$crate::cst::graphql::GraphQLLanguage> for $ty
     $(where
       $($where)+
     )?
@@ -33,12 +31,12 @@ macro_rules! impl_graphql_node {
 
       #[cfg_attr(not(tarpaulin), inline(always))]
       fn try_cast_node(
-        syntax: rowan::SyntaxNode<Self::Language>,
-      ) -> Result<Self, logosky::cst::error::SyntaxError<Self>>
+        syntax: rowan::SyntaxNode<$crate::cst::graphql::GraphQLLanguage>,
+      ) -> Result<Self, logosky::cst::error::SyntaxError<Self, $crate::cst::graphql::GraphQLLanguage>>
       where
         Self: Sized,
       {
-        if <Self as $crate::cst::CstElement>::can_cast(syntax.kind()) {
+        if <Self as $crate::cst::CstElement<$crate::cst::graphql::GraphQLLanguage>>::can_cast(syntax.kind()) {
           $expr(syntax)
         } else {
           Err(logosky::cst::error::SyntaxError::NodeMismatch(logosky::cst::error::CstNodeMismatch::new(syntax)))
@@ -46,7 +44,7 @@ macro_rules! impl_graphql_node {
       }
 
       #[cfg_attr(not(tarpaulin), inline(always))]
-      fn syntax(&self) -> &rowan::SyntaxNode<Self::Language> {
+      fn syntax(&self) -> &rowan::SyntaxNode<$crate::cst::graphql::GraphQLLanguage> {
         self.syntax()
       }
     }

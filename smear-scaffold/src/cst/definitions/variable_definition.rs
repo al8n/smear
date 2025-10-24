@@ -58,9 +58,9 @@ where
 
   /// Tries to create a `VariableDefinition` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -119,7 +119,7 @@ where
   Directives: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -155,24 +155,22 @@ where
 pub struct VariablesDefinition<VariableDefinition, Lang>
 where
   Lang: Language,
-  VariableDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_paren: LParen<TextRange, SyntaxToken<Lang>>,
-  variables: CstNodeChildren<VariableDefinition>,
+  variables: CstNodeChildren<VariableDefinition, Lang>,
   r_paren: RParen<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<VariableDefinition, Lang> VariablesDefinition<VariableDefinition, Lang>
 where
   Lang: Language,
-  VariableDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_paren: LParen<TextRange, SyntaxToken<Lang>>,
-    variables: CstNodeChildren<VariableDefinition>,
+    variables: CstNodeChildren<VariableDefinition, Lang>,
     r_paren: RParen<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -185,9 +183,9 @@ where
 
   /// Tries to create a `VariablesDefinition` from the given syntax node.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -218,7 +216,7 @@ where
 
   /// Returns the collection of variable definitions.
   #[cfg_attr(not(tarpaulin), inline(always))]
-  pub const fn variable_definitions(&self) -> &CstNodeChildren<VariableDefinition> {
+  pub const fn variable_definitions(&self) -> &CstNodeChildren<VariableDefinition, Lang> {
     &self.variables
   }
 }
@@ -226,12 +224,12 @@ where
 impl<'a, VariableDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for VariablesDefinition<VariableDefinition, Lang>
 where
-  VariableDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  VariableDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   LParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RParen<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

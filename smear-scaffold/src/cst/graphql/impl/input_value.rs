@@ -48,7 +48,7 @@ impl_graphql_node! {
     type COMPONENTS = U2;
   } => DefaultValue(|syntax: SyntaxNode<GraphQLLanguage>| {
     let equal = token(&syntax, &SyntaxKind::Equal).map(|t| Equal::with_content(t.text_range(), t));
-    let value = child::<Value>(&syntax);
+    let value = child::<Value, _>(&syntax);
 
     match (equal, value) {
       (Some(equal), Some(value)) => Ok(DefaultInputValue::new(syntax, equal, value)),

@@ -34,7 +34,7 @@ impl<OperationType, Name, Lang> RootOperationTypeDefinition<OperationType, Name,
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -53,7 +53,7 @@ where
 
   /// Tries to create a `RootOperationTypeDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
@@ -96,7 +96,7 @@ where
   Name: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
@@ -129,11 +129,10 @@ where
 pub struct RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
   Lang: Language,
-  RootOperationTypeDefinition: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-  definitions: CstNodeChildren<RootOperationTypeDefinition>,
+  definitions: CstNodeChildren<RootOperationTypeDefinition, Lang>,
   r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
@@ -141,13 +140,12 @@ impl<RootOperationTypeDefinition, Lang>
   RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
   Lang: Language,
-  RootOperationTypeDefinition: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
-    definitions: CstNodeChildren<RootOperationTypeDefinition>,
+    definitions: CstNodeChildren<RootOperationTypeDefinition, Lang>,
     r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -160,9 +158,9 @@ where
 
   /// Tries to create a `RootOperationTypesDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -197,7 +195,7 @@ where
   #[inline]
   pub const fn root_operation_type_definitions(
     &self,
-  ) -> &CstNodeChildren<RootOperationTypeDefinition>
+  ) -> &CstNodeChildren<RootOperationTypeDefinition, Lang>
   {
     &self.definitions
   }
@@ -206,12 +204,12 @@ where
 impl<'a, RootOperationTypeDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for RootOperationTypesDefinition<RootOperationTypeDefinition, Lang>
 where
-  RootOperationTypeDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  RootOperationTypeDefinition: Parseable<'a, I, T, Error, Language = Lang>,
   LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 

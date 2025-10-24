@@ -12,30 +12,28 @@ use core::fmt::Debug;
 pub struct DirectivesDefinition<Directive, Lang>
 where
   Lang: Language,
-  Directive: CstNode<Language = Lang>,
 {
   syntax: SyntaxNode<Lang>,
-  directives: CstNodeChildren<Directive>,
+  directives: CstNodeChildren<Directive, Lang>,
 }
 
 impl<Directive, Lang> DirectivesDefinition<Directive, Lang>
 where
   Lang: Language,
-  Directive: CstNode<Language = Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
-    directives: CstNodeChildren<Directive>,
+    directives: CstNodeChildren<Directive, Lang>,
   ) -> Self {
     Self { syntax, directives }
   }
 
   /// Tries to create a `DirectivesDefinition` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self>>
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
-    Self: CstNode<Language = Lang>,
+    Self: CstNode<Lang>,
   {
     Self::try_cast_node(syntax)
   }
@@ -54,7 +52,7 @@ where
 
   /// Returns the collection of directives.
   #[inline]
-  pub const fn directives(&self) -> &CstNodeChildren<Directive>
+  pub const fn directives(&self) -> &CstNodeChildren<Directive, Lang>
   {
     &self.directives
   }
@@ -63,10 +61,10 @@ where
 impl<'a, Directive, Lang, I, T, Error> Parseable<'a, I, T, Error>
   for DirectivesDefinition<Directive, Lang>
 where
-  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Language = Lang>,
+  Directive: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Language = Lang>,
+  Self: CstNode<Lang>,
 {
   type Language = Lang;
 
