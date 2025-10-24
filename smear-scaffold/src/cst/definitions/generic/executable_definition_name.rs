@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -13,17 +13,17 @@ use super::ExecutableDefinitionTypeGenerics;
 /// ```text
 /// GetUser<ID, Name>
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExecutableDefinitionName<Ident, Type, Lang>
+#[derive(Debug, Clone)]
+pub struct ExecutableDefinitionName<Ident, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
   name: Ident,
-  generics: Option<ExecutableDefinitionTypeGenerics<Ident, Type, Lang>>,
+  generics: Option<ExecutableDefinitionTypeGenerics<Ident, Lang>>,
 }
 
-impl<Ident, Type, Lang> ExecutableDefinitionName<Ident, Type, Lang>
+impl<Ident, Lang> ExecutableDefinitionName<Ident, Lang>
 where
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
@@ -33,14 +33,17 @@ where
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     name: Ident,
-    generics: Option<ExecutableDefinitionTypeGenerics<Ident, Type, Lang>>,
+    generics: Option<ExecutableDefinitionTypeGenerics<Ident, Lang>>,
   ) -> Self {
     Self { syntax, name, generics }
   }
 
   /// Tries to create an `ExecutableDefinitionName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -66,16 +69,16 @@ where
   #[inline]
   pub const fn generics(
     &self,
-  ) -> Option<&ExecutableDefinitionTypeGenerics<Ident, Type, Lang>> {
+  ) -> Option<&ExecutableDefinitionTypeGenerics<Ident, Lang>> {
     self.generics.as_ref()
   }
 }
 
-impl<'a, Ident, Type, Lang, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinitionName<Ident, Type, Lang>
+impl<'a, Ident, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ExecutableDefinitionName<Ident, Lang>
 where
   Ident: Parseable<'a, I, T, Error, Language = Lang>,
-  ExecutableDefinitionTypeGenerics<Ident, Type, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
+  ExecutableDefinitionTypeGenerics<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Lang>,

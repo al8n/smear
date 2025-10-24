@@ -36,7 +36,7 @@ impl_graphql_node! {
     type Component = NamedTypeSyntax;
     type COMPONENTS = U1;
   } => NamedType(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
     let bang = token(&syntax, &SyntaxKind::Bang)
       .map(|t| Bang::with_content(t.text_range(), t));
 
@@ -49,7 +49,7 @@ impl_graphql_node! {
     }
   })
   where
-    Name: Debug + CstNode<Language = GraphQLLanguage>,
+    Name: Debug + CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -59,7 +59,7 @@ impl_graphql_node! {
   } => ListType(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_bracket = token(&syntax, &SyntaxKind::LBracket)
       .map(|t| LBracket::with_content(t.text_range(), t));
-    let ty = child::<Type>(&syntax);
+    let ty = child(&syntax);
     let r_bracket = token(&syntax, &SyntaxKind::RBracket)
       .map(|t| RBracket::with_content(t.text_range(), t));
     let bang = token(&syntax, &SyntaxKind::Bang)
@@ -85,5 +85,5 @@ impl_graphql_node! {
     }
   })
   where
-    Type: Debug + CstNode<Language = GraphQLLanguage>,
+    Type: Debug + CstNode<GraphQLLanguage>,
 }

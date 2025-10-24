@@ -51,5 +51,5 @@ impl_graphql_node! {
     }
   })
   where
-    Value: CstNode<Language = GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
 }

@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -25,8 +25,6 @@ where
 impl<Ident, Lang> ExecutableDefinitionTypeParam<Ident, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(syntax: SyntaxNode<Lang>, ident: Ident) -> Self {
@@ -35,7 +33,10 @@ where
 
   /// Tries to create an `ExecutableDefinitionTypeParam` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -87,28 +88,26 @@ where
 /// Executable definition type generics in CST (e.g., `<T, U>`).
 ///
 /// Similar to definition type generics but for executable definitions (operations/fragments).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExecutableDefinitionTypeGenerics<Ident, Type, Lang>
+#[derive(Debug, Clone)]
+pub struct ExecutableDefinitionTypeGenerics<Ident, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
   l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-  params: CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>>,
+  params: CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>, Lang>,
   r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
 }
 
-impl<Ident, Type, Lang> ExecutableDefinitionTypeGenerics<Ident, Type, Lang>
+impl<Ident, Lang> ExecutableDefinitionTypeGenerics<Ident, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-    params: CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>>,
+    params: CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>, Lang>,
     r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -121,7 +120,10 @@ where
 
   /// Tries to create `ExecutableDefinitionTypeGenerics` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -147,7 +149,7 @@ where
   #[inline]
   pub const fn params(
     &self,
-  ) -> &CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>> {
+  ) -> &CstNodeChildren<ExecutableDefinitionTypeParam<Ident, Lang>, Lang> {
     &self.params
   }
 
@@ -158,8 +160,8 @@ where
   }
 }
 
-impl<'a, Ident, Type, Lang, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinitionTypeGenerics<Ident, Type, Lang>
+impl<'a, Ident, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ExecutableDefinitionTypeGenerics<Ident, Lang>
 where
   ExecutableDefinitionTypeParam<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   LAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,

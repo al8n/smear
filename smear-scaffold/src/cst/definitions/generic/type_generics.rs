@@ -12,24 +12,22 @@ use smear_lexer::punctuator::{LAngle, RAngle};
 pub struct TypeGenerics<Type, Lang>
 where
   Lang: Language,
-  Type: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-  params: CstNodeChildren<Type>,
+  params: CstNodeChildren<Type, Lang>,
   r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Type, Lang> TypeGenerics<Type, Lang>
 where
   Lang: Language,
-  Type: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-    params: CstNodeChildren<Type>,
+    params: CstNodeChildren<Type, Lang>,
     r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -63,7 +61,7 @@ where
 
   /// Returns the type parameters.
   #[inline]
-  pub const fn params(&self) -> &CstNodeChildren<Type> {
+  pub const fn params(&self) -> &CstNodeChildren<Type, Lang> {
     &self.params
   }
 
@@ -82,7 +80,7 @@ where
 
 impl<'a, Type, Lang, I, T, Error> Parseable<'a, I, T, Error> for TypeGenerics<Type, Lang>
 where
-  Type: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
+  Type: Parseable<'a, I, T, Error, Language = Lang>,
   LAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   RAngle<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,

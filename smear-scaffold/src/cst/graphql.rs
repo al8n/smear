@@ -347,13 +347,18 @@ pub enum SyntaxKind {
   // Union Nodes
   // ============================================================================
   /// Union member types (e.g., `User | Post`)
-  UnionMemberTypes,
+  UnionMembers,
+
+  /// Union member type (e.g., `User` or `| Post`)
+  UnionMember,
 
   // ============================================================================
   // Interface Implementation Nodes
   // ============================================================================
   /// Implements interfaces (e.g., `implements Node & Timestamped`)
   ImplementsInterfaces,
+  /// Implements interface member (e.g., `Node` or `& Timestamped`)
+  ImplementInterfaceMember,
 
   // ============================================================================
   // Executable Definition Nodes

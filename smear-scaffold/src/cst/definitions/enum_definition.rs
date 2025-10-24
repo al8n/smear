@@ -40,26 +40,31 @@ where
     }
   }
 
+  /// Tries to create an `EnumValueDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
+  /// Returns the span covering the entire enum value definition.
   #[inline]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
+  /// Returns the syntax node.
   #[inline]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
+  /// Returns the enum value.
   #[inline]
   pub const fn value(&self) -> &Value {
     &self.value
   }
 
+  /// Returns the optional directives.
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
@@ -126,6 +131,7 @@ where
     }
   }
 
+  /// Tries to create an `EnumValuesDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
   where
@@ -134,26 +140,31 @@ where
     Self::try_cast_node(syntax)
   }
 
+  /// Returns the span covering the entire enum values definition.
   #[inline]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
+  /// Returns the syntax node.
   #[inline]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
+  /// Returns the left brace token.
   #[inline]
   pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
     &self.l_brace
   }
 
+  /// Returns the enum value definitions.
   #[inline]
   pub const fn values(&self) -> &CstNodeChildren<ValueDefinition, Lang> {
     &self.values
   }
 
+  /// Returns the right brace token.
   #[inline]
   pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
     &self.r_brace
@@ -233,36 +244,43 @@ where
     }
   }
 
+  /// Tries to create an `EnumTypeDefinition` from the given syntax node.
   #[inline]
   pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
     Self::try_cast_node(syntax)
   }
 
+  /// Returns the span covering the entire enum type definition.
   #[inline]
   pub fn span(&self) -> TextRange {
     self.syntax.text_range()
   }
 
+  /// Returns the syntax node.
   #[inline]
   pub const fn syntax(&self) -> &SyntaxNode<Lang> {
     &self.syntax
   }
 
+  /// Returns the enum keyword token.
   #[inline]
   pub const fn enum_keyword(&self) -> &Enum<TextRange, SyntaxToken<Lang>> {
     &self.enum_kw
   }
 
+  /// Returns the name of the enum type.
   #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
   }
 
+  /// Returns the directives of the enum type.
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
 
+  /// Returns the optional values definition of the enum type.
   #[inline]
   pub const fn values_definition(&self) -> Option<&ValuesDefinition> {
     self.values_definition.as_ref()

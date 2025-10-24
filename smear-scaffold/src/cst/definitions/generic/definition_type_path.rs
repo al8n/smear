@@ -1,12 +1,12 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
 use super::DefinitionName;
-use crate::cst::{Path, PathSegment, generic::TypeGenerics};
+use crate::cst::{Path, generic::TypeGenerics};
 
 /// A GraphQLx definition type path in CST.
 ///
@@ -20,7 +20,6 @@ use crate::cst::{Path, PathSegment, generic::TypeGenerics};
 pub struct DefinitionTypePath<Ident, Type, Lang>
 where
   Lang: Language,
-  PathSegment<Ident, Lang>: CstNode<Lang>,
 {
   syntax: SyntaxNode<Lang>,
   path: Path<Ident, Lang>,
@@ -31,21 +30,23 @@ where
 impl<Ident, Type, Lang> DefinitionTypePath<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
-    path: Option<Path<Ident, Lang>>,
-    name: DefinitionName<Ident, Type, Lang>,
+    path: Path<Ident, Lang>,
+    generics: Option<TypeGenerics<Type, Lang>>,
+    required: bool,
   ) -> Self {
-    Self { syntax, path, name }
+    Self { syntax, path, generics, required }
   }
 
   /// Tries to create a `DefinitionTypePath` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -63,14 +64,14 @@ where
 
   /// Returns the optional path prefix.
   #[inline]
-  pub const fn path(&self) -> Option<&Path<Ident, Lang>> {
-    self.path.as_ref()
+  pub const fn path(&self) -> &Path<Ident, Lang> {
+    &self.path
   }
 
-  /// Returns the definition name (with optional generics).
+  /// Returns the optional type generics.
   #[inline]
-  pub const fn name(&self) -> &DefinitionName<Ident, Type, Lang> {
-    &self.name
+  pub const fn generics(&self) -> Option<&TypeGenerics<Type, Lang>> {
+    self.generics.as_ref()
   }
 }
 

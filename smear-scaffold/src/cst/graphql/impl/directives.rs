@@ -37,8 +37,8 @@ impl_graphql_node! {
   } => Directive(|syntax: SyntaxNode<GraphQLLanguage>| {
     let at = token(&syntax, &SyntaxKind::At)
       .map(|t| At::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let arguments = child::<Arguments>(&syntax);
+    let name = child(&syntax);
+    let arguments = child(&syntax);
 
     match (at, name) {
       (Some(at), Some(name)) => Ok(Directive::new(syntax, at, name, arguments)),
@@ -51,8 +51,8 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Arguments: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Arguments: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -60,8 +60,8 @@ impl_graphql_node! {
     type Component = DirectivesSyntax;
     type COMPONENTS = U1;
   } => Directives(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let has_directive = children::<Dir>(&syntax).next().is_some();
-    let directives = children::<Dir>(&syntax);
+    let directives = children(&syntax);
+    let has_directive = directives.clone().next().is_some();
     if has_directive {
       Ok(Directives::new(syntax, directives))
     } else {
@@ -69,5 +69,5 @@ impl_graphql_node! {
     }
   })
   where
-    Dir: CstNode<Language = GraphQLLanguage>,
+    Dir: CstNode<GraphQLLanguage>,
 }

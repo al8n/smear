@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
@@ -11,7 +11,7 @@ use super::DefinitionTypeGenerics;
 ///
 /// In the example `User<ID, Name = String>`, `User` is the identifier,
 /// and `<ID, Name = String>` are the type generics.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct DefinitionName<Ident, Type, Lang>
 where
   Lang: Language,
@@ -24,8 +24,6 @@ where
 impl<Ident, Type, Lang> DefinitionName<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -38,7 +36,10 @@ where
 
   /// Tries to create a `DefinitionName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 

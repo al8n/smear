@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{self, Parser},
-  cst::{CstElement, CstNode, CstToken, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 

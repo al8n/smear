@@ -8,7 +8,7 @@ use rowan::{Language, SyntaxNode, TextRange};
 use super::TypeGenerics;
 
 /// A GraphQLx type path in CST (e.g., `User<ID, Name>` or `v1::Comment<ID>`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct TypePath<Path, Type, Lang>
 where
   Lang: Language,

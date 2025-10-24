@@ -41,7 +41,7 @@ impl_graphql_node! {
     type Component = AliasSyntax;
     type COMPONENTS = U2;
   } => Alias(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
     let colon = token(&syntax, &SyntaxKind::Colon)
       .map(|t| Colon::with_content(t.text_range(), t));
 
@@ -56,7 +56,7 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -65,11 +65,11 @@ impl_graphql_node! {
       type Component = FieldSyntax;
       type COMPONENTS = U5;
     } => Field(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let alias = child::<AliasT>(&syntax);
-      let name = child::<Name>(&syntax);
-      let arguments = child::<Arguments>(&syntax);
-      let directives = child::<Directives>(&syntax);
-      let selection_set = child::<SelectionSet>(&syntax);
+      let alias = child(&syntax);
+      let name = child(&syntax);
+      let arguments = child(&syntax);
+      let directives = child(&syntax);
+      let selection_set = child(&syntax);
 
       match name {
         Some(name) => Ok(Field::new(
@@ -84,9 +84,9 @@ impl_graphql_node! {
       }
     })
   where
-    AliasT: CstNode<Language = GraphQLLanguage>,
-    Name: CstNode<Language = GraphQLLanguage>,
-    Arguments: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    SelectionSet: CstNode<Language = GraphQLLanguage>,
+    AliasT: CstNode<GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Arguments: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    SelectionSet: CstNode<GraphQLLanguage>,
 }

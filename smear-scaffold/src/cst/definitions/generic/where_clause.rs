@@ -2,7 +2,7 @@ use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
   cst::{
-    CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder, error::SyntaxError,
+    CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError,
   },
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
@@ -20,7 +20,7 @@ use std::vec::Vec;
 /// ```text
 /// T: User & Admin
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct WherePredicate<Ident, Type, Lang>
 where
   Lang: Language,
@@ -28,22 +28,20 @@ where
   syntax: SyntaxNode<Lang>,
   bounded_type: TypePath<Ident, Type, Lang>,
   colon: Colon<TextRange, SyntaxToken<Lang>>,
-  type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>>,
+  type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>, Lang>,
   separators: Vec<Ampersand<TextRange, SyntaxToken<Lang>>>,
 }
 
 impl<Ident, Type, Lang> WherePredicate<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) fn new(
     syntax: SyntaxNode<Lang>,
     bounded_type: TypePath<Ident, Type, Lang>,
     colon: Colon<TextRange, SyntaxToken<Lang>>,
-    type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>>,
+    type_paths: CstNodeChildren<TypePath<Ident, Type, Lang>, Lang>,
     separators: Vec<Ampersand<TextRange, SyntaxToken<Lang>>>,
   ) -> Self {
     Self {
@@ -57,7 +55,10 @@ where
 
   /// Tries to create a `WherePredicate` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -89,14 +90,8 @@ where
   #[inline]
   pub fn bounds(
     &self,
-  ) -> impl Iterator<Item = TypePath<Ident, Type, Lang>> + '_
-  where
-    TypePath<Ident, Type, Lang>: Clone,
-  {
-    let mut iter = self.type_paths.clone();
-    // Skip the bounded type
-    iter.next();
-    iter
+  ) -> &CstNodeChildren<TypePath<Ident, Type, Lang>, Lang> {
+    &self.type_paths
   }
 
   /// Returns the ampersand tokens separating bounds.
@@ -151,27 +146,25 @@ where
 /// ```text
 /// where T: User & Admin, U: Post
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct WhereClause<Ident, Type, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
   where_kw: Where<TextRange, SyntaxToken<Lang>>,
-  predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>>,
+  predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>, Lang>,
 }
 
 impl<Ident, Type, Lang> WhereClause<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     where_kw: Where<TextRange, SyntaxToken<Lang>>,
-    predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>>,
+    predicates: CstNodeChildren<WherePredicate<Ident, Type, Lang>, Lang>,
   ) -> Self {
     Self {
       syntax,
@@ -182,7 +175,10 @@ where
 
   /// Tries to create a `WhereClause` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -208,7 +204,7 @@ where
   #[inline]
   pub const fn predicates(
     &self,
-  ) -> &CstNodeChildren<WherePredicate<Ident, Type, Lang>> {
+  ) -> &CstNodeChildren<WherePredicate<Ident, Type, Lang>, Lang> {
     &self.predicates
   }
 }
@@ -255,7 +251,7 @@ where
 /// ```text
 /// where T: User & Admin { ... }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Constrained<Ident, Type, Target, Lang>
 where
   Lang: Language,

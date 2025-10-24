@@ -5,6 +5,8 @@ use logosky::{
 };
 use rowan::{Language, SyntaxNode, TextRange};
 
+use crate::cst::Path;
+
 use super::ExtensionTypeGenerics;
 
 /// An extension name in CST (e.g., for type extensions with generics).
@@ -13,34 +15,35 @@ use super::ExtensionTypeGenerics;
 /// ```text
 /// extend type User<ID>
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExtensionName<Ident, Type, Lang>
+#[derive(Debug, Clone)]
+pub struct ExtensionName<Ident, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
-  name: Ident,
-  generics: Option<ExtensionTypeGenerics<Ident, Type, Lang>>,
+  path: Path<Ident, Lang>,
+  generics: Option<ExtensionTypeGenerics<Ident, Lang>>,
 }
 
-impl<Ident, Type, Lang> ExtensionName<Ident, Type, Lang>
+impl<Ident, Lang> ExtensionName<Ident, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
-    name: Ident,
-    generics: Option<ExtensionTypeGenerics<Ident, Type, Lang>>,
+    path: Path<Ident, Lang>,
+    generics: Option<ExtensionTypeGenerics<Ident, Lang>>,
   ) -> Self {
-    Self { syntax, name, generics }
+    Self { syntax, path, generics }
   }
 
   /// Tries to create an `ExtensionName` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -56,26 +59,26 @@ where
     &self.syntax
   }
 
-  /// Returns the name identifier.
+  /// Returns the path.
   #[inline]
-  pub const fn name(&self) -> &Ident {
-    &self.name
+  pub const fn path(&self) -> &Path<Ident, Lang> {
+    &self.path
   }
 
   /// Returns the optional type generics.
   #[inline]
   pub const fn generics(
     &self,
-  ) -> Option<&ExtensionTypeGenerics<Ident, Type, Lang>> {
+  ) -> Option<&ExtensionTypeGenerics<Ident, Lang>> {
     self.generics.as_ref()
   }
 }
 
-impl<'a, Ident, Type, Lang, I, T, Error> Parseable<'a, I, T, Error>
-  for ExtensionName<Ident, Type, Lang>
+impl<'a, Ident, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ExtensionName<Ident, Lang>
 where
   Ident: Parseable<'a, I, T, Error, Language = Lang>,
-  ExtensionTypeGenerics<Ident, Type, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
+  ExtensionTypeGenerics<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Lang>,

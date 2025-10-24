@@ -4,11 +4,11 @@ use logosky::cst::{
   CstNode,
   cast::{child, children, token},
   error::IncompleteSyntax,
-  typenum::{U1, U2, U3, U4, U5},
+  typenum::{U1, U2, U3, U4, U5, U7},
 };
 use rowan::SyntaxNode;
 
-use smear_lexer::punctuator::{Colon, Equal, LBrace, LParen, Pipe, RBrace, RParen};
+use smear_lexer::{keywords, punctuator::{Ampersand, At, Colon, Equal, LBrace, LParen, Pipe, RBrace, RParen}};
 
 use smear_lexer::keywords::{
   Enum as EnumKeyword,
@@ -23,13 +23,13 @@ use smear_lexer::keywords::{
 
 use crate::cst::{
   ArgumentsDefinition, Described, Document, EnumTypeDefinition, EnumValueDefinition,
-  EnumValuesDefinition, FieldsDefinition, FragmentDefinition, InputFieldsDefinition,
+  EnumValuesDefinition, FieldsDefinition, FragmentDefinition, InputFieldsDefinition, DirectiveDefinition,
   InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, NamedOperationDefinition,
   ObjectTypeDefinition, RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-  SchemaDefinition, UnionMemberTypes, UnionTypeDefinition, VariableDefinition, VariablesDefinition,
+  SchemaDefinition, UnionMember, UnionMembers, UnionTypeDefinition, VariableDefinition, VariablesDefinition,
+  ImplementInterfaceMember, ImplementsInterfaces,
   graphql::{GraphQLLanguage, SyntaxKind},
 };
-use std::vec::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum DocumentSyntax {
@@ -98,6 +98,24 @@ pub enum ArgumentsDefinitionSyntax {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum DirectiveDefinitionSyntax {
+  #[display("'directive'")]
+  DirectiveKeyword,
+  #[display("'@'")]
+  AtToken,
+  #[display("name")]
+  Name,
+  #[display("arguments definition")]
+  ArgumentsDefinition,
+  #[display("'repeatable'")]
+  RepeatableKeyword,
+  #[display("'on'")]
+  OnKeyword,
+  #[display("directive locations")]
+  DirectiveLocations,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum InputFieldsDefinitionSyntax {
   #[display("'{{'")]
   LBrace,
@@ -162,6 +180,18 @@ pub enum ObjectTypeDefinitionSyntax {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum ImplementInterfaceMemberSyntax {
+  #[display("interface")]
+  Interface,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum ImplementsInterfacesSyntax {
+  #[display("interfaces")]
+  Interfaces,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum InterfaceTypeDefinitionSyntax {
   #[display("'interface'")]
   InterfaceKeyword,
@@ -188,7 +218,15 @@ pub enum InputObjectTypeDefinitionSyntax {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
-pub enum UnionMemberTypesSyntax {
+pub enum UnionMemberSyntax {
+  #[display("type")]
+  Type,
+  #[display("'|'")]
+  Pipe,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum UnionMembersSyntax {
   #[display("members")]
   Members,
 }
@@ -242,6 +280,16 @@ pub enum RootOperationTypeDefinitionSyntax {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum RootOperationTypesDefinitionSyntax {
+  #[display("'{{'")]
+  LBrace,
+  #[display("root operation type definitions")]
+  Definitions,
+  #[display("'}}'")]
+  RBrace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum VariableDefinitionSyntax {
   #[display("variable")]
   Variable,
@@ -278,11 +326,11 @@ impl_graphql_node! {
     type Component = DocumentSyntax;
     type COMPONENTS = U1;
   } => Document(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let definitions = children::<Definition>(&syntax);
+    let definitions = children(&syntax);
     Ok(Document::new(syntax, definitions))
   })
   where
-    Definition: CstNode<Language = GraphQLLanguage>,
+    Definition: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -293,8 +341,8 @@ impl_graphql_node! {
     } => SchemaDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let schema_kw = token(&syntax, &SyntaxKind::schema_KW)
       .map(|t| SchemaKeyword::with_content(t.text_range(), t));
-    let directives = child::<Directives>(&syntax);
-    let root_operations = child::<RootOperations>(&syntax);
+    let directives = child(&syntax);
+    let root_operations = child(&syntax);
 
     match (schema_kw, root_operations) {
       (Some(schema_kw), Some(root_operations)) => Ok(SchemaDefinition::new(
@@ -316,8 +364,8 @@ impl_graphql_node! {
     }
   })
   where
-    Directives: CstNode<Language = GraphQLLanguage>,
-    RootOperations: CstNode<Language = GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    RootOperations: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -326,11 +374,11 @@ impl_graphql_node! {
       type Component = NamedOperationDefinitionSyntax;
       type COMPONENTS = U5;
     } => NamedOperationDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let operation_type = child::<OperationType>(&syntax);
-    let name = child::<Name>(&syntax);
-    let variables = child::<VariablesDef>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let selection_set = child::<SelectionSet>(&syntax);
+    let operation_type = child(&syntax);
+    let name = child(&syntax);
+    let variables = child(&syntax);
+    let directives = child(&syntax);
+    let selection_set = child(&syntax);
 
     match (operation_type, selection_set) {
       (Some(operation_type), Some(selection_set)) => Ok(NamedOperationDefinition::new(
@@ -356,11 +404,11 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    OperationType: CstNode<Language = GraphQLLanguage>,
-    VariablesDef: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    SelectionSet: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    OperationType: CstNode<GraphQLLanguage>,
+    VariablesDef: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    SelectionSet: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -369,12 +417,12 @@ impl_graphql_node! {
       type Component = InputValueDefinitionSyntax;
       type COMPONENTS = U5;
     } => InputValueDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let name = child::<Name>(&syntax);
+      let name = child(&syntax);
       let colon = token(&syntax, &SyntaxKind::Colon)
         .map(|t| Colon::with_content(t.text_range(), t));
-      let ty = child::<Type>(&syntax);
-      let default_value = child::<DefaultValue>(&syntax);
-      let directives = child::<Directives>(&syntax);
+      let ty = child(&syntax);
+      let default_value = child(&syntax);
+      let directives = child(&syntax);
 
       match (name, colon, ty) {
         (Some(name), Some(colon), Some(ty)) => Ok(InputValueDefinition::new(
@@ -395,10 +443,10 @@ impl_graphql_node! {
       }
     })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Type: CstNode<Language = GraphQLLanguage>,
-    DefaultValue: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Type: CstNode<GraphQLLanguage>,
+    DefaultValue: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -408,7 +456,7 @@ impl_graphql_node! {
   } => ArgumentsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_paren = token(&syntax, &SyntaxKind::LParen)
       .map(|t| LParen::with_content(t.text_range(), t));
-    let arguments = children::<InputValueDef>(&syntax);
+    let arguments = children(&syntax);
     let has_arguments = arguments.clone().next().is_some();
     let r_paren = token(&syntax, &SyntaxKind::RParen)
       .map(|t| RParen::with_content(t.text_range(), t));
@@ -430,7 +478,51 @@ impl_graphql_node! {
     }
   })
   where
-    InputValueDef: CstNode<Language = GraphQLLanguage>,
+    InputValueDef: CstNode<GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations, GraphQLLanguage> {
+    type Component = DirectiveDefinitionSyntax;
+    type COMPONENTS = U7;
+  } => DirectiveDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let directive_keyword = token(&syntax, &SyntaxKind::directive_KW)
+      .map(|t| keywords::Directive::with_content(t.text_range(), t));
+    let at_token = token(&syntax, &SyntaxKind::At)
+      .map(|t| At::with_content(t.text_range(), t));
+    let name = child(&syntax);
+    let arguments_definition = child(&syntax);
+    let repeateable = token(&syntax, &SyntaxKind::repeatable_KW)
+      .map(|t| keywords::Repeatable::with_content(t.text_range(), t));
+    let on_keyword = token(&syntax, &SyntaxKind::on_KW)
+      .map(|t| keywords::On::with_content(t.text_range(), t));
+    let directive_locations = child(&syntax);
+
+    match (directive_keyword, at_token, name, directive_locations) {
+      (Some(directive_keyword), Some(at_token), Some(name), Some(directive_locations)) => Ok(DirectiveDefinition::new(
+        syntax,
+        directive_keyword,
+        at_token,
+        name,
+        arguments_definition,
+        repeateable,
+        on_keyword,
+        directive_locations,
+      )),
+      (directive_keyword, at_token, name, directive_locations) => {
+        Err(IncompleteSyntax::from_iter([
+          directive_keyword.is_none().then_some(DirectiveDefinitionSyntax::DirectiveKeyword),
+          at_token.is_none().then_some(DirectiveDefinitionSyntax::AtToken),
+          name.is_none().then_some(DirectiveDefinitionSyntax::Name),
+          directive_locations.is_none().then_some(DirectiveDefinitionSyntax::DirectiveLocations),
+        ].into_iter().flatten()).unwrap().into())
+      }
+    }
+  })
+  where
+    Name: CstNode<GraphQLLanguage>,
+    Args: CstNode<GraphQLLanguage>,
+    Locations: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -440,7 +532,7 @@ impl_graphql_node! {
   } => InputFieldsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_brace = token(&syntax, &SyntaxKind::LBrace)
       .map(|t| LBrace::with_content(t.text_range(), t));
-    let fields = children::<InputValueDef>(&syntax);
+    let fields = children(&syntax);
     let has_fields = fields.clone().next().is_some();
     let r_brace = token(&syntax, &SyntaxKind::RBrace)
       .map(|t| RBrace::with_content(t.text_range(), t));
@@ -462,7 +554,7 @@ impl_graphql_node! {
     }
   })
   where
-    InputValueDef: Debug + CstNode<Language = GraphQLLanguage>,
+    InputValueDef: Debug + CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -472,7 +564,7 @@ impl_graphql_node! {
   } => FieldsDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_brace = token(&syntax, &SyntaxKind::LBrace)
       .map(|t| LBrace::with_content(t.text_range(), t));
-    let fields = children::<FieldDef>(&syntax);
+    let fields = children(&syntax);
     let has_fields = fields.clone().next().is_some();
     let r_brace = token(&syntax, &SyntaxKind::RBrace)
       .map(|t| RBrace::with_content(t.text_range(), t));
@@ -494,7 +586,7 @@ impl_graphql_node! {
     }
   })
   where
-    FieldDef: CstNode<Language = GraphQLLanguage>,
+    FieldDef: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -503,8 +595,8 @@ impl_graphql_node! {
       type Component = EnumValueDefinitionSyntax;
       type COMPONENTS = U2;
     } => EnumValueDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let value = child::<Value>(&syntax);
-    let directives = child::<Directives>(&syntax);
+    let value = child(&syntax);
+    let directives = child(&syntax);
 
     match value {
       Some(value) => Ok(EnumValueDefinition::new(syntax, value, directives)),
@@ -515,8 +607,8 @@ impl_graphql_node! {
     }
   })
   where
-    Value: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -526,7 +618,7 @@ impl_graphql_node! {
   } => EnumValuesDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_brace = token(&syntax, &SyntaxKind::LBrace)
       .map(|t| LBrace::with_content(t.text_range(), t));
-    let values = children::<ValueDef>(&syntax);
+    let values = children(&syntax);
     let has_values = values.clone().next().is_some();
     let r_brace = token(&syntax, &SyntaxKind::RBrace)
       .map(|t| RBrace::with_content(t.text_range(), t));
@@ -550,7 +642,7 @@ impl_graphql_node! {
     }
   })
   where
-    ValueDef: CstNode<Language = GraphQLLanguage>,
+    ValueDef: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -561,9 +653,9 @@ impl_graphql_node! {
     } => EnumTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let enum_kw = token(&syntax, &SyntaxKind::enum_KW)
       .map(|t| EnumKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let values_definition = child::<ValuesDefinition>(&syntax);
+    let name = child(&syntax);
+    let directives = child(&syntax);
+    let values_definition = child(&syntax);
 
     match (enum_kw, name) {
       (Some(enum_kw), Some(name)) => Ok(EnumTypeDefinition::new(
@@ -584,9 +676,9 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    ValuesDefinition: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    ValuesDefinition: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -597,10 +689,10 @@ impl_graphql_node! {
     } => ObjectTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let type_kw = token(&syntax, &SyntaxKind::type_KW)
       .map(|t| TypeKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let implements = child::<ImplementsInterfaces>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let fields_definition = child::<FieldsDefinition>(&syntax);
+    let name = child(&syntax);
+    let implements = child(&syntax);
+    let directives = child(&syntax);
+    let fields_definition = child(&syntax);
 
     match (type_kw, name) {
       (Some(type_kw), Some(name)) => Ok(ObjectTypeDefinition::new(
@@ -622,10 +714,50 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    ImplementsInterfaces: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    ImplementsInterfaces: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    FieldsDefinition: CstNode<GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Interface>
+    ImplementInterfaceMember<Interface, GraphQLLanguage> {
+      type Component = ImplementInterfaceMemberSyntax;
+      type COMPONENTS = U1;
+    } => ImplementInterfaceMember(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let interface = child(&syntax);
+    let ampersand = token(&syntax, &SyntaxKind::Ampersand)
+      .map(|t| Ampersand::with_content(t.text_range(), t));
+
+    match interface {
+      Some(interface) => Ok(ImplementInterfaceMember::new(syntax, ampersand, interface)),
+      None => {
+        Err(IncompleteSyntax::new(ImplementInterfaceMemberSyntax::Interface).into())
+      }
+    }
+  })
+  where
+    Interface: CstNode<GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<InterfaceMember>
+    ImplementsInterfaces<InterfaceMember, GraphQLLanguage> {
+      type Component = ImplementsInterfacesSyntax;
+      type COMPONENTS = U1;
+    } => ImplementsInterfaces(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let interfaces = children(&syntax);
+    let has_interfaces = interfaces.clone().next().is_some();
+
+    if has_interfaces {
+      Ok(ImplementsInterfaces::new(syntax, interfaces))
+    } else {
+      Err(IncompleteSyntax::new(ImplementsInterfacesSyntax::Interfaces).into())
+    }
+  })
+  where
+    InterfaceMember: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -636,10 +768,10 @@ impl_graphql_node! {
     } => InterfaceTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let interface_kw = token(&syntax, &SyntaxKind::interface_KW)
       .map(|t| InterfaceKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let implements = child::<ImplementsInterfaces>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let fields_definition = child::<FieldsDefinition>(&syntax);
+    let name = child(&syntax);
+    let implements = child(&syntax);
+    let directives = child(&syntax);
+    let fields_definition = child(&syntax);
 
     match (interface_kw, name) {
       (Some(interface_kw), Some(name)) => Ok(InterfaceTypeDefinition::new(
@@ -663,10 +795,10 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    ImplementsInterfaces: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    ImplementsInterfaces: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    FieldsDefinition: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -677,9 +809,9 @@ impl_graphql_node! {
     } => InputObjectTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let input_kw = token(&syntax, &SyntaxKind::input_KW)
       .map(|t| InputKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let fields_definition = child::<FieldsDefinition>(&syntax);
+    let name = child(&syntax);
+    let directives = child(&syntax);
+    let fields_definition = child(&syntax);
 
     match (input_kw, name) {
       (Some(input_kw), Some(name)) => Ok(InputObjectTypeDefinition::new(
@@ -702,38 +834,47 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    FieldsDefinition: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    FieldsDefinition: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
-  for<Member> UnionMemberTypes<Member, GraphQLLanguage> {
-    type Component = UnionMemberTypesSyntax;
-    type COMPONENTS = U1;
-  } => UnionMembers(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let members = children::<Member>(&syntax);
-    let has_members = members.clone().next().is_some();
+  for<Name> UnionMember<Name, GraphQLLanguage> {
+    type Component = UnionMemberSyntax;
+    type COMPONENTS = U2;
+  } => UnionMember(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let ty = child(&syntax);
+    let pipe = token(&syntax, &SyntaxKind::Pipe)
+      .map(|t| Pipe::with_content(t.text_range(), t));
 
-    let separators = syntax
-      .children_with_tokens()
-      .filter_map(|element| match element {
-        rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::Pipe => {
-          Some(Pipe::with_content(token.text_range(), token))
-        }
-        _ => None,
-      })
-      .collect::<Vec<_>>();
-
-    if has_members {
-      Ok(UnionMemberTypes::new(syntax, members, separators))
-    } else {
-      let missing = IncompleteSyntax::new(UnionMemberTypesSyntax::Members);
-      Err(missing.into())
+    match ty {
+      Some(ty) => Ok(UnionMember::new(syntax, pipe, ty)),
+      None => {
+        Err(IncompleteSyntax::new(UnionMemberSyntax::Type).into())
+      }
     }
   })
   where
-    Member: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<Name> UnionMembers<Name, GraphQLLanguage> {
+    type Component = UnionMembersSyntax;
+    type COMPONENTS = U1;
+  } => UnionMembers(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let members = children(&syntax);
+    let has_members = members.clone().next().is_some();
+
+    if has_members {
+      Ok(UnionMembers::new(syntax, members))
+    } else {
+      Err(IncompleteSyntax::new(UnionMembersSyntax::Members).into())
+    }
+  })
+  where
+    Name: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -744,11 +885,11 @@ impl_graphql_node! {
     } => UnionTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let union_kw = token(&syntax, &SyntaxKind::union_KW)
       .map(|t| UnionKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let directives = child::<Directives>(&syntax);
+    let name = child(&syntax);
+    let directives = child(&syntax);
     let equal = token(&syntax, &SyntaxKind::Equal)
       .map(|t| Equal::with_content(t.text_range(), t));
-    let members = child::<Members>(&syntax);
+    let members = child(&syntax);
 
     match (union_kw, name, equal, members) {
       (Some(union_kw), Some(name), Some(equal), Some(members)) => Ok(UnionTypeDefinition::new(
@@ -772,9 +913,9 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    Members: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    Members: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -785,8 +926,8 @@ impl_graphql_node! {
     } => ScalarTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let scalar_kw = token(&syntax, &SyntaxKind::scalar_KW)
       .map(|t| ScalarKeyword::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
-    let directives = child::<Directives>(&syntax);
+    let name = child(&syntax);
+    let directives = child(&syntax);
 
     match (scalar_kw, name) {
       (Some(scalar_kw), Some(name)) => Ok(ScalarTypeDefinition::new(
@@ -806,8 +947,8 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -818,10 +959,10 @@ impl_graphql_node! {
     } => FragmentDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let fragment_kw = token(&syntax, &SyntaxKind::fragment_KW)
       .map(|t| FragmentKeyword::with_content(t.text_range(), t));
-    let name = child::<FragmentName>(&syntax);
-    let type_cond = child::<TypeCond>(&syntax);
-    let directives = child::<Directives>(&syntax);
-    let selection_set = child::<SelectionSet>(&syntax);
+    let name = child(&syntax);
+    let type_cond = child(&syntax);
+    let directives = child(&syntax);
+    let selection_set = child(&syntax);
 
     match (fragment_kw, name, type_cond, selection_set) {
       (Some(fragment_kw), Some(name), Some(type_cond), Some(selection_set)) => Ok(
@@ -842,10 +983,10 @@ impl_graphql_node! {
     }
   })
   where
-    FragmentName: CstNode<Language = GraphQLLanguage>,
-    TypeCond: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    SelectionSet: CstNode<Language = GraphQLLanguage>,
+    FragmentName: CstNode<GraphQLLanguage>,
+    TypeCond: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    SelectionSet: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -854,10 +995,10 @@ impl_graphql_node! {
       type Component = RootOperationTypeDefinitionSyntax;
       type COMPONENTS = U3;
     } => RootOperationTypeDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let operation_type = child::<OperationType>(&syntax);
+    let operation_type = child(&syntax);
     let colon = token(&syntax, &SyntaxKind::Colon)
       .map(|t| Colon::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
 
     match (operation_type, colon, name) {
       (Some(operation_type), Some(colon), Some(name)) => Ok(RootOperationTypeDefinition::new(
@@ -880,8 +1021,42 @@ impl_graphql_node! {
     }
   })
   where
-    OperationType: CstNode<Language = GraphQLLanguage>,
-    Name: CstNode<Language = GraphQLLanguage>,
+    OperationType: CstNode<GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+}
+
+impl_graphql_node! {
+  for<RootOpDef> RootOperationTypesDefinition<RootOpDef, GraphQLLanguage> {
+    type Component = RootOperationTypesDefinitionSyntax;
+    type COMPONENTS = U1;
+  } => RootOperationTypesDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
+    let l_brace = token(&syntax, &SyntaxKind::LBrace)
+      .map(|t| LBrace::with_content(t.text_range(), t));
+    let r_brace = token(&syntax, &SyntaxKind::RBrace)
+      .map(|t| RBrace::with_content(t.text_range(), t));
+    let definitions = children(&syntax);
+    let has_definitions = definitions.clone().next().is_some();
+
+    match (l_brace, has_definitions, r_brace) {
+      (Some(l_brace), true, Some(r_brace)) => Ok(RootOperationTypesDefinition::new(
+        syntax,
+        l_brace,
+        definitions,
+        r_brace,
+      )),
+      (l_brace, has_definitions, r_brace) => {
+        let missing = [
+          l_brace.is_none().then_some(RootOperationTypesDefinitionSyntax::LBrace),
+          (!has_definitions).then_some(RootOperationTypesDefinitionSyntax::Definitions),
+          r_brace.is_none().then_some(RootOperationTypesDefinitionSyntax::RBrace),
+        ];
+        let missing = IncompleteSyntax::from_iter(missing.into_iter().flatten()).unwrap();
+        Err(missing.into())
+      }
+    }
+  })
+  where
+    RootOpDef: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -890,11 +1065,11 @@ impl_graphql_node! {
       type Component = VariableDefinitionSyntax;
       type COMPONENTS = U5;
     } => VariableDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
-      let variable = child::<Variable>(&syntax);
+      let variable = child(&syntax);
       let colon = token(&syntax, &SyntaxKind::Colon).map(|t| Colon::with_content(t.text_range(), t));
-      let ty = child::<Type>(&syntax);
-      let directives = child::<Directives>(&syntax);
-      let default_value = child::<DefaultValue>(&syntax);
+      let ty = child(&syntax);
+      let directives = child(&syntax);
+      let default_value = child(&syntax);
       match (variable, colon, ty) {
         (Some(variable), Some(colon), Some(ty)) => Ok(VariableDefinition::new(
           syntax,
@@ -914,10 +1089,10 @@ impl_graphql_node! {
       }
     })
   where
-    Variable: Debug + CstNode<Language = GraphQLLanguage>,
-    Type: Debug + CstNode<Language = GraphQLLanguage>,
-    DefaultValue: Debug + CstNode<Language = GraphQLLanguage>,
-    Directives: Debug + CstNode<Language = GraphQLLanguage>,
+    Variable: Debug + CstNode<GraphQLLanguage>,
+    Type: Debug + CstNode<GraphQLLanguage>,
+    DefaultValue: Debug + CstNode<GraphQLLanguage>,
+    Directives: Debug + CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -927,7 +1102,7 @@ impl_graphql_node! {
   } => VariablesDefinition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_paren = token(&syntax, &SyntaxKind::LParen)
       .map(|t| LParen::with_content(t.text_range(), t));
-    let variables = children::<VariableDef>(&syntax);
+    let variables = children(&syntax);
     let has_variables = variables.clone().next().is_some();
     let r_paren = token(&syntax, &SyntaxKind::RParen)
       .map(|t| RParen::with_content(t.text_range(), t));
@@ -951,7 +1126,7 @@ impl_graphql_node! {
     }
   })
   where
-    VariableDef: CstNode<Language = GraphQLLanguage>,
+    VariableDef: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -959,8 +1134,8 @@ impl_graphql_node! {
     type Component = DescribedSyntax;
     type COMPONENTS = U2;
   } => Description(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let description = child::<Description>(&syntax);
-    let node = child::<T>(&syntax);
+    let description = child(&syntax);
+    let node = child(&syntax);
 
     match node {
       Some(node) => Ok(Described::new(syntax, description, node)),
@@ -971,8 +1146,8 @@ impl_graphql_node! {
     }
   })
   where
-    T: CstNode<Language = GraphQLLanguage>,
-    Description: CstNode<Language = GraphQLLanguage>,
+    T: CstNode<GraphQLLanguage>,
+    Description: CstNode<GraphQLLanguage>,
 }
 
 mod ty;

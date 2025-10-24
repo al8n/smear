@@ -1,7 +1,7 @@
 use logosky::{
   Logos, LosslessToken, Source, Tokenizer,
   chumsky::{Parser, extra::ParserExtra},
-  cst::{CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
 use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
@@ -28,8 +28,6 @@ where
 impl<Ident, Type, Lang> DefinitionTypeParam<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
@@ -48,7 +46,10 @@ where
 
   /// Tries to create a `DefinitionTypeParam` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -124,28 +125,26 @@ where
 /// <T, U = String>  # Type generics with two parameters
 /// <T, U>           # Type generics without defaults
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct DefinitionTypeGenerics<Ident, Type, Lang>
 where
   Lang: Language,
 {
   syntax: SyntaxNode<Lang>,
   l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-  params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>,
+  params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>, Lang>,
   r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
 }
 
 impl<Ident, Type, Lang> DefinitionTypeGenerics<Ident, Type, Lang>
 where
   Lang: Language,
-  Lang::Kind: Into<rowan::SyntaxKind>,
-  Self: CstNode<Lang>,
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub(in crate::cst) const fn new(
     syntax: SyntaxNode<Lang>,
     l_angle: LAngle<TextRange, SyntaxToken<Lang>>,
-    params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>>,
+    params: CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>, Lang>,
     r_angle: RAngle<TextRange, SyntaxToken<Lang>>,
   ) -> Self {
     Self {
@@ -158,7 +157,10 @@ where
 
   /// Tries to create a `DefinitionTypeGenerics` from the given syntax node.
   #[inline]
-  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, logosky::cst::error::SyntaxError<Self, Lang>> {
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
     Self::try_cast_node(syntax)
   }
 
@@ -184,7 +186,7 @@ where
   #[inline]
   pub const fn params(
     &self,
-  ) -> &CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>> {
+  ) -> &CstNodeChildren<DefinitionTypeParam<Ident, Type, Lang>, Lang> {
     &self.params
   }
 

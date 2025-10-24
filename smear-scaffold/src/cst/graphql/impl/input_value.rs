@@ -61,7 +61,7 @@ impl_graphql_node! {
     }
   })
   where
-    Value: CstNode<Language = GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -69,9 +69,9 @@ impl_graphql_node! {
     type Component = ObjectFieldSyntax;
     type COMPONENTS = U3;
   } => ObjectField(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
     let colon = token(&syntax, &SyntaxKind::Colon).map(|t| Colon::with_content(t.text_range(), t));
-    let value = child::<Value>(&syntax);
+    let value = child(&syntax);
 
     match (name, colon, value) {
       (Some(name), Some(colon), Some(value)) => Ok(ObjectField::new(syntax, name, colon, value)),
@@ -85,8 +85,8 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Value: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -97,7 +97,7 @@ impl_graphql_node! {
     let l_brace = token(&syntax, &SyntaxKind::LBrace).map(|t| LBrace::with_content(t.text_range(), t));
     let r_brace = token(&syntax, &SyntaxKind::RBrace).map(|t| RBrace::with_content(t.text_range(), t));
 
-    let fields = children::<ObjectField<Name, Value, GraphQLLanguage>>(&syntax);
+    let fields = children(&syntax);
 
     match (l_brace, r_brace) {
       (Some(l_brace), Some(r_brace)) => Ok(Object::new(syntax, l_brace, fields, r_brace)),
@@ -110,8 +110,8 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Value: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
 }
 
 mod list;

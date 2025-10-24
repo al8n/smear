@@ -10,7 +10,7 @@ use smear_lexer::{
   punctuator::{Asterisk, LBrace, RBrace},
 };
 
-use crate::cst::{Path, PathSegment};
+use crate::cst::Path;
 
 /// Represents a list of import members enclosed in braces.
 #[derive(Debug, Clone)]
@@ -166,6 +166,7 @@ where
 impl<'a, Ident, Lang, I, T, Error> Parseable<'a, I, T, Error> for ImportClause<Ident, Lang>
 where
   ImportList<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
+  ImportMember<Ident, Lang>: Parseable<'a, I, T, Error, Language = Lang>,
   Lang: Language,
   Lang::Kind: Into<rowan::SyntaxKind>,
   Self: CstNode<Lang>,
@@ -373,7 +374,7 @@ where
 
 impl<'a, Name, Lang, I, T, Error> Parseable<'a, I, T, Error> for ImportMember<Name, Lang>
 where
-  Name: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
+  Name: Parseable<'a, I, T, Error, Language = Lang>,
   Asterisk<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   As<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
   Path<Name, Lang>: Parseable<'a, I, T, Error, Language = Lang>,

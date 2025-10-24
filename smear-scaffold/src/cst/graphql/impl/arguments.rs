@@ -39,10 +39,10 @@ impl_graphql_node! {
     type Component = ArgumentSyntax;
     type COMPONENTS = U3;
   } => Argument(|syntax: SyntaxNode<GraphQLLanguage>| {
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
     let colon = token(&syntax, &SyntaxKind::Colon)
       .map(|t| Colon::with_content(t.text_range(), t));
-    let value = child::<Value>(&syntax);
+    let value = child(&syntax);
 
     match (name, colon, value) {
       (Some(name), Some(colon), Some(value)) => Ok(Argument::new(syntax, name, colon, value)),
@@ -56,8 +56,8 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
-    Value: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
+    Value: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -67,7 +67,7 @@ impl_graphql_node! {
   } => Arguments(|syntax: SyntaxNode<GraphQLLanguage>| {
     let l_paren = token(&syntax, &SyntaxKind::LParen)
       .map(|t| LParen::with_content(t.text_range(), t));
-    let arguments_iter = children::<Arg>(&syntax);
+    let arguments_iter = children(&syntax);
     let has_arguments = arguments_iter.clone().next().is_some();
     let r_paren = token(&syntax, &SyntaxKind::RParen)
       .map(|t| RParen::with_content(t.text_range(), t));
@@ -89,5 +89,5 @@ impl_graphql_node! {
     }
   })
   where
-    Arg: CstNode<Language = GraphQLLanguage>,
+    Arg: CstNode<GraphQLLanguage>,
 }

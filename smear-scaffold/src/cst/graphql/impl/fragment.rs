@@ -51,7 +51,7 @@ impl_graphql_node! {
   } => TypeCondition(|syntax: SyntaxNode<GraphQLLanguage>| {
     let on = token(&syntax, &SyntaxKind::on_KW)
       .map(|t| On::with_content(t.text_range(), t));
-    let name = child::<Name>(&syntax);
+    let name = child(&syntax);
 
     match (on, name) {
       (Some(on), Some(name)) => Ok(TypeCondition::new(syntax, on, name)),
@@ -64,7 +64,7 @@ impl_graphql_node! {
     }
   })
   where
-    Name: CstNode<Language = GraphQLLanguage>,
+    Name: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -74,8 +74,8 @@ impl_graphql_node! {
   } => FragmentSpread(|syntax: SyntaxNode<GraphQLLanguage>| {
     let spread = token(&syntax, &SyntaxKind::Spread)
       .map(|t| Spread::with_content(t.text_range(), t));
-    let name = child::<FragmentName>(&syntax);
-    let directives = child::<Directives>(&syntax);
+    let name = child(&syntax);
+    let directives = child(&syntax);
 
     match (spread, name) {
       (Some(spread), Some(name)) => Ok(FragmentSpread::new(syntax, spread, name, directives)),
@@ -88,8 +88,8 @@ impl_graphql_node! {
     }
   })
   where
-    FragmentName: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
+    FragmentName: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
 }
 
 impl_graphql_node! {
@@ -100,9 +100,9 @@ impl_graphql_node! {
     } => InlineFragment(|syntax: SyntaxNode<GraphQLLanguage>| {
       let spread = token(&syntax, &SyntaxKind::Spread)
         .map(|t| Spread::with_content(t.text_range(), t));
-      let type_condition = child::<TypeCond>(&syntax);
-      let directives = child::<Directives>(&syntax);
-      let selection_set = child::<SelectionSet>(&syntax);
+      let type_condition = child(&syntax);
+      let directives = child(&syntax);
+      let selection_set = child(&syntax);
 
       match (spread, selection_set) {
         (Some(spread), Some(selection_set)) => Ok(InlineFragment::new(
@@ -121,7 +121,7 @@ impl_graphql_node! {
       }
     })
   where
-    TypeCond: CstNode<Language = GraphQLLanguage>,
-    Directives: CstNode<Language = GraphQLLanguage>,
-    SelectionSet: CstNode<Language = GraphQLLanguage>,
+    TypeCond: CstNode<GraphQLLanguage>,
+    Directives: CstNode<GraphQLLanguage>,
+    SelectionSet: CstNode<GraphQLLanguage>,
 }
