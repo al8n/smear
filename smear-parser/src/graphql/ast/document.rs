@@ -1,4 +1,4 @@
-use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, Logos, Parseable, Source, Token, Tokenizer,
   chumsky::{
@@ -6,13 +6,12 @@ use logosky::{
     input::{Cursor, InputRef},
     prelude::*,
   },
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
+  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 use smear_lexer::{
-  LitStr,
   graphql::syntactic::SyntacticLexerErrors,
   keywords::{Mutation, Query, Subscription},
-  punctuator::{At, RBrace},
+  punctuator::RBrace,
 };
 use smear_scaffold::ast::{DirectiveLocations, OperationType};
 
@@ -342,7 +341,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
     str: Equivalent<S>,
   {
     Some(match () {
-      () if "scalar".equivalent(&ident) => {
+      () if "scalar".equivalent(ident) => {
         match inp.parse(ScalarTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ConstDirectives::parser(),
@@ -355,7 +354,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
           ))),
         }
       }
-      () if "type".equivalent(&ident) => {
+      () if "type".equivalent(ident) => {
         match inp.parse(ObjectTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ImplementsInterfaces::parser(),
@@ -370,7 +369,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
           ))),
         }
       }
-      () if "interface".equivalent(&ident) => {
+      () if "interface".equivalent(ident) => {
         match inp.parse(InterfaceTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ImplementsInterfaces::parser(),
@@ -385,7 +384,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
           ))),
         }
       }
-      () if "union".equivalent(&ident) => {
+      () if "union".equivalent(ident) => {
         match inp.parse(UnionTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ConstDirectives::parser(),
@@ -399,7 +398,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
           ))),
         }
       }
-      () if "enum".equivalent(&ident) => {
+      () if "enum".equivalent(ident) => {
         match inp.parse(EnumTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ConstDirectives::parser(),
@@ -413,7 +412,7 @@ impl<S, Ty> TypeExtension<S, Ty> {
           ))),
         }
       }
-      () if "input".equivalent(&ident) => {
+      () if "input".equivalent(ident) => {
         match inp.parse(InputObjectTypeExtension::content_parser_with(
           Name::<S>::parser(),
           ConstDirectives::parser(),
@@ -554,9 +553,8 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
   fn parser_inner<'a, 'p, E>(
     inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
     before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
-    span: Span,
-    ident: S,
-  ) -> Result<Self, SyntacticTokenErrors<'a, S>>
+    ident: &S,
+  ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
     E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
@@ -579,8 +577,8 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
       + 'a,
     str: Equivalent<S>,
   {
-    match () {
-      () if "directive".equivalent(&ident) => {
+    Some(match () {
+      () if "directive".equivalent(ident) => {
         match inp.parse(DirectiveDefinition::content_parser_with(
           Name::<S>::parser(),
           ArgumentsDefinition::parser(),
@@ -598,7 +596,7 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
           }
         }
       }
-      () if "schema".equivalent(&ident) => {
+      () if "schema".equivalent(ident) => {
         match inp.parse(SchemaDefinition::content_parser_with(
           ConstDirectives::parser(),
           RootOperationTypesDefinition::parser(),
@@ -613,29 +611,9 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
       }
       _ => {
         // Try to parse as a TypeDefinition (scalar, type, interface, union, enum, input)
-        match TypeDefinition::parser_inner(inp, before, &ident) {
-          None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "directive",
-                "schema",
-              ]),
-              span,
-            )
-            .into(),
-          ),
-          Some(Ok(res)) => Ok(Self::Type(res)),
-          Some(Err(errs)) => Err(errs),
-        }
+        return TypeDefinition::parser_inner(inp, before, ident).map(|res| res.map(Self::Type));
       }
-    }
+    })
   }
 }
 
@@ -678,7 +656,26 @@ where
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
-        })) => Self::parser_inner(inp, before, span, ident),
+        })) => match Self::parser_inner(inp, before, &ident) {
+          None => Err(
+            SyntacticTokenError::unexpected_token(
+              SyntacticToken::Identifier(ident),
+              Expectation::Keyword(&[
+                "scalar",
+                "type",
+                "interface",
+                "union",
+                "enum",
+                "input",
+                "directive",
+                "schema",
+              ]),
+              span,
+            )
+            .into(),
+          ),
+          Some(res) => res,
+        },
         Some(Lexed::Token(Spanned { span, data })) => Err(
           SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemDefinition, span)
             .into(),
@@ -729,9 +726,8 @@ impl<S, Ty> TypeSystemExtension<S, Ty> {
   fn parser_inner<'a, 'p, E>(
     inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
     before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
-    span: Span,
-    ident: S,
-  ) -> Result<Self, SyntacticTokenErrors<'a, S>>
+    ident: &S,
+  ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
     E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
@@ -754,8 +750,8 @@ impl<S, Ty> TypeSystemExtension<S, Ty> {
       + 'a,
     str: Equivalent<S>,
   {
-    match () {
-      () if "schema".equivalent(&ident) => {
+    Some(match () {
+      () if "schema".equivalent(ident) => {
         match inp.parse(SchemaExtension::content_parser_with(
           ConstDirectives::parser(),
           RootOperationTypesDefinition::parser(),
@@ -769,28 +765,9 @@ impl<S, Ty> TypeSystemExtension<S, Ty> {
       }
       _ => {
         // Try to parse as a TypeExtension (scalar, type, interface, union, enum, input)
-        match TypeExtension::parser_inner(inp, before, &ident) {
-          None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "schema",
-              ]),
-              span,
-            )
-            .into(),
-          ),
-          Some(Ok(res)) => Ok(Self::Type(res)),
-          Some(Err(errs)) => Err(errs),
-        }
+        return TypeExtension::parser_inner(inp, before, ident).map(|res| res.map(Self::Type));
       }
-    }
+    })
   }
 }
 
@@ -835,9 +812,8 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
   fn parser_inner<'a, 'p, E>(
     inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
     before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
-    span: Span,
-    ident: S,
-  ) -> Result<Self, SyntacticTokenErrors<'a, S>>
+    ident: &S,
+  ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
     E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
@@ -860,8 +836,8 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
       + 'a,
     str: Equivalent<S>,
   {
-    match () {
-      () if "extend".equivalent(&ident) => {
+    Some(match () {
+      () if "extend".equivalent(ident) => {
         // Extension - parse the type extension after "extend"
         match inp.next() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
@@ -871,9 +847,26 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
           Some(Lexed::Token(Spanned {
             span: ext_span,
             data: SyntacticToken::Identifier(ext_ident),
-          })) => {
-            TypeSystemExtension::parser_inner(inp, before, ext_span, ext_ident).map(Self::Extension)
-          }
+          })) => match TypeSystemExtension::parser_inner(inp, before, &ext_ident) {
+            None => Err(
+              SyntacticTokenError::unexpected_token(
+                SyntacticToken::Identifier(ext_ident),
+                Expectation::Keyword(&[
+                  "scalar",
+                  "type",
+                  "interface",
+                  "union",
+                  "enum",
+                  "input",
+                  "schema",
+                ]),
+                ext_span,
+              )
+              .into(),
+            ),
+            Some(Ok(ext)) => Ok(Self::Extension(ext)),
+            Some(Err(errs)) => Err(errs),
+          },
           Some(Lexed::Token(Spanned { span, data })) => Err(
             SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemExtension, span)
               .into(),
@@ -882,10 +875,10 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
       }
       _ => {
         // Definition - parse as TypeSystemDefinition
-        TypeSystemDefinition::parser_inner(inp, before, span, ident)
-          .map(|def| Self::Definition(Described::new(*def.span(), None, def)))
+        return TypeSystemDefinition::parser_inner(inp, before, ident)
+          .map(|res| res.map(|def| Self::Definition(Described::new(*def.span(), None, def))));
       }
-    }
+    })
   }
 }
 
@@ -929,7 +922,27 @@ where
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
-        })) => Self::parser_inner(inp, before, span, ident),
+        })) => match Self::parser_inner(inp, before, &ident) {
+          None => Err(
+            SyntacticTokenError::unexpected_token(
+              SyntacticToken::Identifier(ident),
+              Expectation::Keyword(&[
+                "extend",
+                "scalar",
+                "type",
+                "interface",
+                "union",
+                "enum",
+                "input",
+                "directive",
+                "schema",
+              ]),
+              span,
+            )
+            .into(),
+          ),
+          Some(res) => res,
+        },
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::LitBlockStr(description),
@@ -997,7 +1010,7 @@ impl<S, Ty> IntoSpan<Span> for ExecutableDefinition<S, Ty> {
 impl<S, Ty> ExecutableDefinition<S, Ty> {
   fn parser_inner<'a, 'p, E>(
     inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    before: &Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
     span: Span,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
@@ -1038,7 +1051,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
           Err(err) => Err(err),
           Ok((name, variable_definitions, directives, selection_set)) => Ok(Self::Operation(
             smear_scaffold::ast::OperationDefinition::Named(NamedOperationDefinition::new(
-              inp.span_since(&before),
+              inp.span_since(before),
               op_type,
               name,
               variable_definitions,
@@ -1060,7 +1073,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
           Err(err) => Err(err),
           Ok((name, type_condition, directives, selection_set)) => {
             Ok(Self::Fragment(FragmentDefinition::new(
-              inp.span_since(&before),
+              inp.span_since(before),
               name,
               type_condition,
               directives,
@@ -1174,7 +1187,7 @@ where
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
-        })) => match Self::parser_inner(inp, before, span, &ident) {
+        })) => match Self::parser_inner(inp, &before, span, &ident) {
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
@@ -1187,6 +1200,366 @@ where
         },
         Some(Lexed::Token(Spanned { span, data })) => Err(
           SyntacticTokenError::unexpected_token(data, Expectation::ExecutableDefinition, span)
+            .into(),
+        ),
+      }
+    })
+  }
+}
+
+/// A GraphQL definition (type system or executable).
+#[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum Definition<S, Ty = Type<Name<S>>> {
+  /// A type system definition.
+  TypeSystem(TypeSystemDefinition<S, Ty>),
+  /// An executable definition.
+  Executable(ExecutableDefinition<S, Ty>),
+}
+
+impl<S, Ty> AsSpan<Span> for Definition<S, Ty> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::TypeSystem(t) => t.as_span(),
+      Self::Executable(e) => e.as_span(),
+    }
+  }
+}
+
+impl<S, Ty> IntoSpan<Span> for Definition<S, Ty> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::TypeSystem(t) => t.into_span(),
+      Self::Executable(e) => e.into_span(),
+    }
+  }
+}
+
+impl<S, Ty> Definition<S, Ty> {
+  fn parser_inner<'a, 'p, E>(
+    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    span: Span,
+    ident: &S,
+  ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
+  where
+    Self: Sized,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
+    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    SyntacticToken<S>: Token<'a>,
+    <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+    <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    str: Equivalent<S>,
+  {
+    // Try to parse as executable definition first (fragment, query, mutation, subscription)
+    if let Some(result) = ExecutableDefinition::parser_inner(inp, &before, span, ident) {
+      return Some(result.map(Self::Executable));
+    }
+
+    // Otherwise, try to parse as type system definition
+    TypeSystemDefinition::parser_inner(inp, before, ident).map(|res| res.map(Self::TypeSystem))
+  }
+}
+
+impl<'a, S: 'a, Ty: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  for Definition<S, Ty>
+where
+  Ty:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
+  {
+    custom(|inp| {
+      let before = inp.cursor();
+
+      match inp.next() {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+        Some(Lexed::Error(errs)) => {
+          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+        }
+        Some(Lexed::Token(Spanned {
+          span: _,
+          data: SyntacticToken::LBrace,
+        })) => ExecutableDefinition::parser_short_hand(inp, before).map(Self::Executable),
+        Some(Lexed::Token(Spanned {
+          span,
+          data: SyntacticToken::Identifier(ident),
+        })) => match Self::parser_inner(inp, before, span, &ident) {
+          None => Err(
+            SyntacticTokenError::unexpected_token(
+              SyntacticToken::Identifier(ident),
+              Expectation::Keyword(&[
+                "fragment",
+                "query",
+                "mutation",
+                "subscription",
+                "scalar",
+                "type",
+                "interface",
+                "union",
+                "enum",
+                "input",
+                "directive",
+                "schema",
+              ]),
+              span,
+            )
+            .into(),
+          ),
+          Some(res) => res,
+        },
+        Some(Lexed::Token(Spanned { span, data })) => {
+          Err(SyntacticTokenError::unexpected_token(data, Expectation::Definition, span).into())
+        }
+      }
+    })
+  }
+}
+
+/// A GraphQL definition or extension.
+#[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum DefinitionOrExtension<S, Ty = Type<Name<S>>> {
+  /// A definition (with optional description for type system definitions).
+  Definition(Described<Definition<S, Ty>, S>),
+  /// A type system extension.
+  Extension(TypeSystemExtension<S, Ty>),
+}
+
+impl<S, Ty> AsSpan<Span> for DefinitionOrExtension<S, Ty> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Definition(d) => d.as_span(),
+      Self::Extension(e) => e.as_span(),
+    }
+  }
+}
+
+impl<S, Ty> IntoSpan<Span> for DefinitionOrExtension<S, Ty> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Definition(d) => d.into_span(),
+      Self::Extension(e) => e.into_span(),
+    }
+  }
+}
+
+impl<S, Ty> DefinitionOrExtension<S, Ty> {
+  fn parser_inner<'a, 'p, E>(
+    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    span: Span,
+    ident: &S,
+  ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
+  where
+    Self: Sized,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
+    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    SyntacticToken<S>: Token<'a>,
+    <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+    <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+      + 'a,
+    str: Equivalent<S>,
+  {
+    Some(match () {
+      () if "extend".equivalent(ident) => {
+        // Extension - parse the type system extension after "extend"
+        match inp.next() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+          Some(Lexed::Error(errs)) => {
+            Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          }
+          Some(Lexed::Token(Spanned {
+            span: ext_span,
+            data: SyntacticToken::Identifier(ext_ident),
+          })) => match TypeSystemExtension::parser_inner(inp, before, &ext_ident) {
+            None => Err(
+              SyntacticTokenError::unexpected_token(
+                SyntacticToken::Identifier(ext_ident),
+                Expectation::Keyword(&[
+                  "scalar",
+                  "type",
+                  "interface",
+                  "union",
+                  "enum",
+                  "input",
+                  "schema",
+                ]),
+                ext_span,
+              )
+              .into(),
+            ),
+            Some(Ok(ext)) => Ok(Self::Extension(ext)),
+            Some(Err(errs)) => Err(errs),
+          },
+          Some(Lexed::Token(Spanned { span, data })) => Err(
+            SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemExtension, span)
+              .into(),
+          ),
+        }
+      }
+      _ => {
+        // Definition - parse as Definition
+        return Definition::parser_inner(inp, before, span, ident)
+          .map(|res| res.map(|def| Self::Definition(Described::new(*def.as_span(), None, def))));
+      }
+    })
+  }
+}
+
+impl<'a, S: 'a, Ty: 'a>
+  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  for DefinitionOrExtension<S, Ty>
+where
+  Ty:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  SyntacticToken<S>: Token<'a>,
+  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  Arguments<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Directives<S>:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  RBrace:
+    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  str: Equivalent<S>,
+{
+  #[inline]
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  where
+    Self: Sized,
+    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenStream<'a, S>: Tokenizer<
+        'a,
+        SyntacticToken<S>,
+        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
+          'a,
+        >,
+      >,
+    SyntacticTokenErrors<'a, S>: 'a,
+  {
+    custom(|inp| {
+      let before = inp.cursor();
+
+      match inp.next() {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
+        Some(Lexed::Error(errs)) => {
+          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+        }
+        Some(Lexed::Token(Spanned {
+          span: _,
+          data: SyntacticToken::LBrace,
+        })) => ExecutableDefinition::parser_short_hand(inp, before)
+          .map(Definition::Executable)
+          .map(|def| Self::Definition(Described::new(*def.as_span(), None, def))),
+        Some(Lexed::Token(Spanned {
+          span,
+          data: SyntacticToken::Identifier(ident),
+        })) => match Self::parser_inner(inp, before, span, &ident) {
+          None => Err(
+            SyntacticTokenError::unexpected_token(
+              SyntacticToken::Identifier(ident),
+              Expectation::Keyword(&[
+                "extend",
+                "fragment",
+                "query",
+                "mutation",
+                "subscription",
+                "scalar",
+                "type",
+                "interface",
+                "union",
+                "enum",
+                "input",
+                "directive",
+                "schema",
+              ]),
+              span,
+            )
+            .into(),
+          ),
+          Some(res) => res,
+        },
+        Some(Lexed::Token(Spanned {
+          span,
+          data: SyntacticToken::LitBlockStr(description),
+        })) => inp.parse(Definition::parser()).map(|def| {
+          Self::Definition(Described::new(
+            inp.span_since(&before),
+            Some(StringValue::<S>::block(span, description)),
+            def,
+          ))
+        }),
+        Some(Lexed::Token(Spanned {
+          span,
+          data: SyntacticToken::LitInlineStr(description),
+        })) => inp.parse(Definition::parser()).map(|def| {
+          Self::Definition(Described::new(
+            inp.span_since(&before),
+            Some(StringValue::<S>::inline(span, description)),
+            def,
+          ))
+        }),
+        Some(Lexed::Token(Spanned { span, data })) => Err(
+          SyntacticTokenError::unexpected_token(data, Expectation::DefinitionOrExtension, span)
             .into(),
         ),
       }

@@ -88,4 +88,8 @@ pub enum Expectation {
   TypeSystemDefinitionOrExtension,
   /// An executable definition was expected.
   ExecutableDefinition,
+  /// A definition was expected.
+  Definition,
+  /// A definition or extension was expected.
+  DefinitionOrExtension,
 }

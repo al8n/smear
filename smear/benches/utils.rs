@@ -29,7 +29,7 @@ pub fn apollo_parser_parse_query(schema: &str) {
 pub fn smear_parser_parse_query(schema: &str) {
   use smear::parser::graphql::ast::*;
 
-  let _document = ExecutableDefinition::<&str>::parse_str(schema).unwrap();
+  let _document = ExecutableDocument::<&str>::parse_str(schema).unwrap();
 }
 
 pub fn graphql_parser_parse_query(schema: &str) {

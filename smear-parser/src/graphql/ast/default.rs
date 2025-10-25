@@ -215,46 +215,16 @@ pub type DescribedSchemaDefinition<S> = Described<SchemaDefinition<S>, S>;
 pub type SchemaExtension<S> =
   scaffold::SchemaExtension<ConstDirectives<S>, RootOperationTypesDefinition<S>>;
 
-// /// Type system definition (schema, type, or directive definition).
-// pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = scaffold::TypeSystemDefinition<
-//   TypeDefinition<S, Ty>,
-//   DirectiveDefinition<S, Ty>,
-//   SchemaDefinition<S>,
-// >;
-
 /// Type system definition with optional description.
 pub type DescribedTypeSystemDefinition<S, Ty = Type<Name<S>>> =
   Described<TypeSystemDefinition<S, Ty>, S>;
-
-// /// Type system extension (type or schema extension).
-// pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
-//   scaffold::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
-
-// /// Type system definition or extension.
-// pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
-//   scaffold::TypeSystemDefinitionOrExtension<
-//     DescribedTypeSystemDefinition<S, Ty>,
-//     TypeSystemExtension<S, Ty>,
-//   >;
-
-// /// Executable definition (operation or fragment).
-// pub type ExecutableDefinition<S, Ty = Type<Name<S>>> =
-//   scaffold::ExecutableDefinition<OperationDefinition<S, Ty>, FragmentDefinition<S>>;
 
 /// Executable definition with optional description.
 pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =
   Described<ExecutableDefinition<S, Ty>, S>;
 
-/// Definition (type system or executable).
-pub type Definition<S, Ty = Type<Name<S>>> =
-  scaffold::Definition<TypeSystemDefinition<S, Ty>, ExecutableDefinition<S, Ty>>;
-
 /// Definition with optional description.
 pub type DescribedDefinition<S, Ty = Type<Name<S>>> = Described<Definition<S, Ty>, S>;
-
-/// Definition or extension.
-pub type DefinitionOrExtension<S, Ty = Type<Name<S>>> =
-  scaffold::DefinitionOrExtension<DescribedDefinition<S, Ty>, TypeSystemExtension<S, Ty>>;
 
 /// Type system document (contains only schema and type definitions/extensions).
 pub type TypeSystemDocument<S, Ty = Type<Name<S>>> =
