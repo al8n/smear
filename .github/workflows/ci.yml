@@ -354,7 +354,7 @@ jobs:
       - name: Run tarpaulin
         uses: actions-rs/cargo@v1
         env:
-          RUSTFLAGS: "--cfg all_tests"
+          RUSTFLAGS: "--cfg tarpaulin"
         with:
           command: tarpaulin
           args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet

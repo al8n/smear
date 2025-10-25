@@ -18,7 +18,7 @@ enum InvalidUnicodeHexDigitsRepr<Char = char> {
 }
 
 impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   const fn len(&self) -> usize {
     match self {
       Self::Zero => 0,
@@ -29,7 +29,7 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
     }
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   const fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Zero => {}
@@ -55,7 +55,7 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
     self
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn push(&mut self, ch: PositionedChar<Char>) {
     *self = match core::mem::take(self) {
       Self::Zero => Self::One(ch),
@@ -76,35 +76,35 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
 pub struct InvalidUnicodeHexDigits<Char = char>(InvalidUnicodeHexDigitsRepr<Char>);
 
 impl<Char> Default for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self(InvalidUnicodeHexDigitsRepr::Zero)
   }
 }
 
 impl<Char> From<PositionedChar<Char>> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn from(c: PositionedChar<Char>) -> Self {
     Self(InvalidUnicodeHexDigitsRepr::One(c))
   }
 }
 
 impl<Char> From<[PositionedChar<Char>; 2]> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn from(c: [PositionedChar<Char>; 2]) -> Self {
     Self(InvalidUnicodeHexDigitsRepr::Two(c))
   }
 }
 
 impl<Char> From<[PositionedChar<Char>; 3]> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn from(c: [PositionedChar<Char>; 3]) -> Self {
     Self(InvalidUnicodeHexDigitsRepr::Three(c))
   }
 }
 
 impl<Char> From<[PositionedChar<Char>; 4]> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn from(c: [PositionedChar<Char>; 4]) -> Self {
     Self(InvalidUnicodeHexDigitsRepr::Four(c))
   }
@@ -114,13 +114,13 @@ impl<Char> InvalidUnicodeHexDigits<Char> {
   /// Returns the length of the invalid unicode sequence.
   ///
   /// The returned length will be in the range of `1..=4`.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn len(&self) -> usize {
     self.0.len()
   }
 
   /// Returns `true` if the length of the invalid unicode sequence is empty.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn is_empty(&self) -> bool {
     matches!(self.0, InvalidUnicodeHexDigitsRepr::Zero)
   }
@@ -134,21 +134,21 @@ impl<Char> InvalidUnicodeHexDigits<Char> {
 
   /// # Panics
   /// - If the length is already 4.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) fn push_fixed(&mut self, ch: PositionedChar<Char>) {
     self.0.push(ch);
   }
 }
 
 impl<Char> AsRef<[PositionedChar<Char>]> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &[PositionedChar<Char>] {
     self
   }
 }
 
 impl<Char> AsMut<[PositionedChar<Char>]> for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_mut(&mut self) -> &mut [PositionedChar<Char>] {
     self
   }
@@ -157,7 +157,7 @@ impl<Char> AsMut<[PositionedChar<Char>]> for InvalidUnicodeHexDigits<Char> {
 impl<Char> core::ops::Deref for InvalidUnicodeHexDigits<Char> {
   type Target = [PositionedChar<Char>];
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn deref(&self) -> &Self::Target {
     match &self.0 {
       InvalidUnicodeHexDigitsRepr::Zero => &[],
@@ -170,7 +170,7 @@ impl<Char> core::ops::Deref for InvalidUnicodeHexDigits<Char> {
 }
 
 impl<Char> core::ops::DerefMut for InvalidUnicodeHexDigits<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn deref_mut(&mut self) -> &mut Self::Target {
     match &mut self.0 {
       InvalidUnicodeHexDigitsRepr::Zero => &mut [],
@@ -191,19 +191,19 @@ pub struct InvalidUnicodeSequence<Char = char> {
 
 impl<Char> InvalidUnicodeSequence<Char> {
   /// Create a new invalid unicode sequence error.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn fixed(digits: InvalidUnicodeHexDigits<Char>, span: Span) -> Self {
     Self { digits, span }
   }
 
   /// Returns `true` if the sequence also incomplete.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn is_incomplete(&self) -> bool {
     self.span.len() < 6 // \u[0-9a-fA-F]{4} is 6 characters long
   }
 
   /// Get the invalid unicode hex digits.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn digits(&self) -> InvalidUnicodeHexDigits<Char>
   where
     Char: Copy,
@@ -212,31 +212,31 @@ impl<Char> InvalidUnicodeSequence<Char> {
   }
 
   /// Get the reference to the invalid unicode hex digits.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn digits_ref(&self) -> &InvalidUnicodeHexDigits<Char> {
     &self.digits
   }
 
   /// Get the mutable reference to the invalid unicode hex digits.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn digits_mut(&mut self) -> &mut InvalidUnicodeHexDigits<Char> {
     &mut self.digits
   }
 
   /// Get the span of the invalid unicode sequence.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span(&self) -> Span {
     self.span
   }
 
   /// Get the span of the invalid unicode sequence as a reference.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_ref(&self) -> &Span {
     &self.span
   }
 
   /// Get the mutable span of the invalid unicode sequence.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_mut(&mut self) -> &mut Span {
     &mut self.span
   }
@@ -269,31 +269,31 @@ pub struct InvalidUnicodeScalarValue {
 
 impl InvalidUnicodeScalarValue {
   /// Create a new invalid unicode scalar value error.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(value: u32, span: Span, kind: InvalidUnicodeScalarKind) -> Self {
     Self { value, span, kind }
   }
 
   /// Get the invalid unicode scalar codepoint.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn codepoint(&self) -> u32 {
     self.value
   }
 
   /// Get the span of the invalid unicode scalar value.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span(&self) -> Span {
     self.span
   }
 
   /// Get the span of the invalid unicode scalar value as a reference.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_ref(&self) -> &Span {
     &self.span
   }
 
   /// Get the mutable span of the invalid unicode scalar value.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_mut(&mut self) -> &mut Span {
     &mut self.span
   }
@@ -306,7 +306,7 @@ impl InvalidUnicodeScalarValue {
   }
 
   /// Returns the kind of invalid unicode scalar value.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn kind(&self) -> InvalidUnicodeScalarKind {
     self.kind
   }
@@ -545,13 +545,13 @@ pub struct EscapedCharacter<Char = char> {
 
 impl<Char> EscapedCharacter<Char> {
   /// Create a new escaped character error.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(char: PositionedChar<Char>, span: Span) -> Self {
     Self { char, span }
   }
 
   /// Get the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn char(&self) -> Char
   where
     Char: Copy,
@@ -560,37 +560,37 @@ impl<Char> EscapedCharacter<Char> {
   }
 
   /// Get the reference to the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn char_ref(&self) -> &Char {
     self.char.char_ref()
   }
 
   /// Get the mutable reference to the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn char_mut(&mut self) -> &mut Char {
     self.char.char_mut()
   }
 
   /// Returns the position of the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn position(&self) -> usize {
     self.char.position()
   }
 
   /// Get the span of the escaped character. The span covers the entire escape sequence, e.g. `\d`, `\r`.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span(&self) -> Span {
     self.span
   }
 
   /// Get the reference to the span of the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_ref(&self) -> &Span {
     &self.span
   }
 
   /// Get the mutable reference to the span of the escaped character.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn span_mut(&mut self) -> &mut Span {
     &mut self.span
   }
@@ -627,7 +627,7 @@ pub enum StringError<Char = char> {
 }
 
 impl<Char> Default for StringError<Char> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self::Other(Cow::Borrowed("unknown"))
   }

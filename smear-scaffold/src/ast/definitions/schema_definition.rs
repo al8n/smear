@@ -139,6 +139,20 @@ impl<Directives, RootOperationTypesDefinition> IntoComponents
 impl<Directives, RootOperationTypesDefinition>
   SchemaDefinition<Directives, RootOperationTypesDefinition>
 {
+  /// Creates a new `SchemaDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    directives: Option<Directives>,
+    operation_type_definitions: RootOperationTypesDefinition,
+  ) -> Self {
+    Self {
+      span,
+      directives,
+      operation_type_definitions,
+    }
+  }
+
   /// Returns a reference to the span covering the entire schema definition.
   ///
   /// The span includes the optional description, schema keyword, optional directives,
@@ -170,11 +184,6 @@ impl<Directives, RootOperationTypesDefinition>
   }
 
   /// Creates a parser for schema definitions using the provided sub-parsers.
-  ///
-  /// This parser handles the complete syntax for a GraphQL schema definition,
-  /// including all optional and required components. The parsing of directives
-  /// and root operation type definitions is delegated to the provided parsers,
-  /// allowing for context-specific validation and processing.
   pub fn parser_with<'src, I, T, Error, E, DP, RP>(
     directives_parser: DP,
     root_operation_types_definition_parser: RP,
@@ -189,13 +198,31 @@ impl<Directives, RootOperationTypesDefinition>
     RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
   {
     Schema::parser()
-      .ignore_then(directives_parser.or_not())
-      .then(root_operation_types_definition_parser)
-      .map_with(|(directives, operation_type_definitions), exa| Self {
-        span: exa.span(),
-        directives,
-        operation_type_definitions,
+      .ignore_then(Self::content_parser_with(
+        directives_parser,
+        root_operation_types_definition_parser,
+      ))
+      .map_with(|(directives, operation_type_definitions), exa| {
+        Self::new(exa.span(), directives, operation_type_definitions)
       })
+  }
+
+  /// Creates a parser for schema definitions without the leading `schema` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, DP, RP>(
+    directives_parser: DP,
+    root_operation_types_definition_parser: RP,
+  ) -> impl Parser<'src, I, (Option<Directives>, RootOperationTypesDefinition), E> + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
+  {
+    directives_parser
+      .or_not()
+      .then(root_operation_types_definition_parser)
   }
 }
 
@@ -556,6 +583,15 @@ impl<Directives, RootOperationTypesDefinition> IntoComponents
 impl<Directives, RootOperationTypesDefinition>
   SchemaExtension<Directives, RootOperationTypesDefinition>
 {
+  /// Creates a new `SchemaExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
+  ) -> Self {
+    Self { span, content }
+  }
+
   /// Returns a reference to the span covering the entire schema extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through
@@ -587,11 +623,6 @@ impl<Directives, RootOperationTypesDefinition>
   }
 
   /// Creates a parser for schema extensions using the provided sub-parsers.
-  ///
-  /// This parser handles the complete syntax for GraphQL schema extensions,
-  /// supporting both directive-only and operational extensions. The parser
-  /// is designed to be composable and integrate seamlessly with larger
-  /// GraphQL document parsers.
   pub fn parser_with<'src, I, T, Error, E, DP, RP>(
     directives_parser: DP,
     root_operation_types_definition_parser: RP,
@@ -608,7 +639,28 @@ impl<Directives, RootOperationTypesDefinition>
   {
     Extend::parser()
       .then(Schema::parser())
-      .ignore_then(directives_parser.or_not())
+      .ignore_then(Self::content_parser_with(
+        directives_parser,
+        root_operation_types_definition_parser,
+      ))
+      .map_with(|content, exa| Self::new(exa.span(), content))
+  }
+
+  /// Creates a parser for schema extensions without the leading `extend` and `schema` keywords.
+  pub fn content_parser_with<'src, I, T, Error, E, DP, RP>(
+    directives_parser: DP,
+    root_operation_types_definition_parser: RP,
+  ) -> impl Parser<'src, I, SchemaExtensionData<Directives, RootOperationTypesDefinition>, E> + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: UnexpectedEndOfSchemaExtensionError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+    RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone + 'src,
+  {
+    directives_parser
+      .or_not()
       .then(root_operation_types_definition_parser.or_not())
       .try_map_with(|(directives, root_operation_types_definition), exa| {
         let content = match (directives, root_operation_types_definition) {
@@ -625,10 +677,7 @@ impl<Directives, RootOperationTypesDefinition>
           }
         };
 
-        Ok(Self {
-          span: exa.span(),
-          content,
-        })
+        Ok(content)
       })
   }
 }

@@ -285,7 +285,7 @@ impl<Name, InputValue, Container> IntoComponents for Object<Name, InputValue, Co
 
 impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   /// Creates a new object literal with the given span and fields.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn new(span: Span, fields: Container) -> Self {
     Self {
       span,

@@ -14,7 +14,7 @@ use crate::{
 type LexerError<Extras> = error::LexerError<char, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<char, Extras>;
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
@@ -30,7 +30,7 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
@@ -49,7 +49,7 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -68,7 +68,7 @@ where
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_hex_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -118,7 +118,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -162,7 +162,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_hex_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>

@@ -133,6 +133,34 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoCom
 impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 {
+  /// Creates a new `NamedOperationDefinition` from its components.
+  ///
+  /// # Parameters
+  /// - `span`: Source location spanning the entire operation definition
+  /// - `operation_type`: The operation type (query, mutation, or subscription)
+  /// - `name`: Optional operation name for identification and caching
+  /// - `variable_definitions`: Optional parameter definitions
+  /// - `directives`: Optional operation-level directives
+  /// - `selection_set`: The fields and data to fetch/modify
+  #[inline]
+  pub const fn new(
+    span: Span,
+    operation_type: OperationType,
+    name: Option<Name>,
+    variable_definitions: Option<VariablesDefinition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      span,
+      operation_type,
+      name,
+      variable_definitions,
+      directives,
+      selection_set,
+    }
+  }
+
   /// Returns a reference to the span covering the entire operation definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -195,11 +223,17 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
     &self.selection_set
   }
 
-  /// Creates a parser for named operation definitions.
+  /// Creates a parser for complete named operation definitions.
   ///
-  /// This parser handles the complete syntax for named operations, including all
-  /// optional components. It delegates parsing of specific components to the
-  /// provided sub-parsers for maximum flexibility.
+  /// Parses the full GraphQL syntax: `query Name($var: Type) @directive { selections }`
+  /// The operation type keyword (query/mutation/subscription) is consumed by this parser.
+  ///
+  /// # Parameters
+  /// - `name_parser`: Parses the optional operation name
+  /// - `operation_type_parser`: Parses the operation type keyword
+  /// - `variable_definitions_parser`: Parses optional variable definitions
+  /// - `directives_parser`: Parses optional operation directives
+  /// - `selection_set_parser`: Parses the field selections
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, OP, VP, DP, SP>(
     name_parser: NP,
@@ -220,18 +254,72 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
     SP: Parser<'src, I, SelectionSet, E> + Clone,
   {
     operation_type_parser
-      .then(name_parser.or_not())
+      .then(Self::content_parser_with(
+        name_parser,
+        variable_definitions_parser,
+        directives_parser,
+        selection_set_parser,
+      ))
+      .map_with(
+        |(operation_type, (name, variable_definitions, directives, selection_set)), exa| {
+          Self::new(
+            exa.span(),
+            operation_type,
+            name,
+            variable_definitions,
+            directives,
+            selection_set,
+          )
+        },
+      )
+  }
+
+  /// Creates a parser for named operation definitions without the leading operation type keyword.
+  ///
+  /// This is useful for context-sensitive parsing where the operation type has already been
+  /// consumed. Returns a tuple of `(name, variable_definitions, directives, selection_set)`
+  /// which can be used to construct the definition with a custom span and operation type.
+  ///
+  /// # Parameters
+  /// - `name_parser`: Parses the optional operation name
+  /// - `variable_definitions_parser`: Parses optional variable definitions
+  /// - `directives_parser`: Parses optional operation directives
+  /// - `selection_set_parser`: Parses the field selections
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, VP, DP, SP>(
+    name_parser: NP,
+    variable_definitions_parser: VP,
+    directives_parser: DP,
+    selection_set_parser: SP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Option<Name>,
+      Option<VariablesDefinition>,
+      Option<Directives>,
+      SelectionSet,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone,
+    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    SP: Parser<'src, I, SelectionSet, E> + Clone,
+  {
+    name_parser
+      .or_not()
       .then(variable_definitions_parser.or_not())
       .then(directives_parser.or_not())
       .then(selection_set_parser)
-      .map_with(
-        |((((operation_type, name), variable_definitions), directives), selection_set), exa| Self {
-          span: exa.span(),
-          operation_type,
-          name,
-          variable_definitions,
-          directives,
-          selection_set,
+      .map(
+        |(((name, variable_definitions), directives), selection_set)| {
+          (name, variable_definitions, directives, selection_set)
         },
       )
   }

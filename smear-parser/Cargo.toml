@@ -10,8 +10,8 @@ description = "High-performance parser for GraphQL and GraphQL-like DSLs"
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
-std = ["smear-scaffold/std", "smear-lexer/std"]
+alloc = ["smear-scaffold/alloc", "smear-lexer/alloc", "logosky/alloc"]
+std = ["smear-scaffold/std", "smear-lexer/std", "logosky/default"]
 
 unstable = ["smear-lexer/unstable"]
 
@@ -32,3 +32,7 @@ paste = "1"
 
 bytes = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+
+[lints.rust]
+rust_2018_idioms = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }

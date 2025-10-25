@@ -196,6 +196,26 @@ impl<Directive, Container> Directives<Directive, Container> {
   pub fn into_directives(self) -> Container {
     self.directives
   }
+
+  /// Creates a parser for a collection of directives using the provided directive parser.
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, DP>(
+    directive_parser: DP,
+  ) -> impl Parser<'a, I, Self, E> + Clone
+  where
+    T: Token<'a>,
+    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    DP: Parser<'a, I, Directive, E> + Clone,
+    Container: chumsky::container::Container<Directive>,
+  {
+    directive_parser
+      .repeated()
+      .at_least(1)
+      .collect()
+      .map_with(|directives, exa| Self::new(exa.span(), directives))
+  }
 }
 
 impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
@@ -213,10 +233,6 @@ where
     I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    Directive::parser()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|directives, exa| Self::new(exa.span(), directives))
+    Self::parser_with(Directive::parser())
   }
 }

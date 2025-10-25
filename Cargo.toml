@@ -20,7 +20,8 @@ bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
 chumsky = { version = "0.11", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
-logosky = { version = "0.1", default-features = false }
+# logosky = { version = "0.1", default-features = false }
+logosky = { version = "0.3", path = "../logosky", default-features = false, features = ["chumsky"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
@@ -28,3 +29,6 @@ thiserror = { version = "2", default-features = false }
 smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
 smear-scaffold = { path = "smear-scaffold", version = "0.0.0", default-features = false }
 smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+
+
+

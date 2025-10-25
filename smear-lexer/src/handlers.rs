@@ -10,7 +10,7 @@ use logosky::{
 
 use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
   T: Logos<'a, Extras = Tracker>,
@@ -18,7 +18,7 @@ where
   lexer.extras.increase_token();
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
   T: Logos<'a, Extras = RecursionLimiter>,
@@ -32,7 +32,7 @@ where
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), E>
@@ -48,7 +48,7 @@ where
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
@@ -70,7 +70,7 @@ where
 }
 
 #[allow(clippy::result_large_err)]
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
@@ -91,7 +91,7 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_map<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
@@ -111,7 +111,7 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
   T: Logos<'a, Extras = Tracker>,
@@ -127,7 +127,7 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn unterminated_spread_operator_error<'a, T, E>(lexer: &mut Lexer<'a, T>) -> E
 where
   T: Logos<'a>,
@@ -136,7 +136,7 @@ where
   E::unterminated_spread_operator(lexer.span().into())
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
   T: Logos<'a, Extras = Tracker>,
@@ -146,7 +146,7 @@ where
   lexer.extras.increase_token();
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn decrease_recursion_depth<'a, T>(lexer: &mut Lexer<'a, T>)
 where
   T: Logos<'a, Extras = RecursionLimiter>,
@@ -280,12 +280,12 @@ where
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) const fn is_ignored_char(ch: &char) -> bool {
   matches!(ch, ' ' | '\t' | '\r' | '\n' | '\u{FEFF}' | ',' | '#')
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   match b {
     b' ' | b'\t' | b'\r' | b'\n' | b',' | b'#' => true,

@@ -15,13 +15,14 @@ use super::{
 use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
+pub use document::*;
 pub use fragment::*;
 pub use name::*;
 pub use ty::*;
-pub use type_system::*;
 pub use value::*;
 
 mod default;
+mod document;
 mod error;
 mod fragment;
 mod keyword;
@@ -30,7 +31,6 @@ mod name;
 mod operation_type;
 mod punctuator;
 mod ty;
-mod type_system;
 mod value;
 
 impl From<SyntacticTokenKind> for Expectation {
@@ -105,7 +105,7 @@ where
       SyntacticTokenStream<'b, &'b str>,
       SyntacticToken<&'b str>,
       SyntacticTokenErrors<'b, &'b str>,
-    >>::parser::<AstParserExtra<&str>>()
+    >>::parser::<AstParserExtra<'_, &str>>()
     .parse(SyntacticTokenStream::new(input.as_ref()))
   }
 }
@@ -139,7 +139,7 @@ where
       SyntacticTokenStream<'b, &'b [u8]>,
       SyntacticToken<&'b [u8]>,
       SyntacticTokenErrors<'b, &'b [u8]>,
-    >>::parser::<AstParserExtra<&[u8]>>()
+    >>::parser::<AstParserExtra<'_, &[u8]>>()
     .parse(SyntacticTokenStream::new(input.as_ref()))
   }
 }
@@ -180,7 +180,7 @@ const _: () = {
         SyntacticTokenStream<'a, Bytes>,
         SyntacticToken<Bytes>,
         SyntacticTokenErrors<'a, Bytes>,
-      >>::parser::<AstParserExtra<Bytes>>()
+      >>::parser::<AstParserExtra<'_, Bytes>>()
       .parse(SyntacticTokenStream::new(CustomSource::from_ref(input)))
     }
   }

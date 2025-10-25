@@ -71,7 +71,7 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
 }
 
 impl<Char, StateError> Default for LexerErrorData<Char, StateError> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self::Other(Cow::Borrowed("unknown"))
   }
@@ -129,7 +129,7 @@ pub struct LexerError<Char = char, StateError = ()> {
 }
 
 impl<Char, StateError> Default for LexerError<Char, StateError> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self::unexpected_eoi(Span::from(0..0))
   }
@@ -245,7 +245,7 @@ type DefaultErrorsContainer<Char = char, StateError = ()> =
 pub struct LexerErrors<Char = char, StateError = ()>(DefaultErrorsContainer<Char, StateError>);
 
 impl<Char, StateError> Default for LexerErrors<Char, StateError> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }

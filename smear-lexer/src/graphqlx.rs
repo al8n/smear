@@ -62,21 +62,21 @@ pub enum LitInt<S> {
 }
 
 impl<S> AsRef<S> for LitInt<S> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &S {
     self.source_ref()
   }
 }
 
 impl AsRef<str> for LitInt<&str> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &str {
     self.source_ref()
   }
 }
 
 impl AsRef<[u8]> for LitInt<&[u8]> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &[u8] {
     self.source_ref()
   }
@@ -112,7 +112,7 @@ impl<S> LitInt<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     match self {
       Self::Decimal(s) => s,
@@ -137,21 +137,21 @@ pub enum LitFloat<S> {
 }
 
 impl<S> AsRef<S> for LitFloat<S> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &S {
     self.source_ref()
   }
 }
 
 impl AsRef<str> for LitFloat<&str> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &str {
     self.source_ref()
   }
 }
 
 impl AsRef<[u8]> for LitFloat<&[u8]> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn as_ref(&self) -> &[u8] {
     self.source_ref()
   }
@@ -184,7 +184,7 @@ impl<S> LitFloat<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     match self {
       Self::Decimal(s) => s,

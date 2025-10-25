@@ -18,7 +18,7 @@ use super::error;
 pub(super) mod slice;
 pub(super) mod str;
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
@@ -28,7 +28,7 @@ where
   handlers::increase_recursion_depth_and_token(lexer)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
@@ -40,7 +40,7 @@ where
 }
 
 #[allow(clippy::result_large_err)]
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
@@ -51,7 +51,7 @@ where
   handlers::tt_hook_and_then_into_errors(lexer, f)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_map<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
@@ -62,7 +62,7 @@ where
   handlers::tt_hook_map(lexer, f)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
@@ -72,7 +72,7 @@ where
   handlers::tt_hook(lexer)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
@@ -82,7 +82,7 @@ where
   handlers::increase_recursion_depth(lexer)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn handle_hex_float_missing_exponent_then_check_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
@@ -307,120 +307,120 @@ struct GraphQLxOctalNumber;
 struct GraphQLxBinaryNumber;
 
 impl ValidateNumberChar<GraphQLxNumber> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, 'a'..='z' | 'A'..='Z' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxHexNumber> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, 'g'..='z' | 'G'..='Z' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxHexExponent> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, 'a'..='z' | 'A'..='Z' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxNumber> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxHexNumber> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'g'..=b'z' | b'G'..=b'Z' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxHexExponent> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxOctalNumber> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, '8'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxOctalNumber> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'8'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxBinaryNumber> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, '2'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLxBinaryNumber> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'2'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }

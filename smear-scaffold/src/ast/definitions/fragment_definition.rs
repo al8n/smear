@@ -164,6 +164,31 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoComponents
 impl<FragmentName, TypeCondition, Directives, SelectionSet>
   FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
 {
+  /// Creates a new `FragmentDefinition` from its components.
+  ///
+  /// # Parameters
+  /// - `span`: Source location spanning the entire fragment definition
+  /// - `name`: The fragment name (identifier for fragment spreads)
+  /// - `type_condition`: The type this fragment applies to (following "on")
+  /// - `directives`: Optional directives applied to the fragment
+  /// - `selection_set`: The fields and selections within the fragment
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: FragmentName,
+    type_condition: TypeCondition,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      type_condition,
+      directives,
+      selection_set,
+    }
+  }
+
   /// Returns a reference to the span covering the entire fragment definition.
   ///
   /// The span includes the optional description, fragment keyword, name,
@@ -214,11 +239,16 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
     &self.selection_set
   }
 
-  /// Creates a parser that can parse a complete fragment definition.
+  /// Creates a parser for complete fragment definitions.
   ///
-  /// This parser handles the full fragment definition syntax including all
-  /// optional and required components. The parsing of selection set and
-  /// directives is delegated to the provided parsers.
+  /// Parses the full GraphQL syntax: `fragment Name on Type @directives { selections }`
+  /// The `fragment` keyword is consumed by this parser.
+  ///
+  /// # Parameters
+  /// - `fragment_name_parser`: Parses the fragment identifier
+  /// - `type_condition_parser`: Parses the type condition (`on TypeName`)
+  /// - `directives_parser`: Parses optional fragment directives
+  /// - `selection_set_parser`: Parses the field selections
   pub fn parser_with<'src, I, T, Error, E, FP, TP, DP, SP>(
     fragment_name_parser: FP,
     type_condition_parser: TP,
@@ -237,19 +267,61 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     Fragment::parser()
-      .ignore_then(fragment_name_parser)
+      .ignore_then(Self::content_parser_with(
+        fragment_name_parser,
+        type_condition_parser,
+        directives_parser,
+        selection_set_parser,
+      ))
+      .map_with(|(name, type_condition, directives, selection_set), exa| {
+        Self::new(exa.span(), name, type_condition, directives, selection_set)
+      })
+  }
+
+  /// Creates a parser for fragment definitions without the leading `fragment` keyword.
+  ///
+  /// This is useful for context-sensitive parsing where the keyword has already been
+  /// consumed. Returns a tuple of `(name, type_condition, directives, selection_set)`
+  /// which can be used to construct the definition with a custom span.
+  ///
+  /// # Parameters
+  /// - `fragment_name_parser`: Parses the fragment identifier
+  /// - `type_condition_parser`: Parses the type condition (`on TypeName`)
+  /// - `directives_parser`: Parses optional fragment directives
+  /// - `selection_set_parser`: Parses the field selections
+  pub fn content_parser_with<'src, I, T, Error, E, FP, TP, DP, SP>(
+    fragment_name_parser: FP,
+    type_condition_parser: TP,
+    directives_parser: DP,
+    selection_set_parser: SP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      FragmentName,
+      TypeCondition,
+      Option<Directives>,
+      SelectionSet,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    FP: Parser<'src, I, FragmentName, E> + Clone,
+    TP: Parser<'src, I, TypeCondition, E> + Clone,
+    SP: Parser<'src, I, SelectionSet, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+  {
+    fragment_name_parser
       .then(type_condition_parser)
       .then(directives_parser.or_not())
       .then(selection_set_parser)
-      .map_with(
-        |(((name, type_condition), directives), selection_set), exa| Self {
-          name,
-          type_condition,
-          directives,
-          selection_set,
-          span: exa.span(),
-        },
-      )
+      .map(|(((name, type_condition), directives), selection_set)| {
+        (name, type_condition, directives, selection_set)
+      })
   }
 }
 

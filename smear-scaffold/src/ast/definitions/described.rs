@@ -52,6 +52,15 @@ impl<T, Description> IntoComponents for Described<T, Description> {
 }
 
 impl<T, Description> Described<T, Description> {
+  /// Creates a new `Described` node with the given description and inner node.
+  pub const fn new(span: Span, description: Option<Description>, node: T) -> Self {
+    Self {
+      span,
+      description,
+      node,
+    }
+  }
+
   /// Returns the span of the described node.
   #[inline]
   pub const fn span(&self) -> &Span {

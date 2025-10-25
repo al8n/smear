@@ -27,7 +27,7 @@ macro_rules! token {
         type Char = $char;
         type Logos = Token $(<$lt>)?;
 
-        #[inline(always)]
+        #[cfg_attr(not(tarpaulin), inline(always))]
         fn kind(&self) -> Self::Kind {
           self.kind()
         }
@@ -127,7 +127,7 @@ macro_rules! token {
       }
 
       impl$(<$lt>)? From<Token $(<$lt>)?> for SyntacticToken<$slice> {
-        #[inline(always)]
+        #[cfg_attr(not(tarpaulin), inline(always))]
         fn from(value: Token $(<$lt>)?) -> Self {
           match value {
             Token::Ampersand => Self::Ampersand,

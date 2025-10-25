@@ -134,6 +134,16 @@ impl<Name, Directives> IntoComponents for ScalarTypeDefinition<Name, Directives>
 }
 
 impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
+  /// Creates a new `ScalarTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Option<Directives>) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+    }
+  }
+
   /// Returns a reference to the span covering the entire scalar definition.
   ///
   /// The span encompasses the complete scalar definition from the optional description
@@ -164,10 +174,6 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
   }
 
   /// Creates a parser for scalar definitions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type definitions,
-  /// supporting optional descriptions and directives while ensuring proper whitespace
-  /// and comment handling throughout the definition.
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP>(
     name_parser: NP,
@@ -183,12 +189,25 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     Scalar::parser()
-      .ignore_then(name_parser.then(directives_parser.or_not()))
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
+      .ignore_then(Self::content_parser_with(name_parser, directives_parser))
+      .map_with(|(name, directives), exa| Self::new(exa.span(), name, directives))
+  }
+
+  /// Creates a parser for scalar type definitions without the leading `scalar` keyword.
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP>(
+    name_parser: NP,
+    directives_parser: DP,
+  ) -> impl Parser<'src, I, (Name, Option<Directives>), E> + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+  {
+    name_parser.then(directives_parser.or_not())
   }
 }
 
@@ -313,6 +332,16 @@ impl<Name, Directives> IntoComponents for ScalarTypeExtension<Name, Directives> 
 }
 
 impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
+  /// Creates a new `ScalarTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+    }
+  }
+
   /// Returns a reference to the span covering the entire scalar extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through
@@ -345,11 +374,6 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   }
 
   /// Creates a parser for scalar extensions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type extensions,
-  /// which must include directives (unlike definitions where they are optional).
-  /// The parser ensures proper keyword recognition, name validation, and directive
-  /// processing while maintaining comprehensive error reporting capabilities.
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP>(
     name_parser: NP,
@@ -367,13 +391,25 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   {
     Extend::parser()
       .then(Scalar::parser())
-      .ignore_then(name_parser)
-      .then(directives_parser)
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
+      .ignore_then(Self::content_parser_with(name_parser, directives_parser))
+      .map_with(|(name, directives), exa| Self::new(exa.span(), name, directives))
+  }
+
+  /// Creates a parser for scalar type extensions without the leading `extend` and `scalar` keywords.
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP>(
+    name_parser: NP,
+    directives_parser: DP,
+  ) -> impl Parser<'src, I, (Name, Directives), E> + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+  {
+    name_parser.then(directives_parser)
   }
 }
 

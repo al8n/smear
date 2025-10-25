@@ -53,9 +53,19 @@ impl<S> IntoComponents for StringValue<S> {
 }
 
 impl<S> StringValue<S> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
     Self { span, lit }
+  }
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn block(span: Span, lit: LitBlockStr<S>) -> Self {
+    Self::new(span, LitStr::Block(lit))
+  }
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn inline(span: Span, lit: LitInlineStr<S>) -> Self {
+    Self::new(span, LitStr::Inline(lit))
   }
 
   /// Returns the span of the name.
@@ -65,7 +75,7 @@ impl<S> StringValue<S> {
   }
 
   /// Returns the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -74,7 +84,7 @@ impl<S> StringValue<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
   }
@@ -154,7 +164,7 @@ where
 }
 
 impl<S> InlineStringValue<S> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self {
     Self { span, lit }
   }
@@ -166,7 +176,7 @@ impl<S> InlineStringValue<S> {
   }
 
   /// Returns the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -175,7 +185,7 @@ impl<S> InlineStringValue<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
   }
@@ -257,7 +267,7 @@ where
 }
 
 impl<S> BlockStringValue<S> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self {
     Self { span, lit }
   }
@@ -269,7 +279,7 @@ impl<S> BlockStringValue<S> {
   }
 
   /// Returns the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -278,7 +288,7 @@ impl<S> BlockStringValue<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     self.lit.source_ref()
   }

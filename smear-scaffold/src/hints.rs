@@ -45,7 +45,7 @@ pub enum UnionTypeExtensionHint {
   Directives,
   /// Union member types.
   #[display("union member types")]
-  UnionMemberTypes,
+  UnionMembers,
   /// Name.
   #[display("name")]
   Name,
@@ -57,7 +57,7 @@ pub enum UnionTypeExtensionHint {
   Union,
   /// Directives or union member types.
   #[display("directives or union member types")]
-  DirectivesOrUnionMemberTypes,
+  DirectivesOrUnionMembers,
 }
 
 /// Hints for the next component was expected while parsing an input object type extension.

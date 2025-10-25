@@ -16,15 +16,24 @@ macro_rules! punctuator {
       $(
         #[doc = "The `" $punct "` punctuator"]
         #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
-        pub struct $name {
-          span: $crate::__private::logosky::utils::Span,
+        pub struct $name<S = $crate::__private::logosky::utils::Span, C = ()> {
+          span: S,
+          source: C,
         }
 
-        impl $name {
+        impl<S> $name<S> {
           /// Creates a new punctuator with the given span.
-          #[inline(always)]
-          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
-            Self { span }
+          #[cfg_attr(not(tarpaulin), inline(always))]
+          pub const fn new(span: S) -> Self {
+            Self { span, source: () }
+          }
+        }
+
+        impl<S, C> $name<S, C> {
+          #[doc = "Creates a new punctuator with the given span and content."]
+          #[cfg_attr(not(tarpaulin), inline(always))]
+          pub const fn with_content(span: S, content: C) -> Self {
+            Self { span, source: content }
           }
 
           #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
@@ -41,91 +50,97 @@ macro_rules! punctuator {
 
           #[doc = "Returns the span of the `" $punct "` punctuator."]
           #[inline]
-          pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
+          pub const fn span(&self) -> &S {
             &self.span
+          }
+
+          #[doc = "Returns a reference to the content of the `" $punct "` punctuator."]
+          #[inline]
+          pub const fn content(&self) -> &C {
+            &self.source
           }
         }
 
-        impl ::core::cmp::PartialEq<::core::primitive::str> for $name {
+        impl<S, C> ::core::cmp::PartialEq<::core::primitive::str> for $name<S, C> {
           #[inline]
           fn eq(&self, other: &::core::primitive::str) -> bool {
             self.as_str().eq(other)
           }
         }
 
-        impl ::core::cmp::PartialOrd<::core::primitive::str> for $name {
+        impl<S, C> ::core::cmp::PartialOrd<::core::primitive::str> for $name<S, C> {
           #[inline]
           fn partial_cmp(&self, other: &::core::primitive::str) -> ::core::option::Option<::core::cmp::Ordering> {
             self.as_str().partial_cmp(other)
           }
         }
 
-        impl ::core::cmp::PartialEq<$name> for ::core::primitive::str {
+        impl<S, C> ::core::cmp::PartialEq<$name<S, C>> for ::core::primitive::str {
           #[inline]
-          fn eq(&self, other: &$name) -> bool {
+          fn eq(&self, other: &$name<S, C>) -> bool {
             self.eq(other.as_str())
           }
         }
 
-        impl ::core::cmp::PartialOrd<$name> for ::core::primitive::str {
+        impl<S, C> ::core::cmp::PartialOrd<$name<S, C>> for ::core::primitive::str {
           #[inline]
-          fn partial_cmp(&self, other: &$name) -> ::core::option::Option<::core::cmp::Ordering> {
+          fn partial_cmp(&self, other: &$name<S, C>) -> ::core::option::Option<::core::cmp::Ordering> {
             self.partial_cmp(other.as_str())
           }
         }
 
-        impl ::core::borrow::Borrow<::core::primitive::str> for $name {
+        impl<S, C> ::core::borrow::Borrow<::core::primitive::str> for $name<S, C> {
           #[inline]
           fn borrow(&self) -> &::core::primitive::str {
             self.as_str()
           }
         }
 
-        impl ::core::convert::AsRef<::core::primitive::str> for $name {
+        impl<S, C> ::core::convert::AsRef<::core::primitive::str> for $name<S, C> {
           #[inline]
           fn as_ref(&self) -> &::core::primitive::str {
             self.as_str()
           }
         }
 
-        impl $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl<S, C> $crate::__private::logosky::utils::AsSpan<S> for $name<S, C> {
           #[inline]
-          fn as_span(&self) -> &$crate::__private::logosky::utils::Span {
+          fn as_span(&self) -> &S {
             self.span()
           }
         }
 
-        impl $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl<S, C> $crate::__private::logosky::utils::IntoSpan<S> for $name<S, C> {
           #[inline]
-          fn into_span(self) -> $crate::__private::logosky::utils::Span {
+          fn into_span(self) -> S {
             self.span
           }
         }
 
-        impl $crate::__private::logosky::utils::IntoComponents for $name {
-          type Components = $crate::__private::logosky::utils::Span;
+        impl<S, C> $crate::__private::logosky::utils::IntoComponents for $name<S, C> {
+          type Components = (S, C);
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <Self as $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
+            (self.span, self.source)
           }
         }
 
-        impl ::core::fmt::Display for $name {
-          #[inline(always)]
+        impl<S, C> ::core::fmt::Display for $name<S, C> {
+          #[cfg_attr(not(tarpaulin), inline(always))]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt($punct, f)
           }
         }
 
-        impl $crate::__private::logosky::utils::human_display::DisplayHuman for $name {
+        impl<S, C> $crate::__private::logosky::utils::human_display::DisplayHuman for $name<S, C> {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name {
+        impl<S, C> $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name<S, C> {
           type Options = ();
 
           #[inline]
@@ -134,7 +149,7 @@ macro_rules! punctuator {
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name {
+        impl<S, C> $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name<S, C> {
           type Options = ();
 
           #[inline]

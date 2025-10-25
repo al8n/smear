@@ -6,7 +6,7 @@ use std::fs;
 #[cfg(feature = "graphql")]
 #[cfg_attr(miri, ignore)]
 fn parse_executables() {
-  use smear::parser::graphql::ast::{Document, ParseStr};
+  use smear::parser::graphql::ast::*;
 
   let mut current_dir = std::env::current_dir().expect("current directory should be existent");
   current_dir.push("tests");
@@ -27,6 +27,13 @@ fn parse_executables() {
           let _ = doc.definitions();
         }
         Err(e) => {
+          for errs in e.iter() {
+            for err in errs.iter() {
+              let span = err.span();
+              println!("span({span:?}): {}", &content[span.start()..span.end()]);
+            }
+          }
+
           panic!("Failed to parse {}: {:?}", path.display(), e);
         }
       }

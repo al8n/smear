@@ -64,7 +64,7 @@ where
 
 impl<Name> VariableValue<Name> {
   /// Creates a new variable from the given span and name.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
