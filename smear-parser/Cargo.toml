@@ -10,8 +10,8 @@ description = "High-performance parser for GraphQL and GraphQL-like DSLs"
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
-std = ["smear-scaffold/std", "smear-lexer/std"]
+alloc = ["smear-scaffold/alloc", "smear-lexer/alloc", "logosky/alloc"]
+std = ["smear-scaffold/std", "smear-lexer/std", "logosky/default"]
 
 unstable = ["smear-lexer/unstable"]
 

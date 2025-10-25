@@ -15,13 +15,14 @@ use super::{
 use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
+pub use document::*;
 pub use fragment::*;
 pub use name::*;
 pub use ty::*;
-pub use type_system::*;
 pub use value::*;
 
 mod default;
+mod document;
 mod error;
 mod fragment;
 mod keyword;
@@ -30,7 +31,6 @@ mod name;
 mod operation_type;
 mod punctuator;
 mod ty;
-mod type_system;
 mod value;
 
 impl From<SyntacticTokenKind> for Expectation {

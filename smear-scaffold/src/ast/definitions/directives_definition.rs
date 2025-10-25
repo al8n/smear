@@ -776,6 +776,24 @@ impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, L
 }
 
 impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
+  /// Creates a new `DirectiveDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    arguments_definition: Option<Args>,
+    repeateable: bool,
+    directive_locations: Locations,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      arguments_definition,
+      repeateable,
+      directive_locations,
+    }
+  }
+
   /// Returns a reference to the span covering the entire directive definition.
   ///
   /// The span includes the optional description, directive keyword, name,
@@ -822,10 +840,6 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   }
 
   /// Creates a parser that can parse a complete directive definition.
-  ///
-  /// This parser handles the full directive definition syntax including all
-  /// optional components. The parsing of arguments and locations is delegated
-  /// to the provided parsers.
   pub fn parser_with<'src, I, T, Error, E, NP, AP, LP>(
     name_parser: NP,
     args_parser: AP,
@@ -845,19 +859,56 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
     NP: Parser<'src, I, Name, E> + Clone,
   {
     Directive::parser()
-      .then(At::parser())
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        args_parser,
+        directive_locations_parser,
+      ))
+      .map_with(
+        |(name, arguments_definition, repeateable, directive_locations), exa| {
+          Self::new(
+            exa.span(),
+            name,
+            arguments_definition,
+            repeateable,
+            directive_locations,
+          )
+        },
+      )
+  }
+
+  /// Creates a parser for directive definitions without the leading `directive` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, AP, LP>(
+    name_parser: NP,
+    args_parser: AP,
+    directive_locations_parser: LP,
+  ) -> impl Parser<'src, I, (Name, Option<Args>, bool, Locations), E> + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    At: Parseable<'src, I, T, Error> + 'src,
+    On: Parseable<'src, I, T, Error> + 'src,
+    Repeatable: Parseable<'src, I, T, Error> + 'src,
+    AP: Parser<'src, I, Args, E> + Clone,
+    LP: Parser<'src, I, Locations, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
+  {
+    At::parser()
       .ignore_then(name_parser)
       .then(args_parser.or_not())
       .then(Repeatable::parser().or_not())
       .then_ignore(On::parser())
       .then(directive_locations_parser)
-      .map_with(
-        |(((name, arguments_definition), repeateable), directive_locations), exa| Self {
-          span: exa.span(),
-          name,
-          arguments_definition,
-          repeateable: repeateable.is_some(),
-          directive_locations,
+      .map(
+        |(((name, arguments_definition), repeateable), directive_locations)| {
+          (
+            name,
+            arguments_definition,
+            repeateable.is_some(),
+            directive_locations,
+          )
         },
       )
   }

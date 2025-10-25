@@ -4,10 +4,7 @@
 //! with concrete GraphQL types. These aliases form the public API for parsing standard GraphQL.
 
 use super::*;
-use smear_scaffold::ast::{
-  self as scaffold, DirectiveLocations, ImplementInterfaces, Location, OperationType,
-  UnionMemberTypes,
-};
+use smear_scaffold::ast::{self as scaffold, DirectiveLocations, Location, OperationType};
 
 pub use field::*;
 
@@ -111,10 +108,13 @@ pub type DescribedScalarTypeDefinition<S> = Described<ScalarTypeDefinition<S>, S
 /// Extension of a scalar type.
 pub type ScalarTypeExtension<S> = scaffold::ScalarTypeExtension<Name<S>, ConstDirectives<S>>;
 
+/// Implements interfaces clause for object and interface types.
+pub type ImplementsInterfaces<S> = scaffold::ImplementsInterfaces<Name<S>>;
+
 /// Object type definition.
 pub type ObjectTypeDefinition<S, Ty = Type<Name<S>>> = scaffold::ObjectTypeDefinition<
   Name<S>,
-  ImplementInterfaces<Name<S>>,
+  ImplementsInterfaces<S>,
   ConstDirectives<S>,
   FieldsDefinition<S, Ty>,
 >;
@@ -126,7 +126,7 @@ pub type DescribedObjectTypeDefinition<S, Ty = Type<Name<S>>> =
 /// Extension of an object type.
 pub type ObjectTypeExtension<S, Ty = Type<Name<S>>> = scaffold::ObjectTypeExtension<
   Name<S>,
-  ImplementInterfaces<Name<S>>,
+  ImplementsInterfaces<S>,
   ConstDirectives<S>,
   FieldsDefinition<S, Ty>,
 >;
@@ -134,7 +134,7 @@ pub type ObjectTypeExtension<S, Ty = Type<Name<S>>> = scaffold::ObjectTypeExtens
 /// Interface type definition.
 pub type InterfaceTypeDefinition<S, Ty = Type<Name<S>>> = scaffold::InterfaceTypeDefinition<
   Name<S>,
-  ImplementInterfaces<Name<S>>,
+  ImplementsInterfaces<S>,
   ConstDirectives<S>,
   FieldsDefinition<S, Ty>,
 >;
@@ -146,21 +146,24 @@ pub type DescribedInterfaceTypeDefinition<S, Ty = Type<Name<S>>> =
 /// Extension of an interface type.
 pub type InterfaceTypeExtension<S, Ty = Type<Name<S>>> = scaffold::InterfaceTypeExtension<
   Name<S>,
-  ImplementInterfaces<Name<S>>,
+  ImplementsInterfaces<S>,
   ConstDirectives<S>,
   FieldsDefinition<S, Ty>,
 >;
 
+/// Union member types (list of type names).
+pub type UnionMembers<S> = scaffold::UnionMembers<Name<S>>;
+
 /// Union type definition.
 pub type UnionTypeDefinition<S> =
-  scaffold::UnionTypeDefinition<Name<S>, ConstDirectives<S>, UnionMemberTypes<Name<S>>>;
+  scaffold::UnionTypeDefinition<Name<S>, ConstDirectives<S>, UnionMembers<S>>;
 
 /// Union type definition with optional description.
 pub type DescribedUnionTypeDefinition<S> = Described<UnionTypeDefinition<S>, S>;
 
 /// Extension of a union type.
 pub type UnionTypeExtension<S> =
-  scaffold::UnionTypeExtension<Name<S>, ConstDirectives<S>, UnionMemberTypes<Name<S>>>;
+  scaffold::UnionTypeExtension<Name<S>, ConstDirectives<S>, UnionMembers<S>>;
 
 /// Enum value definition.
 pub type EnumValueDefinition<S> =
@@ -212,31 +215,31 @@ pub type DescribedSchemaDefinition<S> = Described<SchemaDefinition<S>, S>;
 pub type SchemaExtension<S> =
   scaffold::SchemaExtension<ConstDirectives<S>, RootOperationTypesDefinition<S>>;
 
-/// Type system definition (schema, type, or directive definition).
-pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = scaffold::TypeSystemDefinition<
-  TypeDefinition<S, Ty>,
-  DirectiveDefinition<S, Ty>,
-  SchemaDefinition<S>,
->;
+// /// Type system definition (schema, type, or directive definition).
+// pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = scaffold::TypeSystemDefinition<
+//   TypeDefinition<S, Ty>,
+//   DirectiveDefinition<S, Ty>,
+//   SchemaDefinition<S>,
+// >;
 
 /// Type system definition with optional description.
 pub type DescribedTypeSystemDefinition<S, Ty = Type<Name<S>>> =
   Described<TypeSystemDefinition<S, Ty>, S>;
 
-/// Type system extension (type or schema extension).
-pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
-  scaffold::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
+// /// Type system extension (type or schema extension).
+// pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
+//   scaffold::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
 
-/// Type system definition or extension.
-pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
-  scaffold::TypeSystemDefinitionOrExtension<
-    DescribedTypeSystemDefinition<S, Ty>,
-    TypeSystemExtension<S, Ty>,
-  >;
+// /// Type system definition or extension.
+// pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
+//   scaffold::TypeSystemDefinitionOrExtension<
+//     DescribedTypeSystemDefinition<S, Ty>,
+//     TypeSystemExtension<S, Ty>,
+//   >;
 
-/// Executable definition (operation or fragment).
-pub type ExecutableDefinition<S, Ty = Type<Name<S>>> =
-  scaffold::ExecutableDefinition<OperationDefinition<S, Ty>, FragmentDefinition<S>>;
+// /// Executable definition (operation or fragment).
+// pub type ExecutableDefinition<S, Ty = Type<Name<S>>> =
+//   scaffold::ExecutableDefinition<OperationDefinition<S, Ty>, FragmentDefinition<S>>;
 
 /// Executable definition with optional description.
 pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =

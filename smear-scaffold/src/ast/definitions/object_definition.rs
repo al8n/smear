@@ -116,6 +116,24 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new `ObjectTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    implements: Option<ImplementInterfaces>,
+    directives: Option<Directives>,
+    fields_definition: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      implements,
+      directives,
+      fields_definition,
+    }
+  }
+
   /// Returns a reference to the span covering the entire object definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -161,10 +179,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   }
 
   /// Creates a parser for object type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL object types, including
-  /// all optional components like descriptions, interface implementations,
-  /// directives, and field definitions.
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -188,7 +202,50 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
   {
     Type::parser()
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|(name, implements, directives, fields_definition), exa| {
+        Self::new(exa.span(), name, implements, directives, fields_definition)
+      })
+  }
+
+  /// Creates a parser for object type definitions without the leading `type` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Name,
+      Option<ImplementInterfaces>,
+      Option<Directives>,
+      Option<FieldsDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Implements: Parseable<'src, I, T, Error>,
+    Name: 'src,
+    Directives: 'src,
+    ImplementInterfaces: 'src,
+    FieldsDefinition: 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
+  {
+    name_parser
       .then(
         Implements::parser()
           .ignore_then(implement_interfaces_parser)
@@ -196,13 +253,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
       )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
-      .map_with(|(((name, implements), directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields_definition: fields,
-        implements,
-      })
+      .map(|(((name, implements), directives), fields)| (name, implements, directives, fields))
   }
 }
 
@@ -426,6 +477,16 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new `ObjectTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire object extension.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -474,10 +535,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   }
 
   /// Creates a parser for object type extensions.
-  ///
-  /// This parser handles the `extend type` syntax followed by the object name
-  /// and extension data. The content parsing is delegated to the
-  /// `ObjectTypeExtensionData` parser for modularity.
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -503,7 +560,46 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   {
     Extend::parser()
       .then(Type::parser())
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|(name, data), exa| Self::new(exa.span(), name, data))
+  }
+
+  /// Creates a parser for object type extensions without the leading `extend` and `type` keywords.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Name,
+      ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: UnexpectedEndOfObjectExtensionError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Implements: Parseable<'src, I, T, Error>,
+    Name: 'src,
+    ImplementInterfaces: 'src,
+    Directives: 'src,
+    FieldsDefinition: 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
+  {
+    name_parser
       .then(
         Implements::parser()
           .ignore_then(implement_interfaces_parser)
@@ -531,11 +627,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
           }
         };
 
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+        Ok((name, data))
       })
   }
 }

@@ -141,52 +141,52 @@ harness = false
 
 # Executable benchmarks
 # Representative benchmark queries (tiny to huge, simple to complex)
-[[bench]]
-name = "bench_01_tiny_simple"
-path = "benches/executables/bench_01_tiny_simple.rs"
-harness = false
+# [[bench]]
+# name = "bench_01_tiny_simple"
+# path = "benches/executables/bench_01_tiny_simple.rs"
+# harness = false
 
-[[bench]]
-name = "bench_02_small_simple"
-path = "benches/executables/bench_02_small_simple.rs"
-harness = false
+# [[bench]]
+# name = "bench_02_small_simple"
+# path = "benches/executables/bench_02_small_simple.rs"
+# harness = false
 
-[[bench]]
-name = "bench_03_small_variables"
-path = "benches/executables/bench_03_small_variables.rs"
-harness = false
+# [[bench]]
+# name = "bench_03_small_variables"
+# path = "benches/executables/bench_03_small_variables.rs"
+# harness = false
 
-[[bench]]
-name = "bench_04_medium_nested"
-path = "benches/executables/bench_04_medium_nested.rs"
-harness = false
+# [[bench]]
+# name = "bench_04_medium_nested"
+# path = "benches/executables/bench_04_medium_nested.rs"
+# harness = false
 
-[[bench]]
-name = "bench_05_medium_fragments"
-path = "benches/executables/bench_05_medium_fragments.rs"
-harness = false
+# [[bench]]
+# name = "bench_05_medium_fragments"
+# path = "benches/executables/bench_05_medium_fragments.rs"
+# harness = false
 
-[[bench]]
-name = "bench_06_large_complex"
-path = "benches/executables/bench_06_large_complex.rs"
-harness = false
+# [[bench]]
+# name = "bench_06_large_complex"
+# path = "benches/executables/bench_06_large_complex.rs"
+# harness = false
 
-[[bench]]
-name = "bench_07_large_deep_nesting"
-path = "benches/executables/bench_07_large_deep_nesting.rs"
-harness = false
+# [[bench]]
+# name = "bench_07_large_deep_nesting"
+# path = "benches/executables/bench_07_large_deep_nesting.rs"
+# harness = false
 
-[[bench]]
-name = "bench_08_many_fields"
-path = "benches/executables/bench_08_many_fields.rs"
-harness = false
+# [[bench]]
+# name = "bench_08_many_fields"
+# path = "benches/executables/bench_08_many_fields.rs"
+# harness = false
 
-[[bench]]
-name = "bench_09_many_aliases"
-path = "benches/executables/bench_09_many_aliases.rs"
-harness = false
+# [[bench]]
+# name = "bench_09_many_aliases"
+# path = "benches/executables/bench_09_many_aliases.rs"
+# harness = false
 
-[[bench]]
-name = "bench_10_huge_comprehensive"
-path = "benches/executables/bench_10_huge_comprehensive.rs"
-harness = false
+# [[bench]]
+# name = "bench_10_huge_comprehensive"
+# path = "benches/executables/bench_10_huge_comprehensive.rs"
+# harness = false

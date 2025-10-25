@@ -58,6 +58,16 @@ impl<S> StringValue<S> {
     Self { span, lit }
   }
 
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn block(span: Span, lit: LitBlockStr<S>) -> Self {
+    Self::new(span, LitStr::Block(lit))
+  }
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(crate) const fn inline(span: Span, lit: LitInlineStr<S>) -> Self {
+    Self::new(span, LitStr::Inline(lit))
+  }
+
   /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {

@@ -74,6 +74,18 @@ pub enum Expectation {
   EnumValue,
   /// A string value was expected.
   StringValue,
-  /// A keyword was expected.
-  Keyword(&'static str),
+  /// One or more keywords were expected.
+  Keyword(&'static [&'static str]),
+  /// A type definition was expected.
+  TypeDefinition,
+  /// A type extension was expected.
+  TypeExtension,
+  /// A type system definition was expected.
+  TypeSystemDefinition,
+  /// A type system extension was expected.
+  TypeSystemExtension,
+  /// A type system definition or extension was expected.
+  TypeSystemDefinitionOrExtension,
+  /// An executable definition was expected.
+  ExecutableDefinition,
 }

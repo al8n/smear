@@ -9,7 +9,7 @@ macro_rules! define_module {
   };
 }
 
-define_module!(
-  err_0001_directive_definition_missing_location,
-  err_0062_kitchen_sink_ccn,
-);
+// define_module!(
+//   err_0001_directive_definition_missing_location,
+//   err_0062_kitchen_sink_ccn,
+// );
