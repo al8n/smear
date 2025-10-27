@@ -5,8 +5,8 @@
 // };
 use derive_more::{From, Into};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 

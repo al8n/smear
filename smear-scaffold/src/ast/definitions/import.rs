@@ -3,8 +3,10 @@ use std::vec::Vec;
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{
+    IterParser, Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra,
+  },
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 

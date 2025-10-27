@@ -1,8 +1,10 @@
 use core::marker::PhantomData;
 
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{
+    IterParser, Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra,
+  },
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 

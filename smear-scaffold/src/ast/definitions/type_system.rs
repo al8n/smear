@@ -1,7 +1,7 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::choice},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::choice},
   utils::{AsSpan, IntoSpan, Span},
 };
 

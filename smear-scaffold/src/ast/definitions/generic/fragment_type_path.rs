@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, container::Container as ChumskyContainer, extra::ParserExtra},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     cmp::{self, Equivalent},
