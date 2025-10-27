@@ -2,7 +2,7 @@ macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, utils::tracker::{LimitExceeded, Tracker},
+        Logos, Lexable, utils::tracker::{LimitExceeded, Limiter},
       };
       use crate::{
         error::StringErrors,
@@ -39,7 +39,7 @@ macro_rules! token {
       )]
       #[logos(
         crate = logosky::logos,
-        extras = Tracker,
+        extras = Limiter,
         source = $source,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]

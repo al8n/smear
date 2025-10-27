@@ -6,7 +6,7 @@ use crate::{
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, UnexpectedEnd, tracker::Tracker},
+  utils::{Lexeme, UnexpectedEnd, tracker::Limiter},
 };
 
 use super::error;
@@ -36,7 +36,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {

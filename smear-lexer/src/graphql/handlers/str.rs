@@ -2,7 +2,7 @@ use super::error::{self, FloatError};
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, tracker::Tracker},
+  utils::{Lexeme, PositionedChar, Span, tracker::Limiter},
 };
 
 use crate::{
@@ -35,7 +35,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
