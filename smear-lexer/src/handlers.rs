@@ -2,7 +2,7 @@ use logosky::{
   Logos, Source,
   logos::Lexer,
   utils::{
-    CharSize, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+    CharLen, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
@@ -272,7 +272,7 @@ where
     }
     Some(ch) => {
       let span = lexer.span();
-      lexer.bump(ch.char_size());
+      lexer.bump(ch.char_len());
 
       let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
       UnexpectedLexeme::new(l, hint()).into()
@@ -297,7 +297,7 @@ pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   }
 }
 
-pub(super) trait ValidateNumberChar<Language>: CharSize {
+pub(super) trait ValidateNumberChar<Language>: CharLen {
   fn is_first_invalid_char(&self) -> bool;
   fn is_following_invalid_char(&self) -> bool;
 }
