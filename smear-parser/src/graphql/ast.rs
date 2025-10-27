@@ -3,8 +3,7 @@
 use std::vec::Vec;
 
 use logosky::{
-  Parseable,
-  chumsky::{ParseResult, Parser},
+  chumsky::{ParseResult, Parseable, Parser},
   utils::{Span, recursion_tracker::RecursionLimitExceeded},
 };
 

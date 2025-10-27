@@ -1,8 +1,8 @@
 use super::{input_fields_definition::InputFieldsDefinition, ty::Path, *};
 use derive_more::{From, Into};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::extra::ParserExtra,
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 

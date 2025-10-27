@@ -1,8 +1,7 @@
 use std::vec::Vec;
 
 use logosky::{
-  Parseable,
-  chumsky::{ParseResult, Parser},
+  chumsky::{ParseResult, Parseable, Parser},
   utils::recursion_tracker::RecursionLimitExceeded,
 };
 

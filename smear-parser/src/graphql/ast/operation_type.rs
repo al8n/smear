@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
   utils::{Span, cmp::Equivalent},
 };
 use smear_lexer::{

@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 use smear_lexer::graphqlx::syntactic::SyntacticLexerErrors;

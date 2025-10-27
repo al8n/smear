@@ -9,8 +9,8 @@ use super::{
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  Lexed, Source, Token, Tokenizer,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };

@@ -1,7 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
 use smear_lexer::punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket};

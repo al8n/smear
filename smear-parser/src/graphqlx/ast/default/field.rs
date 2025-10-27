@@ -1,7 +1,7 @@
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  Lexed, Logos, Source, Token, Tokenizer,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 use smear_lexer::{

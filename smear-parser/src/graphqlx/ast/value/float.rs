@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 

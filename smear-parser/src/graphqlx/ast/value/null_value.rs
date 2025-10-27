@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
   utils::{Span, cmp::Equivalent},
 };
 

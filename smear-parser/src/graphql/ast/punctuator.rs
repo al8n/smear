@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
 };
 use smear_lexer::{graphql::syntactic::SyntacticLexerErrors, punctuator::*};
 

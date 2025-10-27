@@ -1,7 +1,8 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Parseable, Source, Token, Tokenizer,
+  Lexed, Logos, Source, Token, Tokenizer,
   chumsky::{
+    Parseable,
     extra::ParserExtra,
     input::{Cursor, InputRef},
     prelude::*,
