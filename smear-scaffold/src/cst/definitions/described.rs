@@ -11,7 +11,13 @@ pub struct Described<T, Description, S, TriviaContainer = std::vec::Vec<crate::c
 }
 
 impl<T, Description, S, TriviaContainer> Described<T, Description, S, TriviaContainer> {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn description(&self) -> Option<&Description> { self.description.as_ref() }
-  pub const fn value(&self) -> &T { &self.value }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn description(&self) -> Option<&Description> {
+    self.description.as_ref()
+  }
+  pub const fn value(&self) -> &T {
+    &self.value
+  }
 }

@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use logosky::{
-  Logos, Source, Token, Tokenizer,
+  LogoStream, Logos, Source, Token,
   chumsky::{self, IterParser, Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
@@ -94,7 +94,7 @@ impl<Type, Container> TypeGenerics<Type, Container> {
   pub fn parser_with<'a, I, T, Error, E, TP>(type_parser: TP) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     TP: Parser<'a, I, Type, E> + Clone + 'a,
@@ -122,7 +122,7 @@ where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Type::parser())

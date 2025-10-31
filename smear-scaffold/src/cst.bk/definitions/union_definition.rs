@@ -1,5 +1,5 @@
 use logosky::{
-  Logos, LosslessToken, Source, Tokenizer,
+  Logos, LosslessToken, Source, LogoStream,
   chumsky::{Parser, extra::ParserExtra},
   cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
 };
@@ -73,7 +73,7 @@ where
   where
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Pipe<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
@@ -97,7 +97,7 @@ where
   where
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Pipe<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
@@ -177,7 +177,7 @@ where
   #[inline]
   fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
   where
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
     Error: 'a,
@@ -290,7 +290,7 @@ where
   #[inline]
   fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
   where
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
     Error: 'a,

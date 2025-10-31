@@ -1,5 +1,5 @@
 use logosky::{
-  Logos, Source, Token, Tokenizer,
+  LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
@@ -109,7 +109,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
     type_parser: TP,
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: InvalidFragmentTypePath + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
@@ -152,7 +152,7 @@ where
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     T: Token<'a>,
   {

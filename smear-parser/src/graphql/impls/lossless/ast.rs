@@ -2,7 +2,7 @@ use logosky::utils::Span;
 
 use crate::lexer::token::lossless::{Token, TokenKind};
 
-use super::{LosslessTokenErrors, LosslessTokenStream};
+use super::{LosslessTokenErrors, LosslessTokenizer};
 
 pub use list::*;
 pub use object::*;

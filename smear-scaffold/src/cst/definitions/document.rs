@@ -1,5 +1,5 @@
-use logosky::utils::Span;
 use core::marker::PhantomData;
+use logosky::utils::Span;
 use std::vec::Vec;
 
 /// Concrete Syntax Tree representation of a GraphQL document.
@@ -28,7 +28,12 @@ use std::vec::Vec;
 /// The CST would preserve the comment "# GraphQL schema", the blank line,
 /// the comment "# Another type", etc.
 #[derive(Debug, Clone)]
-pub struct Document<Definition, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<Definition>> {
+pub struct Document<
+  Definition,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<Definition>,
+> {
   span: Span,
   /// Leading trivia before the first definition
   leading: TriviaContainer,
@@ -72,7 +77,9 @@ where
   }
 }
 
-impl<Definition, S, TriviaContainer, Container> Document<Definition, S, TriviaContainer, Container> {
+impl<Definition, S, TriviaContainer, Container>
+  Document<Definition, S, TriviaContainer, Container>
+{
   /// Returns the span covering the entire document.
   #[inline]
   pub const fn span(&self) -> &Span {

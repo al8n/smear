@@ -1,5 +1,5 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -100,21 +100,27 @@ pub struct Map<Entry, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container
   _marker: PhantomData<Entry>,
 }
 
-impl<Entry, S, TriviaContainer, Container> AsSpan<Span> for Map<Entry, S, TriviaContainer, Container> {
+impl<Entry, S, TriviaContainer, Container> AsSpan<Span>
+  for Map<Entry, S, TriviaContainer, Container>
+{
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Entry, S, TriviaContainer, Container> IntoSpan<Span> for Map<Entry, S, TriviaContainer, Container> {
+impl<Entry, S, TriviaContainer, Container> IntoSpan<Span>
+  for Map<Entry, S, TriviaContainer, Container>
+{
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Entry, S, TriviaContainer, Container> IntoComponents for Map<Entry, S, TriviaContainer, Container> {
+impl<Entry, S, TriviaContainer, Container> IntoComponents
+  for Map<Entry, S, TriviaContainer, Container>
+{
   type Components = (
     Span,
     Padding<S, TriviaContainer>,

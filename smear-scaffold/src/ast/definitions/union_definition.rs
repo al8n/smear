@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use logosky::{
-  Logos, Source, Token, Tokenizer,
+  LogoStream, Logos, Source, Token,
   chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
@@ -81,7 +81,7 @@ where
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     T: Token<'a>,
   {
@@ -297,7 +297,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Union: Parseable<'src, I, T, Error> + Clone,
@@ -323,7 +323,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   ) -> impl Parser<'src, I, (Name, Option<Directives>, Option<MemberTypes>), E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Equal: Parseable<'src, I, T, Error> + Clone,
@@ -353,7 +353,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
@@ -536,7 +536,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfUnionExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error> + Clone,
@@ -564,7 +564,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   ) -> impl Parser<'src, I, (Name, UnionTypeExtensionData<Directives, MemberTypes>), E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfUnionExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Equal: Parseable<'src, I, T, Error> + Clone,
@@ -612,7 +612,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())

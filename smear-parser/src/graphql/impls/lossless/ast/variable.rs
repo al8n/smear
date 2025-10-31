@@ -8,18 +8,18 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for Variable<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     <Dollar as Parseable<
       'a,
-      LosslessTokenStream<'a>,
+      LosslessTokenizer<'a>,
       Token<'a>,
       LosslessTokenErrors<'a, &'a str>,
     >>::parser()
@@ -27,7 +27,7 @@ impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'
     .then(
       <Name<&'a str> as Parseable<
         'a,
-        LosslessTokenStream<'a>,
+        LosslessTokenizer<'a>,
         Token<'a>,
         LosslessTokenErrors<'a, &'a str>,
       >>::parser()
@@ -62,7 +62,7 @@ mod tests {
   fn test_variable_parser() {
     let parser = Variable::parser::<LosslessParserExtra<&str>>();
     let input = r#"$foo"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(*parsed.slice(), "$foo");
     assert_eq!(*parsed.name().source(), "foo");
     assert_eq!(parsed.span(), Span::new(0, 4));

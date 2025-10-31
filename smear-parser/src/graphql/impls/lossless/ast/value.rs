@@ -23,14 +23,14 @@ pub enum InputValue<S> {
   Object(Object<Padded<ObjectField<InputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for InputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     recursive(|parser| {
       let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);
@@ -72,14 +72,14 @@ pub enum ConstInputValue<S> {
   Object(Object<Padded<ObjectField<ConstInputValue<S>, S>, S>>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for ConstInputValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     recursive(|parser| {
       let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);

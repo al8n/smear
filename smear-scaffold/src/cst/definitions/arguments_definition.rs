@@ -1,5 +1,5 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -21,7 +21,12 @@ use crate::cst::Padding;
 /// )
 /// ```
 #[derive(Debug, Clone)]
-pub struct ArgumentsDefinition<InputValueDef, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<InputValueDef>> {
+pub struct ArgumentsDefinition<
+  InputValueDef,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<InputValueDef>,
+> {
   span: Span,
   /// Padding around the left parenthesis
   lparen_padding: Padding<S, TriviaContainer>,

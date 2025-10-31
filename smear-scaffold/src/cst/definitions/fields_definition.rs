@@ -1,5 +1,5 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -21,7 +21,14 @@ use crate::cst::Padding;
 /// email: String @deprecated
 /// ```
 #[derive(Debug, Clone)]
-pub struct FieldDefinition<Name, Arguments, Type, Directives, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct FieldDefinition<
+  Name,
+  Arguments,
+  Type,
+  Directives,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   /// The field name
   name: Name,
@@ -171,7 +178,12 @@ impl<Name, Arguments, Type, Directives, S, TriviaContainer>
 /// }
 /// ```
 #[derive(Debug, Clone)]
-pub struct FieldsDefinition<FieldDef, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<FieldDef>> {
+pub struct FieldsDefinition<
+  FieldDef,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<FieldDef>,
+> {
   span: Span,
   /// Padding around the left brace
   lbrace_padding: Padding<S, TriviaContainer>,
@@ -221,7 +233,8 @@ impl<FieldDef, S, TriviaContainer, Container> IntoComponents
   }
 }
 
-impl<FieldDef, S, TriviaContainer, Container> FieldsDefinition<FieldDef, S, TriviaContainer, Container>
+impl<FieldDef, S, TriviaContainer, Container>
+  FieldsDefinition<FieldDef, S, TriviaContainer, Container>
 where
   TriviaContainer: Default,
   Container: Default,
@@ -254,7 +267,9 @@ where
   }
 }
 
-impl<FieldDef, S, TriviaContainer, Container> FieldsDefinition<FieldDef, S, TriviaContainer, Container> {
+impl<FieldDef, S, TriviaContainer, Container>
+  FieldsDefinition<FieldDef, S, TriviaContainer, Container>
+{
   /// Returns the span covering the entire fields definition.
   #[inline]
   pub const fn span(&self) -> &Span {

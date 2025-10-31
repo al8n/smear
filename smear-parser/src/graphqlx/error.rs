@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Token, TokenStream,
+  Lexed, Logos, Token, Tokenizer,
   chumsky::{
     self, DefaultExpected,
     error::{self, LabelError},
@@ -395,7 +395,7 @@ impl<S, T, Char, Expectation, StateError> Extend<Error<S, T, Char, Expectation, 
 }
 
 impl<'a, S, T, Char, Expectation, StateError>
-  LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
+  LabelError<'a, Tokenizer<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
   for Errors<S, T, Char, Expectation, StateError>
 where
   T: Token<'a>,
@@ -466,7 +466,7 @@ where
     span: logosky::utils::Span,
   ) -> Self
   where
-    Self: error::Error<'a, TokenStream<'a, T>>,
+    Self: error::Error<'a, Tokenizer<'a, T>>,
   {
     // Create new errors from the expected/found combination
     let new_errors = Self::expected_found(expected, found, span);
@@ -477,7 +477,7 @@ where
   }
 }
 
-impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
+impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, Tokenizer<'a, T>>
   for Errors<S, T, Char, Expectation, StateError>
 where
   T: Token<'a>,

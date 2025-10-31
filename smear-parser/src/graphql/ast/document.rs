@@ -1,6 +1,6 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Source, Token, Tokenizer,
+  Lexed, LogoStream, Logos, Source, Token,
   chumsky::{
     Parseable,
     extra::ParserExtra,
@@ -74,14 +74,14 @@ impl<S, Ty> TypeDefinition<S, Ty> {
   }
 
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -89,15 +89,15 @@ impl<S, Ty> TypeDefinition<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -203,26 +203,25 @@ impl<S, Ty> TypeDefinition<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for TypeDefinition<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -315,14 +314,14 @@ impl<S, Ty> TypeExtension<S, Ty> {
   }
 
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -330,15 +329,15 @@ impl<S, Ty> TypeExtension<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -433,26 +432,25 @@ impl<S, Ty> TypeExtension<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for TypeExtension<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -552,14 +550,14 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
   }
 
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -567,15 +565,15 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -619,26 +617,25 @@ impl<S, Ty> TypeSystemDefinition<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for TypeSystemDefinition<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -725,14 +722,14 @@ impl<S, Ty> TypeSystemExtension<S, Ty> {
   }
 
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -740,15 +737,15 @@ impl<S, Ty> TypeSystemExtension<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -811,14 +808,14 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
   }
 
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -826,15 +823,15 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -884,26 +881,25 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for TypeSystemDefinitionOrExtension<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1010,15 +1006,15 @@ impl<S, Ty> IntoSpan<Span> for ExecutableDefinition<S, Ty> {
 
 impl<S, Ty> ExecutableDefinition<S, Ty> {
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: &Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: &Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     span: Span,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1026,17 +1022,17 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    RBrace:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     macro_rules! parse_named_operation_type_definition {
@@ -1097,13 +1093,13 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
   }
 
   fn parser_short_hand<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
   ) -> Result<Self, SyntacticTokenErrors<'a, S>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1111,17 +1107,17 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    RBrace:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     match inp.parse(
@@ -1143,28 +1139,27 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for ExecutableDefinition<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1241,15 +1236,15 @@ impl<S, Ty> IntoSpan<Span> for Definition<S, Ty> {
 
 impl<S, Ty> Definition<S, Ty> {
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     span: Span,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1257,17 +1252,17 @@ impl<S, Ty> Definition<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    RBrace:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     // Try to parse as executable definition first (fragment, query, mutation, subscription)
@@ -1281,28 +1276,27 @@ impl<S, Ty> Definition<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for Definition<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1391,15 +1385,15 @@ impl<S, Ty> IntoSpan<Span> for DefinitionOrExtension<S, Ty> {
 
 impl<S, Ty> DefinitionOrExtension<S, Ty> {
   fn parser_inner<'a, 'p, E>(
-    inp: &mut InputRef<'a, 'p, SyntacticTokenStream<'a, S>, E>,
-    before: Cursor<'a, 'p, SyntacticTokenStream<'a, S>>,
+    inp: &mut InputRef<'a, 'p, SyntacticTokenizer<'a, S>, E>,
+    before: Cursor<'a, 'p, SyntacticTokenizer<'a, S>>,
     span: Span,
     ident: &S,
   ) -> Option<Result<Self, SyntacticTokenErrors<'a, S>>>
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -1407,17 +1401,17 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
         >,
       >,
     SyntacticTokenErrors<'a, S>: 'a,
-    Ty: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Ty:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     SyntacticToken<S>: Token<'a>,
     <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
     <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-    Arguments<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    Directives<S>: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
-    RBrace: Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-      + 'a,
+    Arguments<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Directives<S>:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    RBrace:
+      Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
     str: Equivalent<S>,
   {
     Some(match () {
@@ -1467,28 +1461,27 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
 }
 
 impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+  Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for DefinitionOrExtension<S, Ty>
 where
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+  Ty: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
   Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   Directives<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<

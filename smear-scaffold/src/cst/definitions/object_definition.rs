@@ -1,12 +1,19 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
 
 /// CST representation of object type definition: `type Name implements Interface { fields }`
 #[derive(Debug, Clone)]
-pub struct ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct ObjectTypeDefinition<
+  Name,
+  Implements,
+  Directives,
+  Fields,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   type_keyword_padding: Padding<S, TriviaContainer>,
   name: Name,
@@ -19,31 +26,54 @@ pub struct ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaC
 impl<Name, Implements, Directives, Fields, S, TriviaContainer>
   ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn type_keyword_padding(&self) -> &Padding<S, TriviaContainer> { &self.type_keyword_padding }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn implements(&self) -> Option<&Implements> { self.implements.as_ref() }
-  pub const fn directives(&self) -> Option<&Directives> { self.directives.as_ref() }
-  pub const fn fields_definition(&self) -> Option<&Fields> { self.fields_definition.as_ref() }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn type_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.type_keyword_padding
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    self.fields_definition.as_ref()
+  }
 }
 
 impl<Name, Implements, Directives, Fields, S, TriviaContainer> AsSpan<Span>
   for ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<Name, Implements, Directives, Fields, S, TriviaContainer> IntoSpan<Span>
   for ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 /// Object extension data
 #[derive(Debug, Clone)]
 pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
-  Directives { implements: Option<Implements>, directives: Directives },
-  Fields { implements: Option<Implements>, directives: Option<Directives>, fields: Fields },
+  Directives {
+    implements: Option<Implements>,
+    directives: Directives,
+  },
+  Fields {
+    implements: Option<Implements>,
+    directives: Option<Directives>,
+    fields: Fields,
+  },
   Implements(Implements),
 }
 
@@ -73,7 +103,14 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
 
 /// CST representation of object type extension
 #[derive(Debug, Clone)]
-pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct ObjectTypeExtension<
+  Name,
+  Implements,
+  Directives,
+  Fields,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   extend_keyword_padding: Padding<S, TriviaContainer>,
   type_keyword_padding: Padding<S, TriviaContainer>,
@@ -85,19 +122,29 @@ pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaCo
 impl<Name, Implements, Directives, Fields, S, TriviaContainer>
   ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn data(&self) -> &ObjectTypeExtensionData<Implements, Directives, Fields> { &self.data }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn data(&self) -> &ObjectTypeExtensionData<Implements, Directives, Fields> {
+    &self.data
+  }
 }
 
 impl<Name, Implements, Directives, Fields, S, TriviaContainer> AsSpan<Span>
   for ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<Name, Implements, Directives, Fields, S, TriviaContainer> IntoSpan<Span>
   for ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }

@@ -6,7 +6,7 @@
 use logosky::utils::Span;
 
 /// Placeholder for generic CST structures
-/// 
+///
 /// These structures would include things like:
 /// - TypeGenerics
 /// - WhereClause  

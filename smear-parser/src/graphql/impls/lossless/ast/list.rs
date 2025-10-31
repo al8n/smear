@@ -8,16 +8,16 @@ use crate::{
 
 use super::{padded::Padded, *};
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a, V> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for List<Padded<V, &'a str>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  V: Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     list_parser(V::parser())
   }
@@ -25,15 +25,15 @@ where
 
 pub fn list_parser<'a, V, VP, E>(
   value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, List<Padded<V, &'a str>>, E> + Clone
+) -> impl Parser<'a, LosslessTokenizer<'a>, List<Padded<V, &'a str>>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+  VP: Parser<'a, LosslessTokenizer<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
   <LBracket as Parseable<
     'a,
-    LosslessTokenStream<'a>,
+    LosslessTokenizer<'a>,
     Token<'a>,
     LosslessTokenErrors<'a, &'a str>,
   >>::parser()
@@ -41,7 +41,7 @@ where
   .then(
     <RBracket as Parseable<
       'a,
-      LosslessTokenStream<'a>,
+      LosslessTokenizer<'a>,
       Token<'a>,
       LosslessTokenErrors<'a, &'a str>,
     >>::parser()
@@ -66,7 +66,7 @@ mod tests {
   fn test_list_parser() {
     let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra<&str>>();
     let input = r#"["a", "b", "c"]"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(parsed.values().len(), 3);
     assert_eq!(*parsed.values()[0].value().content(), "a");
     assert_eq!(*parsed.values()[1].value().content(), "b");
@@ -79,7 +79,7 @@ mod tests {
     let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra<&str>>();
     let input = r#"["a", "b", "c""#;
     let mut parsed = parser
-      .parse(LosslessTokenStream::new(input))
+      .parse(LosslessTokenizer::new(input))
       .into_result()
       .unwrap_err();
     assert_eq!(parsed.len(), 1);

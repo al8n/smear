@@ -1,5 +1,5 @@
-use logosky::utils::Span;
 use core::marker::PhantomData;
+use logosky::utils::Span;
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -21,7 +21,12 @@ use crate::cst::Padding;
 /// { id  name  email }  # preserves spacing
 /// ```
 #[derive(Debug, Clone)]
-pub struct SelectionSet<Selection, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<Selection>> {
+pub struct SelectionSet<
+  Selection,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<Selection>,
+> {
   span: Span,
   /// Padding around the left brace
   lbrace_padding: Padding<S, TriviaContainer>,
@@ -32,7 +37,8 @@ pub struct SelectionSet<Selection, S, TriviaContainer = Vec<crate::cst::Trivia<S
   _marker: PhantomData<Selection>,
 }
 
-impl<Selection, S, TriviaContainer, Container> SelectionSet<Selection, S, TriviaContainer, Container>
+impl<Selection, S, TriviaContainer, Container>
+  SelectionSet<Selection, S, TriviaContainer, Container>
 where
   TriviaContainer: Default,
   Container: Default,
@@ -65,7 +71,9 @@ where
   }
 }
 
-impl<Selection, S, TriviaContainer, Container> SelectionSet<Selection, S, TriviaContainer, Container> {
+impl<Selection, S, TriviaContainer, Container>
+  SelectionSet<Selection, S, TriviaContainer, Container>
+{
   /// Returns the span covering the entire selection set.
   #[inline]
   pub const fn span(&self) -> &Span {

@@ -1,4 +1,4 @@
-// use logosky::{TokenStream, utils::tracker::LimitExceeded};
+// use logosky::{Tokenizer, utils::tracker::LimitExceeded};
 
 // use crate::{
 //   error::Extra,
@@ -10,7 +10,7 @@
 // mod ast;
 
 // /// The token stream type used for the lossless parser implementation.
-// pub type LosslessTokenStream<'a> = TokenStream<'a, Token<'a>>;
+// pub type LosslessTokenizer<'a> = Tokenizer<'a, Token<'a>>;
 // /// The parser extra type used for the lossless parser implementation.
 // pub type LosslessParserExtra<'a, S> = Extra<S, Token<'a>, TokenKind, char, LimitExceeded>;
 // /// The error type used for the lossless parser implementation.

@@ -4,7 +4,7 @@ use logosky::{
   utils::Span,
 };
 
-use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenStream};
+use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenizer};
 use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
 
 /// A GraphQL name identifier.
@@ -61,8 +61,7 @@ use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
 pub type Name<S> = crate::ident::Ident<S>;
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for Name<S>
 where
   SyntacticToken<S>: Token<'a>,
@@ -70,10 +69,10 @@ where
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
     any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
       Lexed::Token(tok) => {

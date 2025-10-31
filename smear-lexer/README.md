@@ -91,7 +91,7 @@ Most common for UTF-8 validated text:
 
 ```rust
 use smear_lexer::graphql::syntactic::Lexer;
-use logosky::TokenStream;
+use logosky::Tokenizer;
 
 let source = "{ field }";
 let tokens = Lexer::<&str>::new(source);

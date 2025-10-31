@@ -17,7 +17,7 @@ mod slice;
 mod str;
 
 /// The lossless lexer for GraphQLx.
-pub type Lexer<'a, S = &'a str> = logosky::TokenStream<'a, LosslessToken<S>>;
+pub type Lexer<'a, S = &'a str> = logosky::Tokenizer<'a, LosslessToken<S>>;
 
 /// The char type used for the lossless token.
 pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
@@ -68,10 +68,10 @@ pub type LosslessLexerErrors<'a, S> =
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphqlx::lossless::LosslessToken;
-/// use logosky::TokenStream;
+/// use logosky::Tokenizer;
 ///
 /// let source = "query { # comment\n  user { id }\n}";
-/// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+/// let tokens = Tokenizer::<LosslessToken<&str>>::new(source);
 ///
 /// // ALL tokens appear in the stream, including:
 /// // Identifier("query"), Space, LBrace, Space, Comment("# comment"),

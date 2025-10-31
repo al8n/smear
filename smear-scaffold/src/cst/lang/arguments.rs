@@ -1,5 +1,5 @@
-use logosky::utils::Span;
 use core::marker::PhantomData;
+use logosky::utils::Span;
 use std::vec::Vec;
 
 use crate::cst::Padding;

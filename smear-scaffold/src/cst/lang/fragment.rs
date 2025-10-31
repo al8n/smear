@@ -16,7 +16,12 @@ use crate::cst::Padding;
 /// ...  fragmentName  # preserves spacing
 /// ```
 #[derive(Debug, Clone)]
-pub struct FragmentSpread<Name, Directives, S, TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>> {
+pub struct FragmentSpread<
+  Name,
+  Directives,
+  S,
+  TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   /// Padding around the spread operator
   spread_padding: Padding<S, TriviaContainer>,
@@ -126,7 +131,13 @@ impl<Name, Directives, S, TriviaContainer> FragmentSpread<Name, Directives, S, T
 /// ... on Admin @include(if: true) { role }
 /// ```
 #[derive(Debug, Clone)]
-pub struct InlineFragment<TypeCondition, Directives, SelectionSet, S, TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>> {
+pub struct InlineFragment<
+  TypeCondition,
+  Directives,
+  SelectionSet,
+  S,
+  TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   /// Padding around the spread operator
   spread_padding: Padding<S, TriviaContainer>,

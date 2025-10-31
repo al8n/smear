@@ -1,5 +1,5 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -8,7 +8,12 @@ use crate::cst::Padding;
 ///
 /// Preserves the enum value name and optional directives with all trivia
 #[derive(Debug, Clone)]
-pub struct EnumValueDefinition<EnumValue, Directives, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct EnumValueDefinition<
+  EnumValue,
+  Directives,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   enum_value: EnumValue,
   directives: Option<Directives>,
@@ -18,21 +23,31 @@ pub struct EnumValueDefinition<EnumValue, Directives, S, TriviaContainer = Vec<c
 impl<EnumValue, Directives, S, TriviaContainer>
   EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn value(&self) -> &EnumValue { &self.enum_value }
-  pub const fn directives(&self) -> Option<&Directives> { self.directives.as_ref() }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn value(&self) -> &EnumValue {
+    &self.enum_value
+  }
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
 }
 
 impl<EnumValue, Directives, S, TriviaContainer> AsSpan<Span>
   for EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<EnumValue, Directives, S, TriviaContainer> IntoSpan<Span>
   for EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 impl<EnumValue, Directives, S, TriviaContainer> IntoComponents
@@ -49,7 +64,12 @@ impl<EnumValue, Directives, S, TriviaContainer> IntoComponents
 ///
 /// Preserves braces and all enum values with their trivia
 #[derive(Debug, Clone)]
-pub struct EnumValuesDefinition<EnumValueDef, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<EnumValueDef>> {
+pub struct EnumValuesDefinition<
+  EnumValueDef,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<EnumValueDef>,
+> {
   span: Span,
   lbrace_padding: Padding<S, TriviaContainer>,
   enum_values: Container,
@@ -60,31 +80,53 @@ pub struct EnumValuesDefinition<EnumValueDef, S, TriviaContainer = Vec<crate::cs
 impl<EnumValueDef, S, TriviaContainer, Container>
   EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn lbrace_padding(&self) -> &Padding<S, TriviaContainer> { &self.lbrace_padding }
-  pub const fn enum_value_definitions(&self) -> &Container { &self.enum_values }
-  pub const fn rbrace_padding(&self) -> &Padding<S, TriviaContainer> { &self.rbrace_padding }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn lbrace_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.lbrace_padding
+  }
+  pub const fn enum_value_definitions(&self) -> &Container {
+    &self.enum_values
+  }
+  pub const fn rbrace_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.rbrace_padding
+  }
 }
 
 impl<EnumValueDef, S, TriviaContainer, Container> AsSpan<Span>
   for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<EnumValueDef, S, TriviaContainer, Container> IntoSpan<Span>
   for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 impl<EnumValueDef, S, TriviaContainer, Container> IntoComponents
   for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
 {
-  type Components = (Span, Padding<S, TriviaContainer>, Container, Padding<S, TriviaContainer>);
+  type Components = (
+    Span,
+    Padding<S, TriviaContainer>,
+    Container,
+    Padding<S, TriviaContainer>,
+  );
 
   fn into_components(self) -> Self::Components {
-    (self.span, self.lbrace_padding, self.enum_values, self.rbrace_padding)
+    (
+      self.span,
+      self.lbrace_padding,
+      self.enum_values,
+      self.rbrace_padding,
+    )
   }
 }
 
@@ -92,7 +134,13 @@ impl<EnumValueDef, S, TriviaContainer, Container> IntoComponents
 ///
 /// Preserves `enum` keyword, name, optional directives, and optional enum values
 #[derive(Debug, Clone)]
-pub struct EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct EnumTypeDefinition<
+  Name,
+  Directives,
+  EnumValues,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   enum_keyword_padding: Padding<S, TriviaContainer>,
   name: Name,
@@ -103,32 +151,58 @@ pub struct EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer =
 impl<Name, Directives, EnumValues, S, TriviaContainer>
   EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> { &self.enum_keyword_padding }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn directives(&self) -> Option<&Directives> { self.directives.as_ref() }
-  pub const fn enum_values_definition(&self) -> Option<&EnumValues> { self.enum_values.as_ref() }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.enum_keyword_padding
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+  pub const fn enum_values_definition(&self) -> Option<&EnumValues> {
+    self.enum_values.as_ref()
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> AsSpan<Span>
   for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> IntoSpan<Span>
   for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> IntoComponents
   for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  type Components = (Span, Padding<S, TriviaContainer>, Name, Option<Directives>, Option<EnumValues>);
+  type Components = (
+    Span,
+    Padding<S, TriviaContainer>,
+    Name,
+    Option<Directives>,
+    Option<EnumValues>,
+  );
 
   fn into_components(self) -> Self::Components {
-    (self.span, self.enum_keyword_padding, self.name, self.directives, self.enum_values)
+    (
+      self.span,
+      self.enum_keyword_padding,
+      self.name,
+      self.directives,
+      self.enum_values,
+    )
   }
 }
 
@@ -164,7 +238,13 @@ impl<Directives, EnumValues> EnumTypeExtensionData<Directives, EnumValues> {
 ///
 /// Preserves `extend` and `enum` keywords with all content
 #[derive(Debug, Clone)]
-pub struct EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer = Vec<crate::cst::Trivia<S>>> {
+pub struct EnumTypeExtension<
+  Name,
+  Directives,
+  EnumValues,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   extend_keyword_padding: Padding<S, TriviaContainer>,
   enum_keyword_padding: Padding<S, TriviaContainer>,
@@ -176,25 +256,43 @@ pub struct EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer = 
 impl<Name, Directives, EnumValues, S, TriviaContainer>
   EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn extend_keyword_padding(&self) -> &Padding<S, TriviaContainer> { &self.extend_keyword_padding }
-  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> { &self.enum_keyword_padding }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn data(&self) -> &EnumTypeExtensionData<Directives, EnumValues> { &self.data }
-  pub const fn directives(&self) -> Option<&Directives> { self.data.directives() }
-  pub const fn enum_values_definition(&self) -> Option<&EnumValues> { self.data.enum_values_definition() }
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn extend_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.extend_keyword_padding
+  }
+  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
+    &self.enum_keyword_padding
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn data(&self) -> &EnumTypeExtensionData<Directives, EnumValues> {
+    &self.data
+  }
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+  pub const fn enum_values_definition(&self) -> Option<&EnumValues> {
+    self.data.enum_values_definition()
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> AsSpan<Span>
   for EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  fn as_span(&self) -> &Span { self.span() }
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> IntoSpan<Span>
   for EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
 {
-  fn into_span(self) -> Span { self.span }
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 impl<Name, Directives, EnumValues, S, TriviaContainer> IntoComponents

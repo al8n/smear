@@ -88,16 +88,16 @@ Unlike other Rust GraphQL parsers that only provide one token type, smear offers
 ```rust
 // SyntacticToken for servers - fast execution
 use smear::lexer::graphql::syntactic::SyntacticToken;
-use logosky::TokenStream;
+use logosky::Tokenizer;
 
 let source = "query { user { id } }";
-let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+let tokens = Tokenizer::<SyntacticToken<&str>>::new(source);
 // Only syntactically significant tokens (whitespace skipped)
 
 // LosslessToken for tooling - preserves formatting
 use smear::lexer::graphql::lossless::LosslessToken;
 
-let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+let tokens = Tokenizer::<LosslessToken<&str>>::new(source);
 // ALL tokens including spaces, comments, exact formatting
 ```
 

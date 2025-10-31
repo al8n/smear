@@ -18,18 +18,34 @@ pub struct ScalarTypeDefinition<Name, Directives, S, TriviaContainer = Vec<Trivi
   directives: Option<Directives>,
 }
 
-impl<Name, Directives, S, TriviaContainer> ScalarTypeDefinition<Name, Directives, S, TriviaContainer> {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn directives(&self) -> Option<&Directives> { self.directives.as_ref() }
+impl<Name, Directives, S, TriviaContainer>
+  ScalarTypeDefinition<Name, Directives, S, TriviaContainer>
+{
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
 }
 
-impl<Name, Directives, S, TriviaContainer> AsSpan<Span> for ScalarTypeDefinition<Name, Directives, S, TriviaContainer> {
-  fn as_span(&self) -> &Span { self.span() }
+impl<Name, Directives, S, TriviaContainer> AsSpan<Span>
+  for ScalarTypeDefinition<Name, Directives, S, TriviaContainer>
+{
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
-impl<Name, Directives, S, TriviaContainer> IntoSpan<Span> for ScalarTypeDefinition<Name, Directives, S, TriviaContainer> {
-  fn into_span(self) -> Span { self.span }
+impl<Name, Directives, S, TriviaContainer> IntoSpan<Span>
+  for ScalarTypeDefinition<Name, Directives, S, TriviaContainer>
+{
+  fn into_span(self) -> Span {
+    self.span
+  }
 }
 
 /// CST representation of a scalar type extension
@@ -42,16 +58,32 @@ pub struct ScalarTypeExtension<Name, Directives, S, TriviaContainer = Vec<Trivia
   directives: Directives,
 }
 
-impl<Name, Directives, S, TriviaContainer> ScalarTypeExtension<Name, Directives, S, TriviaContainer> {
-  pub const fn span(&self) -> &Span { &self.span }
-  pub const fn name(&self) -> &Name { &self.name }
-  pub const fn directives(&self) -> &Directives { &self.directives }
+impl<Name, Directives, S, TriviaContainer>
+  ScalarTypeExtension<Name, Directives, S, TriviaContainer>
+{
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+  pub const fn directives(&self) -> &Directives {
+    &self.directives
+  }
 }
 
-impl<Name, Directives, S, TriviaContainer> AsSpan<Span> for ScalarTypeExtension<Name, Directives, S, TriviaContainer> {
-  fn as_span(&self) -> &Span { self.span() }
+impl<Name, Directives, S, TriviaContainer> AsSpan<Span>
+  for ScalarTypeExtension<Name, Directives, S, TriviaContainer>
+{
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
 }
 
-impl<Name, Directives, S, TriviaContainer> IntoSpan<Span> for ScalarTypeExtension<Name, Directives, S, TriviaContainer> {
-  fn into_span(self) -> Span { self.span }
+impl<Name, Directives, S, TriviaContainer> IntoSpan<Span>
+  for ScalarTypeExtension<Name, Directives, S, TriviaContainer>
+{
+  fn into_span(self) -> Span {
+    self.span
+  }
 }

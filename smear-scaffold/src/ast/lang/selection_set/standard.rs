@@ -1,6 +1,6 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Source, Token, Tokenizer,
+  LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
@@ -87,7 +87,7 @@ where
   where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
     T: Token<'a>,
     Error: 'a,
   {

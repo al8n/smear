@@ -1,5 +1,5 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use core::marker::PhantomData;
+use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
 use std::vec::Vec;
 
 use crate::cst::Padding;
@@ -119,7 +119,12 @@ impl<Name, Args, S, TriviaContainer> Directive<Name, Args, S, TriviaContainer> {
 /// @include(if: true)  @customDirective
 /// ```
 #[derive(Debug, Clone)]
-pub struct Directives<Directive, S, TriviaContainer = Vec<crate::cst::Trivia<S>>, Container = Vec<Directive>> {
+pub struct Directives<
+  Directive,
+  S,
+  TriviaContainer = Vec<crate::cst::Trivia<S>>,
+  Container = Vec<Directive>,
+> {
   span: Span,
   /// Directives with trivia between them
   directives: Container,
@@ -178,7 +183,9 @@ where
   }
 }
 
-impl<Directive, S, TriviaContainer, Container> Directives<Directive, S, TriviaContainer, Container> {
+impl<Directive, S, TriviaContainer, Container>
+  Directives<Directive, S, TriviaContainer, Container>
+{
   /// Returns the span covering all directives.
   #[inline]
   pub const fn span(&self) -> &Span {

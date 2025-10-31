@@ -1,5 +1,5 @@
 use logosky::{
-  Logos, LosslessToken, Source, Tokenizer,
+  Logos, LosslessToken, Source, LogoStream,
   chumsky::{self, Parser, extra::ParserExtra},
   cst::{
     CstElement, CstNode, CstNodeChildren, CstToken, Parseable, SyntaxTreeBuilder,
@@ -131,7 +131,7 @@ where
   where
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
@@ -164,7 +164,7 @@ where
     builder: &'a SyntaxTreeBuilder<Self::Language>,
   ) -> impl chumsky::Parser<'a, I, (), E> + Clone
   where
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: LosslessToken<'a>,
     <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
     Error: 'a,

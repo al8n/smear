@@ -127,7 +127,15 @@ impl<Name, S, TriviaContainer> core::ops::Deref for Alias<Name, S, TriviaContain
 /// }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Field<Alias, Name, Arguments, Directives, SelectionSet, S, TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>> {
+pub struct Field<
+  Alias,
+  Name,
+  Arguments,
+  Directives,
+  SelectionSet,
+  S,
+  TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>,
+> {
   span: Span,
   /// Optional alias with its trivia
   alias: Option<Alias>,

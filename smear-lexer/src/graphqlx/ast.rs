@@ -17,7 +17,7 @@ mod slice;
 mod str;
 
 /// The syntactic lexer for GraphQLx.
-pub type Lexer<'a, S = &'a str> = logosky::TokenStream<'a, SyntacticToken<S>>;
+pub type Lexer<'a, S = &'a str> = logosky::Tokenizer<'a, SyntacticToken<S>>;
 
 /// The char type used for the syntactic token.
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
@@ -68,10 +68,10 @@ pub type SyntacticLexerErrors<'a, S> =
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphqlx::ast::SyntacticToken;
-/// use logosky::TokenStream;
+/// use logosky::Tokenizer;
 ///
 /// let source = "query { user { id } }";
-/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+/// let tokens = Tokenizer::<SyntacticToken<&str>>::new(source);
 ///
 /// // Only syntactically significant tokens appear in the stream:
 /// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
