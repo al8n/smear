@@ -4,13 +4,13 @@ use crate::{
 
 use super::{
   DefaultVec, Expectation, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
-  SyntacticTokenStream,
+  SyntacticTokenizer,
 };
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
+  Lexed, LogoStream, Source, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
@@ -136,29 +136,26 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for InputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  LBrace: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBrace: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   RBracket:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   PathSeparator:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -168,7 +165,7 @@ where
     SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
+      custom::<_, SyntacticTokenizer<'_, S>, Self, E>(move |inp| {
         let before = inp.cursor();
 
         match inp.next() {
@@ -399,29 +396,26 @@ impl<S> IntoSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for ConstInputValue<S>
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  LBrace: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  RBrace: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   RBracket:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   PathSeparator:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+    Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -431,7 +425,7 @@ where
     SyntacticTokenErrors<'a, S>: 'a,
   {
     recursive(|parser| {
-      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
+      custom::<_, SyntacticTokenizer<'_, S>, Self, E>(move |inp| {
         let before = inp.cursor();
 
         match inp.next() {

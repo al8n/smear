@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser as _, Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, IterParser as _, Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -126,7 +126,7 @@ impl<Name, InputValue> ObjectField<Name, InputValue> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     VP: Parser<'src, I, InputValue, E> + Clone + 'src,
@@ -152,7 +152,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), InputValue::parser())
@@ -285,7 +285,7 @@ impl<Name, InputValue, Container> IntoComponents for Object<Name, InputValue, Co
 
 impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   /// Creates a new object literal with the given span and fields.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn new(span: Span, fields: Container) -> Self {
     Self {
       span,
@@ -330,7 +330,7 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnclosedBraceError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     NP: Parser<'src, I, Name, E> + Clone + 'src,
@@ -371,7 +371,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), InputValue::parser())

@@ -2,8 +2,8 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     sdl_display::{DisplayCompact, DisplayPretty},
@@ -18,27 +18,27 @@ use crate::{error::UnexpectedEndOfUnionExtensionError, hints::UnionTypeExtension
 
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnionMemberTypes<Name, Container = Vec<Name>> {
+pub struct UnionMembers<Name, Container = Vec<Name>> {
   span: Span,
   members: Container,
   _m: PhantomData<Name>,
 }
 
-impl<Name, Container> AsSpan<Span> for UnionMemberTypes<Name, Container> {
+impl<Name, Container> AsSpan<Span> for UnionMembers<Name, Container> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Container> IntoSpan<Span> for UnionMemberTypes<Name, Container> {
+impl<Name, Container> IntoSpan<Span> for UnionMembers<Name, Container> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Container> IntoComponents for UnionMemberTypes<Name, Container> {
+impl<Name, Container> IntoComponents for UnionMembers<Name, Container> {
   type Components = (Span, Container);
 
   #[inline]
@@ -47,7 +47,7 @@ impl<Name, Container> IntoComponents for UnionMemberTypes<Name, Container> {
   }
 }
 
-impl<Name, Container> UnionMemberTypes<Name, Container> {
+impl<Name, Container> UnionMembers<Name, Container> {
   /// Returns a reference to the span covering the entire union member types.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -70,8 +70,7 @@ impl<Name, Container> UnionMemberTypes<Name, Container> {
   }
 }
 
-impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionMemberTypes<Name, Container>
+impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error> for UnionMembers<Name, Container>
 where
   Container: chumsky::container::Container<Name>,
   Name: Parseable<'a, I, T, Error>,
@@ -82,7 +81,7 @@ where
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     T: Token<'a>,
   {
@@ -102,7 +101,7 @@ where
   }
 }
 
-impl<Name, Container> DisplayCompact for UnionMemberTypes<Name, Container>
+impl<Name, Container> DisplayCompact for UnionMembers<Name, Container>
 where
   Container: AsRef<[Name]>,
   Name: DisplayCompact,
@@ -120,7 +119,7 @@ where
   }
 }
 
-impl<Name, Container> DisplayPretty for UnionMemberTypes<Name, Container>
+impl<Name, Container> DisplayPretty for UnionMembers<Name, Container>
 where
   Container: AsRef<[Name]>,
   Name: DisplayPretty,
@@ -199,7 +198,7 @@ where
 /// ## Grammar
 /// ```text
 /// UnionTypeDefinition:
-///   Description? union Name Directives? UnionMemberTypes?
+///   Description? union Name Directives? UnionMembers?
 /// ```
 ///
 /// Spec: [Union Type Definition](https://spec.graphql.org/draft/#sec-Union-Type-Definition)
@@ -241,6 +240,22 @@ impl<Name, Directives, MemberTypes> IntoComponents
 }
 
 impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, MemberTypes> {
+  /// Creates a new `UnionTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    members: Option<MemberTypes>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      members,
+    }
+  }
+
   /// Returns a reference to the span covering the entire union definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -275,9 +290,6 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   }
 
   /// Creates a parser for union type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL union types, including
-  /// optional descriptions, directives, and member type definitions.
   pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
     name_parser: NP,
     directives_parser: DP,
@@ -285,7 +297,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Union: Parseable<'src, I, T, Error> + Clone,
@@ -295,15 +307,34 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
     NP: Parser<'src, I, Name, E> + Clone,
   {
     Union::parser()
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        member_types,
+      ))
+      .map_with(|(name, directives, members), exa| Self::new(exa.span(), name, directives, members))
+  }
+
+  /// Creates a parser for union type definitions without the leading `union` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP, MP>(
+    name_parser: NP,
+    directives_parser: DP,
+    member_types: MP,
+  ) -> impl Parser<'src, I, (Name, Option<Directives>, Option<MemberTypes>), E> + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Equal: Parseable<'src, I, T, Error> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    MP: Parser<'src, I, MemberTypes, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(Equal::parser().ignore_then(member_types).or_not())
-      .map_with(|((name, directives), members), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        members,
-      })
+      .map(|((name, directives), members)| (name, directives, members))
   }
 }
 
@@ -322,7 +353,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
@@ -408,7 +439,7 @@ impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
 /// ## Grammar
 /// ```text
 /// UnionTypeExtension:
-///   extend union Name Directives? UnionMemberTypes
+///   extend union Name Directives? UnionMembers
 ///   | extend union Name Directives
 /// ```
 ///
@@ -450,6 +481,16 @@ impl<Name, Directives, MemberTypes> IntoComponents
 }
 
 impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberTypes> {
+  /// Creates a new `UnionTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: UnionTypeExtensionData<Directives, MemberTypes>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire union extension.
   ///
   /// The span includes the `extend union` keywords, union name, and all extension
@@ -487,11 +528,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
     &self.data
   }
 
-  /// Creates a parser for union type extensions with comprehensive syntax support.
-  ///
-  /// This parser handles the complete `extend union` syntax, managing keyword
-  /// recognition, name validation, and content parsing through a structured
-  /// approach that ensures robust error handling and proper whitespace management.
+  /// Creates a parser for union type extensions.
   pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
     name_parser: NP,
     directives_parser: DP,
@@ -499,7 +536,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfUnionExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error> + Clone,
@@ -511,7 +548,31 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   {
     Extend::parser()
       .then(Union::parser())
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        member_types_parser,
+      ))
+      .map_with(|(name, data), exa| Self::new(exa.span(), name, data))
+  }
+
+  /// Creates a parser for union type extensions without the leading `extend` and `union` keywords.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP, MP>(
+    name_parser: NP,
+    directives_parser: DP,
+    member_types_parser: MP,
+  ) -> impl Parser<'src, I, (Name, UnionTypeExtensionData<Directives, MemberTypes>), E> + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: UnexpectedEndOfUnionExtensionError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Equal: Parseable<'src, I, T, Error> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    MP: Parser<'src, I, MemberTypes, E> + Clone,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(Equal::parser().ignore_then(member_types_parser).or_not())
       .try_map_with(|((name, directives), members), exa| {
@@ -524,16 +585,12 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
           (None, None) => {
             return Err(Error::unexpected_end_of_union_extension(
               exa.span(),
-              UnionTypeExtensionHint::DirectivesOrUnionMemberTypes,
+              UnionTypeExtensionHint::DirectivesOrUnionMembers,
             ));
           }
         };
 
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+        Ok((name, data))
       })
   }
 }
@@ -555,7 +612,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())

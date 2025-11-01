@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
   utils::{IntoComponents, Span, cmp::Equivalent},
 };
 use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
@@ -11,8 +11,7 @@ use super::*;
 /// A type condition for a fragment, specifying the type it applies to.
 pub type TypeCondition<S> = scaffold::TypeCondition<Name<S>>;
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for FragmentName<S>
 where
   SyntacticToken<S>: Token<'a>,
@@ -21,10 +20,10 @@ where
   str: logosky::utils::cmp::Equivalent<S>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
     any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
       Lexed::Token(tok) => {

@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -187,6 +187,22 @@ impl<Name, Directives, FieldsDefinition> IntoComponents
 impl<Name, Directives, FieldsDefinition>
   InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
 {
+  /// Creates a new `InputObjectTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    fields: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      fields,
+    }
+  }
+
   /// Returns a reference to the span covering the entire input object definition.
   ///
   /// The span includes the optional description, input keyword, name, optional
@@ -225,10 +241,6 @@ impl<Name, Directives, FieldsDefinition>
   }
 
   /// Creates a parser that can parse a complete input object definition.
-  ///
-  /// This parser handles the full input object definition syntax including all
-  /// optional components. The parsing of fields definition and directives is
-  /// delegated to the provided parser functions.
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP, FP>(
     name_parser: NP,
@@ -237,7 +249,7 @@ impl<Name, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Input: Parseable<'src, I, T, Error> + 'src,
@@ -246,15 +258,34 @@ impl<Name, Directives, FieldsDefinition>
     NP: Parser<'src, I, Name, E> + Clone,
   {
     Input::parser()
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        input_fields_definition_parser,
+      ))
+      .map_with(|(name, directives, fields), exa| Self::new(exa.span(), name, directives, fields))
+  }
+
+  /// Creates a parser for input object type definitions without the leading `input` keyword.
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP, FP>(
+    name_parser: NP,
+    directives_parser: DP,
+    input_fields_definition_parser: FP,
+  ) -> impl Parser<'src, I, (Name, Option<Directives>, Option<FieldsDefinition>), E> + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(input_fields_definition_parser.or_not())
-      .map_with(|((name, directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields,
-      })
+      .map(|((name, directives), fields)| (name, directives, fields))
   }
 }
 
@@ -266,13 +297,13 @@ where
   FieldsDefinition: Parseable<'a, I, T, Error>,
   Input: Parseable<'a, I, T, Error>,
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(
@@ -461,6 +492,16 @@ impl<Name, Directives, FieldsDefinition> IntoComponents
 impl<Name, Directives, FieldsDefinition>
   InputObjectTypeExtension<Name, Directives, FieldsDefinition>
 {
+  /// Creates a new `InputObjectTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire input object extension.
   ///
   /// The span includes the extend keyword, input keyword, name, and all
@@ -501,9 +542,6 @@ impl<Name, Directives, FieldsDefinition>
   }
 
   /// Creates a parser that can parse a complete input object extension.
-  ///
-  /// This parser handles the full input object extension syntax including the extend
-  /// and input keywords, target input object name, and extension data.
   #[inline]
   pub fn parser_with<'a, I, T, Error, E, NP, DP, FP>(
     name_parser: NP,
@@ -512,7 +550,7 @@ impl<Name, Directives, FieldsDefinition>
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: UnexpectedEndOfInputObjectExtensionError + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Extend: Parseable<'a, I, T, Error> + 'a,
@@ -523,7 +561,39 @@ impl<Name, Directives, FieldsDefinition>
   {
     Extend::parser()
       .then(Input::parser())
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        input_fields_definition_parser,
+      ))
+      .map_with(|(name, data), exa| Self::new(exa.span(), name, data))
+  }
+
+  /// Creates a parser for input object type extensions without the leading `extend` and `input` keywords.
+  #[inline]
+  pub fn content_parser_with<'a, I, T, Error, E, NP, DP, FP>(
+    name_parser: NP,
+    directives_parser: DP,
+    input_fields_definition_parser: FP,
+  ) -> impl Parser<
+    'a,
+    I,
+    (
+      Name,
+      InputObjectTypeExtensionData<Directives, FieldsDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'a>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: UnexpectedEndOfInputObjectExtensionError + 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    NP: Parser<'a, I, Name, E> + Clone,
+    FP: Parser<'a, I, FieldsDefinition, E> + Clone,
+    DP: Parser<'a, I, Directives, E> + Clone,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(input_fields_definition_parser.or_not())
       .try_map_with(|((name, directives), fields), exa| {
@@ -537,11 +607,7 @@ impl<Name, Directives, FieldsDefinition>
             ));
           }
         };
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+        Ok((name, data))
       })
   }
 }
@@ -556,13 +622,13 @@ where
   Extend: Parseable<'a, I, T, Error>,
   Input: Parseable<'a, I, T, Error>,
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: UnexpectedEndOfInputObjectExtensionError + 'a,
   {
     Self::parser_with(

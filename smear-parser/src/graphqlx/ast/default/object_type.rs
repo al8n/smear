@@ -1,21 +1,21 @@
 use super::{fields_definition::FieldsDefinition, ty::Path, *};
 use derive_more::{From, Into};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::extra::ParserExtra,
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
 type ObjectTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::ObjectTypeDefinition<
   DefinitionName<S, Ty>,
-  ImplementInterfaces<S, Ty>,
+  ImplementsInterfaces<S, Ty>,
   ConstDirectives<S, Ty>,
   FieldsDefinition<S, Ty>,
 >;
 
 type ObjectTypeExtensionAlias<S, Ty = Type<S>> = scaffold::ObjectTypeExtension<
   ExtensionName<S>,
-  ImplementInterfaces<S, Ty>,
+  ImplementsInterfaces<S, Ty>,
   ConstDirectives<S, Ty>,
   FieldsDefinition<S, Ty>,
 >;
@@ -63,7 +63,7 @@ impl<S, Ty> IntoComponents for ObjectTypeDefinition<S, Ty> {
     Span,
     Ident<S>,
     Option<DefinitionTypeGenerics<S, Ty>>,
-    Option<ImplementInterfaces<S, Ty>>,
+    Option<ImplementsInterfaces<S, Ty>>,
     Option<ConstDirectives<S, Ty>>,
     Option<WhereClause<S, Ty>>,
     Option<super::FieldsDefinition<S, Ty>>,
@@ -113,7 +113,7 @@ impl<S, Ty> ObjectTypeDefinition<S, Ty> {
 
   /// Returns the implemented interfaces of the object type definition, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces<S, Ty>> {
     self.0.implements()
   }
 
@@ -149,7 +149,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
@@ -193,7 +193,7 @@ impl<S, Ty> IntoComponents for ObjectTypeExtension<S, Ty> {
     Span,
     Path<S>,
     Option<ExtensionTypeGenerics<S>>,
-    Option<ImplementInterfaces<S, Ty>>,
+    Option<ImplementsInterfaces<S, Ty>>,
     Option<ConstDirectives<S, Ty>>,
     Option<WhereClause<S, Ty>>,
     Option<super::FieldsDefinition<S, Ty>>,
@@ -261,7 +261,7 @@ impl<S, Ty> ObjectTypeExtension<S, Ty> {
 
   /// Returns the implemented interfaces of the object type extension, if any.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces<S, Ty>> {
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces<S, Ty>> {
     self.0.implements()
   }
 
@@ -297,7 +297,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,

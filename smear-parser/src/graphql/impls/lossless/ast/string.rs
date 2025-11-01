@@ -8,14 +8,14 @@ use crate::{
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for StringValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => {
@@ -45,7 +45,7 @@ mod tests {
   fn test_string_value_parser() {
     let parser = StringValue::parser::<LosslessParserExtra<&str>>();
     let input = r#""Hello, World!""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(*parsed.content(), "Hello, World!");
     assert_eq!(parsed.kind, Kind::Inline);
     assert_eq!(parsed.span(), Span::new(0, 15));
@@ -57,7 +57,7 @@ mod tests {
     let parser = StringValue::parser::<LosslessParserExtra<&str>>();
     let input = r#""""Hello,
 World!""""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(*parsed.content(), "Hello,\nWorld!");
     assert_eq!(parsed.kind, Kind::Block);
     assert_eq!(parsed.span(), Span::new(0, 19));

@@ -4,7 +4,7 @@ use logosky::{
   utils::{
     Lexeme, UnexpectedEnd, UnexpectedLexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-    tracker::{LimitExceeded, Tracker},
+    tracker::{LimitExceeded, Limiter},
   },
 };
 
@@ -18,61 +18,61 @@ use super::error;
 pub(super) mod slice;
 pub(super) mod str;
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   handlers::increase_recursion_depth_and_token(lexer)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   handlers::tt_hook_and_then(lexer, f)
 }
 
 #[allow(clippy::result_large_err)]
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
 ) -> Result<O, error::LexerErrors<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   handlers::tt_hook_and_then_into_errors(lexer, f)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_map<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   handlers::tt_hook_map(lexer, f)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   handlers::tt_hook(lexer)
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
@@ -155,24 +155,24 @@ where
 pub(super) struct GraphQLNumber;
 
 impl ValidateNumberChar<GraphQLNumber> for char {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, 'a'..='z' | 'A'..='Z' | '_' | '.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, '0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '.')
   }
 }
 
 impl ValidateNumberChar<GraphQLNumber> for u8 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_first_invalid_char(&self) -> bool {
     matches!(*self, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')
   }
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.')
   }

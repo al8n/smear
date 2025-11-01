@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
   utils::Span,
 };
 use smear_lexer::{graphqlx::syntactic::SyntacticLexerErrors, punctuator::*};
@@ -10,17 +10,17 @@ use super::*;
 macro_rules! punctuator_parser {
   ($($name:ident),+$(,)?) => {
     $(
-      impl<'a, S> Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
+      impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
       where
         SyntacticToken<S>: Token<'a>,
         <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
         <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
       {
         #[inline]
-        fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+        fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
         where
           Self: Sized,
-          E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+          E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
         {
           any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
             Lexed::Token(tok) => {

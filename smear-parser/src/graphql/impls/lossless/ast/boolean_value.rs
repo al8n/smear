@@ -5,14 +5,14 @@ use crate::{error::Error, parser::ast::BooleanValue};
 
 use super::*;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for BooleanValue<&'a str>
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     any().try_map(|res, span: Span| match res {
       Lexed::Token(tok) => {
@@ -41,7 +41,7 @@ mod tests {
   fn test_enum_value_parser() {
     let parser = BooleanValue::parser::<LosslessParserExtra<&str>>();
     let input = r#"foo"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(*parsed.source(), "foo");
     assert_eq!(parsed.span(), Span::new(0, 3));
   }

@@ -1,6 +1,6 @@
 use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
+  Lexed, Logos, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::any},
 };
 use smear_lexer::{
   graphql::syntactic::SyntacticLexerErrors,
@@ -12,7 +12,7 @@ use super::*;
 macro_rules! keyword_parser {
   ($($name:ty:$kw:literal),+$(,)?) => {
     $(
-      impl<'a, S> Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
+      impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
       where
         SyntacticToken<S>: Token<'a>,
         <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
@@ -20,10 +20,10 @@ macro_rules! keyword_parser {
         str: logosky::utils::cmp::Equivalent<S>,
       {
         #[inline]
-        fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+        fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
         where
           Self: Sized,
-          E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+          E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
         {
           use logosky::utils::cmp::Equivalent;
 
@@ -36,7 +36,7 @@ macro_rules! keyword_parser {
                 } else {
                   Err(Error::unexpected_keyword(name, $kw, span).into())
                 },
-                tok => Err(Error::unexpected_token(tok, Expectation::Keyword($kw), span).into()),
+                tok => Err(Error::unexpected_token(tok, Expectation::Keyword(&[$kw]), span).into()),
               }
             },
             Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

@@ -136,26 +136,26 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a, V> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for ObjectField<V, &'a str>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  V: Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     <PaddedRight<Name<&'a str>, &'a str> as Parseable<
       'a,
-      LosslessTokenStream<'a>,
+      LosslessTokenizer<'a>,
       Token<'a>,
       LosslessTokenErrors<'a, &'a str>,
     >>::parser()
     .then(<Colon as Parseable<
       'a,
-      LosslessTokenStream<'a>,
+      LosslessTokenizer<'a>,
       Token<'a>,
       LosslessTokenErrors<'a, &'a str>,
     >>::parser())
@@ -164,16 +164,16 @@ where
   }
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
+impl<'a, V> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
   for Object<Padded<ObjectField<V, &'a str>, &'a str>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  V: Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
   where
     Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+    E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
   {
     object_parser(V::parser())
   }
@@ -181,21 +181,21 @@ where
 
 pub fn object_field_parser<'a, V, VP, E>(
   value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, ObjectField<V, &'a str>, E> + Clone
+) -> impl Parser<'a, LosslessTokenizer<'a>, ObjectField<V, &'a str>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+  VP: Parser<'a, LosslessTokenizer<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
   <PaddedRight<Name<&'a str>, &'a str> as Parseable<
     'a,
-    LosslessTokenStream<'a>,
+    LosslessTokenizer<'a>,
     Token<'a>,
     LosslessTokenErrors<'a, &'a str>,
   >>::parser()
   .then(<Colon as Parseable<
     'a,
-    LosslessTokenStream<'a>,
+    LosslessTokenizer<'a>,
     Token<'a>,
     LosslessTokenErrors<'a, &'a str>,
   >>::parser())
@@ -205,19 +205,19 @@ where
 
 pub fn object_parser<'a, V, VP, E>(
   value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, Object<Padded<ObjectField<V, &'a str>, &'a str>>, E> + Clone
+) -> impl Parser<'a, LosslessTokenizer<'a>, Object<Padded<ObjectField<V, &'a str>, &'a str>>, E> + Clone
 where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
+  E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+  VP: Parser<'a, LosslessTokenizer<'a>, V, E> + Clone + 'a,
   V: 'a,
 {
-  <LBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
+  <LBrace as Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
     .then(
       padded::padded_parser(object_field_parser::<V, VP, E>(value_parser))
         .repeated()
         .collect(),
     )
-    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser().or_not())
+    .then(<RBrace as Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser().or_not())
     .try_map(|((l, values), r), span| match r {
       Some(r) => Ok(Object::new(span, l, values, r)),
       None => Err(Error::unclosed_object(span).into()),
@@ -237,7 +237,7 @@ mod tests {
   fn test_object_field_parser() {
     let parser = ObjectField::<StringValue<&str>, &str>::parser::<LosslessParserExtra<&str>>();
     let input = r#"name: "Jane""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(*parsed.name().source(), "name");
     assert_eq!(*parsed.value().content(), "Jane");
   }
@@ -254,7 +254,7 @@ mod tests {
       b: "b",
       c: "c", # Trailing comment
     }"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
+    let parsed = parser.parse(LosslessTokenizer::new(input)).unwrap();
     assert_eq!(parsed.fields().len(), 3);
     assert_eq!(*parsed.fields()[0].value().value().content(), "a");
     assert_eq!(*parsed.fields()[1].value().value().content(), "b");
@@ -268,7 +268,7 @@ mod tests {
     >();
     let input = r#"{a: "a", b: "b", c: "c""#;
     let mut parsed = parser
-      .parse(LosslessTokenStream::new(input))
+      .parse(LosslessTokenizer::new(input))
       .into_result()
       .unwrap_err();
     assert_eq!(parsed.len(), 1);

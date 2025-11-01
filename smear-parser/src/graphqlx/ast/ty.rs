@@ -1,7 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoSpan, Span},
 };
 use smear_lexer::punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket};
@@ -215,7 +215,7 @@ macro_rules! ty {
           pub fn parser_with<'a, I, T, Error, E, IP>(ident_parser: IP) -> impl Parser<'a, I, Self, E> + Clone
           where
             T: Token<'a>,
-            I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+            I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a,
             S: 'a,
@@ -275,7 +275,7 @@ macro_rules! ty {
           where
             Self: Sized + 'a,
             T: Token<'a>,
-            I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+            I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
             Error: 'a,
             E: ParserExtra<'a, I, Error = Error> + 'a
           {

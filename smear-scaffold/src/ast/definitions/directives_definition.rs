@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     human_display::DisplayHuman,
@@ -186,14 +186,14 @@ impl ExecutableDirectiveLocation {
   #[inline]
   pub const fn as_str(&self) -> &'static str {
     match self {
-      Self::Query(_) => QueryLocation::raw(),
-      Self::Mutation(_) => MutationLocation::raw(),
-      Self::Subscription(_) => SubscriptionLocation::raw(),
-      Self::Field(_) => FieldLocation::raw(),
-      Self::FragmentDefinition(_) => FragmentDefinitionLocation::raw(),
-      Self::FragmentSpread(_) => FragmentSpreadLocation::raw(),
-      Self::InlineFragment(_) => InlineFragmentLocation::raw(),
-      Self::VariableDefinition(_) => VariableDefinitionLocation::raw(),
+      Self::Query(_) => QueryLocation::<()>::raw(),
+      Self::Mutation(_) => MutationLocation::<()>::raw(),
+      Self::Subscription(_) => SubscriptionLocation::<()>::raw(),
+      Self::Field(_) => FieldLocation::<()>::raw(),
+      Self::FragmentDefinition(_) => FragmentDefinitionLocation::<()>::raw(),
+      Self::FragmentSpread(_) => FragmentSpreadLocation::<()>::raw(),
+      Self::InlineFragment(_) => InlineFragmentLocation::<()>::raw(),
+      Self::VariableDefinition(_) => VariableDefinitionLocation::<()>::raw(),
     }
   }
 
@@ -391,17 +391,17 @@ impl TypeSystemDirectiveLocation {
   #[inline]
   pub const fn as_str(&self) -> &'static str {
     match self {
-      Self::Schema(_) => SchemaLocation::raw(),
-      Self::Scalar(_) => ScalarLocation::raw(),
-      Self::Object(_) => ObjectLocation::raw(),
-      Self::FieldDefinition(_) => FieldDefinitionLocation::raw(),
-      Self::ArgumentDefinition(_) => ArgumentDefinitionLocation::raw(),
-      Self::Interface(_) => InterfaceLocation::raw(),
-      Self::Union(_) => UnionLocation::raw(),
-      Self::Enum(_) => EnumLocation::raw(),
-      Self::EnumValue(_) => EnumValueLocation::raw(),
-      Self::InputObject(_) => InputObjectLocation::raw(),
-      Self::InputFieldDefinition(_) => InputFieldDefinitionLocation::raw(),
+      Self::Schema(_) => SchemaLocation::<()>::raw(),
+      Self::Scalar(_) => ScalarLocation::<()>::raw(),
+      Self::Object(_) => ObjectLocation::<()>::raw(),
+      Self::FieldDefinition(_) => FieldDefinitionLocation::<()>::raw(),
+      Self::ArgumentDefinition(_) => ArgumentDefinitionLocation::<()>::raw(),
+      Self::Interface(_) => InterfaceLocation::<()>::raw(),
+      Self::Union(_) => UnionLocation::<()>::raw(),
+      Self::Enum(_) => EnumLocation::<()>::raw(),
+      Self::EnumValue(_) => EnumValueLocation::<()>::raw(),
+      Self::InputObject(_) => InputObjectLocation::<()>::raw(),
+      Self::InputFieldDefinition(_) => InputFieldDefinitionLocation::<()>::raw(),
     }
   }
 
@@ -627,7 +627,7 @@ where
   where
     Self: Sized,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
   {
@@ -776,6 +776,24 @@ impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, L
 }
 
 impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
+  /// Creates a new `DirectiveDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    arguments_definition: Option<Args>,
+    repeateable: bool,
+    directive_locations: Locations,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      arguments_definition,
+      repeateable,
+      directive_locations,
+    }
+  }
+
   /// Returns a reference to the span covering the entire directive definition.
   ///
   /// The span includes the optional description, directive keyword, name,
@@ -822,10 +840,6 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   }
 
   /// Creates a parser that can parse a complete directive definition.
-  ///
-  /// This parser handles the full directive definition syntax including all
-  /// optional components. The parsing of arguments and locations is delegated
-  /// to the provided parsers.
   pub fn parser_with<'src, I, T, Error, E, NP, AP, LP>(
     name_parser: NP,
     args_parser: AP,
@@ -833,7 +847,7 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     At: Parseable<'src, I, T, Error> + 'src,
@@ -845,19 +859,56 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
     NP: Parser<'src, I, Name, E> + Clone,
   {
     Directive::parser()
-      .then(At::parser())
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        args_parser,
+        directive_locations_parser,
+      ))
+      .map_with(
+        |(name, arguments_definition, repeateable, directive_locations), exa| {
+          Self::new(
+            exa.span(),
+            name,
+            arguments_definition,
+            repeateable,
+            directive_locations,
+          )
+        },
+      )
+  }
+
+  /// Creates a parser for directive definitions without the leading `directive` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, AP, LP>(
+    name_parser: NP,
+    args_parser: AP,
+    directive_locations_parser: LP,
+  ) -> impl Parser<'src, I, (Name, Option<Args>, bool, Locations), E> + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    At: Parseable<'src, I, T, Error> + 'src,
+    On: Parseable<'src, I, T, Error> + 'src,
+    Repeatable: Parseable<'src, I, T, Error> + 'src,
+    AP: Parser<'src, I, Args, E> + Clone,
+    LP: Parser<'src, I, Locations, E> + Clone,
+    NP: Parser<'src, I, Name, E> + Clone,
+  {
+    At::parser()
       .ignore_then(name_parser)
       .then(args_parser.or_not())
       .then(Repeatable::parser().or_not())
       .then_ignore(On::parser())
       .then(directive_locations_parser)
-      .map_with(
-        |(((name, arguments_definition), repeateable), directive_locations), exa| Self {
-          span: exa.span(),
-          name,
-          arguments_definition,
-          repeateable: repeateable.is_some(),
-          directive_locations,
+      .map(
+        |(((name, arguments_definition), repeateable), directive_locations)| {
+          (
+            name,
+            arguments_definition,
+            repeateable.is_some(),
+            directive_locations,
+          )
         },
       )
   }
@@ -880,7 +931,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Args::parser(), Locations::parser())

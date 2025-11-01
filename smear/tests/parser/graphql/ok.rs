@@ -1,7 +1,11 @@
 macro_rules! define_module {
-  ($($filename:ident),+$(,)?) => {
+  ($(
+    $(#[$meta:meta])*
+    $filename:ident
+  ),+$(,)?) => {
     $(
       paste::paste! {
+        $(#[$meta])*
         #[path = "ok/" $filename ".rs"]
         mod $filename;
       }

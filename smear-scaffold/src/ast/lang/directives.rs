@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, IterParser, Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -95,7 +95,7 @@ impl<Name, Args> Directive<Name, Args> {
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Args: Parseable<'a, I, T, Error>,
@@ -122,7 +122,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Args::parser())
@@ -196,6 +196,26 @@ impl<Directive, Container> Directives<Directive, Container> {
   pub fn into_directives(self) -> Container {
     self.directives
   }
+
+  /// Creates a parser for a collection of directives using the provided directive parser.
+  #[inline]
+  pub fn parser_with<'a, I, T, Error, E, DP>(
+    directive_parser: DP,
+  ) -> impl Parser<'a, I, Self, E> + Clone
+  where
+    T: Token<'a>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+    DP: Parser<'a, I, Directive, E> + Clone,
+    Container: chumsky::container::Container<Directive>,
+  {
+    directive_parser
+      .repeated()
+      .at_least(1)
+      .collect()
+      .map_with(|directives, exa| Self::new(exa.span(), directives))
+  }
 }
 
 impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
@@ -210,13 +230,9 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
-    Directive::parser()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|directives, exa| Self::new(exa.span(), directives))
+    Self::parser_with(Directive::parser())
   }
 }

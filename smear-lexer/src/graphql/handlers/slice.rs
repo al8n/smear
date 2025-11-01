@@ -5,7 +5,7 @@ use crate::{
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, tracker::Tracker},
+  utils::{Lexeme, PositionedChar, Span, tracker::Limiter},
 };
 
 use super::error::{self, FloatError};
@@ -14,7 +14,7 @@ type LexerError<Extras> = error::LexerError<u8, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<u8, Extras>;
 type LexerErrorData<Extras> = error::LexerErrorData<u8, Extras>;
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
@@ -30,12 +30,12 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -49,7 +49,7 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn unexpected_plus_token<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, error::LexerError<u8, Extras>>
@@ -63,7 +63,7 @@ where
   Err(error::LexerError::unexpected_char(span.into(), b'+', pos))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn unexpected_minus_token<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, error::LexerError<u8, Extras>>
@@ -121,7 +121,7 @@ where
 }
 
 #[allow(clippy::result_large_err)]
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_leading_zero_and_number_suffix_error<'a, S, T, LE, SE, Extras>(
   lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<u8>) -> LE,
@@ -185,7 +185,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -246,7 +246,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>

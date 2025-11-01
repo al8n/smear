@@ -9,13 +9,13 @@ use super::*;
 macro_rules! punctuator_parser {
   ($($name:ident),+$(,)?) => {
     $(
-      impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for $name {
+      impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for $name {
 
         #[inline]
-        fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+        fn parser<E>() -> impl Parser<'a, LosslessTokenizer<'a>, Self, E> + Clone
         where
           Self: Sized,
-          E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+          E: ParserExtra<'a, LosslessTokenizer<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
         {
           any().try_map(|res, span: Span| match res {
             Lexed::Token(tok) => {

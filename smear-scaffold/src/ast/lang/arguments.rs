@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, IterParser, Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -97,7 +97,7 @@ impl<Name, Value> Argument<Name, Value> {
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Colon: Parseable<'a, I, T, Error>,
@@ -126,7 +126,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Name::parser(), Value::parser())
@@ -180,9 +180,7 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct Arguments<Arg, Container = Vec<Arg>> {
   span: Span,
-  l_paren: LParen,
   arguments: Container,
-  r_paren: RParen,
   _arg: PhantomData<Arg>,
 }
 
@@ -201,11 +199,11 @@ impl<Arg, Container> IntoSpan<Span> for Arguments<Arg, Container> {
 }
 
 impl<Arg, Container> IntoComponents for Arguments<Arg, Container> {
-  type Components = (Span, LParen, Container, RParen);
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.l_paren, self.arguments, self.r_paren)
+    (self.span, self.arguments)
   }
 }
 
@@ -218,26 +216,6 @@ impl<Arg, Container> Arguments<Arg, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Returns the opening parenthesis token.
-  ///
-  /// This provides access to the `(` character that begins the argument list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// parenthesis matching, and precise error reporting at argument boundaries.
-  #[inline]
-  pub const fn l_paren(&self) -> &LParen {
-    &self.l_paren
-  }
-
-  /// Returns the closing parenthesis token.
-  ///
-  /// This provides access to the `)` character that ends the argument list,
-  /// including its exact source position. Useful for syntax highlighting,
-  /// parenthesis matching, and detecting incomplete argument lists.
-  #[inline]
-  pub const fn r_paren(&self) -> &RParen {
-    &self.r_paren
   }
 
   /// Returns the container holding the arguments.
@@ -263,17 +241,15 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     LParen::parser()
-      .then(Arg::parser().repeated().at_least(1).collect())
-      .then(RParen::parser())
-      .map_with(|((l_paren, arguments), r_paren), exa| Self {
+      .ignore_then(Arg::parser().repeated().at_least(1).collect())
+      .then_ignore(RParen::parser())
+      .map_with(|arguments, exa| Self {
         span: exa.span(),
-        l_paren,
         arguments,
-        r_paren,
         _arg: PhantomData,
       })
   }

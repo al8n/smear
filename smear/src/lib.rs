@@ -103,10 +103,10 @@ pub use smear_scaffold as scaffold;
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::syntactic::SyntacticToken;
-/// use logosky::TokenStream;
+/// use logosky::Tokenizer;
 ///
 /// let source = "query { user { id name } }";
-/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+/// let tokens = Tokenizer::<SyntacticToken<&str>>::new(source);
 /// // Only syntactically significant tokens (whitespace automatically skipped)
 /// ```
 ///
@@ -114,10 +114,10 @@ pub use smear_scaffold as scaffold;
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::lossless::LosslessToken;
-/// use logosky::TokenStream;
+/// use logosky::Tokenizer;
 ///
 /// let source = "query { # comment\n  user { id }\n}";
-/// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
+/// let tokens = Tokenizer::<LosslessToken<&str>>::new(source);
 /// // ALL tokens including spaces, comments, exact formatting
 /// ```
 pub use smear_lexer as lexer;

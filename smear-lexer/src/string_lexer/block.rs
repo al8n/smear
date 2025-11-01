@@ -66,7 +66,7 @@ impl<S: DisplayHuman> core::fmt::Display for LitBlockStr<S> {
 
 impl<'a> LitBlockStr<&'a str> {
   /// Returns the str representation of the block string.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn as_str(&self) -> &'a str {
     match self {
       Self::Plain(s) => s.as_str(),
@@ -77,7 +77,7 @@ impl<'a> LitBlockStr<&'a str> {
 
 impl<'a> LitBlockStr<&'a [u8]> {
   /// Returns the byte slice representation of the block string.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn as_bytes(&self) -> &'a [u8] {
     match self {
       Self::Plain(s) => s.as_bytes(),
@@ -88,7 +88,7 @@ impl<'a> LitBlockStr<&'a [u8]> {
 
 impl<S> LitBlockStr<S> {
   /// Returns the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -100,7 +100,7 @@ impl<S> LitBlockStr<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     match self {
       Self::Plain(s) => s.source_ref(),
@@ -109,7 +109,7 @@ impl<S> LitBlockStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn to_equivalent<T>(&self) -> LitBlockStr<T>
   where
     S: logosky::utils::ToEquivalent<T>,
@@ -121,7 +121,7 @@ impl<S> LitBlockStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn into_equivalent<T>(self) -> LitBlockStr<T>
   where
     S: logosky::utils::IntoEquivalent<T>,
@@ -138,12 +138,12 @@ impl_common_traits!(LitBlockStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexBlockStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexBlockStr::<&'a [u8]>::as_bytes);
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn is_blank_line(s: &[u8]) -> bool {
   s.iter().all(|&b| b == b' ' || b == b'\t')
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn leading_ws_indent(bytes: &[u8]) -> usize {
   bytes
     .iter()
@@ -151,7 +151,7 @@ fn leading_ws_indent(bytes: &[u8]) -> usize {
     .count()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn chop_indent(s: &str, mut n: usize) -> &str {
   let bytes = s.as_bytes();
   let mut i = 0usize;
@@ -195,7 +195,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
         // Write one logical line body:
         // - optionally dedent (only non-first, non-blank lines),
         // - unescape \"\"\" -> """
-        #[inline(always)]
+        #[cfg_attr(not(tarpaulin), inline(always))]
         fn write_line(out: &mut String, line: &str, dedent: usize, is_first_kept: bool) {
           let body = if is_first_kept || is_blank_line(line.as_bytes()) {
             line

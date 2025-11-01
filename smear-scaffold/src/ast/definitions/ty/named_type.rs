@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -125,7 +125,7 @@ impl<Name> NamedType<Name> {
   pub fn parser_with<'a, I, T, Error, E, NP>(name_parser: NP) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Bang: Parseable<'a, I, T, Error> + 'a,
@@ -149,7 +149,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,

@@ -2,8 +2,8 @@ use core::marker::PhantomData;
 use std::vec::Vec;
 
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     sdl_display::{DisplayCompact, DisplayPretty},
@@ -18,13 +18,13 @@ use crate::{error::UnexpectedEndOfInterfaceExtensionError, hints::InterfaceTypeE
 
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImplementInterfaces<Name, Container = Vec<Name>> {
+pub struct ImplementsInterfaces<Name, Container = Vec<Name>> {
   span: Span,
   interfaces: Container,
   _m: PhantomData<Name>,
 }
 
-impl<Name, Container> ImplementInterfaces<Name, Container> {
+impl<Name, Container> ImplementsInterfaces<Name, Container> {
   /// Returns a reference to the span covering the entire implements clause.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -48,7 +48,7 @@ impl<Name, Container> ImplementInterfaces<Name, Container> {
 }
 
 impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ImplementInterfaces<Name, Container>
+  for ImplementsInterfaces<Name, Container>
 where
   Container: chumsky::container::Container<Name>,
   Name: Parseable<'a, I, T, Error>,
@@ -59,7 +59,7 @@ where
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     T: Token<'a>,
   {
@@ -79,7 +79,7 @@ where
   }
 }
 
-impl<Name, Container> DisplayCompact for ImplementInterfaces<Name, Container>
+impl<Name, Container> DisplayCompact for ImplementsInterfaces<Name, Container>
 where
   Container: AsRef<[Name]>,
   Name: DisplayCompact,
@@ -97,7 +97,7 @@ where
   }
 }
 
-impl<Name, Container> DisplayPretty for ImplementInterfaces<Name, Container>
+impl<Name, Container> DisplayPretty for ImplementsInterfaces<Name, Container>
 where
   Container: AsRef<[Name]>,
   Name: DisplayPretty,
@@ -165,16 +165,16 @@ where
 ///
 /// Spec: [Interface Type Definition](https://spec.graphql.org/draft/#sec-Interface-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition> {
+pub struct InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition> {
   span: Span,
   name: Name,
-  implements: Option<ImplementInterfaces>,
+  implements: Option<ImplementsInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -182,8 +182,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -191,13 +191,13 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
-  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   type Components = (
     Span,
     Name,
-    Option<ImplementInterfaces>,
+    Option<ImplementsInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
   );
@@ -214,9 +214,27 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new `InterfaceTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    implements: Option<ImplementsInterfaces>,
+    directives: Option<Directives>,
+    fields_definition: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      implements,
+      directives,
+      fields_definition,
+    }
+  }
+
   /// Returns a reference to the span covering the entire interface definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -237,7 +255,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   /// Interface inheritance allows interfaces to extend other interfaces,
   /// creating hierarchical contracts that implementing types must fulfill.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces> {
     self.implements.as_ref()
   }
 
@@ -261,9 +279,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   }
 
   /// Creates a parser for interface type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL interfaces, including
-  /// interface inheritance through the implements clause.
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -272,22 +287,66 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Interface: Parseable<'src, I, T, Error>,
     Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     Directives: 'src,
-    ImplementInterfaces: 'src,
+    ImplementsInterfaces: 'src,
     FieldsDefinition: 'src,
     NP: Parser<'src, I, Name, E> + Clone + 'src,
     DP: Parser<'src, I, Directives, E> + Clone + 'src,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementsInterfaces, E> + Clone + 'src,
   {
     Interface::parser()
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|(name, implements, directives, fields_definition), exa| {
+        Self::new(exa.span(), name, implements, directives, fields_definition)
+      })
+  }
+
+  /// Creates a parser for interface type definitions without the leading `interface` keyword.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Name,
+      Option<ImplementsInterfaces>,
+      Option<Directives>,
+      Option<FieldsDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Interface: Parseable<'src, I, T, Error>,
+    Implements: Parseable<'src, I, T, Error>,
+    Name: 'src,
+    Directives: 'src,
+    ImplementsInterfaces: 'src,
+    FieldsDefinition: 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementsInterfaces, E> + Clone + 'src,
+  {
+    name_parser
       .then(
         Implements::parser()
           .ignore_then(implement_interfaces_parser)
@@ -295,24 +354,18 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
       )
       .then(directives_parser.or_not())
       .then(fields_definition_parser.or_not())
-      .map_with(|(((name, implements), directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields_definition: fields,
-        implements,
-      })
+      .map(|(((name, implements), directives), fields)| (name, implements, directives, fields))
   }
 }
 
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
-  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 where
   Interface: Parseable<'a, I, T, Error>,
   Implements: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  ImplementsInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   FieldsDefinition: Parseable<'a, I, T, Error>,
 {
@@ -322,12 +375,12 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
-      ImplementInterfaces::parser(),
+      ImplementsInterfaces::parser(),
       Directives::parser(),
       FieldsDefinition::parser(),
     )
@@ -343,7 +396,7 @@ where
 ///
 /// These can be combined in various ways to create comprehensive extensions.
 #[derive(Debug, Clone, Copy)]
-pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
+pub enum InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition> {
   /// Extension adds directives to an interface, optionally with new interface implementations.
   ///
   /// This variant applies metadata or behavioral modifications without changing
@@ -363,7 +416,7 @@ pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefin
   /// ```
   Directives {
     /// Optional new interface implementations
-    implements: Option<ImplementInterfaces>,
+    implements: Option<ImplementsInterfaces>,
     /// Directives being added to the interface
     directives: Directives,
   },
@@ -398,7 +451,7 @@ pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefin
   /// ```
   Fields {
     /// Optional new interface implementations
-    implements: Option<ImplementInterfaces>,
+    implements: Option<ImplementsInterfaces>,
     /// Optional directives to apply
     directives: Option<Directives>,
     /// New field definitions being added
@@ -419,11 +472,11 @@ pub enum InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefin
   /// # Multiple interface inheritance
   /// extend interface ComplexEntity implements Node & Timestamped & Searchable
   /// ```
-  Implements(ImplementInterfaces),
+  Implements(ImplementsInterfaces),
 }
 
-impl<ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>
+impl<ImplementsInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>
 {
   /// Returns the directives if this extension includes them.
   #[inline]
@@ -437,7 +490,7 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 
   /// Returns the interface implementations if this extension includes them.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces> {
     match self {
       Self::Directives { implements, .. } => implements.as_ref(),
       Self::Fields { implements, .. } => implements.as_ref(),
@@ -482,14 +535,14 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///   | extend interface Name ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition> {
+pub struct InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition> {
   span: Span,
   name: Name,
-  data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+  data: InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -497,8 +550,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -506,13 +559,13 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
-  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
   type Components = (
     Span,
     Name,
-    InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+    InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
   );
 
   #[inline]
@@ -521,9 +574,19 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+  InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new `InterfaceTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire interface extension.
   ///
   /// Includes the `extend interface` keywords, interface name, and all extension data.
@@ -549,7 +612,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
 
   /// Returns interface implementations if this extension includes them.
   #[inline]
-  pub const fn implements(&self) -> Option<&ImplementInterfaces> {
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces> {
     self.data.implements()
   }
 
@@ -568,14 +631,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   #[inline]
   pub const fn data(
     &self,
-  ) -> &InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
+  ) -> &InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition> {
     &self.data
   }
 
   /// Creates a parser for interface type extensions.
-  ///
-  /// This parser handles the complete `extend interface` syntax, parsing the keywords,
-  /// interface name, and delegating content parsing to the extension content parser.
   pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
     name_parser: NP,
     implement_interfaces_parser: IP,
@@ -584,7 +644,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfInterfaceExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error>,
@@ -592,16 +652,55 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     Implements: Parseable<'src, I, T, Error>,
     Name: 'src,
     Directives: 'src,
-    ImplementInterfaces: 'src,
+    ImplementsInterfaces: 'src,
     FieldsDefinition: 'src,
     NP: Parser<'src, I, Name, E> + Clone + 'src,
     DP: Parser<'src, I, Directives, E> + Clone + 'src,
     FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementsInterfaces, E> + Clone + 'src,
   {
     Extend::parser()
       .then(Interface::parser())
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        implement_interfaces_parser,
+        directives_parser,
+        fields_definition_parser,
+      ))
+      .map_with(|(name, data), exa| Self::new(exa.span(), name, data))
+  }
+
+  /// Creates a parser for interface type extensions without the leading `extend` and `interface` keywords.
+  pub fn content_parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
+    name_parser: NP,
+    implement_interfaces_parser: IP,
+    directives_parser: DP,
+    fields_definition_parser: FP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Name,
+      InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: UnexpectedEndOfInterfaceExtensionError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    Implements: Parseable<'src, I, T, Error>,
+    Name: 'src,
+    Directives: 'src,
+    ImplementsInterfaces: 'src,
+    FieldsDefinition: 'src,
+    NP: Parser<'src, I, Name, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
+    IP: Parser<'src, I, ImplementsInterfaces, E> + Clone + 'src,
+  {
+    name_parser
       .then(
         Implements::parser()
           .ignore_then(implement_interfaces_parser)
@@ -629,25 +728,21 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
           }
         };
 
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+        Ok((name, data))
       })
   }
 }
 
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, I, T, Error>
   Parseable<'a, I, T, Error>
-  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
 where
   Error: UnexpectedEndOfInterfaceExtensionError,
   Extend: Parseable<'a, I, T, Error>,
   Interface: Parseable<'a, I, T, Error>,
   Implements: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
+  ImplementsInterfaces: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
   FieldsDefinition: Parseable<'a, I, T, Error>,
 {
@@ -657,12 +752,12 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(
       Name::parser(),
-      ImplementInterfaces::parser(),
+      ImplementsInterfaces::parser(),
       Directives::parser(),
       FieldsDefinition::parser(),
     )

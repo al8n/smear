@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, IterParser, Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 
@@ -93,7 +93,7 @@ impl<Ident, Container> Path<Ident, Container> {
     ident_parser: IP,
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
@@ -124,7 +124,7 @@ where
   where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     T: Token<'a>,
   {

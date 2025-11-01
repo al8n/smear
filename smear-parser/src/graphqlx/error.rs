@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, Logos, Token, TokenStream,
+  Lexed, Logos, Token, Tokenizer,
   chumsky::{
     self, DefaultExpected,
     error::{self, LabelError},
@@ -346,7 +346,7 @@ pub struct Errors<S, T, Char = char, Exp = Expectation, StateError = ()>(
 );
 
 impl<S, T, Char, Expectation, StateError> Default for Errors<S, T, Char, Expectation, StateError> {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }
@@ -355,7 +355,7 @@ impl<S, T, Char, Expectation, StateError> Default for Errors<S, T, Char, Expecta
 impl<S, T, Char, Expectation, StateError> From<Error<S, T, Char, Expectation, StateError>>
   for Errors<S, T, Char, Expectation, StateError>
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn from(error: Error<S, T, Char, Expectation, StateError>) -> Self {
     Self(core::iter::once(error).collect())
   }
@@ -376,7 +376,7 @@ impl<S, T, Char, Expectation, StateError> IntoIterator
   type IntoIter =
     <DefaultErrorsContainer<S, T, Char, Expectation, StateError> as IntoIterator>::IntoIter;
 
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_iter()
   }
@@ -385,7 +385,7 @@ impl<S, T, Char, Expectation, StateError> IntoIterator
 impl<S, T, Char, Expectation, StateError> Extend<Error<S, T, Char, Expectation, StateError>>
   for Errors<S, T, Char, Expectation, StateError>
 {
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   fn extend<I: IntoIterator<Item = Error<S, T, Char, Expectation, StateError>>>(
     &mut self,
     iter: I,
@@ -395,7 +395,7 @@ impl<S, T, Char, Expectation, StateError> Extend<Error<S, T, Char, Expectation, 
 }
 
 impl<'a, S, T, Char, Expectation, StateError>
-  LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
+  LabelError<'a, Tokenizer<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
   for Errors<S, T, Char, Expectation, StateError>
 where
   T: Token<'a>,
@@ -466,7 +466,7 @@ where
     span: logosky::utils::Span,
   ) -> Self
   where
-    Self: error::Error<'a, TokenStream<'a, T>>,
+    Self: error::Error<'a, Tokenizer<'a, T>>,
   {
     // Create new errors from the expected/found combination
     let new_errors = Self::expected_found(expected, found, span);
@@ -477,7 +477,7 @@ where
   }
 }
 
-impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
+impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, Tokenizer<'a, T>>
   for Errors<S, T, Char, Expectation, StateError>
 where
   T: Token<'a>,

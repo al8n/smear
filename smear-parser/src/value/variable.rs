@@ -1,8 +1,8 @@
 use core::fmt::Display;
 
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra},
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     human_display::DisplayHuman,
@@ -64,7 +64,7 @@ where
 
 impl<Name> VariableValue<Name> {
   /// Creates a new variable from the given span and name.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub(crate) const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
@@ -118,7 +118,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Dollar::parser()

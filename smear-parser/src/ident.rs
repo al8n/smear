@@ -40,7 +40,7 @@ impl<S> Ident<S> {
   }
 
   /// Returns reference of the underlying source value.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     &self.value
   }

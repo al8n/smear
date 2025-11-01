@@ -1,4 +1,4 @@
-use logosky::{Lexed, TokenStream, utils::recursion_tracker::RecursionLimiter};
+use logosky::{Lexed, Tokenizer, utils::recursion_tracker::RecursionLimiter};
 
 use super::*;
 
@@ -167,7 +167,7 @@ fn test_escape_triple_quote_block_string() {
 fn test_bom_lexing() {
   let input = "\u{feff}";
 
-  let mut lexer = TokenStream::<StrSyntacticToken<'_>>::new(input).into_iter();
+  let mut lexer = Tokenizer::<StrSyntacticToken<'_>>::new(input).into_iter();
 
   assert_eq!(lexer.next(), None);
 }
@@ -178,7 +178,7 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let lexer = TokenStream::<StrSyntacticToken<'_>>::with_state(
+  let lexer = Tokenizer::<StrSyntacticToken<'_>>::with_state(
     query.as_str(),
     RecursionLimiter::with_limitation(depth - 1),
   );

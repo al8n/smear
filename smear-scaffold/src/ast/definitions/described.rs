@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -52,6 +52,15 @@ impl<T, Description> IntoComponents for Described<T, Description> {
 }
 
 impl<T, Description> Described<T, Description> {
+  /// Creates a new `Described` node with the given description and inner node.
+  pub const fn new(span: Span, description: Option<Description>, node: T) -> Self {
+    Self {
+      span,
+      description,
+      node,
+    }
+  }
+
   /// Returns the span of the described node.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -82,7 +91,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Description::parser()

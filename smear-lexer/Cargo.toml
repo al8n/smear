@@ -33,3 +33,7 @@ hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+
+[lints.rust]
+rust_2018_idioms = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }

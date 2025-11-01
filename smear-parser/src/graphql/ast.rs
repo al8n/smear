@@ -3,8 +3,7 @@
 use std::vec::Vec;
 
 use logosky::{
-  Parseable,
-  chumsky::{ParseResult, Parser},
+  chumsky::{ParseResult, Parseable, Parser},
   utils::{Span, recursion_tracker::RecursionLimitExceeded},
 };
 
@@ -15,13 +14,14 @@ use super::{
 use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
+pub use document::*;
 pub use fragment::*;
 pub use name::*;
 pub use ty::*;
-pub use type_system::*;
 pub use value::*;
 
 mod default;
+mod document;
 mod error;
 mod fragment;
 mod keyword;
@@ -30,7 +30,6 @@ mod name;
 mod operation_type;
 mod punctuator;
 mod ty;
-mod type_system;
 mod value;
 
 impl From<SyntacticTokenKind> for Expectation {
@@ -62,7 +61,7 @@ impl From<SyntacticTokenKind> for Expectation {
 }
 
 /// The token stream type used for the AST parser implementation.
-pub type SyntacticTokenStream<'a, S> = logosky::TokenStream<'a, SyntacticToken<S>>;
+pub type SyntacticTokenizer<'a, S> = logosky::Tokenizer<'a, SyntacticToken<S>>;
 /// The parser extra type used for the AST parser implementation.
 pub type AstParserExtra<'a, S> =
   Extra<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
@@ -89,7 +88,7 @@ impl<'b, T> ParseStr<'b> for T
 where
   T: Parseable<
       'b,
-      SyntacticTokenStream<'b, &'b str>,
+      SyntacticTokenizer<'b, &'b str>,
       SyntacticToken<&'b str>,
       SyntacticTokenErrors<'b, &'b str>,
     >,
@@ -102,11 +101,11 @@ where
   {
     <T as Parseable<
       'b,
-      SyntacticTokenStream<'b, &'b str>,
+      SyntacticTokenizer<'b, &'b str>,
       SyntacticToken<&'b str>,
       SyntacticTokenErrors<'b, &'b str>,
-    >>::parser::<AstParserExtra<&str>>()
-    .parse(SyntacticTokenStream::new(input.as_ref()))
+    >>::parser::<AstParserExtra<'_, &str>>()
+    .parse(SyntacticTokenizer::new(input.as_ref()))
   }
 }
 
@@ -123,7 +122,7 @@ impl<'b, T> ParseBytesSlice<'b> for T
 where
   T: Parseable<
       'b,
-      SyntacticTokenStream<'b, &'b [u8]>,
+      SyntacticTokenizer<'b, &'b [u8]>,
       SyntacticToken<&'b [u8]>,
       SyntacticTokenErrors<'b, &'b [u8]>,
     >,
@@ -136,11 +135,11 @@ where
   {
     <T as Parseable<
       'b,
-      SyntacticTokenStream<'b, &'b [u8]>,
+      SyntacticTokenizer<'b, &'b [u8]>,
       SyntacticToken<&'b [u8]>,
       SyntacticTokenErrors<'b, &'b [u8]>,
-    >>::parser::<AstParserExtra<&[u8]>>()
-    .parse(SyntacticTokenStream::new(input.as_ref()))
+    >>::parser::<AstParserExtra<'_, &[u8]>>()
+    .parse(SyntacticTokenizer::new(input.as_ref()))
   }
 }
 
@@ -165,7 +164,7 @@ const _: () = {
   where
     T: Parseable<
         'a,
-        SyntacticTokenStream<'a, Bytes>,
+        SyntacticTokenizer<'a, Bytes>,
         SyntacticToken<Bytes>,
         SyntacticTokenErrors<'a, Bytes>,
       >,
@@ -177,11 +176,11 @@ const _: () = {
     {
       <T as Parseable<
         'a,
-        SyntacticTokenStream<'a, Bytes>,
+        SyntacticTokenizer<'a, Bytes>,
         SyntacticToken<Bytes>,
         SyntacticTokenErrors<'a, Bytes>,
-      >>::parser::<AstParserExtra<Bytes>>()
-      .parse(SyntacticTokenStream::new(CustomSource::from_ref(input)))
+      >>::parser::<AstParserExtra<'_, Bytes>>()
+      .parse(SyntacticTokenizer::new(CustomSource::from_ref(input)))
     }
   }
 };

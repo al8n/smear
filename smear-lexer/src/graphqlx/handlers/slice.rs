@@ -6,7 +6,7 @@ use crate::{
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, UnexpectedEnd, tracker::Tracker},
+  utils::{Lexeme, UnexpectedEnd, tracker::Limiter},
 };
 
 use super::error;
@@ -15,7 +15,7 @@ type LexerError<Extras> = error::LexerError<u8, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<u8, Extras>;
 type LexerErrorData<Extras> = error::LexerErrorData<u8, Extras>;
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
@@ -31,12 +31,12 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -50,7 +50,7 @@ where
   .into()
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -71,7 +71,7 @@ where
   ))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_hex_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -124,7 +124,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -168,7 +168,7 @@ where
   )
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn handle_hex_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>

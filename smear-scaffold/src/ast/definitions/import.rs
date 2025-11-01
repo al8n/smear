@@ -3,8 +3,10 @@ use std::vec::Vec;
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{
+    IterParser, Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra,
+  },
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 
@@ -85,7 +87,7 @@ impl<Ident, Container> NamedSpecifier<Ident, Container> {
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     keywords::As: Parseable<'a, I, T, Error> + 'a,
@@ -167,7 +169,7 @@ impl<Ident, Container> WildcardSpecifier<Ident, Container> {
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     Asterisk: Parseable<'a, I, T, Error> + 'a,
@@ -247,7 +249,7 @@ impl<Ident, Container> ImportMember<Ident, Container> {
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone,
@@ -360,7 +362,7 @@ impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     LBrace: Parseable<'a, I, T, Error> + 'a,
@@ -395,7 +397,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
@@ -464,7 +466,7 @@ impl<Ident, PathContainer, ItemContainer> ImportClause<Ident, PathContainer, Ite
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     IP: Parser<'a, I, Ident, E> + Clone,
@@ -498,7 +500,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
@@ -599,7 +601,7 @@ impl<Ident, FilePath, PathContainer, ItemContainer>
   ) -> impl Parser<'a, I, Self, E> + Clone
   where
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     LBrace: Parseable<'a, I, T, Error> + 'a,
@@ -644,7 +646,7 @@ where
   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
   where
     Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     T: Token<'a>,
     Error: 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,

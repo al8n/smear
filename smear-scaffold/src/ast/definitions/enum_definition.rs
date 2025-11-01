@@ -1,6 +1,6 @@
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
+  LogoStream, Logos, Source, Token,
+  chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
   utils::{AsSpan, IntoComponents, IntoSpan, Span},
 };
 use smear_lexer::{
@@ -123,7 +123,7 @@ impl<EnumValue, Directives> EnumValueDefinition<EnumValue, Directives> {
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -151,7 +151,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(EnumValue::parser(), Directives::parser())
@@ -280,7 +280,7 @@ impl<EnumValueDefinition, Container> EnumValuesDefinition<EnumValueDefinition, C
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     LBrace: Parseable<'src, I, T, Error>,
@@ -313,7 +313,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(EnumValueDefinition::parser())
@@ -414,6 +414,22 @@ impl<Name, Directives, EnumValuesDefinition> IntoComponents
 impl<Name, Directives, EnumValuesDefinition>
   EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
 {
+  /// Creates a new `EnumTypeDefinition` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    enum_values: Option<EnumValuesDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      enum_values,
+    }
+  }
+
   /// Returns a reference to the span covering the entire enum definition.
   ///
   /// The span includes the optional description, enum keyword, name, optional
@@ -451,10 +467,6 @@ impl<Name, Directives, EnumValuesDefinition>
   }
 
   /// Creates a parser that can parse a complete enum definition.
-  ///
-  /// This parser handles the full enum definition syntax including all optional
-  /// components. The parsing of enum values and directives is delegated to the
-  /// provided parsers.
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, P, DP>(
     name_parser: NP,
@@ -463,7 +475,7 @@ impl<Name, Directives, EnumValuesDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Enum: Parseable<'src, I, T, Error> + 'src,
@@ -472,15 +484,36 @@ impl<Name, Directives, EnumValuesDefinition>
     DP: Parser<'src, I, Directives, E> + Clone,
   {
     Enum::parser()
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        enum_values_definition_parser,
+      ))
+      .map_with(|(name, directives, enum_values), exa| {
+        Self::new(exa.span(), name, directives, enum_values)
+      })
+  }
+
+  /// Creates a parser for enum type definitions without the leading `enum` keyword.
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, P, DP>(
+    name_parser: NP,
+    directives_parser: DP,
+    enum_values_definition_parser: P,
+  ) -> impl Parser<'src, I, (Name, Option<Directives>, Option<EnumValuesDefinition>), E> + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone,
+    P: Parser<'src, I, EnumValuesDefinition, E> + Clone,
+    DP: Parser<'src, I, Directives, E> + Clone,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(enum_values_definition_parser.or_not())
-      .map_with(|((name, directives), enum_values), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        enum_values,
-      })
+      .map(|((name, directives), enum_values)| (name, directives, enum_values))
   }
 }
 
@@ -498,7 +531,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(
@@ -587,7 +620,7 @@ impl<Directives, EnumValuesDefinition> EnumTypeExtensionData<Directives, EnumVal
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     DP: Parser<'src, I, Directives, E> + Clone,
@@ -615,7 +648,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(Directives::parser, EnumValuesDefinition::parser)
@@ -725,6 +758,16 @@ impl<Name, Directives, EnumValuesDefinition> IntoComponents
 impl<Name, Directives, EnumValuesDefinition>
   EnumTypeExtension<Name, Directives, EnumValuesDefinition>
 {
+  /// Creates a new `EnumTypeExtension` with the given components.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire enum extension.
   ///
   /// The span includes the extend keyword, enum keyword, name, and all
@@ -765,9 +808,6 @@ impl<Name, Directives, EnumValuesDefinition>
   }
 
   /// Creates a parser that can parse a complete enum extension.
-  ///
-  /// This parser handles the full enum extension syntax including the extend
-  /// and enum keywords, target enum name, and extension data.
   #[inline]
   pub fn parser_with<'src, I, T, Error, E, NP, DP, EVP>(
     name_parser: NP,
@@ -776,7 +816,7 @@ impl<Name, Directives, EnumValuesDefinition>
   ) -> impl Parser<'src, I, Self, E> + Clone
   where
     T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
     Error: UnexpectedEndOfEnumExtensionError + 'src,
     E: ParserExtra<'src, I, Error = Error> + 'src,
     Extend: Parseable<'src, I, T, Error> + 'src,
@@ -787,7 +827,39 @@ impl<Name, Directives, EnumValuesDefinition>
   {
     Extend::parser()
       .then(Enum::parser())
-      .ignore_then(name_parser)
+      .ignore_then(Self::content_parser_with(
+        name_parser,
+        directives_parser,
+        enum_values_definition_parser,
+      ))
+      .map_with(|(name, data), exa| Self::new(exa.span(), name, data))
+  }
+
+  /// Creates a parser for enum type extensions without the leading `extend` and `enum` keywords.
+  #[inline]
+  pub fn content_parser_with<'src, I, T, Error, E, NP, DP, EVP>(
+    name_parser: NP,
+    directives_parser: DP,
+    enum_values_definition_parser: EVP,
+  ) -> impl Parser<
+    'src,
+    I,
+    (
+      Name,
+      EnumTypeExtensionData<Directives, EnumValuesDefinition>,
+    ),
+    E,
+  > + Clone
+  where
+    T: Token<'src>,
+    I: LogoStream<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
+    Error: UnexpectedEndOfEnumExtensionError + 'src,
+    E: ParserExtra<'src, I, Error = Error> + 'src,
+    NP: Parser<'src, I, Name, E> + Clone,
+    EVP: Parser<'src, I, EnumValuesDefinition, E> + Clone + 'src,
+    DP: Parser<'src, I, Directives, E> + Clone + 'src,
+  {
+    name_parser
       .then(directives_parser.or_not())
       .then(enum_values_definition_parser.or_not())
       .try_map_with(|((name, directives), fields), exa| {
@@ -801,11 +873,7 @@ impl<Name, Directives, EnumValuesDefinition>
             ));
           }
         };
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
+        Ok((name, data))
       })
   }
 }
@@ -826,7 +894,7 @@ where
     Self: Sized + 'a,
     E: ParserExtra<'a, I, Error = Error> + 'a,
     T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    I: LogoStream<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
     Error: 'a,
   {
     Self::parser_with(

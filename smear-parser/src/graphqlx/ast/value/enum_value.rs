@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra},
+  LogoStream, Logos, Source, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra},
   utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
 };
 use smear_lexer::graphqlx::syntactic::SyntacticLexerErrors;
@@ -58,22 +58,20 @@ impl<S> EnumValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
+impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
   for EnumValue<S>
 where
   SyntacticToken<S>: Token<'a>,
   <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
   <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Path<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  Path<S>: Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
   str: Equivalent<Path<S>>,
 {
   #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+  fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
   where
     Self: Sized + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
+    SyntacticTokenizer<'a, S>: LogoStream<
         'a,
         SyntacticToken<S>,
         Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
@@ -82,7 +80,7 @@ where
       >,
     SyntacticToken<S>: Token<'a>,
     SyntacticTokenErrors<'a, S>: 'a,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+    E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
   {
     Path::parser().try_map(|path, span: Span| {
       if "true".equivalent(&path) {

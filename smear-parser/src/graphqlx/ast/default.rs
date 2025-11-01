@@ -55,7 +55,7 @@ pub type ExecutableDefinitionTypeGenerics<S> =
   scaffold::generic::ExecutableDefinitionTypeGenerics<Ident<S>>;
 
 /// A list of interfaces that a type implements.
-pub type ImplementInterfaces<S, Ty = Type<S>> = scaffold::ImplementInterfaces<TypePath<S, Ty>>;
+pub type ImplementsInterfaces<S, Ty = Type<S>> = scaffold::ImplementsInterfaces<TypePath<S, Ty>>;
 
 /// A default value for an input field or variable.
 pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
@@ -145,7 +145,7 @@ pub type EnumTypeExtension<S, Ty = Type<S>> =
   scaffold::EnumTypeExtension<Path<Ident<S>>, ConstDirectives<S, Ty>, EnumValuesDefinition<S, Ty>>;
 
 /// A list of member types for a union type.
-pub type UnionMemberTypes<S, Ty = Type<S>> = scaffold::UnionMemberTypes<TypePath<S, Ty>>;
+pub type UnionMembers<S, Ty = Type<S>> = scaffold::UnionMembers<TypePath<S, Ty>>;
 
 /// Definition of root operation types for a schema (query, mutation, subscription).
 pub type RootOperationTypesDefinition<S, Ty = Type<S>> =

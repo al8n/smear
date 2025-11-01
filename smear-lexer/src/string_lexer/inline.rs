@@ -79,7 +79,7 @@ impl<S: DisplayHuman> core::fmt::Display for LitInlineStr<S> {
 
 impl<'a> LitInlineStr<&'a str> {
   /// Returns the str representation of the inline string.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn as_str(&self) -> &'a str {
     match self {
       Self::Plain(s) => s.as_str(),
@@ -90,7 +90,7 @@ impl<'a> LitInlineStr<&'a str> {
 
 impl<'a> LitInlineStr<&'a [u8]> {
   /// Returns the byte slice representation of the inline string.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn as_bytes(&self) -> &'a [u8] {
     match self {
       Self::Plain(s) => s.as_bytes(),
@@ -128,7 +128,7 @@ impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
 
 impl<S> LitInlineStr<S> {
   /// Returns the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source(&self) -> S
   where
     S: Copy,
@@ -140,7 +140,7 @@ impl<S> LitInlineStr<S> {
   }
 
   /// Returns the reference to the underlying source.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn source_ref(&self) -> &S {
     match self {
       Self::Plain(s) => s.source_ref(),
@@ -149,7 +149,7 @@ impl<S> LitInlineStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn to_equivalent<T>(&self) -> LitInlineStr<T>
   where
     S: logosky::utils::ToEquivalent<T>,
@@ -161,7 +161,7 @@ impl<S> LitInlineStr<S> {
   }
 
   /// Converts this to an equivalent type.
-  #[inline(always)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn into_equivalent<T>(self) -> LitInlineStr<T>
   where
     S: logosky::utils::IntoEquivalent<T>,
@@ -243,7 +243,7 @@ fn normalize_str_to_string(src: &str, output: &mut String) {
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 const fn utf8_len_for_scalar(cp: u32) -> usize {
   match cp {
     0x0000..=0x007F => 1,

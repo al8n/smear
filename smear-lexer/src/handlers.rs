@@ -2,23 +2,23 @@ use logosky::{
   Logos, Source,
   logos::Lexer,
   utils::{
-    CharSize, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+    CharLen, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-    tracker::{LimitExceeded, Tracker},
+    tracker::{LimitExceeded, Limiter},
   },
 };
 
 use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   lexer.extras.increase_token();
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
   T: Logos<'a, Extras = RecursionLimiter>,
@@ -32,12 +32,12 @@ where
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer.extras.increase_recursion();
@@ -48,13 +48,13 @@ where
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -70,13 +70,13 @@ where
 }
 
 #[allow(clippy::result_large_err)]
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -91,13 +91,13 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_map<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -111,10 +111,10 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -127,7 +127,7 @@ where
     })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn unterminated_spread_operator_error<'a, T, E>(lexer: &mut Lexer<'a, T>) -> E
 where
   T: Logos<'a>,
@@ -136,17 +136,17 @@ where
   E::unterminated_spread_operator(lexer.span().into())
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
   lexer.extras.increase_token();
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn decrease_recursion_depth<'a, T>(lexer: &mut Lexer<'a, T>)
 where
   T: Logos<'a, Extras = RecursionLimiter>,
@@ -272,7 +272,7 @@ where
     }
     Some(ch) => {
       let span = lexer.span();
-      lexer.bump(ch.char_size());
+      lexer.bump(ch.char_len());
 
       let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
       UnexpectedLexeme::new(l, hint()).into()
@@ -280,12 +280,12 @@ where
   }
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) const fn is_ignored_char(ch: &char) -> bool {
   matches!(ch, ' ' | '\t' | '\r' | '\n' | '\u{FEFF}' | ',' | '#')
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   match b {
     b' ' | b'\t' | b'\r' | b'\n' | b',' | b'#' => true,
@@ -297,7 +297,7 @@ pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   }
 }
 
-pub(super) trait ValidateNumberChar<Language>: CharSize {
+pub(super) trait ValidateNumberChar<Language>: CharLen {
   fn is_first_invalid_char(&self) -> bool;
   fn is_following_invalid_char(&self) -> bool;
 }

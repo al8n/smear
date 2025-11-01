@@ -13,7 +13,16 @@ default = ["std"]
 alloc = []
 std = []
 
+cst = ["rowan", "logosky/rowan"]
+smallvec = ["logosky/smallvec"]
+
 [dependencies]
 derive_more.workspace = true
 logosky.workspace = true
 smear-lexer.workspace = true
+
+rowan = { version = "0.16", optional = true }
+
+[lints.rust]
+rust_2018_idioms = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
