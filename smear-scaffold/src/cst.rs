@@ -1,22 +1,30 @@
-//! Concrete Syntax Tree (CST) structures for smear-scaffold
-//!
-//! CST preserves all source information including whitespace, comments, and formatting.
-//! Unlike AST which only preserves semantic structure, CST maintains complete fidelity
-//! to the original source code, enabling:
-//!
-//! - Lossless round-tripping (parse and reconstruct identical source)
-//! - Code formatting and pretty-printing
-//! - Source code analysis and refactoring
-//! - IDE features like syntax highlighting and error reporting
-//!
-//! CST uses `LosslessToken` instead of `SyntacticToken` to preserve all trivia.
+// pub mod graphql;
+// pub mod graphqlx;
 
-mod and;
-pub mod definitions;
-pub mod lang;
-pub mod trivia;
+// pub use arguments::*;
+// pub use definitions::*;
+// pub use directives::*;
+// pub use field::*;
+// pub use fragment::*;
+// pub use input_value::*;
+// pub use selection_set::*;
 
-pub use and::*;
-pub use definitions::*;
-pub use lang::*;
-pub use trivia::*;
+// mod arguments;
+// mod definitions;
+// mod directives;
+// mod field;
+// mod fragment;
+// mod input_value;
+mod selection_set;
+
+pub use logosky::cst::*;
+
+/// Common components used across various CST nodes.
+pub mod components;
+
+#[cfg(feature = "smallvec")]
+type DefaultTriviaContainer<T> = logosky::utils::container::FourOrMore<T>;
+
+#[cfg(not(feature = "smallvec"))]
+type DefaultTriviaContainer<T> = std::vec::Vec<T>;
+

@@ -1,124 +1,104 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{self, Parser},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use smear_lexer::{
+  keywords::Set,
+  punctuator::{Bang, LBrace, RBrace},
+};
 
-/// CST representation of a GraphQL set type: `<Type>!?`
-///
-/// Preserves all tokens including angle brackets and bang.
+/// Represents a GraphQLx set type with optional non-null modifier in CST.
 ///
 /// ## Grammar
 /// ```text
-/// SetType : < Type > !?
+/// SetType : set { Type } !?
 /// ```
-#[derive(Debug, Clone)]
-pub struct SetType<Type, S, TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>> {
-  span: Span,
-  /// Padding around the left angle bracket
-  langle_padding: Padding<S, TriviaContainer>,
-  /// The element type
-  ty: Type,
-  /// Padding around the right angle bracket
-  rangle_padding: Padding<S, TriviaContainer>,
-  /// Optional bang token with its padding
-  bang: Option<Padding<S, TriviaContainer>>,
-}
-
-impl<Type, S, TriviaContainer> AsSpan<Span> for SetType<Type, S, TriviaContainer> {
-  #[inline]
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Type, S, TriviaContainer> IntoSpan<Span> for SetType<Type, S, TriviaContainer> {
-  #[inline]
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Type, S, TriviaContainer> IntoComponents for SetType<Type, S, TriviaContainer> {
-  type Components = (
-    Span,
-    Padding<S, TriviaContainer>,
-    Type,
-    Padding<S, TriviaContainer>,
-    Option<Padding<S, TriviaContainer>>,
-  );
-
-  #[inline]
-  fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.langle_padding,
-      self.ty,
-      self.rangle_padding,
-      self.bang,
-    )
-  }
-}
-
-impl<Type, S, TriviaContainer> SetType<Type, S, TriviaContainer>
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SetType<Type, Lang>
 where
-  TriviaContainer: Default,
+  Lang: Language,
 {
-  /// Creates a new CST SetType.
-  pub fn new(span: Span, ty: Type) -> Self {
-    Self {
-      span,
-      langle_padding: Padding::new(),
-      ty,
-      rangle_padding: Padding::new(),
-      bang: None,
-    }
-  }
+  syntax: SyntaxNode<Lang>,
+  set_kw: Set<TextRange, SyntaxToken<Lang>>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  ty: Type,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+}
 
-  /// Creates a new CST SetType with all components.
-  pub const fn with_parts(
-    span: Span,
-    langle_padding: Padding<S, TriviaContainer>,
+impl<Type, Lang> SetType<Type, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    set_kw: Set<TextRange, SyntaxToken<Lang>>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
     ty: Type,
-    rangle_padding: Padding<S, TriviaContainer>,
-    bang: Option<Padding<S, TriviaContainer>>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
   ) -> Self {
     Self {
-      span,
-      langle_padding,
+      syntax,
+      set_kw,
+      l_brace,
       ty,
-      rangle_padding,
+      r_brace,
       bang,
     }
   }
-}
 
-impl<Type, S, TriviaContainer> SetType<Type, S, TriviaContainer> {
+  /// Tries to create a new `SetType` from a syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
+  }
+
   /// Returns the span covering the entire set type.
   #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
   }
 
-  /// Returns a reference to the left angle bracket padding.
+  /// Returns the syntax node.
   #[inline]
-  pub const fn langle_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.langle_padding
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
   }
 
-  /// Returns a reference to the element type.
+  /// Returns the set keyword token.
+  #[inline]
+  pub const fn set_keyword(&self) -> &Set<TextRange, SyntaxToken<Lang>> {
+    &self.set_kw
+  }
+
+  /// Returns the left brace token.
+  #[inline]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
+  }
+
+  /// Returns the element type.
   #[inline]
   pub const fn ty(&self) -> &Type {
     &self.ty
   }
 
-  /// Returns a reference to the right angle bracket padding.
+  /// Returns the right brace token.
   #[inline]
-  pub const fn rangle_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.rangle_padding
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
   }
 
-  /// Returns a reference to the bang padding, if present.
+  /// Returns the bang token if present.
   #[inline]
-  pub const fn bang(&self) -> Option<&Padding<S, TriviaContainer>> {
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
     self.bang.as_ref()
   }
 
@@ -126,5 +106,41 @@ impl<Type, S, TriviaContainer> SetType<Type, S, TriviaContainer> {
   #[inline]
   pub const fn required(&self) -> bool {
     self.bang.is_some()
+  }
+}
+
+impl<'a, Type, Lang, I, T, Error> Parseable<'a, I, T, Error> for SetType<Type, Lang>
+where
+  Type: Parseable<'a, I, T, Error, Language = Lang>,
+  Set<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Bang<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(
+    builder: &'a SyntaxTreeBuilder<Self::Language>,
+  ) -> impl chumsky::Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: chumsky::extra::ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Set::parser(builder)
+      .ignore_then(LBrace::parser(builder))
+      .ignore_then(Type::parser(builder))
+      .then_ignore(RBrace::parser(builder))
+      .ignore_then(Bang::parser(builder).or_not())
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }

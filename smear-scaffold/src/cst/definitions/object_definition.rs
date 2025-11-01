@@ -1,150 +1,135 @@
-use core::marker::PhantomData;
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use smear_lexer::keywords::Type;
 
-/// CST representation of object type definition: `type Name implements Interface { fields }`
+/// Represents an object type definition in the CST.
 #[derive(Debug, Clone)]
-pub struct ObjectTypeDefinition<
-  Name,
-  Implements,
-  Directives,
-  Fields,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  type_keyword_padding: Padding<S, TriviaContainer>,
+pub struct ObjectTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  type_kw: Type<TextRange, SyntaxToken<Lang>>,
   name: Name,
-  implements: Option<Implements>,
+  implements: Option<ImplementsInterfaces>,
   directives: Option<Directives>,
-  fields_definition: Option<Fields>,
-  _marker: PhantomData<(S, TriviaContainer)>,
+  fields_definition: Option<FieldsDefinition>,
 }
 
-impl<Name, Implements, Directives, Fields, S, TriviaContainer>
-  ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+  ObjectTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    type_kw: Type<TextRange, SyntaxToken<Lang>>,
+    name: Name,
+    implements: Option<ImplementsInterfaces>,
+    directives: Option<Directives>,
+    fields_definition: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      syntax,
+      type_kw,
+      name,
+      implements,
+      directives,
+      fields_definition,
+    }
   }
-  pub const fn type_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.type_keyword_padding
+
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
   }
+
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  #[inline]
+  pub const fn type_keyword(&self) -> &Type<TextRange, SyntaxToken<Lang>> {
+    &self.type_kw
+  }
+
+  #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
   }
-  pub const fn implements(&self) -> Option<&Implements> {
+
+  #[inline]
+  pub const fn implements(&self) -> Option<&ImplementsInterfaces> {
     self.implements.as_ref()
   }
+
+  #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
-  pub const fn fields_definition(&self) -> Option<&Fields> {
+
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
     self.fields_definition.as_ref()
   }
 }
 
-impl<Name, Implements, Directives, Fields, S, TriviaContainer> AsSpan<Span>
-  for ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
+impl<
+    'a,
+    Name,
+    ImplementsInterfaces,
+    Directives,
+    FieldsDefinition,
+    Lang,
+    I,
+    T,
+    Error,
+  > Parseable<'a, I, T, Error>
+  for ObjectTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+where
+  Type<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Name: Parseable<'a, I, T, Error, Language = Lang>,
+  ImplementsInterfaces: Parseable<'a, I, T, Error, Language = Lang>,
+  Directives: Parseable<'a, I, T, Error, Language = Lang>,
+  FieldsDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  fn as_span(&self) -> &Span {
-    self.span()
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Type::parser(builder)
+      .ignore_then(Name::parser(builder))
+      .ignore_then(ImplementsInterfaces::parser(builder).or_not())
+      .ignore_then(Directives::parser(builder).or_not())
+      .ignore_then(FieldsDefinition::parser(builder).or_not())
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }
 
-impl<Name, Implements, Directives, Fields, S, TriviaContainer> IntoSpan<Span>
-  for ObjectTypeDefinition<Name, Implements, Directives, Fields, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-/// Object extension data
-#[derive(Debug, Clone)]
-pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
-  Directives {
-    implements: Option<Implements>,
-    directives: Directives,
-  },
-  Fields {
-    implements: Option<Implements>,
-    directives: Option<Directives>,
-    fields: Fields,
-  },
-  Implements(Implements),
-}
-
-impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directives, Fields> {
-  pub const fn implements(&self) -> Option<&Implements> {
-    match self {
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
-      Self::Implements(i) => Some(i),
-    }
-  }
-
-  pub const fn directives(&self) -> Option<&Directives> {
-    match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
-      Self::Implements(_) => None,
-    }
-  }
-
-  pub const fn fields_definition(&self) -> Option<&Fields> {
-    match self {
-      Self::Fields { fields, .. } => Some(fields),
-      _ => None,
-    }
-  }
-}
-
-/// CST representation of object type extension
-#[derive(Debug, Clone)]
-pub struct ObjectTypeExtension<
-  Name,
-  Implements,
-  Directives,
-  Fields,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  extend_keyword_padding: Padding<S, TriviaContainer>,
-  type_keyword_padding: Padding<S, TriviaContainer>,
-  name: Name,
-  data: ObjectTypeExtensionData<Implements, Directives, Fields>,
-  _marker: PhantomData<(S, TriviaContainer)>,
-}
-
-impl<Name, Implements, Directives, Fields, S, TriviaContainer>
-  ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
-{
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-  pub const fn data(&self) -> &ObjectTypeExtensionData<Implements, Directives, Fields> {
-    &self.data
-  }
-}
-
-impl<Name, Implements, Directives, Fields, S, TriviaContainer> AsSpan<Span>
-  for ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
-{
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Implements, Directives, Fields, S, TriviaContainer> IntoSpan<Span>
-  for ObjectTypeExtension<Name, Implements, Directives, Fields, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}

@@ -1,73 +1,118 @@
-use core::marker::PhantomData;
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use core::fmt::Debug;
+use smear_lexer::punctuator::{LBrace, RBrace};
 
-/// CST representation of input fields definition: `{ field1 field2 ... }`
+/// Represents an input fields definition in GraphQL schema.
 #[derive(Debug, Clone)]
-pub struct InputFieldsDefinition<
-  InputValueDef,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-  Container = Vec<InputValueDef>,
-> {
-  span: Span,
-  lbrace_padding: Padding<S, TriviaContainer>,
-  fields: Container,
-  rbrace_padding: Padding<S, TriviaContainer>,
-  _marker: PhantomData<InputValueDef>,
+pub struct InputFieldsDefinition<InputValueDefinition, Lang>
+where
+  Lang: Language,
+  InputValueDefinition: CstNode<Lang>,
+{
+  syntax: SyntaxNode<Lang>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  fields: CstNodeChildren<InputValueDefinition, Lang>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
 }
 
-impl<InputValueDef, S, TriviaContainer, Container>
-  InputFieldsDefinition<InputValueDef, S, TriviaContainer, Container>
+impl<InputValueDefinition, Lang> InputFieldsDefinition<InputValueDefinition, Lang>
+where
+  Lang: Language,
+  InputValueDefinition: CstNode<Lang>,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    fields: CstNodeChildren<InputValueDefinition, Lang>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
+    Self {
+      syntax,
+      l_brace,
+      fields,
+      r_brace,
+    }
   }
-  pub const fn lbrace_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.lbrace_padding
+
+  /// Tries to create an `InputFieldsDefinition` from the given syntax node.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
+    Self::try_cast_node(syntax)
   }
-  pub const fn input_value_definitions(&self) -> &Container {
+
+  /// Returns the span covering this input fields definition.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the left brace token.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
+  }
+
+  /// Returns the right brace token.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
+  }
+
+  /// Returns the collection of input value definitions.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub const fn input_value_definitions(&self) -> &CstNodeChildren<InputValueDefinition, Lang> {
     &self.fields
   }
-  pub const fn rbrace_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.rbrace_padding
-  }
 }
 
-impl<InputValueDef, S, TriviaContainer, Container> AsSpan<Span>
-  for InputFieldsDefinition<InputValueDef, S, TriviaContainer, Container>
+impl<'a, InputValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for InputFieldsDefinition<InputValueDefinition, Lang>
+where
+  InputValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
+  LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
+  type Language = Lang;
 
-impl<InputValueDef, S, TriviaContainer, Container> IntoSpan<Span>
-  for InputFieldsDefinition<InputValueDef, S, TriviaContainer, Container>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<InputValueDef, S, TriviaContainer, Container> IntoComponents
-  for InputFieldsDefinition<InputValueDef, S, TriviaContainer, Container>
-{
-  type Components = (
-    Span,
-    Padding<S, TriviaContainer>,
-    Container,
-    Padding<S, TriviaContainer>,
-  );
-
-  fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.lbrace_padding,
-      self.fields,
-      self.rbrace_padding,
-    )
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    LBrace::parser(builder)
+      .ignore_then(
+        InputValueDefinition::parser(builder)
+          .repeated()
+          .at_least(1)
+          .ignored(),
+      )
+      .then_ignore(RBrace::parser(builder))
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }

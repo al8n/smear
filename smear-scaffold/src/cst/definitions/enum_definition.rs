@@ -1,318 +1,322 @@
-use core::marker::PhantomData;
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use smear_lexer::{
+  keywords::Enum,
+  punctuator::{LBrace, RBrace},
+};
 
-/// CST representation of a single enum value definition
-///
-/// Preserves the enum value name and optional directives with all trivia
-#[derive(Debug, Clone)]
-pub struct EnumValueDefinition<
-  EnumValue,
-  Directives,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  enum_value: EnumValue,
+/// Represents a single enum value definition within an enum type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumValueDefinition<Value, Directives, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  value: Value,
   directives: Option<Directives>,
-  _marker: PhantomData<(S, TriviaContainer)>,
 }
 
-impl<EnumValue, Directives, S, TriviaContainer>
-  EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
+impl<Value, Directives, Lang> EnumValueDefinition<Value, Directives, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-  pub const fn value(&self) -> &EnumValue {
-    &self.enum_value
-  }
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-}
-
-impl<EnumValue, Directives, S, TriviaContainer> AsSpan<Span>
-  for EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
-{
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<EnumValue, Directives, S, TriviaContainer> IntoSpan<Span>
-  for EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<EnumValue, Directives, S, TriviaContainer> IntoComponents
-  for EnumValueDefinition<EnumValue, Directives, S, TriviaContainer>
-{
-  type Components = (Span, EnumValue, Option<Directives>);
-
-  fn into_components(self) -> Self::Components {
-    (self.span, self.enum_value, self.directives)
-  }
-}
-
-/// CST representation of enum values definition: `{ VALUE1 VALUE2 ... }`
-///
-/// Preserves braces and all enum values with their trivia
-#[derive(Debug, Clone)]
-pub struct EnumValuesDefinition<
-  EnumValueDef,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-  Container = Vec<EnumValueDef>,
-> {
-  span: Span,
-  lbrace_padding: Padding<S, TriviaContainer>,
-  enum_values: Container,
-  rbrace_padding: Padding<S, TriviaContainer>,
-  _marker: PhantomData<EnumValueDef>,
-}
-
-impl<EnumValueDef, S, TriviaContainer, Container>
-  EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
-{
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-  pub const fn lbrace_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.lbrace_padding
-  }
-  pub const fn enum_value_definitions(&self) -> &Container {
-    &self.enum_values
-  }
-  pub const fn rbrace_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.rbrace_padding
-  }
-}
-
-impl<EnumValueDef, S, TriviaContainer, Container> AsSpan<Span>
-  for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
-{
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<EnumValueDef, S, TriviaContainer, Container> IntoSpan<Span>
-  for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<EnumValueDef, S, TriviaContainer, Container> IntoComponents
-  for EnumValuesDefinition<EnumValueDef, S, TriviaContainer, Container>
-{
-  type Components = (
-    Span,
-    Padding<S, TriviaContainer>,
-    Container,
-    Padding<S, TriviaContainer>,
-  );
-
-  fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.lbrace_padding,
-      self.enum_values,
-      self.rbrace_padding,
-    )
-  }
-}
-
-/// CST representation of enum type definition: `enum Name { VALUES }`
-///
-/// Preserves `enum` keyword, name, optional directives, and optional enum values
-#[derive(Debug, Clone)]
-pub struct EnumTypeDefinition<
-  Name,
-  Directives,
-  EnumValues,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  enum_keyword_padding: Padding<S, TriviaContainer>,
-  name: Name,
-  directives: Option<Directives>,
-  enum_values: Option<EnumValues>,
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer>
-  EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.enum_keyword_padding
-  }
-  pub const fn name(&self) -> &Name {
-    &self.name
-  }
-  pub const fn directives(&self) -> Option<&Directives> {
-    self.directives.as_ref()
-  }
-  pub const fn enum_values_definition(&self) -> Option<&EnumValues> {
-    self.enum_values.as_ref()
-  }
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer> AsSpan<Span>
-  for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer> IntoSpan<Span>
-  for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer> IntoComponents
-  for EnumTypeDefinition<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  type Components = (
-    Span,
-    Padding<S, TriviaContainer>,
-    Name,
-    Option<Directives>,
-    Option<EnumValues>,
-  );
-
-  fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.enum_keyword_padding,
-      self.name,
-      self.directives,
-      self.enum_values,
-    )
-  }
-}
-
-/// CST representation of enum extension data
-#[derive(Debug, Clone)]
-pub enum EnumTypeExtensionData<Directives, EnumValues> {
-  /// Extension adds values with optional directives
-  Values {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    value: Value,
     directives: Option<Directives>,
-    values: EnumValues,
-  },
-  /// Extension adds only directives
-  Directives(Directives),
-}
+  ) -> Self {
+    Self {
+      syntax,
+      value,
+      directives,
+    }
+  }
 
-impl<Directives, EnumValues> EnumTypeExtensionData<Directives, EnumValues> {
+  /// Tries to create an `EnumValueDefinition` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
+  }
+
+  /// Returns the span covering the entire enum value definition.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the enum value.
+  #[inline]
+  pub const fn value(&self) -> &Value {
+    &self.value
+  }
+
+  /// Returns the optional directives.
+  #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
-    match self {
-      Self::Values { directives, .. } => directives.as_ref(),
-      Self::Directives(d) => Some(d),
-    }
-  }
-
-  pub const fn enum_values_definition(&self) -> Option<&EnumValues> {
-    match self {
-      Self::Values { values, .. } => Some(values),
-      Self::Directives(_) => None,
-    }
+    self.directives.as_ref()
   }
 }
 
-/// CST representation of enum type extension: `extend enum Name ...`
-///
-/// Preserves `extend` and `enum` keywords with all content
-#[derive(Debug, Clone)]
-pub struct EnumTypeExtension<
-  Name,
-  Directives,
-  EnumValues,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  extend_keyword_padding: Padding<S, TriviaContainer>,
-  enum_keyword_padding: Padding<S, TriviaContainer>,
-  name: Name,
-  data: EnumTypeExtensionData<Directives, EnumValues>,
-  _marker: PhantomData<(S, TriviaContainer)>,
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer>
-  EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
+impl<'a, Value, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for EnumValueDefinition<Value, Directives, Lang>
+where
+  Value: Parseable<'a, I, T, Error, Language = Lang>,
+  Directives: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Value::parser(builder)
+      .ignore_then(Directives::parser(builder).or_not())
+      .map(|_| {
+        builder.finish_node();
+      })
   }
-  pub const fn extend_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.extend_keyword_padding
+}
+
+/// Represents a collection of enum value definitions.
+#[derive(Debug, Clone)]
+pub struct EnumValuesDefinition<ValueDefinition, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+  values: CstNodeChildren<ValueDefinition, Lang>,
+  r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+}
+
+impl<ValueDefinition, Lang> EnumValuesDefinition<ValueDefinition, Lang>
+where
+  Lang: Language,
+{
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    l_brace: LBrace<TextRange, SyntaxToken<Lang>>,
+    values: CstNodeChildren<ValueDefinition, Lang>,
+    r_brace: RBrace<TextRange, SyntaxToken<Lang>>,
+  ) -> Self {
+    Self {
+      syntax,
+      l_brace,
+      values,
+      r_brace,
+    }
   }
-  pub const fn enum_keyword_padding(&self) -> &Padding<S, TriviaContainer> {
-    &self.enum_keyword_padding
+
+  /// Tries to create an `EnumValuesDefinition` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
+    Self::try_cast_node(syntax)
   }
+
+  /// Returns the span covering the entire enum values definition.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the left brace token.
+  #[inline]
+  pub const fn l_brace_token(&self) -> &LBrace<TextRange, SyntaxToken<Lang>> {
+    &self.l_brace
+  }
+
+  /// Returns the enum value definitions.
+  #[inline]
+  pub const fn values(&self) -> &CstNodeChildren<ValueDefinition, Lang> {
+    &self.values
+  }
+
+  /// Returns the right brace token.
+  #[inline]
+  pub const fn r_brace_token(&self) -> &RBrace<TextRange, SyntaxToken<Lang>> {
+    &self.r_brace
+  }
+}
+
+impl<'a, ValueDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for EnumValuesDefinition<ValueDefinition, Lang>
+where
+  ValueDefinition: Parseable<'a, I, T, Error, Language = Lang> + CstNode<Lang>,
+  LBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  RBrace<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    LBrace::parser(builder)
+      .ignore_then(
+        ValueDefinition::parser(builder)
+          .repeated()
+          .at_least(1)
+          .ignored(),
+      )
+      .then_ignore(RBrace::parser(builder))
+      .map(|_| {
+        builder.finish_node();
+      })
+  }
+}
+
+/// Represents an enum type definition in the CST.
+#[derive(Debug, Clone)]
+pub struct EnumTypeDefinition<Name, Directives, ValuesDefinition, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  enum_kw: Enum<TextRange, SyntaxToken<Lang>>,
+  name: Name,
+  directives: Option<Directives>,
+  values_definition: Option<ValuesDefinition>,
+}
+
+impl<Name, Directives, ValuesDefinition, Lang>
+  EnumTypeDefinition<Name, Directives, ValuesDefinition, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    enum_kw: Enum<TextRange, SyntaxToken<Lang>>,
+    name: Name,
+    directives: Option<Directives>,
+    values_definition: Option<ValuesDefinition>,
+  ) -> Self {
+    Self {
+      syntax,
+      enum_kw,
+      name,
+      directives,
+      values_definition,
+    }
+  }
+
+  /// Tries to create an `EnumTypeDefinition` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
+  }
+
+  /// Returns the span covering the entire enum type definition.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the enum keyword token.
+  #[inline]
+  pub const fn enum_keyword(&self) -> &Enum<TextRange, SyntaxToken<Lang>> {
+    &self.enum_kw
+  }
+
+  /// Returns the name of the enum type.
+  #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
   }
-  pub const fn data(&self) -> &EnumTypeExtensionData<Directives, EnumValues> {
-    &self.data
-  }
+
+  /// Returns the directives of the enum type.
+  #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
-    self.data.directives()
+    self.directives.as_ref()
   }
-  pub const fn enum_values_definition(&self) -> Option<&EnumValues> {
-    self.data.enum_values_definition()
+
+  /// Returns the optional values definition of the enum type.
+  #[inline]
+  pub const fn values_definition(&self) -> Option<&ValuesDefinition> {
+    self.values_definition.as_ref()
   }
 }
 
-impl<Name, Directives, EnumValues, S, TriviaContainer> AsSpan<Span>
-  for EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
+impl<'a, Name, Directives, ValuesDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for EnumTypeDefinition<Name, Directives, ValuesDefinition, Lang>
+where
+  Enum<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Name: Parseable<'a, I, T, Error, Language = Lang>,
+  Directives: Parseable<'a, I, T, Error, Language = Lang>,
+  ValuesDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  fn as_span(&self) -> &Span {
-    self.span()
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Enum::parser(builder)
+      .ignore_then(Name::parser(builder))
+      .ignore_then(Directives::parser(builder).or_not())
+      .ignore_then(ValuesDefinition::parser(builder).or_not())
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }
 
-impl<Name, Directives, EnumValues, S, TriviaContainer> IntoSpan<Span>
-  for EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
-  }
-}
-
-impl<Name, Directives, EnumValues, S, TriviaContainer> IntoComponents
-  for EnumTypeExtension<Name, Directives, EnumValues, S, TriviaContainer>
-{
-  type Components = (
-    Span,
-    Padding<S, TriviaContainer>,
-    Padding<S, TriviaContainer>,
-    Name,
-    EnumTypeExtensionData<Directives, EnumValues>,
-  );
-
-  fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.extend_keyword_padding,
-      self.enum_keyword_padding,
-      self.name,
-      self.data,
-    )
-  }
-}

@@ -1,80 +1,156 @@
-use core::marker::PhantomData;
-use logosky::utils::{AsSpan, IntoSpan, Span};
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, TextRange};
 
-use crate::cst::Padding;
+use core::fmt::Debug;
 
-/// CST representation of operation definition (query, mutation, subscription)
+/// Represents a named GraphQL operation definition.
+///
+/// ## Grammar
+///
+/// ```text
+/// OperationDefinition:
+///   OperationType Name? VariablesDefinition? Directives? SelectionSet
+/// ```
+///
+/// Spec: [Operation Definition](https://spec.graphql.org/draft/#sec-Language.Operations)
 #[derive(Debug, Clone)]
-pub struct OperationDefinition<
-  OperationType,
+pub struct NamedOperationDefinition<
   Name,
-  Variables,
+  OperationType,
+  VariablesDefinition,
   Directives,
   SelectionSet,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  operation_type: Option<OperationType>,
+  Lang,
+> where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  operation_type: OperationType,
   name: Option<Name>,
-  variable_definitions: Option<Variables>,
+  variables_definition: Option<VariablesDefinition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
-  _marker: PhantomData<(S, TriviaContainer)>,
 }
 
-impl<OperationType, Name, Variables, Directives, SelectionSet, S, TriviaContainer>
-  OperationDefinition<OperationType, Name, Variables, Directives, SelectionSet, S, TriviaContainer>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
+  NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
+where
+  Lang: Language,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    operation_type: OperationType,
+    name: Option<Name>,
+    variables_definition: Option<VariablesDefinition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      syntax,
+      operation_type,
+      name,
+      variables_definition,
+      directives,
+      selection_set,
+    }
   }
-  pub const fn operation_type(&self) -> Option<&OperationType> {
-    self.operation_type.as_ref()
+
+  /// Tries to create a `NamedOperationDefinition` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
+    Self::try_cast_node(syntax)
   }
+
+  /// Returns the span of the named operation definition.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node of the named operation definition.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the operation type of the named operation definition.
+  #[inline]
+  pub const fn operation_type(&self) -> &OperationType {
+    &self.operation_type
+  }
+
+  /// Returns the name of the named operation definition.
+  #[inline]
   pub const fn name(&self) -> Option<&Name> {
     self.name.as_ref()
   }
-  pub const fn variable_definitions(&self) -> Option<&Variables> {
-    self.variable_definitions.as_ref()
+
+  /// Returns the variable definitions of the named operation definition.
+  #[inline]
+  pub const fn variable_definitions(&self) -> Option<&VariablesDefinition> {
+    self.variables_definition.as_ref()
   }
+
+  /// Returns the directives of the named operation definition.
+  #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
+
+  /// Returns the selection set of the named operation definition.
+  #[inline]
   pub const fn selection_set(&self) -> &SelectionSet {
     &self.selection_set
   }
 }
 
-impl<OperationType, Name, Variables, Directives, SelectionSet, S, TriviaContainer> AsSpan<Span>
-  for OperationDefinition<
-    OperationType,
+impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for NamedOperationDefinition<
     Name,
-    Variables,
+    OperationType,
+    VariablesDefinition,
     Directives,
     SelectionSet,
-    S,
-    TriviaContainer,
+    Lang,
   >
+where
+  Name: Parseable<'a, I, T, Error, Language = Lang>,
+  OperationType: Parseable<'a, I, T, Error, Language = Lang>,
+  VariablesDefinition: Parseable<'a, I, T, Error, Language = Lang>,
+  Directives: Parseable<'a, I, T, Error, Language = Lang>,
+  SelectionSet: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
+  type Language = Lang;
 
-impl<OperationType, Name, Variables, Directives, SelectionSet, S, TriviaContainer> IntoSpan<Span>
-  for OperationDefinition<
-    OperationType,
-    Name,
-    Variables,
-    Directives,
-    SelectionSet,
-    S,
-    TriviaContainer,
-  >
-{
-  fn into_span(self) -> Span {
-    self.span
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    OperationType::parser(builder)
+      .ignore_then(Name::parser(builder).or_not())
+      .ignore_then(VariablesDefinition::parser(builder).or_not())
+      .ignore_then(Directives::parser(builder).or_not())
+      .ignore_then(SelectionSet::parser(builder))
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }

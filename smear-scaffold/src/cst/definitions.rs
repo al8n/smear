@@ -1,7 +1,5 @@
 /// Generic definitions scaffold.
 pub mod generic;
-/// Type definitions for CST
-pub mod ty;
 
 mod arguments_definition;
 mod described;
@@ -22,6 +20,7 @@ mod operation_type_definition;
 mod path;
 mod scalar_definition;
 mod schema_definition;
+mod ty;
 mod type_system;
 mod union_definition;
 mod variable_definition;

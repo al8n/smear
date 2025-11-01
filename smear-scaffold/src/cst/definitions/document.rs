@@ -1,138 +1,94 @@
-use core::marker::PhantomData;
-use logosky::utils::Span;
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{CstElement, CstNode, CstNodeChildren, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, TextRange};
 
-/// Concrete Syntax Tree representation of a GraphQL document.
+/// A document consisting of a series of definitions.
 ///
-/// Unlike the AST version which only stores definitions, the CST version preserves:
-/// - Leading trivia before the first definition
-/// - Trivia between each definition
-/// - Trailing trivia after the last definition
-///
-/// This allows for complete source reconstruction including all formatting,
-/// comments, and whitespace.
-///
-/// ## Examples
-/// ```text
-/// # GraphQL schema
-/// type User {
-///   id: ID!
-/// }
-///
-/// # Another type
-/// type Post {
-///   title: String
-/// }
-/// ```
-///
-/// The CST would preserve the comment "# GraphQL schema", the blank line,
-/// the comment "# Another type", etc.
+/// This is the top-level container for GraphQL documents. It holds a collection of definitions
+/// (type system definitions, executable definitions, or both) and tracks the source span.
 #[derive(Debug, Clone)]
-pub struct Document<
-  Definition,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-  Container = Vec<Definition>,
-> {
-  span: Span,
-  /// Leading trivia before the first definition
-  leading: TriviaContainer,
-  /// Definitions with their associated padding (trivia after each definition)
-  definitions: Container,
-  /// Trailing trivia after the last definition
-  trailing: TriviaContainer,
-  _marker: PhantomData<(Definition, S)>,
+pub struct Document<Definition, Lang>
+where
+  Lang: Language,
+  Definition: CstNode<Lang>,
+{
+  syntax: SyntaxNode<Lang>,
+  definitions: CstNodeChildren<Definition, Lang>,
 }
 
-impl<Definition, S, TriviaContainer, Container> Document<Definition, S, TriviaContainer, Container>
+impl<Definition, Lang> Document<Definition, Lang>
 where
-  TriviaContainer: Default,
-  Container: Default,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+  Definition: CstNode<Lang>,
 {
-  /// Creates a new empty CST Document.
-  pub fn new(span: Span) -> Self {
-    Self {
-      span,
-      leading: TriviaContainer::default(),
-      definitions: Container::default(),
-      trailing: TriviaContainer::default(),
-      _marker: PhantomData,
-    }
-  }
-
-  /// Creates a new CST Document with the given components.
-  pub const fn with_parts(
-    span: Span,
-    leading: TriviaContainer,
-    definitions: Container,
-    trailing: TriviaContainer,
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    definitions: CstNodeChildren<Definition, Lang>,
   ) -> Self {
     Self {
-      span,
-      leading,
+      syntax,
       definitions,
-      trailing,
-      _marker: PhantomData,
     }
+  }
+
+  /// Tries to create a `Document` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
+  }
+
+  /// Returns a reference to the span covering the entire document.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the definitions in the document.
+  #[inline]
+  pub const fn definitions(&self) -> &CstNodeChildren<Definition, Lang> {
+    &self.definitions
   }
 }
 
-impl<Definition, S, TriviaContainer, Container>
-  Document<Definition, S, TriviaContainer, Container>
+impl<'a, Definition, Lang, I, Token, Error> Parseable<'a, I, Token, Error>
+  for Document<Definition, Lang>
+where
+  Definition: Parseable<'a, I, Token, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Definition: CstNode<Lang>,
+  Self: CstNode<Lang>,
 {
-  /// Returns the span covering the entire document.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
+  type Language = Lang;
 
-  /// Returns a reference to the leading trivia.
   #[inline]
-  pub const fn leading(&self) -> &TriviaContainer {
-    &self.leading
-  }
-
-  /// Returns a reference to the definitions container.
-  #[inline]
-  pub const fn definitions(&self) -> &Container {
-    &self.definitions
-  }
-
-  /// Returns a reference to the trailing trivia.
-  #[inline]
-  pub const fn trailing(&self) -> &TriviaContainer {
-    &self.trailing
-  }
-
-  /// Returns a mutable reference to the leading trivia.
-  #[inline]
-  pub fn leading_mut(&mut self) -> &mut TriviaContainer {
-    &mut self.leading
-  }
-
-  /// Returns a mutable reference to the definitions container.
-  #[inline]
-  pub fn definitions_mut(&mut self) -> &mut Container {
-    &mut self.definitions
-  }
-
-  /// Returns a mutable reference to the trailing trivia.
-  #[inline]
-  pub fn trailing_mut(&mut self) -> &mut TriviaContainer {
-    &mut self.trailing
-  }
-
-  /// Returns a slice of definitions if the container supports it.
-  #[inline]
-  pub fn definitions_slice(&self) -> &[Definition]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
   where
-    Container: AsRef<[Definition]>,
+    I: LogoStream<'a, Token, Slice = <<<Token>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    Token: LosslessToken<'a>,
+    <<Token>::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
   {
-    self.definitions().as_ref()
-  }
-
-  /// Deconstructs the Document into its components.
-  pub fn into_parts(self) -> (Span, TriviaContainer, Container, TriviaContainer) {
-    (self.span, self.leading, self.definitions, self.trailing)
+    builder.start_node(Self::KIND);
+    Definition::parser(builder)
+      .repeated()
+      .at_least(1)
+      .ignored()
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }

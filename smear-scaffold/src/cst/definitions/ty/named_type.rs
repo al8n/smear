@@ -1,81 +1,70 @@
-use logosky::utils::{AsSpan, IntoComponents, IntoSpan, Span};
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{self, Parser},
+  cst::{CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError},
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use smear_lexer::punctuator::Bang;
 
-/// Concrete Syntax Tree representation of a named GraphQL type with optional non-null modifier.
-///
-/// Unlike the AST version which only stores the name and required flag, this CST version
-/// preserves:
-/// - The exact name token with its trivia
-/// - The optional bang token (`!`) with its trivia
-/// - All whitespace and comments between tokens
-///
-/// This allows for lossless round-tripping and source-level manipulation.
+/// Represents a named GraphQL type with optional non-null modifier in CST.
 ///
 /// ## Grammar
 /// ```text
 /// NamedType : Name !?
 /// ```
-///
-/// ## Examples
-/// ```text
-/// String          # name: "String", bang: None
-/// String!         # name: "String", bang: Some(!)
-/// User  !         # name: "User  ", bang: Some(!)  (preserves spacing)
-/// ```
-#[derive(Debug, Clone)]
-pub struct NamedType<Name, S, TriviaContainer = std::vec::Vec<crate::cst::Trivia<S>>> {
-  span: Span,
-  /// The type name with its padding
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NamedType<Name, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
   name: Name,
-  /// The optional bang token with its padding
-  bang: Option<Padding<S, TriviaContainer>>,
+  bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
 }
 
-impl<Name, S, TriviaContainer> AsSpan<Span> for NamedType<Name, S, TriviaContainer> {
+impl<Name, Lang> NamedType<Name, Lang>
+where
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    name: Name,
+    bang: Option<Bang<TextRange, SyntaxToken<Lang>>>,
+  ) -> Self {
+    Self { syntax, name, bang }
+  }
+
+  /// Tries to create a new `NamedType` from a syntax node.
   #[inline]
-  fn as_span(&self) -> &Span {
-    self.span()
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>> {
+    Self::try_cast_node(syntax)
   }
-}
 
-impl<Name, S, TriviaContainer> IntoSpan<Span> for NamedType<Name, S, TriviaContainer> {
+  /// Returns the span covering the entire named type.
   #[inline]
-  fn into_span(self) -> Span {
-    self.span
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
   }
-}
 
-impl<Name, S, TriviaContainer> IntoComponents for NamedType<Name, S, TriviaContainer> {
-  type Components = (Span, Name, Option<Padding<S, TriviaContainer>>);
-
+  /// Returns the syntax node.
   #[inline]
-  fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.bang)
-  }
-}
-
-impl<Name, S, TriviaContainer> NamedType<Name, S, TriviaContainer> {
-  /// Creates a new CST NamedType.
-  pub const fn new(span: Span, name: Name, bang: Option<Padding<S, TriviaContainer>>) -> Self {
-    Self { span, name, bang }
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
   }
 
-  /// Returns the span covering the entire named type including all trivia.
-  #[inline]
-  pub const fn span(&self) -> &Span {
-    &self.span
-  }
-
-  /// Returns a reference to the type name.
+  /// Returns the type name.
   #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
   }
 
-  /// Returns a reference to the bang token padding, if present.
+  /// Returns the bang token if present.
   #[inline]
-  pub const fn bang(&self) -> Option<&Padding<S, TriviaContainer>> {
+  pub const fn bang_token(&self) -> Option<&Bang<TextRange, SyntaxToken<Lang>>> {
     self.bang.as_ref()
   }
 
@@ -84,13 +73,34 @@ impl<Name, S, TriviaContainer> NamedType<Name, S, TriviaContainer> {
   pub const fn required(&self) -> bool {
     self.bang.is_some()
   }
-
-  /// Converts this CST node into mutable references to its components.
-  pub fn as_mut_parts(&mut self) -> (&mut Name, &mut Option<Padding<S, TriviaContainer>>) {
-    (&mut self.name, &mut self.bang)
-  }
 }
 
-// Note: Parser implementation would go here, but requires integration with
-// a trivia-collecting tokenizer. For now, CST nodes are meant to be constructed
-// programmatically or via a custom parser that handles lossless token streams.
+impl<'a, Name, Lang, I, T, Error> Parseable<'a, I, T, Error> for NamedType<Name, Lang>
+where
+  Name: Parseable<'a, I, T, Error, Language = Lang>,
+  Bang<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
+{
+  type Language = Lang;
+
+  #[inline]
+  fn parser<E>(
+    builder: &'a SyntaxTreeBuilder<Self::Language>,
+  ) -> impl chumsky::Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: chumsky::extra::ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Name::parser(builder)
+      .ignore_then(Bang::parser(builder).or_not())
+      .map(|_| {
+        builder.finish_node();
+      })
+  }
+}

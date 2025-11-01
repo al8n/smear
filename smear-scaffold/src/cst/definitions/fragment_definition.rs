@@ -1,60 +1,149 @@
-use core::marker::PhantomData;
-use logosky::utils::{AsSpan, IntoSpan, Span};
-use std::vec::Vec;
+use logosky::{
+  Logos, LosslessToken, Source, LogoStream,
+  chumsky::{Parser, extra::ParserExtra},
+  cst::{
+    CstElement, CstNode, Parseable, SyntaxTreeBuilder, error::SyntaxError,
+  },
+};
+use rowan::{Language, SyntaxNode, SyntaxToken, TextRange};
 
-use crate::cst::Padding;
+use core::fmt::Debug;
+use smear_lexer::keywords::Fragment;
 
-/// CST representation of fragment definition
+/// Represents a named fragment definition in GraphQL.
+///
+/// ## Grammar
+///
+/// ```text
+/// FragmentDefinition : fragment FragmentName TypeCondition Directives? SelectionSet
+/// ```
+///
+/// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
 #[derive(Debug, Clone)]
-pub struct FragmentDefinition<
-  FragmentName,
-  TypeCondition,
-  Directives,
-  SelectionSet,
-  S,
-  TriviaContainer = Vec<crate::cst::Trivia<S>>,
-> {
-  span: Span,
-  fragment_keyword_padding: Padding<S, TriviaContainer>,
-  fragment_name: FragmentName,
+pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
+where
+  Lang: Language,
+{
+  syntax: SyntaxNode<Lang>,
+  fragment_kw: Fragment<TextRange, SyntaxToken<Lang>>,
+  name: FragmentName,
   type_condition: TypeCondition,
   directives: Option<Directives>,
   selection_set: SelectionSet,
-  _marker: PhantomData<(S, TriviaContainer)>,
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer>
-  FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
+  FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
+where
+  Lang: Language,
 {
-  pub const fn span(&self) -> &Span {
-    &self.span
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub(in crate::cst) const fn new(
+    syntax: SyntaxNode<Lang>,
+    fragment_kw: Fragment<TextRange, SyntaxToken<Lang>>,
+    name: FragmentName,
+    type_condition: TypeCondition,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      syntax,
+      fragment_kw,
+      name,
+      type_condition,
+      directives,
+      selection_set,
+    }
   }
-  pub const fn fragment_name(&self) -> &FragmentName {
-    &self.fragment_name
+
+  /// Tries to create a `FragmentDefinition` from the given syntax node.
+  #[inline]
+  pub fn try_new(syntax: SyntaxNode<Lang>) -> Result<Self, SyntaxError<Self, Lang>>
+  where
+    Self: CstNode<Lang>,
+  {
+    Self::try_cast_node(syntax)
   }
-  pub const fn type_condition(&self) -> &TypeCondition {
+
+  /// Returns the span covering this fragment definition.
+  #[inline]
+  pub fn span(&self) -> TextRange {
+    self.syntax.text_range()
+  }
+
+  /// Returns the syntax node.
+  #[inline]
+  pub const fn syntax(&self) -> &SyntaxNode<Lang> {
+    &self.syntax
+  }
+
+  /// Returns the fragment keyword token.
+  #[inline]
+  pub const fn fragment_keyword(&self) -> &Fragment<TextRange, SyntaxToken<Lang>>
+  {
+    &self.fragment_kw
+  }
+
+  /// Returns the fragment name.
+  #[inline]
+  pub const fn name(&self) -> &FragmentName {
+    &self.name
+  }
+
+  /// Returns the type condition.
+  #[inline]
+  pub const fn type_condition(&self) -> &TypeCondition
+  {
     &self.type_condition
   }
-  pub const fn directives(&self) -> Option<&Directives> {
+
+  /// Returns the optional directives.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives>
+  {
     self.directives.as_ref()
   }
-  pub const fn selection_set(&self) -> &SelectionSet {
+
+  /// Returns the selection set.
+  #[inline]
+  pub const fn selection_set(&self) -> &SelectionSet
+  {
     &self.selection_set
   }
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer> AsSpan<Span>
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer>
+impl<'a, FragmentName, TypeCondition, Directives, SelectionSet, Lang, I, T, Error>
+  Parseable<'a, I, T, Error>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
+where
+  Fragment<TextRange, SyntaxToken<Lang>>: Parseable<'a, I, T, Error, Language = Lang>,
+  FragmentName: Parseable<'a, I, T, Error, Language = Lang>,
+  TypeCondition: Parseable<'a, I, T, Error, Language = Lang>,
+  Directives: Parseable<'a, I, T, Error, Language = Lang>,
+  SelectionSet: Parseable<'a, I, T, Error, Language = Lang>,
+  Lang: Language,
+  Lang::Kind: Into<rowan::SyntaxKind>,
+  Self: CstNode<Lang>,
 {
-  fn as_span(&self) -> &Span {
-    self.span()
-  }
-}
+  type Language = Lang;
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer> IntoSpan<Span>
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, S, TriviaContainer>
-{
-  fn into_span(self) -> Span {
-    self.span
+  #[inline]
+  fn parser<E>(builder: &'a SyntaxTreeBuilder<Self::Language>) -> impl Parser<'a, I, (), E> + Clone
+  where
+    I: LogoStream<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
+    T: LosslessToken<'a>,
+    <T::Logos as Logos<'a>>::Source: Source<Slice<'a> = &'a str>,
+    Error: 'a,
+    E: ParserExtra<'a, I, Error = Error> + 'a,
+  {
+    builder.start_node(Self::KIND);
+    Fragment::parser(builder)
+      .ignore_then(FragmentName::parser(builder))
+      .ignore_then(TypeCondition::parser(builder))
+      .ignore_then(Directives::parser(builder).or_not())
+      .ignore_then(SelectionSet::parser(builder))
+      .map(|_| {
+        builder.finish_node();
+      })
   }
 }
