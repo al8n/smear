@@ -3,8 +3,8 @@ use crate::{
 };
 
 use super::{
-  DefaultVec, Expectation, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
-  SyntacticTokenizer,
+  DefaultVec, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenizer,
+  SyntaxKind,
 };
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
@@ -255,7 +255,7 @@ where
                     })) => Ident::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
                       return Err(
-                        SyntacticTokenError::unexpected_token(data, Expectation::Identifier, span)
+                        SyntacticTokenError::unexpected_token(data, SyntaxKind::Identifier, span)
                           .into(),
                       );
                     }
@@ -318,8 +318,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
-                      .into(),
+                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
                   );
                 }
               };
@@ -544,8 +543,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
-                      .into(),
+                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
                   );
                 }
               };

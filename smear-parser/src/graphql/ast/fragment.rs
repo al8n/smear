@@ -36,7 +36,7 @@ where
               Ok(FragmentName::new(span, name))
             }
           }
-          tok => Err(Error::unexpected_token(tok, Expectation::FragmentName, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::FragmentName, span).into()),
         }
       }
       Lexed::Error(err) => Err(SyntacticTokenError::from_lexer_errors(err, span).into()),

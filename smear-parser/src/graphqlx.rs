@@ -6,83 +6,623 @@ pub mod cst;
 
 mod error;
 
-/// Expectations for the GraphQLx parser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// GraphQLx Concrete Syntax Tree node kind.
+///
+/// Represents all possible node types in a GraphQLx CST, including standard GraphQL nodes
+/// plus extensions for generics, imports, type paths, maps, sets, and extended numeric literals.
+/// This enum can be converted to `rowan::SyntaxKind` for use with the rowan library.
+///
+/// ## Node Categories
+///
+/// - **Standard GraphQL Nodes**: All nodes from standard GraphQL
+/// - **Extended Numeric Literals**: Hexadecimal (`0xFF`), binary (`0b101`), octal (`0o77`), hex float (`0x1.8p3`)
+/// - **Generic Type System**: Type parameters, where clauses, constraints
+/// - **Import System**: Import statements, import specifiers
+/// - **Type Paths**: Namespaced type references (e.g., `user::User`, `::Global`)
+/// - **Extended Collections**: Map types (`<K => V>`), set types (`<T>`)
+#[allow(clippy::upper_case_acronyms, bad_style)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u16)]
 #[non_exhaustive]
-pub enum Expectation {
-  /// An inline string was expected.
+pub enum SyntaxKind {
+  // ============================================================================
+  // Tokens (Leaf Nodes)
+  // ============================================================================
+  /// Identifier token (e.g., `User`, `query`, `id`)
+  Identifier,
+
+  /// Int integer literal token (e.g., `42`, `-10`)
+  Int,
+
+  /// Hexadecimal integer literal token (e.g., `0xFF`, `0x2A`)
+  Hex,
+
+  /// Binary integer literal token (e.g., `0b101`, `0b1010`)
+  Binary,
+
+  /// Octal integer literal token (e.g., `0o77`, `0o52`)
+  Octal,
+
+  /// Decimal float literal token (e.g., `3.14`, `-2.5e10`)
+  Float,
+
+  /// Hexadecimal float literal token (e.g., `0x1.8p3`, `0xA.Bp-2`)
+  HexFloat,
+
+  /// Inline string literal token (e.g., `"hello"`)
   InlineString,
-  /// A block string was expected.
+
+  /// Block string literal token (e.g., `"""multi\nline"""`)
   BlockString,
-  /// A `$` was expected.
+
+  /// String literal token (either inline or block)
+  String,
+
+  // ============================================================================
+  // Keyword Tokens
+  // ============================================================================
+  /// `query` keyword
+  query_KW,
+
+  /// `mutation` keyword
+  mutation_KW,
+
+  /// `subscription` keyword
+  subscription_KW,
+
+  /// `fragment` keyword
+  fragment_KW,
+
+  /// `on` keyword
+  on_KW,
+
+  /// `null` keyword
+  null_KW,
+
+  /// `true` keyword
+  true_KW,
+
+  /// `false` keyword
+  false_KW,
+
+  /// `type` keyword
+  type_KW,
+
+  /// `interface` keyword
+  interface_KW,
+
+  /// `union` keyword
+  union_KW,
+
+  /// `enum` keyword
+  enum_KW,
+
+  /// `input` keyword
+  input_KW,
+
+  /// `scalar` keyword
+  scalar_KW,
+
+  /// `schema` keyword
+  schema_KW,
+
+  /// `directive` keyword
+  directive_KW,
+
+  /// `extend` keyword
+  extend_KW,
+
+  /// `implements` keyword
+  implements_KW,
+
+  /// `repeatable` keyword
+  repeatable_KW,
+
+  /// `import` keyword (GraphQLx extension)
+  import_KW,
+
+  /// `from` keyword (GraphQLx extension)
+  from_KW,
+
+  /// `as` keyword (GraphQLx extension)
+  as_KW,
+
+  /// `where` keyword (GraphQLx extension)
+  where_KW,
+
+  /// `set` keyword (GraphQLx extension)
+  set_KW,
+
+  /// `map` keyword (GraphQLx extension)
+  map_KW,
+
+  // ============================================================================
+  // Directive Locations Keywords
+  // ============================================================================
+  /// `QUERY` directive location
+  QUERY_KW,
+  /// `MUTATION` directive location
+  MUTATION_KW,
+  /// `SUBSCRIPTION` directive location
+  SUBSCRIPTION_KW,
+  /// `FIELD` directive location
+  FIELD_KW,
+  /// `FRAGMENT_DEFINITION` directive location
+  FRAGMENT_DEFINITION_KW,
+  /// `FRAGMENT_SPREAD` directive location
+  FRAGMENT_SPREAD_KW,
+  /// `INLINE_FRAGMENT` directive location
+  INLINE_FRAGMENT_KW,
+  /// `VARIABLE_DEFINITION` directive location
+  VARIABLE_DEFINITION_KW,
+  /// `SCHEMA` directive location
+  SCHEMA_KW,
+  /// `SCALAR` directive location
+  SCALAR_KW,
+  /// `OBJECT` directive location
+  OBJECT_KW,
+  /// `FIELD_DEFINITION` directive location
+  FIELD_DEFINITION_KW,
+  /// `ARGUMENT_DEFINITION` directive location
+  ARGUMENT_DEFINITION_KW,
+  /// `INTERFACE` directive location
+  INTERFACE_KW,
+  /// `UNION` directive location
+  UNION_KW,
+  /// `ENUM` directive location
+  ENUM_KW,
+  /// `ENUM_VALUE` directive location
+  ENUM_VALUE_KW,
+  /// `INPUT_OBJECT` directive location
+  INPUT_OBJECT_KW,
+  /// `INPUT_FIELD_DEFINITION` directive location
+  INPUT_FIELD_DEFINITION_KW,
+
+  // ============================================================================
+  // Punctuation Tokens
+  // ============================================================================
+  /// Dollar sign `$` (variable prefix)
   Dollar,
-  /// A `(` was expected.
+
+  /// Left parenthesis `(`
   LParen,
-  /// A `)` was expected.
+
+  /// Right parenthesis `)`
   RParen,
-  /// A `...` was expected.
+
+  /// Spread operator `...`
   Spread,
-  /// A `:` was expected.
+
+  /// Colon `:`
   Colon,
-  /// A `=` was expected.
+
+  /// Equal sign `=`
   Equal,
-  /// A `@` was expected.
+
+  /// At sign `@`
   At,
-  /// A `<` was expected.
-  LAngle,
-  /// A `>` was expected.
-  RAngle,
-  /// A `[` was expected.
+
+  /// Left square bracket `[`
   LBracket,
-  /// A `]` was expected.
+
+  /// Right square bracket `]`
   RBracket,
-  /// A `{` was expected.
+
+  /// Left curly brace `{`
   LBrace,
-  /// A `}` was expected.
+
+  /// Right curly brace `}`
   RBrace,
-  /// An `*` was expected.
-  Asterisk,
-  /// A `+` was expected.
-  Plus,
-  /// A `-` was expected.
-  Minus,
-  /// A path separator (`::`) was expected.
-  PathSeparator,
-  /// A fat arrow (`=>`) was expected.
-  FatArrow,
-  /// A `|` was expected.
+
+  /// Pipe `|`
   Pipe,
-  /// A `!` was expected.
+
+  /// Exclamation mark `!` (non-null modifier)
   Bang,
-  /// A `&` was expected.
+
+  /// Ampersand `&` (implements separator, where clause separator)
   Ampersand,
 
-  /// Const input value was expected.
-  ConstInputValue,
-  /// Input value was expected.
-  InputValue,
-  /// Fragment name was expected.
-  FragmentName,
-  /// An identifier was expected.
-  Identifier,
-  /// An operation name was expected.
-  OperationName,
-  /// An directive location was expected.
+  /// Left angle bracket `<` (type parameters, set/map open)
+  LAngle,
+
+  /// Right angle bracket `>` (type parameters, set/map close)
+  RAngle,
+
+  /// Fat arrow `=>` (map type separator)
+  FatArrow,
+
+  /// Plus `+` (trait bound combiner)
+  Plus,
+
+  /// Minus `-` (for negative numbers)
+  Minus,
+
+  /// Path separator `::` (namespace separator)
+  PathSeparator,
+
+  /// Asterisk `*` (wildcard import)
+  Asterisk,
+
+  // ============================================================================
+  // Trivia Nodes (Whitespace, Comments, Commas)
+  // ============================================================================
+  /// Whitespace
+  Whitespace,
+
+  /// Tab
+  Tab,
+
+  /// Newline
+  Newline,
+
+  /// Carriage return
+  CarriageReturn,
+
+  /// Carriage return + Newline
+  CarriageReturnNewline,
+
+  /// Comment (from `#` to end of line)
+  Comment,
+
+  /// Comma `,` (optional separator)
+  Comma,
+
+  // ============================================================================
+  // Type System Nodes
+  // ============================================================================
+  /// Named type (e.g., `String`, `User`)
+  NamedType,
+
+  /// List type (e.g., `[String]`)
+  ListType,
+
+  /// Non-null type (e.g., `String!`, `[User]!`)
+  NonNullType,
+
+  /// Set type (e.g., `<String>`, `<User!>`)
+  SetType,
+
+  /// Map type (e.g., `<String => Int>`, `<ID! => User>`)
+  MapType,
+
+  // ============================================================================
+  // Type Path Nodes (GraphQLx Extension)
+  // ============================================================================
+  /// Path (e.g., `user::profile`, `::std`)
+  Path,
+
+  /// Type path (e.g., `user::User`, `std::Option<T>`)
+  TypePath,
+
+  /// Definition type path (e.g., `v1::User<ID>`)
+  DefinitionTypePath,
+
+  /// Path segment (single identifier in a path with optional separator for leading segment and required separator for following segments)
+  PathSegment,
+
+  // ============================================================================
+  // Generic Type System Nodes (GraphQLx Extension)
+  // ============================================================================
+  /// Type parameter (e.g., `T`, `K`, `V`)
+  TypeParameter,
+
+  /// Type parameters list (e.g., `T, K, V`)
+  TypeParameters,
+
+  /// Type generics (type parameters with constraints)
+  TypeGenerics,
+
+  /// Definition type generics (for type definitions)
+  DefinitionTypeGenerics,
+
+  /// Extension type generics (for type extensions)
+  ExtensionTypeGenerics,
+
+  /// Executable definition type generics (for operations/fragments)
+  ExecutableDefinitionTypeGenerics,
+
+  /// Where clause (e.g., `where T: Node`)
+  WhereClause,
+
+  /// Where predicate (e.g., `T: Node`)
+  WherePredicate,
+
+  /// Type bound (e.g., `Node`, `Node + Timestamped`)
+  TypeBound,
+
+  /// Type constraint (e.g., `: Node`)
+  TypeConstraint,
+
+  /// Default type (e.g., `= String`)
+  DefaultType,
+
+  // ============================================================================
+  // Import System Nodes (GraphQLx Extension)
+  // ============================================================================
+  /// Import definition (e.g., `import { User } from "./types.graphqlx"`)
+  ImportDefinition,
+
+  /// Import clause (what to import)
+  ImportClause,
+
+  /// Import list (e.g., `{ User, Post }`)
+  ImportList,
+
+  /// Import member (single imported item)
+  ImportMember,
+
+  /// Named import specifier (e.g., `User`, `User as UserType`)
+  NamedSpecifier,
+
+  /// Wildcard import specifier (e.g., `*`, `* as types`)
+  WildcardSpecifier,
+
+  /// Import alias (e.g., `as UserType`)
+  ImportAlias,
+
+  // ============================================================================
+  // Type Definition Nodes
+  // ============================================================================
+  /// Scalar type definition (e.g., `scalar DateTime`)
+  ScalarTypeDefinition,
+
+  /// Object type definition (e.g., `type User<T> { ... }`)
+  ObjectTypeDefinition,
+
+  /// Interface type definition (e.g., `interface Node<T> { ... }`)
+  InterfaceTypeDefinition,
+
+  /// Union type definition (e.g., `union SearchResult = User | Post`)
+  UnionTypeDefinition,
+
+  /// Enum type definition (e.g., `enum Role { ... }`)
+  EnumTypeDefinition,
+
+  /// Input object type definition (e.g., `input CreateUserInput<T> { ... }`)
+  InputObjectTypeDefinition,
+
+  // ============================================================================
+  // Type Extension Nodes
+  // ============================================================================
+  /// Scalar type extension
+  ScalarTypeExtension,
+
+  /// Object type extension
+  ObjectTypeExtension,
+
+  /// Interface type extension
+  InterfaceTypeExtension,
+
+  /// Union type extension
+  UnionTypeExtension,
+
+  /// Enum type extension
+  EnumTypeExtension,
+
+  /// Input object type extension
+  InputObjectTypeExtension,
+
+  // ============================================================================
+  // Field and Argument Definition Nodes
+  // ============================================================================
+  /// Field definition (e.g., `name: String!`)
+  FieldDefinition,
+
+  /// Fields definition list (e.g., `{ id: ID! name: String }`)
+  FieldsDefinition,
+
+  /// Input value definition (argument or input field)
+  InputValueDefinition,
+
+  /// Arguments definition (e.g., `(id: ID!)`)
+  ArgumentsDefinition,
+
+  /// Input fields definition (e.g., `{ name: String }`)
+  InputFieldsDefinition,
+
+  // ============================================================================
+  // Directive Nodes
+  // ============================================================================
+  /// Directive definition (e.g., `directive @auth<T> ...`)
+  DirectiveDefinition,
+
+  /// Directive application (e.g., `@deprecated`, `@auth<User>`)
+  Directive,
+
+  /// Directives list
+  Directives,
+
+  /// Directive location (e.g., `on FIELD | ARGUMENT_DEFINITION`)
   DirectiveLocation,
-  /// Either a fragment spread or an inline fragment was expected.
-  FragmentSpreadOrInlineFragment,
-  /// A number was expected.
-  IntValue,
-  /// A boolean was expected.
+
+  /// Directive locations (e.g., `on FIELD | ARGUMENT_DEFINITION`)
+  DirectiveLocations,
+
+  // ============================================================================
+  // Schema Definition Nodes
+  // ============================================================================
+  /// Schema definition (e.g., `schema { query: Query }`)
+  SchemaDefinition,
+
+  /// Schema extension
+  SchemaExtension,
+
+  /// Root operation type definition (e.g., `query: Query`)
+  RootOperationTypeDefinition,
+  /// Root operation types definition list
+  RootOperationTypesDefinition,
+
+  // ============================================================================
+  // Enum Nodes
+  // ============================================================================
+  /// Enum value definition (e.g., `ADMIN`)
+  EnumValueDefinition,
+
+  /// Enum values definition list
+  EnumValuesDefinition,
+
+  // ============================================================================
+  // Union Nodes
+  // ============================================================================
+  /// Union member types (e.g., `User | Post`)
+  UnionMemberTypes,
+
+  // ============================================================================
+  // Interface Implementation Nodes
+  // ============================================================================
+  /// Implements interfaces (e.g., `implements Node & Timestamped`)
+  ImplementsInterfaces,
+
+  // ============================================================================
+  // Executable Definition Nodes
+  // ============================================================================
+  /// Operation name (query, mutation, subscription)
+  OperationName,
+
+  /// Named operation definition (e.g., `query GetUser<T> { ... }`)
+  NamedOperationDefinition,
+
+  /// Fragment definition (e.g., `fragment UserFields<T> on User<T> { ... }`)
+  FragmentDefinition,
+
+  /// Fragment spread (e.g., `...UserFields`, `...UserFields<String>`)
+  FragmentSpread,
+
+  /// Inline fragment (e.g., `... on User<T> { ... }`)
+  InlineFragment,
+
+  // ============================================================================
+  // Selection Nodes
+  // ============================================================================
+  /// Field selection (e.g., `name`, `user(id: 1) { name }`)
+  Field,
+
+  /// Selection set (e.g., `{ id name }`)
+  SelectionSet,
+
+  /// Field alias (e.g., `userName: name`)
+  Alias,
+
+  // ============================================================================
+  // Variable Nodes
+  // ============================================================================
+  /// Variable definition (e.g., `$id: ID!`)
+  VariableDefinition,
+
+  /// Variables definition (e.g., `($id: ID!, $name: String)`)
+  VariablesDefinition,
+
+  /// Variable value (e.g., `$id`)
+  VariableValue,
+
+  // ============================================================================
+  // Argument Nodes
+  // ============================================================================
+  /// Argument (e.g., `id: $userId`)
+  Argument,
+
+  /// Arguments list (e.g., `(id: $userId, name: "John")`)
+  Arguments,
+
+  // ============================================================================
+  // Value Nodes
+  // ============================================================================
+  /// Input value (any value in input position)
+  InputValue,
+
+  /// Const input value (value without variables)
+  ConstInputValue,
+
+  /// Boolean value (`true` or `false`)
   BooleanValue,
-  /// A float was expected.
-  FloatValue,
-  /// A null value was expected.
+
+  /// Null value (`null`)
   NullValue,
-  /// An enum value was expected.
+
+  /// Enum value (e.g., `ADMIN`, `user::Role::ADMIN`)
   EnumValue,
-  /// A string value was expected.
-  StringValue,
-  /// A keyword was expected.
-  Keyword(&'static str),
+
+  /// List value (e.g., `[1, 2, 3]`)
+  ListValue,
+
+  /// Set value (e.g., `set { 1, 2, 3 }`)
+  SetValue,
+
+  /// Map value (e.g., `map { "key" => "value" }`)
+  MapValue,
+
+  /// Map entry (e.g., `"key" => "value"`)
+  MapEntry,
+
+  /// Object value (e.g., `{ name: "John" }`)
+  ObjectValue,
+
+  /// Object field (e.g., `name: "John"`)
+  ObjectField,
+
+  // ============================================================================
+  // Miscellaneous Nodes
+  // ============================================================================
+  /// Type condition (e.g., `on User<T>`)
+  TypeCondition,
+
+  /// Description (string literal used as documentation)
+  Description,
+
+  /// Default value (e.g., `= 42`)
+  DefaultValue,
+
+  /// Definition name (name with optional generics)
+  DefinitionName,
+
+  /// Extension name (name for extensions)
+  ExtensionName,
+
+  /// Executable definition name (name for operations/fragments)
+  ExecutableDefinitionName,
+
+  /// Fragment type path (type path in fragment context)
+  FragmentTypePath,
+
+  // ============================================================================
+  // Sum Types
+  // ============================================================================
+  /// Type Definition
+  TypeDefinition,
+  /// Type extension
+  TypeExtension,
+  /// Type system definition (type, directive, schema)
+  TypeSystemDefinition,
+  /// Executable definition (operation or fragment)
+  ExecutableDefinition,
+  /// Type system extension (type system extension)
+  TypeSystemExtension,
+  /// Type system definition or extension
+  TypeSystemDefinitionOrExtension,
+  /// Definition (type system or executable)
+  Definition,
+  /// Definition or extension (definition or extension)
+  DefinitionOrExtension,
+
+  // ============================================================================
+  // Document Nodes
+  // ============================================================================
+  /// Type system document (schema definitions)
+  TypeSystemDocument,
+
+  /// Executable document (queries, mutations, subscriptions)
+  ExecutableDocument,
+
+  /// Full GraphQLx document
+  Document,
+
+  // ============================================================================
+  // Error Recovery Nodes
+  // ============================================================================
+  /// Error node (for parser error recovery)
+  Error,
+
+  /// Root node (top-level container)
+  Root,
 }

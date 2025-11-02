@@ -4,7 +4,7 @@ use logosky::{
   utils::Span,
 };
 
-use super::{Error, Expectation, SyntacticToken, SyntacticTokenErrors, SyntacticTokenizer};
+use super::{Error, SyntacticToken, SyntacticTokenErrors, SyntacticTokenizer, SyntaxKind};
 use crate::lexer::graphql::syntactic::SyntacticLexerErrors;
 
 /// A GraphQL name identifier.
@@ -79,7 +79,7 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           SyntacticToken::Identifier(name) => Ok(Name::new(span, name)),
-          tok => Err(Error::unexpected_token(tok, Expectation::Name, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::Name, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

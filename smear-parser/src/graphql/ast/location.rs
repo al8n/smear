@@ -104,7 +104,7 @@ where
               _ => return Err(Error::unknown_directive_location(name, span).into()),
             }
           }),
-          tok => Err(Error::unexpected_token(tok, Expectation::DirectiveLocation, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::DirectiveLocation, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

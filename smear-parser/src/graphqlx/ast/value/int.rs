@@ -84,7 +84,7 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           SyntacticToken::LitInt(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, Expectation::IntValue, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::Int, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

@@ -26,7 +26,7 @@ where
   fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
     Self::unexpected_token(
       SyntacticToken::Identifier(name.into_components().1),
-      Expectation::Dollar,
+      SyntaxKind::Dollar,
       span,
     )
   }

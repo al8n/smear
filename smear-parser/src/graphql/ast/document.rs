@@ -244,7 +244,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&["scalar", "type", "interface", "union", "enum", "input"]),
+              SyntaxKind::TypeKeywords,
               span,
             )
             .into(),
@@ -252,7 +252,7 @@ where
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => {
-          Err(SyntacticTokenError::unexpected_token(data, Expectation::TypeDefinition, span).into())
+          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeDefinition, span).into())
         }
       }
     })
@@ -486,7 +486,7 @@ where
               None => Err(
                 SyntacticTokenError::unexpected_token(
                   SyntacticToken::Identifier(ident),
-                  Expectation::Keyword(&["scalar", "type", "interface", "union", "enum", "input"]),
+                  SyntaxKind::Keyword(&["scalar", "type", "interface", "union", "enum", "input"]),
                   span,
                 )
                 .into(),
@@ -494,14 +494,13 @@ where
               Some(res) => res,
             },
             Some(Lexed::Token(Spanned { span, data })) => Err(
-              SyntacticTokenError::unexpected_token(data, Expectation::TypeExtension, span).into(),
+              SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeExtension, span).into(),
             ),
           }
         }
-        Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, Expectation::Keyword(&["extend"]), span)
-            .into(),
-        ),
+        Some(Lexed::Token(Spanned { span, data })) => {
+          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::extend_KW, span).into())
+        }
       }
     })
   }
@@ -658,7 +657,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
+              SyntaxKind::Keyword(&[
                 "scalar",
                 "type",
                 "interface",
@@ -675,7 +674,7 @@ where
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemDefinition, span)
+          SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemDefinition, span)
             .into(),
         ),
       }
@@ -849,7 +848,7 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
             None => Err(
               SyntacticTokenError::unexpected_token(
                 SyntacticToken::Identifier(ext_ident),
-                Expectation::Keyword(&[
+                SyntaxKind::Keyword(&[
                   "scalar",
                   "type",
                   "interface",
@@ -866,7 +865,7 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
             Some(Err(errs)) => Err(errs),
           },
           Some(Lexed::Token(Spanned { span, data })) => Err(
-            SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemExtension, span)
+            SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemExtension, span)
               .into(),
           ),
         }
@@ -923,7 +922,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
+              SyntaxKind::Keyword(&[
                 "extend",
                 "scalar",
                 "type",
@@ -963,7 +962,7 @@ where
         Some(Lexed::Token(Spanned { span, data })) => Err(
           SyntacticTokenError::unexpected_token(
             data,
-            Expectation::TypeSystemDefinitionOrExtension,
+            SyntaxKind::TypeSystemDefinitionOrExtension,
             span,
           )
           .into(),
@@ -1187,7 +1186,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&["fragment", "query", "mutation", "subscription"]),
+              SyntaxKind::Keyword(&["fragment", "query", "mutation", "subscription"]),
               span,
             )
             .into(),
@@ -1195,7 +1194,7 @@ where
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, Expectation::ExecutableDefinition, span)
+          SyntacticTokenError::unexpected_token(data, SyntaxKind::ExecutableDefinition, span)
             .into(),
         ),
       }
@@ -1324,7 +1323,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
+              SyntaxKind::Keyword(&[
                 "fragment",
                 "query",
                 "mutation",
@@ -1345,7 +1344,7 @@ where
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => {
-          Err(SyntacticTokenError::unexpected_token(data, Expectation::Definition, span).into())
+          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::Definition, span).into())
         }
       }
     })
@@ -1429,7 +1428,7 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
             None => Err(
               SyntacticTokenError::unexpected_token(
                 SyntacticToken::Identifier(ext_ident),
-                Expectation::Keyword(&[
+                SyntaxKind::Keyword(&[
                   "scalar",
                   "type",
                   "interface",
@@ -1446,7 +1445,7 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
             Some(Err(errs)) => Err(errs),
           },
           Some(Lexed::Token(Spanned { span, data })) => Err(
-            SyntacticTokenError::unexpected_token(data, Expectation::TypeSystemExtension, span)
+            SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemExtension, span)
               .into(),
           ),
         }
@@ -1511,7 +1510,7 @@ where
           None => Err(
             SyntacticTokenError::unexpected_token(
               SyntacticToken::Identifier(ident),
-              Expectation::Keyword(&[
+              SyntaxKind::Keyword(&[
                 "extend",
                 "fragment",
                 "query",
@@ -1553,7 +1552,7 @@ where
           ))
         }),
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, Expectation::DefinitionOrExtension, span)
+          SyntacticTokenError::unexpected_token(data, SyntaxKind::DefinitionOrExtension, span)
             .into(),
         ),
       }

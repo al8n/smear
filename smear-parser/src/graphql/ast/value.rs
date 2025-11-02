@@ -1,8 +1,8 @@
 use crate::{hints::VariableValueHint, lexer::graphql::syntactic::SyntacticLexerErrors};
 
 use super::{
-  DefaultVec, Expectation, Name, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
-  SyntacticTokenizer,
+  DefaultVec, Name, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenizer,
+  SyntaxKind,
 };
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
@@ -195,7 +195,7 @@ where
                     })) => Name::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
                       return Err(
-                        SyntacticTokenError::unexpected_token(data, Expectation::Name, span).into(),
+                        SyntacticTokenError::unexpected_token(data, SyntaxKind::Name, span).into(),
                       );
                     }
                     Some(Lexed::Error(err)) => {
@@ -257,8 +257,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
-                      .into(),
+                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
                   );
                 }
               };
@@ -437,7 +436,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::ConstInputValue, span)
+                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::ConstInputValue, span)
                       .into(),
                   );
                 }

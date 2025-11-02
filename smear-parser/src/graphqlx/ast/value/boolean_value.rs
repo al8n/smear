@@ -33,7 +33,7 @@ where
             () if "false".equivalent(&ident) => BooleanValue::new(span, false),
             _ => return Err(Error::invalid_boolean_value(ident, span).into()),
           }),
-          tok => Err(Error::unexpected_token(tok, Expectation::BooleanValue, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::BooleanValue, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

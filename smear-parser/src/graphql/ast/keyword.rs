@@ -11,39 +11,41 @@ use super::*;
 
 macro_rules! keyword_parser {
   ($($name:ty:$kw:literal),+$(,)?) => {
-    $(
-      impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
-      where
-        SyntacticToken<S>: Token<'a>,
-        <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-        <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-        str: logosky::utils::cmp::Equivalent<S>,
-      {
-        #[inline]
-        fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
+    paste::paste! {
+      $(
+        impl<'a, S> Parseable<'a, SyntacticTokenizer<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
         where
-          Self: Sized,
-          E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+          SyntacticToken<S>: Token<'a>,
+          <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
+          <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+          str: logosky::utils::cmp::Equivalent<S>,
         {
-          use logosky::utils::cmp::Equivalent;
+          #[inline]
+          fn parser<E>() -> impl Parser<'a, SyntacticTokenizer<'a, S>, Self, E> + Clone
+          where
+            Self: Sized,
+            E: ParserExtra<'a, SyntacticTokenizer<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+          {
+            use logosky::utils::cmp::Equivalent;
 
-          any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
-            Lexed::Token(tok) => {
-              let (span, tok) = tok.into_components();
-              match tok {
-                SyntacticToken::Identifier(name) => if $kw.equivalent(&name) {
-                  Ok(<$name>::new(span))
-                } else {
-                  Err(Error::unexpected_keyword(name, $kw, span).into())
-                },
-                tok => Err(Error::unexpected_token(tok, Expectation::Keyword(&[$kw]), span).into()),
-              }
-            },
-            Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-          })
+            any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
+              Lexed::Token(tok) => {
+                let (span, tok) = tok.into_components();
+                match tok {
+                  SyntacticToken::Identifier(name) => if $kw.equivalent(&name) {
+                    Ok(<$name>::new(span))
+                  } else {
+                    Err(Error::unexpected_keyword(name, $kw, span).into())
+                  },
+                  tok => Err(Error::unexpected_token(tok, SyntaxKind::[< $kw _KW >], span).into()),
+                }
+              },
+              Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+            })
+          }
         }
-      }
-    )*
+      )*
+    }
   };
 }
 

@@ -35,7 +35,7 @@ where
             () if "subscription".equivalent(&name) => Self::Subscription(Subscription::new(span)),
             _ => return Err(Error::unknown_operation_type(name, span).into()),
           }),
-          tok => Err(Error::unexpected_token(tok, Expectation::OperationName, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::OperationName, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

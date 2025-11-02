@@ -543,19 +543,15 @@ where
                     )))
                   }
                   token => Err(
-                    SyntacticTokenError::unexpected_token(
-                      token,
-                      Expectation::FragmentSpreadOrInlineFragment,
-                      fragment_span,
-                    )
-                    .into(),
+                    SyntacticTokenError::unexpected_token(token, SyntaxKind::Field, fragment_span)
+                      .into(),
                   ),
                 }
               }
             }
           }
           token => {
-            Err(SyntacticTokenError::unexpected_token(token, Expectation::Spread, span).into())
+            Err(SyntacticTokenError::unexpected_token(token, SyntaxKind::Spread, span).into())
           }
         }
       }

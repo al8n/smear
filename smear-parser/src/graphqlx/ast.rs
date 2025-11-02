@@ -5,11 +5,9 @@ use logosky::{
   utils::recursion_tracker::RecursionLimitExceeded,
 };
 
-use super::{
-  Expectation,
-  error::{Error, Errors, Extra},
-};
+use super::error::{Error, Errors, Extra};
 use crate::{
+  graphqlx::SyntaxKind,
   ident::Ident,
   lexer::graphqlx::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind},
 };
@@ -30,7 +28,7 @@ mod punctuator;
 mod ty;
 mod value;
 
-impl From<SyntacticTokenKind> for Expectation {
+impl From<SyntacticTokenKind> for SyntaxKind {
   #[inline]
   fn from(kind: SyntacticTokenKind) -> Self {
     match kind {
@@ -51,8 +49,8 @@ impl From<SyntacticTokenKind> for Expectation {
       SyntacticTokenKind::RBracket => Self::RBracket,
       SyntacticTokenKind::LParen => Self::LParen,
       SyntacticTokenKind::RParen => Self::RParen,
-      SyntacticTokenKind::Int => Self::IntValue,
-      SyntacticTokenKind::Float => Self::FloatValue,
+      SyntacticTokenKind::Int => Self::Int,
+      SyntacticTokenKind::Float => Self::Float,
       SyntacticTokenKind::FatArrow => Self::FatArrow,
       SyntacticTokenKind::LAngle => Self::LAngle,
       SyntacticTokenKind::RAngle => Self::RAngle,
@@ -72,13 +70,13 @@ pub type DefaultVec<T> = Vec<T>;
 pub type SyntacticTokenizer<'a, S> = logosky::Tokenizer<'a, SyntacticToken<S>>;
 /// The parser extra type used for the AST parser implementation.
 pub type AstParserExtra<'a, S> =
-  Extra<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+  Extra<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, SyntaxKind, RecursionLimitExceeded>;
 /// The error type used for the AST parser implementation.
 pub type SyntacticTokenError<'a, S> =
-  Error<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+  Error<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, SyntaxKind, RecursionLimitExceeded>;
 /// The errors type used for the AST parser implementation.
 pub type SyntacticTokenErrors<'a, S> =
-  Errors<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+  Errors<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, SyntaxKind, RecursionLimitExceeded>;
 
 /// Parse a value of type `T` from a string slice using the AST token.
 pub trait ParseStr<'a> {

@@ -11,7 +11,7 @@ use logosky::{
   utils::{Span, UnexpectedEnd},
 };
 
-use super::Expectation;
+use super::SyntaxKind;
 
 pub use crate::{
   error::{UnexpectedKeyword, UnexpectedToken},
@@ -24,7 +24,7 @@ pub use crate::{
 };
 
 /// An extra alias
-pub type Extra<S, T, Char = char, Exp = Expectation, StateError = ()> =
+pub type Extra<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
   logosky::chumsky::extra::Err<Errors<S, T, Char, Exp, StateError>>;
 
 /// An unclosed structure error.
@@ -51,7 +51,7 @@ pub enum InvalidEnumValue {
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
+pub enum ErrorData<S, T, Char = char, Exp = SyntaxKind, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
   /// An integer value could not be parsed due to overflow.
@@ -108,21 +108,21 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 
 /// A parser error.
 #[derive(Debug, Clone)]
-pub struct Error<S, T, Char = char, Exp = Expectation, StateError = ()> {
+pub struct Error<S, T, Char = char, Exp = SyntaxKind, StateError = ()> {
   span: Span,
   data: ErrorData<S, T, Char, Exp, StateError>,
 }
 
-impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateError> {
+impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateError> {
   /// Creates a new error.
   #[inline]
-  pub const fn new(span: Span, data: ErrorData<S, T, Char, Expectation, StateError>) -> Self {
+  pub const fn new(span: Span, data: ErrorData<S, T, Char, SyntaxKind, StateError>) -> Self {
     Self { span, data }
   }
 
   /// Creates an unexpected token error.
   #[inline]
-  pub const fn unexpected_token(found: T, expected: Expectation, span: Span) -> Self {
+  pub const fn unexpected_token(found: T, expected: SyntaxKind, span: Span) -> Self {
     Self::new(
       span,
       ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
@@ -314,54 +314,54 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
 
   /// Returns the data of the error.
   #[inline]
-  pub const fn data(&self) -> &ErrorData<S, T, Char, Expectation, StateError> {
+  pub const fn data(&self) -> &ErrorData<S, T, Char, SyntaxKind, StateError> {
     &self.data
   }
 
   /// Returns a mutable reference to the data of the error.
   #[inline]
-  pub const fn data_mut(&mut self) -> &mut ErrorData<S, T, Char, Expectation, StateError> {
+  pub const fn data_mut(&mut self) -> &mut ErrorData<S, T, Char, SyntaxKind, StateError> {
     &mut self.data
   }
 
   /// Consumes the error and returns its data.
   #[inline]
-  pub fn into_data(self) -> ErrorData<S, T, Char, Expectation, StateError> {
+  pub fn into_data(self) -> ErrorData<S, T, Char, SyntaxKind, StateError> {
     self.data
   }
 }
 
 #[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
+type DefaultErrorsContainer<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
   smallvec::SmallVec<[Error<S, T, Char, Exp, StateError>; 1]>;
 
 #[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
+type DefaultErrorsContainer<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
   std::vec::Vec<Error<S, T, Char, Exp, StateError>>;
 
 /// A container for storing multiple parser errors.
 #[derive(Debug, Clone, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct Errors<S, T, Char = char, Exp = Expectation, StateError = ()>(
+pub struct Errors<S, T, Char = char, Exp = SyntaxKind, StateError = ()>(
   DefaultErrorsContainer<S, T, Char, Exp, StateError>,
 );
 
-impl<S, T, Char, Expectation, StateError> Default for Errors<S, T, Char, Expectation, StateError> {
+impl<S, T, Char, SyntaxKind, StateError> Default for Errors<S, T, Char, SyntaxKind, StateError> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }
 }
 
-impl<S, T, Char, Expectation, StateError> From<Error<S, T, Char, Expectation, StateError>>
-  for Errors<S, T, Char, Expectation, StateError>
+impl<S, T, Char, SyntaxKind, StateError> From<Error<S, T, Char, SyntaxKind, StateError>>
+  for Errors<S, T, Char, SyntaxKind, StateError>
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn from(error: Error<S, T, Char, Expectation, StateError>) -> Self {
+  fn from(error: Error<S, T, Char, SyntaxKind, StateError>) -> Self {
     Self(core::iter::once(error).collect())
   }
 }
 
-impl<S, T, Char, Expectation, StateError> Errors<S, T, Char, Expectation, StateError> {
+impl<S, T, Char, SyntaxKind, StateError> Errors<S, T, Char, SyntaxKind, StateError> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
@@ -369,12 +369,12 @@ impl<S, T, Char, Expectation, StateError> Errors<S, T, Char, Expectation, StateE
   }
 }
 
-impl<S, T, Char, Expectation, StateError> IntoIterator
-  for Errors<S, T, Char, Expectation, StateError>
+impl<S, T, Char, SyntaxKind, StateError> IntoIterator
+  for Errors<S, T, Char, SyntaxKind, StateError>
 {
-  type Item = Error<S, T, Char, Expectation, StateError>;
+  type Item = Error<S, T, Char, SyntaxKind, StateError>;
   type IntoIter =
-    <DefaultErrorsContainer<S, T, Char, Expectation, StateError> as IntoIterator>::IntoIter;
+    <DefaultErrorsContainer<S, T, Char, SyntaxKind, StateError> as IntoIterator>::IntoIter;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn into_iter(self) -> Self::IntoIter {
@@ -382,26 +382,23 @@ impl<S, T, Char, Expectation, StateError> IntoIterator
   }
 }
 
-impl<S, T, Char, Expectation, StateError> Extend<Error<S, T, Char, Expectation, StateError>>
-  for Errors<S, T, Char, Expectation, StateError>
+impl<S, T, Char, SyntaxKind, StateError> Extend<Error<S, T, Char, SyntaxKind, StateError>>
+  for Errors<S, T, Char, SyntaxKind, StateError>
 {
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn extend<I: IntoIterator<Item = Error<S, T, Char, Expectation, StateError>>>(
-    &mut self,
-    iter: I,
-  ) {
+  fn extend<I: IntoIterator<Item = Error<S, T, Char, SyntaxKind, StateError>>>(&mut self, iter: I) {
     self.0.extend(iter);
   }
 }
 
-impl<'a, S, T, Char, Expectation, StateError>
+impl<'a, S, T, Char, SyntaxKind, StateError>
   LabelError<'a, Tokenizer<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
-  for Errors<S, T, Char, Expectation, StateError>
+  for Errors<S, T, Char, SyntaxKind, StateError>
 where
   T: Token<'a>,
   T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
   <T::Logos as Logos<'a>>::Extras: Copy,
-  Expectation: From<T::Kind>,
+  SyntaxKind: From<T::Kind>,
   Char: Clone,
   StateError: Clone,
 {
@@ -477,14 +474,14 @@ where
   }
 }
 
-impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, Tokenizer<'a, T>>
-  for Errors<S, T, Char, Expectation, StateError>
+impl<'a, S, T, Char, SyntaxKind, StateError> chumsky::error::Error<'a, Tokenizer<'a, T>>
+  for Errors<S, T, Char, SyntaxKind, StateError>
 where
   T: Token<'a>,
   T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
   <T::Logos as Logos<'a>>::Extras: Copy,
   Char: Clone,
-  Expectation: From<T::Kind>,
+  SyntaxKind: From<T::Kind>,
   StateError: Clone,
 {
 }

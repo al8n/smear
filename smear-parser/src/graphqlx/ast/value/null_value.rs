@@ -32,7 +32,7 @@ where
             () if "null".equivalent(&name) => Ok(NullValue::new(span, name)),
             _ => Err(Error::invalid_null_value(name, span).into()),
           },
-          tok => Err(Error::unexpected_token(tok, Expectation::NullValue, span).into()),
+          tok => Err(Error::unexpected_token(tok, SyntaxKind::NullValue, span).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
