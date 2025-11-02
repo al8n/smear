@@ -109,7 +109,7 @@ where
       SyntacticTokenizer<'b, &'b str>,
       SyntacticToken<&'b str>,
       SyntacticTokenErrors<'b, &'b str>,
-    >>::parser::<AstParserExtra<&str>>()
+    >>::parser::<AstParserExtra<'_, &str>>()
     .parse(SyntacticTokenizer::new(input.as_ref()))
   }
 }
@@ -143,7 +143,7 @@ where
       SyntacticTokenizer<'b, &'b [u8]>,
       SyntacticToken<&'b [u8]>,
       SyntacticTokenErrors<'b, &'b [u8]>,
-    >>::parser::<AstParserExtra<&[u8]>>()
+    >>::parser::<AstParserExtra<'_, &[u8]>>()
     .parse(SyntacticTokenizer::new(input.as_ref()))
   }
 }
@@ -184,7 +184,7 @@ const _: () = {
         SyntacticTokenizer<'a, Bytes>,
         SyntacticToken<Bytes>,
         SyntacticTokenErrors<'a, Bytes>,
-      >>::parser::<AstParserExtra<Bytes>>()
+      >>::parser::<AstParserExtra<'_, Bytes>>()
       .parse(SyntacticTokenizer::new(CustomSource::from_ref(input)))
     }
   }

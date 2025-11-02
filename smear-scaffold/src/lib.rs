@@ -2,7 +2,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, allow(unused_attributes))]
-// #![deny(missing_docs)]
+#![allow(clippy::double_parens)]
+#![deny(missing_docs)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc as std;
@@ -18,8 +19,3 @@ pub mod hints;
 
 /// The scaffold AST nodes
 pub mod ast;
-
-/// The scaffold CST nodes
-#[cfg(feature = "cst")]
-#[cfg_attr(docsrs, doc(cfg(feature = "cst")))]
-pub mod cst;
