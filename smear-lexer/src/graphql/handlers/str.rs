@@ -6,6 +6,7 @@ use logosky::{
 };
 
 use crate::{
+  graphql::error::DecimalError,
   handlers::{self, is_ignored_char},
   hints::{ExponentHint, FloatHint},
 };
@@ -122,7 +123,7 @@ where
 
 #[allow(clippy::result_large_err)]
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn handle_leading_zero_and_number_suffix_error<'a, S, T, LE, SE, Extras>(
+fn handle_leading_zero_and_number_suffix_error<'a, S, T, LE, SE, Extras>(
   lexer: &mut Lexer<'a, T>,
   leading_zeros: impl FnOnce(Lexeme<char>) -> LE,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> SE,
@@ -151,6 +152,50 @@ where
       Err(errs)
     }
   }
+}
+
+#[allow(clippy::result_large_err)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn handle_leading_zero_and_int_suffix_error<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_leading_zero_and_number_suffix_error(
+    lexer,
+    |err| {
+      let mut token_span = span;
+      token_span.bump_start(err.end());
+      DecimalError::leading_zeros(token_span, err)
+    },
+    |err| DecimalError::unexpected_suffix(span, err),
+  )
+}
+
+#[allow(clippy::result_large_err)]
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn handle_leading_zero_and_float_suffix_error<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_leading_zero_and_number_suffix_error(
+    lexer,
+    |err| {
+      let mut token_span = span;
+      token_span.bump_start(err.end());
+      FloatError::leading_zeros(token_span, err)
+    },
+    |err| FloatError::unexpected_suffix(span, err),
+  )
 }
 
 #[allow(clippy::result_large_err)]
@@ -287,7 +332,7 @@ where
   Err(errs)
 }
 
-pub(crate) fn handle_decimal_suffix<'a, S, T, E, Extras>(
+fn handle_decimal_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -306,4 +351,28 @@ where
     unexpected_suffix,
   )
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
+}
+
+pub(crate) fn handle_int_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_decimal_suffix(lexer, |e| error::DecimalError::unexpected_suffix(span, e))
+}
+
+pub(crate) fn handle_float_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_decimal_suffix(lexer, |e| error::FloatError::unexpected_suffix(span, e))
 }

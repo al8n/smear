@@ -1,8 +1,5 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  error::{UnexpectedEnd, UnexpectedLexeme, UnexpectedLineTerminator, UnicodeEscapeError},
-  utils::{Lexeme, Message, PositionedChar, SingleCharEscape, Span},
-};
+use logosky::{error::{UnexpectedLineTerminator, UnexpectedEnd, UnicodeEscapeError, UnexpectedLexeme}, utils::{Lexeme, Message, PositionedChar, Span, SingleCharEscape}};
 
 use crate::hints::LitStrDelimiterHint;
 

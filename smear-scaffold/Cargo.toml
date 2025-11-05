@@ -10,15 +10,15 @@ description = "Generic, reusable AST scaffolding for GraphQL and GraphQL-like DS
 
 [features]
 default = ["std"]
-alloc = []
-std = []
+alloc = ["logosky/alloc"]
+std = ["logosky/default"]
 
 cst = ["rowan", "logosky/rowan"]
 smallvec = ["logosky/smallvec"]
 
 [dependencies]
 derive_more.workspace = true
-logosky.workspace = true
+logosky = { workspace = true, features = ["chumsky"] }
 smear-lexer.workspace = true
 
 rowan = { version = "0.16", optional = true }

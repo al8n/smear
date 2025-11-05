@@ -26,7 +26,7 @@ pub enum FloatError<Char = char> {
   LeadingZeros(UnexpectedPrefix<Char, FloatLiteral>),
   /// Float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
-  MissingIntegerPart,
+  MissingIntegerPart(Span),
 }
 
 impl<Char> FloatError<Char> {

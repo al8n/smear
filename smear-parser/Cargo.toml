@@ -25,7 +25,7 @@ smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 
 [dependencies]
 derive_more.workspace = true
-logosky.workspace = true
+logosky = { workspace = true, features = ["chumsky"] }
 smear-scaffold.workspace = true
 smear-lexer.workspace = true
 paste = "1"

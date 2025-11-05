@@ -784,7 +784,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
 
   let mut lexer = Token::test_lexer("-.123");
@@ -796,7 +796,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
 
   let mut lexer = Token::test_lexer(".123e3");
@@ -808,7 +808,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
   let mut lexer = Token::test_lexer("-.123E3");
   assert!(matches!(
@@ -819,7 +819,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
 
   let mut lexer = Token::test_lexer(".123e+3");
@@ -831,7 +831,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
   let mut lexer = Token::test_lexer("-.123E+3");
   assert!(matches!(
@@ -842,7 +842,7 @@ where
       .pop()
       .unwrap()
       .into_data(),
-    LexerErrorData::Float(FloatError::MissingIntegerPart)
+    LexerErrorData::Float(FloatError::MissingIntegerPart(_))
   ));
 }
 

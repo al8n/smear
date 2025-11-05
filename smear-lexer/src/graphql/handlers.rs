@@ -101,7 +101,7 @@ where
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
     span,
-    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart),
+    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart(span)),
   ));
 
   match handle_decimal_suffix(lexer, remainder_len, remainder, |e| {
