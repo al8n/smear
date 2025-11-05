@@ -1,5 +1,6 @@
 use logosky::{
   Token,
+  error::{LineTerminator, UnpairedSurrogateHint},
   logos::{Lexer, Logos, Source},
   utils::Span,
 };
@@ -7,9 +8,7 @@ use logosky::{
 use crate::{
   LitComplexInlineStr, LitInlineStr, LitPlainStr,
   graphql::error::{DecimalError, FloatError, LexerErrorData, LexerErrors},
-  hints::{
-    ExponentHint, FloatHint, LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint,
-  },
+  hints::{ExponentHint, FloatHint, LitStrDelimiterHint},
 };
 
 fn assert_token<'a, Token, StateError>(source: &'a str, kind: Token, length: usize)
@@ -323,12 +322,14 @@ where
     .data()
     .unwrap_int_ref()
     .unwrap_leading_zeros_ref()
+    .prefix()
     .unwrap_span_ref();
   assert_eq!(err1, &Span::from(0..2));
   let err2 = errs[1]
     .data()
     .unwrap_int_ref()
     .unwrap_unexpected_suffix_ref()
+    .suffix()
     .unwrap_span_ref();
   assert_eq!(err2, &Span::from(2..5));
 
@@ -339,12 +340,14 @@ where
     .data()
     .unwrap_int_ref()
     .unwrap_leading_zeros_ref()
+    .prefix()
     .unwrap_span_ref();
   assert_eq!(err1, &Span::from(1..3));
   let err2 = errs[1]
     .data()
     .unwrap_int_ref()
     .unwrap_unexpected_suffix_ref()
+    .suffix()
     .unwrap_span_ref();
   assert_eq!(err2, &Span::from(3..6));
 }
@@ -363,6 +366,7 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_leading_zeros_ref()
+    .prefix()
     .unwrap_char_ref();
   assert_eq!(err1.char_ref(), &'0');
   assert_eq!(err1.position(), 0);
@@ -380,6 +384,7 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_leading_zeros_ref()
+    .prefix()
     .unwrap_char_ref();
   assert_eq!(err1.char_ref(), &'0');
   assert_eq!(err1.position(), 1);
@@ -397,12 +402,14 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_leading_zeros_ref()
+    .prefix()
     .unwrap_span_ref();
   assert_eq!(err1, &Span::from(0..4));
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
+    .suffix()
     .unwrap_span_ref();
   assert_eq!(err2, &Span::from(8..12));
 }
@@ -424,6 +431,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, (1..4).into());
 
@@ -437,6 +445,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 1);
@@ -451,6 +460,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, Span::from(2..5));
 
@@ -464,6 +474,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 2);
@@ -478,6 +489,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, Span::from(3..6));
 
@@ -491,6 +503,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 3);
@@ -505,6 +518,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, Span::from(4..7));
 
@@ -518,6 +532,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 4);
@@ -532,6 +547,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
@@ -546,6 +562,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
@@ -560,6 +577,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 5);
@@ -574,6 +592,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
@@ -588,6 +607,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
@@ -602,6 +622,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
@@ -616,6 +637,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 6);
@@ -630,6 +652,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'a');
   assert_eq!(err.position(), 7);
@@ -644,6 +667,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, Span::from(4..6));
 
@@ -657,6 +681,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_span();
   assert_eq!(err, Span::from(5..7));
   assert_eq!(lexer.span(), 0..7);
@@ -672,6 +697,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'.');
   assert_eq!(err.position(), 4);
@@ -687,6 +713,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'.');
   assert_eq!(err.position(), 4);
@@ -702,6 +729,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'.');
   assert_eq!(err.position(), 4);
@@ -717,6 +745,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'.');
   assert_eq!(err.position(), 4);
@@ -732,6 +761,7 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
+    .suffix()
     .unwrap_char();
   assert_eq!(err.char_ref(), &'.');
   assert_eq!(err.position(), 4);
@@ -835,6 +865,7 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
+    .suffix()
     .unwrap_span();
   assert_eq!(err2, Span::from(4..8));
 
@@ -849,6 +880,7 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
+    .suffix()
     .unwrap_span();
   assert_eq!(err2, Span::from(5..9));
 }
@@ -1508,15 +1540,15 @@ where
     .unwrap()
     .unwrap_unexpected_line_terminator();
   match err1.hint() {
-    LineTerminatorHint::NewLine => {
+    LineTerminator::NewLine => {
       assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\n');
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
     }
-    LineTerminatorHint::CarriageReturn => {
+    LineTerminator::CarriageReturn => {
       assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\r');
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
     }
-    LineTerminatorHint::CarriageReturnNewLine => {
+    LineTerminator::CarriageReturnNewLine => {
       assert_eq!(err1.lexeme().unwrap_span(), Span::from(9..11));
     }
   }
@@ -1618,15 +1650,15 @@ hello
 
   let err1 = errs[0].unwrap_unexpected_line_terminator_ref();
   match err1.hint() {
-    LineTerminatorHint::NewLine => {
+    LineTerminator::NewLine => {
       assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\n');
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 1);
     }
-    LineTerminatorHint::CarriageReturn => {
+    LineTerminator::CarriageReturn => {
       assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\r');
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 1);
     }
-    LineTerminatorHint::CarriageReturnNewLine => {
+    LineTerminator::CarriageReturnNewLine => {
       assert_eq!(err1.lexeme().unwrap_span(), Span::from(1..3));
     }
   }
@@ -1634,15 +1666,15 @@ hello
 
   let err2 = errs[1].unwrap_unexpected_line_terminator_ref();
   match err2.hint() {
-    LineTerminatorHint::NewLine => {
+    LineTerminator::NewLine => {
       assert_eq!(err2.lexeme().unwrap_char_ref().char_ref(), &'\n');
       assert_eq!(err2.lexeme().unwrap_char_ref().position(), 7);
     }
-    LineTerminatorHint::CarriageReturn => {
+    LineTerminator::CarriageReturn => {
       assert_eq!(err2.lexeme().unwrap_char_ref().char_ref(), &'\r');
       assert_eq!(err2.lexeme().unwrap_char_ref().position(), 7);
     }
-    LineTerminatorHint::CarriageReturnNewLine => {
+    LineTerminator::CarriageReturnNewLine => {
       assert_eq!(err2.lexeme().unwrap_span(), Span::from(7..9));
     }
   }

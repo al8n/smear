@@ -7,7 +7,7 @@ macro_rules! token {
       use crate::{
         error::StringErrors,
         graphqlx::{
-          error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
+          error::{LexerErrors, LexerError, BinaryError, OctalError},
           handlers::{
             self,
             tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
@@ -156,7 +156,7 @@ macro_rules! token {
         #[regex("(?&ident)", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Identifier($slice),
 
-        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_float_suffix))]
         #[regex(
           "-?(?&frac)(?&exp)?",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix)
@@ -166,7 +166,7 @@ macro_rules! token {
         #[regex("(?&decimal)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
         Float($slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_valid_hex_suffix))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix))]
         #[regex(
           "-?(?&hex_frac)(?&hex_exp)",
@@ -177,7 +177,7 @@ macro_rules! token {
         #[regex("(?&hex)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
         HexFloat($slice),
 
-        #[regex("(?&decimal)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_int_suffix))]
         Decimal($slice),
 
         #[regex("(?&binary)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix)))]
@@ -188,7 +188,7 @@ macro_rules! token {
         #[regex("(?&octal_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_octal_suffix))]
         Octal($slice),
 
-        #[regex("(?&hex)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix)))]
+        #[regex("(?&hex)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_valid_hex_suffix))]
         #[regex("(?&hex_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix))]
         Hex($slice),
 

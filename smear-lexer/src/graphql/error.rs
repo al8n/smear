@@ -1,7 +1,13 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use logosky::{
+  error::{UnexpectedEnd, UnexpectedLexeme, UnexpectedPrefix, UnexpectedSuffix},
+  utils::{
+    CharLen, Lexeme, PositionedChar, Span,
+    knowledge::{FloatLiteral, IntLiteral},
+  },
+};
 
 use crate::{error::*, hints::*};
 
@@ -11,18 +17,36 @@ use crate::{error::*, hints::*};
 #[try_unwrap(ref)]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
-  #[from(skip)]
-  UnexpectedSuffix(Lexeme<Char>),
+  UnexpectedSuffix(UnexpectedSuffix<Char, FloatLiteral>),
   /// Unexpected lexeme in float literal, e.g. `1.x`, `1.ex`, `1.e+x`
   UnexpectedLexeme(UnexpectedLexeme<Char, FloatHint>),
   /// Unexpected end of input in float literal.
   UnexpectedEnd(UnexpectedEnd<FloatHint>),
   /// Float must not have non-significant leading zeroes.
-  #[from(skip)]
-  LeadingZeros(Lexeme<Char>),
+  LeadingZeros(UnexpectedPrefix<Char, FloatLiteral>),
   /// Float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
   MissingIntegerPart,
+}
+
+impl<Char> FloatError<Char> {
+  /// Creates a new leading zeros float error.
+  #[inline]
+  pub fn leading_zeros(token: Span, prefix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::LeadingZeros(UnexpectedPrefix::new(token, prefix))
+  }
+
+  /// Creates a new unexpected suffix float error.
+  #[inline]
+  pub fn unexpected_suffix(token: Span, suffix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::UnexpectedSuffix(UnexpectedSuffix::new(token, suffix))
+  }
 }
 
 /// An error encountered during lexing for decimal literals.
@@ -31,13 +55,31 @@ pub enum FloatError<Char = char> {
 #[try_unwrap(ref)]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
-  #[from(skip)]
-  UnexpectedSuffix(Lexeme<Char>),
+  UnexpectedSuffix(UnexpectedSuffix<Char, IntLiteral>),
   /// Unexpected character in decimal literal, e.g. `-A`
   UnexpectedEnd(UnexpectedEnd<DecimalHint>),
   /// Decimal literals must not have non-significant leading zeroes, e.g. `0123`
-  #[from(skip)]
-  LeadingZeros(Lexeme<Char>),
+  LeadingZeros(UnexpectedPrefix<Char, IntLiteral>),
+}
+
+impl<Char> DecimalError<Char> {
+  /// Creates a new leading zeros float error.
+  #[inline]
+  pub fn leading_zeros(token: Span, prefix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::LeadingZeros(UnexpectedPrefix::new(token, prefix))
+  }
+
+  /// Creates a new unexpected suffix decimal error.
+  #[inline]
+  pub fn unexpected_suffix(token: Span, suffix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::UnexpectedSuffix(UnexpectedSuffix::new(token, suffix))
+  }
 }
 
 /// The data of the lexer error.

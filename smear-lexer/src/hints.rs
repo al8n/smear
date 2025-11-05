@@ -185,18 +185,6 @@ pub enum HexFloatHint {
   Digit,
 }
 
-/// An unpaired unicode surrogate error.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
-#[non_exhaustive]
-pub enum UnpairedSurrogateHint {
-  /// An unpaired high surrogate.
-  #[display("high surrogate")]
-  High,
-  /// An unpaired low surrogate.
-  #[display("low surrogate")]
-  Low,
-}
-
 /// An unterminated string hint.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
 #[non_exhaustive]
@@ -211,21 +199,6 @@ pub enum LitStrDelimiterHint {
   /// A double quote character or a triple quote sequence.
   #[display(r#"" or """"#)]
   QuoteOrTripleQuote,
-}
-
-/// A hint about what line terminator was found.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
-#[non_exhaustive]
-pub enum LineTerminatorHint {
-  /// A line feed character.
-  #[display("'\\n'")]
-  NewLine,
-  /// A carriage return character.
-  #[display("'\\r'")]
-  CarriageReturn,
-  /// A carriage return followed by a line feed character.
-  #[display("'\\r\\n'")]
-  CarriageReturnNewLine,
 }
 
 /// A hint about what line terminator was found.

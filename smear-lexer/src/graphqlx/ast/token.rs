@@ -2,12 +2,12 @@ macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+        Logos, Lexable, utils::{recursion_tracker::{RecursionLimitExceeded, RecursionLimiter}, Span},
       };
       use crate::{
         error::StringErrors,
         graphqlx::{
-          error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
+          error::{LexerErrors, LexerError, DecimalError, FloatError, BinaryError, OctalError},
           handlers::{increase_recursion_depth, self},
           ast::{SyntacticToken, SyntacticTokenKind, LitInt, LitFloat},
         },
@@ -129,7 +129,10 @@ macro_rules! token {
         #[regex("(?&ident)", |lex| lex.slice())]
         Identifier($slice),
 
-        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_decimal_suffix(lexer, |err| FloatError::unexpected_suffix(span, err))
+        })]
         #[regex(
           "-?(?&frac)(?&exp)?",
           handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix
@@ -139,8 +142,8 @@ macro_rules! token {
         #[regex("(?&decimal)(?&esign)", handlers::$handlers::handle_exponent_error)]
         Float($slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix))]
-        #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix(lexer))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", handlers::$handlers::handle_valid_hex_suffix)]
+        #[regex("(?&hex)(?&hex_frac)", handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix)]
         #[regex(
           "-?(?&hex_frac)(?&hex_exp)",
           handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix
@@ -150,7 +153,10 @@ macro_rules! token {
         #[regex("(?&hex)(?&psign)", handlers::$handlers::handle_hex_exponent_error)]
         HexFloat($slice),
 
-        #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix))]
+        #[regex("(?&decimal)", |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_decimal_suffix(lexer, |err| DecimalError::unexpected_suffix(span, err))
+        })]
         Decimal($slice),
 
         #[regex("(?&binary)", |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix))]
@@ -161,7 +167,7 @@ macro_rules! token {
         #[regex("(?&octal_start)", |lexer| handlers::$handlers::handle_invalid_octal_suffix(lexer))]
         Octal($slice),
 
-        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix))]
+        #[regex("(?&hex)", handlers::$handlers::handle_valid_hex_suffix)]
         #[regex("(?&hex_start)", handlers::$handlers::handle_invalid_hex_suffix)]
         Hex($slice),
 

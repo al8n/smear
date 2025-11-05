@@ -1,12 +1,13 @@
 use super::error;
 use logosky::{
   Source,
+  error::UnexpectedEnd,
   logos::{Lexer, Logos},
-  utils::{Lexeme, UnexpectedEnd, tracker::Limiter},
+  utils::{Lexeme, Span, tracker::Limiter},
 };
 
 use crate::{
-  graphqlx::error::{BinaryError, HexError, OctalError},
+  graphqlx::error::{BinaryError, DecimalError, FloatError, HexError, HexFloatError, OctalError},
   handlers::{self, is_ignored_char},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
 };
@@ -252,6 +253,30 @@ where
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }
 
+pub(crate) fn handle_int_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_decimal_suffix(lexer, |err| DecimalError::unexpected_suffix(span, err))
+}
+
+pub(crate) fn handle_float_suffix<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let span: Span = lexer.span().into();
+  handle_decimal_suffix(lexer, |err| FloatError::unexpected_suffix(span, err))
+}
+
 pub(crate) fn handle_valid_binary_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
@@ -354,24 +379,20 @@ where
   }
 }
 
-pub(crate) fn handle_valid_hex_suffix<'a, S, T, E, Extras>(
+pub(crate) fn handle_valid_hex_suffix<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-  unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
-  E: Into<error::LexerErrorData<char, Extras>>,
 {
+  let span: Span = lexer.span().into();
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_valid_hex_suffix(
-    lexer,
-    remainder_len,
-    remainder.as_ref().chars(),
-    unexpected_suffix,
-  )
+  super::handle_valid_hex_suffix(lexer, remainder_len, remainder.as_ref().chars(), |err| {
+    HexFloatError::unexpected_suffix(span, err)
+  })
   .map_err(|e| LexerError::new(lexer.span(), e.into()))
 }
 
@@ -396,7 +417,7 @@ where
     return Err(errs);
   }
 
-  match handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix) {
+  match handle_valid_hex_suffix(lexer) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));

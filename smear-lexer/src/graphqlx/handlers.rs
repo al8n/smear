@@ -1,8 +1,11 @@
+#![allow(clippy::result_large_err)]
+
 use logosky::{
   Logos, Source,
+  error::{UnexpectedEnd, UnexpectedLexeme, UnexpectedSuffix},
   logos::Lexer,
   utils::{
-    Lexeme, UnexpectedEnd, UnexpectedLexeme,
+    Lexeme, Span,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
@@ -93,18 +96,16 @@ where
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxHexNumber>,
 {
+  let span: Span = lexer.span().into();
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
-    lexer.span(),
-    error::LexerErrorData::HexFloat(error::HexFloatError::MissingExponent(lexer.span().into())),
+    span,
+    error::LexerErrorData::HexFloat(error::HexFloatError::MissingExponent(span)),
   ));
 
-  match handle_valid_hex_suffix(
-    lexer,
-    remainder_len,
-    remainder,
-    error::HexFloatError::UnexpectedSuffix,
-  ) {
+  match handle_valid_hex_suffix(lexer, remainder_len, remainder, |err| {
+    error::HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+  }) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
@@ -171,18 +172,16 @@ where
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxNumber>,
 {
+  let span: Span = lexer.span().into();
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
-    lexer.span(),
-    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart(lexer.span().into())),
+    span,
+    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart(span)),
   ));
 
-  match handle_decimal_suffix(
-    lexer,
-    remainder_len,
-    remainder,
-    error::FloatError::UnexpectedSuffix,
-  ) {
+  match handle_decimal_suffix(lexer, remainder_len, remainder, |err| {
+    error::FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+  }) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
@@ -203,20 +202,16 @@ where
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxHexExponent>,
 {
+  let span: Span = lexer.span().into();
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
-    lexer.span(),
-    error::LexerErrorData::HexFloat(error::HexFloatError::MissingIntegerPart(
-      lexer.span().into(),
-    )),
+    span,
+    error::LexerErrorData::HexFloat(error::HexFloatError::MissingIntegerPart(span)),
   ));
 
-  match handle_hex_float_suffix(
-    lexer,
-    remainder_len,
-    remainder,
-    error::HexFloatError::UnexpectedSuffix,
-  ) {
+  match handle_hex_float_suffix(lexer, remainder_len, remainder, |err| {
+    error::HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+  }) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));

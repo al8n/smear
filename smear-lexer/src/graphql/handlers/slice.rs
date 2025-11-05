@@ -207,7 +207,11 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let err = leading_zero_error(lexer, FloatError::LeadingZeros);
+  let mut span: Span = lexer.span().into();
+  let err = leading_zero_error(lexer, |err| {
+    span.bump_start(err.end());
+    FloatError::leading_zeros(span, err)
+  });
   let mut errs = LexerErrors::with_capacity(2);
   errs.push(err);
   errs.push(fractional_error(lexer));
@@ -268,7 +272,11 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let err = leading_zero_error(lexer, FloatError::LeadingZeros);
+  let mut span: Span = lexer.span().into();
+  let err = leading_zero_error(lexer, |err| {
+    span.bump_start(err.end());
+    FloatError::leading_zeros(span, err)
+  });
   let mut errs = LexerErrors::with_capacity(2);
   errs.push(err);
   errs.push(exponent_error(lexer));

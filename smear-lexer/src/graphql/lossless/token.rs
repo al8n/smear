@@ -2,7 +2,7 @@ macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, utils::tracker::{LimitExceeded, Limiter},
+        Logos, Lexable, utils::{tracker::{LimitExceeded, Limiter}, Span},
       };
       use crate::{
         error::StringErrors,
@@ -118,8 +118,22 @@ macro_rules! token {
         #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Comment($slice),
 
-        #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
-        #[regex("(?&int)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
+        #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_leading_zero_and_number_suffix_error(
+            lexer,
+            |err| {
+              let mut token_span = span;
+              token_span.bump_start(err.end());
+              FloatError::leading_zeros(token_span, err)
+            },
+            |err| FloatError::unexpected_suffix(span, err),
+          )
+        }))]
+        #[regex("(?&int)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_decimal_suffix(lexer, |err| FloatError::unexpected_suffix(span, err))
+        }))]
         #[regex(
           "-?(?&frac)(?&exp)?",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix)
@@ -135,8 +149,22 @@ macro_rules! token {
         #[regex("[a-zA-Z_][a-zA-Z0-9_]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Identifier($slice),
 
-        #[regex("(?&int)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)))]
-        #[regex("-?0(?&digit)+", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, DecimalError::LeadingZeros, DecimalError::UnexpectedSuffix)))]
+        #[regex("(?&int)", |lexer| tt_hook_and_then(lexer, |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_decimal_suffix(lexer, |err| DecimalError::unexpected_suffix(span, err))
+        }))]
+        #[regex("-?0(?&digit)+", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| {
+          let span: Span = lexer.span().into();
+          handlers::$handlers::handle_leading_zero_and_number_suffix_error(
+            lexer,
+            |err| {
+              let mut token_span = span;
+              token_span.bump_start(err.end());
+              DecimalError::leading_zeros(token_span, err)
+            },
+            |err| DecimalError::unexpected_suffix(span, err)
+          )
+        }))]
         #[token("-", |lexer| {
           tt_hook_and_then(lexer, handlers::$handlers::unexpected_minus_token)
         })]

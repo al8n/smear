@@ -1,7 +1,13 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use logosky::{
+  error::{UnexpectedEnd, UnexpectedLexeme, UnexpectedSuffix},
+  utils::{
+    CharLen, Lexeme, PositionedChar, Span,
+    knowledge::{FloatLiteral, HexFloatLiteral, IntLiteral},
+  },
+};
 
 use crate::{error::*, hints::*};
 
@@ -11,8 +17,7 @@ use crate::{error::*, hints::*};
 #[try_unwrap(ref)]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
-  #[from(skip)]
-  UnexpectedSuffix(Lexeme<Char>),
+  UnexpectedSuffix(UnexpectedSuffix<Char, FloatLiteral>),
   /// Unexpected lexeme in float literal, e.g. `1.x`, `1.ex`, `1.e+x`
   UnexpectedLexeme(UnexpectedLexeme<Char, FloatHint>),
   /// Unexpected end of input in float literal.
@@ -22,14 +27,24 @@ pub enum FloatError<Char = char> {
   MissingIntegerPart(Span),
 }
 
+impl<Char> FloatError<Char> {
+  /// Creates a new unexpected suffix float error.
+  #[inline]
+  pub fn unexpected_suffix(token: Span, suffix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::UnexpectedSuffix(UnexpectedSuffix::new(token, suffix))
+  }
+}
+
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
 pub enum HexFloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
-  #[from(skip)]
-  UnexpectedSuffix(Lexeme<Char>),
+  UnexpectedSuffix(UnexpectedSuffix<Char, HexFloatLiteral>),
   /// Unexpected lexeme in float literal, e.g. `1.x`, `1.ex`, `1.e+x`
   UnexpectedLexeme(UnexpectedLexeme<Char, HexFloatHint>),
   /// Unexpected end of input in float literal.
@@ -42,16 +57,37 @@ pub enum HexFloatError<Char = char> {
   MissingExponent(Span),
 }
 
+impl<Char> HexFloatError<Char> {
+  /// Creates a new unexpected suffix hex float error.
+  #[inline]
+  pub fn unexpected_suffix(token: Span, suffix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::UnexpectedSuffix(UnexpectedSuffix::new(token, suffix))
+  }
+}
+
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
-  #[from(skip)]
-  UnexpectedSuffix(Lexeme<Char>),
+  UnexpectedSuffix(UnexpectedSuffix<Char, IntLiteral>),
   /// Unexpected character in decimal literal, e.g. `-A`
   UnexpectedEnd(UnexpectedEnd<DecimalHint>),
+}
+
+impl<Char> DecimalError<Char> {
+  /// Creates a new unexpected suffix decimal error.
+  #[inline]
+  pub fn unexpected_suffix(token: Span, suffix: Lexeme<Char>) -> Self
+  where
+    Char: CharLen,
+  {
+    Self::UnexpectedSuffix(UnexpectedSuffix::new(token, suffix))
+  }
 }
 
 /// An error encountered during lexing for hex literals.

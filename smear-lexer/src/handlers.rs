@@ -1,8 +1,9 @@
 use logosky::{
   Logos, Source,
+  error::{UnexpectedEnd, UnexpectedLexeme},
   logos::Lexer,
   utils::{
-    CharLen, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+    CharLen, Lexeme, PositionedChar, Span,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },

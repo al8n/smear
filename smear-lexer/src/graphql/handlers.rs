@@ -1,8 +1,11 @@
+#![allow(clippy::result_large_err)]
+
 use logosky::{
   Logos, Source,
+  error::{UnexpectedEnd, UnexpectedLexeme, UnexpectedSuffix},
   logos::Lexer,
   utils::{
-    Lexeme, UnexpectedEnd, UnexpectedLexeme,
+    Lexeme, Span,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
@@ -94,18 +97,16 @@ where
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLNumber>,
 {
+  let span: Span = lexer.span().into();
   let mut errs = error::LexerErrors::default();
   errs.push(error::LexerError::new(
-    lexer.span(),
+    span,
     error::LexerErrorData::Float(error::FloatError::MissingIntegerPart),
   ));
 
-  match handle_decimal_suffix(
-    lexer,
-    remainder_len,
-    remainder,
-    error::FloatError::UnexpectedSuffix,
-  ) {
+  match handle_decimal_suffix(lexer, remainder_len, remainder, |e| {
+    error::FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, e))
+  }) {
     Ok(_) => Err(errs),
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
