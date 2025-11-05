@@ -1,8 +1,8 @@
 use logosky::{
   Token,
-  error::{LineTerminator, UnpairedSurrogateHint},
+  error::UnpairedSurrogateHint,
   logos::{Lexer, Logos, Source},
-  utils::Span,
+  utils::{Span, knowledge::LineTerminator},
 };
 
 use crate::{

@@ -1,8 +1,8 @@
 use logosky::{
   Lexable, Source,
-  error::{InvalidFixedUnicodeHexDigits, LineTerminator, UnicodeEscapeError},
+  error::{InvalidFixedUnicodeHexDigits, UnicodeEscapeError},
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span},
+  utils::{Lexeme, PositionedChar, Span, knowledge::LineTerminator},
 };
 
 use crate::error::{StringError, StringErrors};
