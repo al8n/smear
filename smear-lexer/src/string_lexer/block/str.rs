@@ -4,7 +4,7 @@ use logosky::{
   logos::{Lexer, Logos},
 };
 
-use crate::error::StringError;
+use crate::{error::StringError, handlers::str::default_string_error};
 
 use super::{
   super::{SealedWrapper, sealed::StringErrorWrapper},
@@ -12,7 +12,12 @@ use super::{
 };
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = logosky::logos, error(StringErrorWrapper<char>))]
+#[logos(crate = logosky::logos, error(StringErrorWrapper<char>, |lexer| {
+  match default_string_error(lexer) {
+    Some(err) => StringErrorWrapper::Err(err),
+    None => StringErrorWrapper::Err(StringError::unterminated_block_string(lexer.span().into())),
+  }
+}))]
 pub(crate) enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]

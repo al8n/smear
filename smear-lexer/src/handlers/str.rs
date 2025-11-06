@@ -4,7 +4,19 @@ use logosky::{
   logos::Lexer,
 };
 
-use crate::Lxr;
+use crate::{Lxr, error::StringError};
+
+#[cfg_attr(not(tarpaulin), inline(always))]
+pub(crate) fn default_string_error<'a, S, T>(lexer: &mut Lexer<'a, T>) -> Option<StringError<char>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  lexer.slice().as_ref().chars().next().map(|ch| {
+    StringError::UnsupportedCharacter(UnknownLexeme::unknown_character(lexer.span().start, ch))
+  })
+}
 
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn default_error<'a, S, T, L, E>(lexer: &mut Lexer<'a, T>) -> E

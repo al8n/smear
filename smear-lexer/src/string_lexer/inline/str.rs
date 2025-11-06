@@ -5,7 +5,7 @@ use logosky::{
   utils::{Lexeme, PositionedChar, knowledge::LineTerminator},
 };
 
-use crate::error::StringError;
+use crate::{error::StringError, handlers::str::default_string_error};
 
 use super::{
   super::{SealedWrapper, sealed::StringErrorWrapper},
@@ -13,7 +13,12 @@ use super::{
 };
 
 #[derive(Logos, Debug)]
-#[logos(crate = logosky::logos, extras = usize, error(StringErrorWrapper<char>))]
+#[logos(crate = logosky::logos, extras = usize, error(StringErrorWrapper<char>, |lexer| {
+  match default_string_error(lexer) {
+    Some(err) => StringErrorWrapper::Err(err),
+    None => StringErrorWrapper::Err(StringError::unterminated_inline_string(lexer.span().into())),
+  }
+}))]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
