@@ -32,7 +32,7 @@ where
               || "false".equivalent(&name)
               || "null".equivalent(&name) =>
             {
-              Err(Error::invalid_enum_value(name, span).into())
+              Err(Error::invalid_enum_value(span).into())
             }
             _ => Ok(EnumValue::new(span, name)),
           },

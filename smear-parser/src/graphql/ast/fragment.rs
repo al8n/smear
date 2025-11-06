@@ -31,7 +31,7 @@ where
         match tok {
           SyntacticToken::Identifier(name) => {
             if "on".equivalent(&name) {
-              Err(Error::invalid_fragment_name(name, span).into())
+              Err(Error::invalid_fragment_name(span).into())
             } else {
               Ok(FragmentName::new(span, name))
             }

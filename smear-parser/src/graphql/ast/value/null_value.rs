@@ -30,7 +30,7 @@ where
         match tok {
           SyntacticToken::Identifier(name) => match () {
             () if "null".equivalent(&name) => Ok(NullValue::new(span, name)),
-            _ => Err(Error::invalid_null_value(name, span).into()),
+            _ => Err(Error::invalid_null_value(span).into()),
           },
           tok => Err(Error::unexpected_token(tok, SyntaxKind::NullValue, span).into()),
         }

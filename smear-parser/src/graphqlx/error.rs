@@ -21,10 +21,7 @@ use super::{
   syntax::{DirectiveLocationSyntax, FragmentTypePathSyntax, OperationTypeSyntax},
 };
 
-pub use crate::{
-  hints::{ObjectFieldValueHint, VariableValueHint},
-  lexer::graphqlx::error::LexerErrors,
-};
+pub use crate::{hints::VariableValueHint, lexer::graphqlx::error::LexerErrors};
 
 /// A malformed fragment type path error.
 pub type InvalidFragmentTypePath = Invalid<FragmentTypePathSyntax>;
@@ -49,7 +46,7 @@ pub enum Error<S, T, Char = char, Exp: 'static = SyntaxKind, StateError = ()> {
   InvalidNullValue(InvalidNullLiteral),
   /// A fragment type path is invalid.
   InvalidFragmentTypePath(InvalidFragmentTypePath),
-  /// A list was not closed.
+  /// A bracket was not closed.
   UnclosedBracket(UnclosedBracket),
   /// A brace was not closed.
   UnclosedBrace(UnclosedBrace),
@@ -63,8 +60,6 @@ pub enum Error<S, T, Char = char, Exp: 'static = SyntaxKind, StateError = ()> {
   UnexpectedKeyword(UnexpectedKeyword<'static, S>),
   /// An unexpected end was found in a variable value.
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
-  /// An unexpected end was found in an object field value.
-  UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
   /// An unknown directive location was found.
   UnknownDirectiveLocation(UnknownLexeme<Char, DirectiveLocationSyntax>),
   /// An unknown operation type was found.
@@ -212,7 +207,6 @@ impl<S, T, Char, SyntaxKind: 'static, StateError> Error<S, T, Char, SyntaxKind, 
       Self::UnexpectedToken(e) => e.span(),
       Self::UnexpectedKeyword(e) => e.span(),
       Self::UnexpectedEndOfVariableValue(e) => e.span(),
-      Self::UnexpectedEndOfObjectFieldValue(e) => e.span(),
       Self::UnknownDirectiveLocation(e) => e.span(),
       Self::UnknownOperationType(e) => e.span(),
       Self::EndOfInput(e) => e.span(),
