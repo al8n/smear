@@ -8,7 +8,7 @@ license.workspace = true
 description = "Blazing fast, fully spec-compliant, reusable parser combinators for standard GraphQL and GraphQL-like DSLs."
 
 [features]
-default = ["std", "smallvec", "graphql", "graphqlx"]
+default = ["std", "graphql", "graphqlx"]
 alloc = ["smear-lexer/alloc", "smear-scaffold/alloc", "smear-parser/alloc"]
 std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default", "smear-lexer/std", "smear-scaffold/std", "smear-parser/std"]
 
@@ -21,7 +21,6 @@ graphqlx = ["unstable", "smear-lexer/graphqlx", "smear-parser/graphqlx"]
 bytes = ["dep:bytes", "logosky/bytes", "smear-lexer/bytes", "smear-parser/bytes"]
 bstr = ["dep:bstr", "logosky/bstr", "smear-lexer/bstr", "smear-parser/bstr"]
 hipstr = ["dep:hipstr", "logosky/hipstr", "smear-lexer/hipstr", "smear-parser/hipstr"]
-smallvec = ["dep:smallvec", "smear-lexer/smallvec", "smear-parser/smallvec"]
 
 [dependencies]
 derive_more.workspace = true
@@ -34,7 +33,6 @@ smear-scaffold.workspace = true
 smear-parser.workspace = true
 
 rowan = { version = "0.16", optional = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }

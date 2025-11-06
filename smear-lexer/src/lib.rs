@@ -4,12 +4,15 @@
 #![allow(clippy::double_parens)]
 #![deny(warnings, missing_docs)]
 
-#[cfg(not(feature = "std"))]
+#[allow(unused)]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 extern crate alloc as std;
 
 #[cfg(feature = "std")]
 extern crate std;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "graphql", feature = "graphqlx"))))]
 pub use string_lexer::*;
 
 pub use logosky;
@@ -133,6 +136,7 @@ pub mod graphql;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod string_lexer;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]

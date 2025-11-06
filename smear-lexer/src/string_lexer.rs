@@ -1,10 +1,7 @@
 use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  // logos::Lexer,
-  utils::{
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
+use logosky::utils::{
+  human_display::DisplayHuman,
+  sdl_display::{DisplayCompact, DisplayPretty},
 };
 
 pub use block::{LitBlockStr, LitComplexBlockStr};

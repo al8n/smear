@@ -1,4 +1,4 @@
-use logosky::{Lexed, Tokenizer, utils::recursion_tracker::RecursionLimiter};
+use logosky::Tokenizer;
 
 use super::*;
 
@@ -6,8 +6,6 @@ use crate::{
   LitInlineStr,
   graphql::tests::{self, TestToken},
 };
-
-use std::string::ToString;
 
 type StrSyntacticToken<'a> = SyntacticToken<&'a str>;
 
@@ -172,8 +170,12 @@ fn test_bom_lexing() {
   assert_eq!(lexer.next(), None);
 }
 
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[test]
 fn test_recursion_limit() {
+  use logosky::{Lexed, utils::recursion_tracker::RecursionLimiter};
+  use std::string::ToString;
+
   let depth = 65;
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();

@@ -91,7 +91,7 @@ impl<Char> StringError<Char> {
 
   /// Bumps the span or position of the error by `n`.
   #[inline]
-  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
+  pub fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::UnexpectedLineTerminator(lexeme) => {
         lexeme.bump(n);

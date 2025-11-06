@@ -5,7 +5,6 @@ use logosky::utils::{
 };
 
 use super::LitPlainStr;
-use std::{borrow::Cow, string::String};
 
 mod str;
 mod u8_slice;
@@ -106,20 +105,89 @@ impl<'a> TryFrom<LitInlineStr<&'a [u8]>> for LitInlineStr<&'a str> {
   }
 }
 
-impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
-  #[inline]
-  fn from(value: LitInlineStr<&'a str>) -> Self {
-    match value {
-      LitInlineStr::Plain(s) => Cow::Borrowed(s.as_str()),
-      LitInlineStr::Complex(s) => {
-        let mut builder = String::with_capacity(s.required_capacity());
-        let raw = s.as_str();
-        normalize_str_to_string(&raw[1..raw.len() - 1], &mut builder);
-        Cow::Owned(builder)
+#[cfg(any(feature = "std", feature = "alloc"))]
+const _: () = {
+  use std::{borrow::Cow, string::String};
+  impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
+    #[inline]
+    fn from(value: LitInlineStr<&'a str>) -> Self {
+      match value {
+        LitInlineStr::Plain(s) => Cow::Borrowed(s.as_str()),
+        LitInlineStr::Complex(s) => {
+          let mut builder = String::with_capacity(s.required_capacity());
+          let raw = s.as_str();
+          normalize_str_to_string(&raw[1..raw.len() - 1], &mut builder);
+          Cow::Owned(builder)
+        }
       }
     }
   }
-}
+
+  #[inline]
+  fn normalize_str_to_string(src: &str, output: &mut String) {
+    #[inline]
+    fn read_hex4(it: &mut core::str::Chars<'_>) -> u32 {
+      (0..4)
+        .map(|_| {
+          it.next()
+            .expect("\\u escape truncated")
+            .to_digit(16)
+            .expect("invalid hex digit in \\u escape")
+        })
+        .fold(0u32, |acc, d| (acc << 4) | d)
+    }
+
+    let mut chars = src.chars();
+
+    while let Some(c) = chars.next() {
+      match c {
+        '\\' => {
+          let esc = chars.next().expect("backslash at end");
+          match esc {
+            '"' | '\\' | '/' => output.push(esc),
+            'b' => output.push('\x08'),
+            'f' => output.push('\x0C'),
+            'n' => output.push('\n'),
+            'r' => output.push('\r'),
+            't' => output.push('\t'),
+            'u' => {
+              let u = read_hex4(&mut chars);
+
+              // If high surrogate, require a following \uXXXX low surrogate.
+              if (0xD800..=0xDBFF).contains(&u) {
+                let slash = chars
+                  .next()
+                  .expect("high surrogate not followed by low surrogate (missing \\)");
+                let u_ch = chars
+                  .next()
+                  .expect("high surrogate not followed by low surrogate (missing u)");
+                if slash != '\\' || u_ch != 'u' {
+                  panic!("high surrogate not followed by \\u");
+                }
+                let lo = read_hex4(&mut chars);
+                if !(0xDC00..=0xDFFF).contains(&lo) {
+                  panic!("invalid low surrogate");
+                }
+
+                let combined = 0x10000 + (((u - 0xD800) << 10) | (lo - 0xDC00));
+                let ch = core::char::from_u32(combined).expect("invalid combined code point");
+                output.push(ch);
+              } else if (0xDC00..=0xDFFF).contains(&u) {
+                // Lone low surrogate is invalid in JSON.
+                panic!("lone low surrogate");
+              } else {
+                let ch = core::char::from_u32(u).expect("invalid code point");
+                output.push(ch);
+              }
+            }
+            _ => unreachable!(),
+          }
+        }
+        other => output.push(other),
+      }
+    }
+  }
+};
 
 impl<S> LitInlineStr<S> {
   /// Returns the underlying source.
@@ -172,71 +240,6 @@ impl_common_traits!(LitInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitInlineStr::<&'a [u8]>::as_bytes);
 impl_common_traits!(LitComplexInlineStr::<&'a str>::as_str);
 impl_common_traits!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
-
-#[inline]
-fn normalize_str_to_string(src: &str, output: &mut String) {
-  #[inline]
-  fn read_hex4(it: &mut core::str::Chars<'_>) -> u32 {
-    (0..4)
-      .map(|_| {
-        it.next()
-          .expect("\\u escape truncated")
-          .to_digit(16)
-          .expect("invalid hex digit in \\u escape")
-      })
-      .fold(0u32, |acc, d| (acc << 4) | d)
-  }
-
-  let mut chars = src.chars();
-
-  while let Some(c) = chars.next() {
-    match c {
-      '\\' => {
-        let esc = chars.next().expect("backslash at end");
-        match esc {
-          '"' | '\\' | '/' => output.push(esc),
-          'b' => output.push('\x08'),
-          'f' => output.push('\x0C'),
-          'n' => output.push('\n'),
-          'r' => output.push('\r'),
-          't' => output.push('\t'),
-          'u' => {
-            let u = read_hex4(&mut chars);
-
-            // If high surrogate, require a following \uXXXX low surrogate.
-            if (0xD800..=0xDBFF).contains(&u) {
-              let slash = chars
-                .next()
-                .expect("high surrogate not followed by low surrogate (missing \\)");
-              let u_ch = chars
-                .next()
-                .expect("high surrogate not followed by low surrogate (missing u)");
-              if slash != '\\' || u_ch != 'u' {
-                panic!("high surrogate not followed by \\u");
-              }
-              let lo = read_hex4(&mut chars);
-              if !(0xDC00..=0xDFFF).contains(&lo) {
-                panic!("invalid low surrogate");
-              }
-
-              let combined = 0x10000 + (((u - 0xD800) << 10) | (lo - 0xDC00));
-              let ch = core::char::from_u32(combined).expect("invalid combined code point");
-              output.push(ch);
-            } else if (0xDC00..=0xDFFF).contains(&u) {
-              // Lone low surrogate is invalid in JSON.
-              panic!("lone low surrogate");
-            } else {
-              let ch = core::char::from_u32(u).expect("invalid code point");
-              output.push(ch);
-            }
-          }
-          _ => unreachable!(),
-        }
-      }
-      other => output.push(other),
-    }
-  }
-}
 
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn utf8_len_for_scalar(cp: u32) -> usize {

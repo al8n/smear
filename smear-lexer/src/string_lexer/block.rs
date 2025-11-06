@@ -1,5 +1,3 @@
-use std::{borrow::Cow, string::String};
-
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::human_display::DisplayHuman;
 
@@ -146,146 +144,151 @@ fn leading_ws_indent(bytes: &[u8]) -> usize {
     .count()
 }
 
-#[cfg_attr(not(tarpaulin), inline(always))]
-fn chop_indent(s: &str, mut n: usize) -> &str {
-  let bytes = s.as_bytes();
-  let mut i = 0usize;
-  while i < bytes.len() && n > 0 {
-    match bytes[i] {
-      b' ' | b'\t' => {
-        i += 1;
-        n -= 1;
-      }
-      _ => break,
-    }
-  }
-  &s[i..]
-}
+#[cfg(any(feature = "std", feature = "alloc"))]
+const _: () = {
+  use std::{borrow::Cow, string::String};
 
-impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
-  #[inline]
-  fn from(value: LitBlockStr<&'a str>) -> Self {
-    match value {
-      LitBlockStr::Plain(s) => Cow::Borrowed(s.as_str()),
-      LitBlockStr::Complex(s) => {
-        let raw = s.as_str();
-
-        // Inner content between the surrounding delimiters.
-        let inner = &raw[3..raw.len() - 3];
-
-        let total_lines = s.total_lines();
-        let leading_blank_lines = s.leading_blank_lines();
-        let trailing_blank_lines = s.trailing_blank_lines(); // already the "effective" trailing
-        let common_indent = s.common_indent();
-        let cap = s.required_capacity();
-
-        let keep_start = leading_blank_lines;
-        let keep_end = total_lines.saturating_sub(trailing_blank_lines);
-
-        // Fast-return for empty result.
-        if keep_start >= keep_end {
-          return std::borrow::Cow::Owned(String::new());
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn chop_indent(s: &str, mut n: usize) -> &str {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && n > 0 {
+      match bytes[i] {
+        b' ' | b'\t' => {
+          i += 1;
+          n -= 1;
         }
+        _ => break,
+      }
+    }
+    &s[i..]
+  }
 
-        // Write one logical line body:
-        // - optionally dedent (only non-first, non-blank lines),
-        // - unescape \"\"\" -> """
-        #[cfg_attr(not(tarpaulin), inline(always))]
-        fn write_line(out: &mut String, line: &str, dedent: usize, is_first_kept: bool) {
-          let body = if is_first_kept || is_blank_line(line.as_bytes()) {
-            line
-          } else {
-            chop_indent(line, dedent)
-          };
+  impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
+    #[inline]
+    fn from(value: LitBlockStr<&'a str>) -> Self {
+      match value {
+        LitBlockStr::Plain(s) => Cow::Borrowed(s.as_str()),
+        LitBlockStr::Complex(s) => {
+          let raw = s.as_str();
 
-          // Copy with `\"\"\"` → `"""` (drop the backslash)
-          let b = body.as_bytes();
-          let mut i = 0usize;
-          let mut chunk_start = 0usize;
-          while i < b.len() {
-            if b[i] == b'\\'
-              && i + 3 < b.len()
-              && b[i + 1] == b'"'
-              && b[i + 2] == b'"'
-              && b[i + 3] == b'"'
-            {
-              // Flush up to the backslash
-              // (safe to slice: split points are ASCII)
-              unsafe {
-                out
-                  .as_mut_vec()
-                  .extend_from_slice(&body.as_bytes()[chunk_start..i]);
-              }
-              out.push_str(r#"""""#); // three quotes
-              i += 4; // skip backslash + 3 quotes
-              chunk_start = i;
+          // Inner content between the surrounding delimiters.
+          let inner = &raw[3..raw.len() - 3];
+
+          let total_lines = s.total_lines();
+          let leading_blank_lines = s.leading_blank_lines();
+          let trailing_blank_lines = s.trailing_blank_lines(); // already the "effective" trailing
+          let common_indent = s.common_indent();
+          let cap = s.required_capacity();
+
+          let keep_start = leading_blank_lines;
+          let keep_end = total_lines.saturating_sub(trailing_blank_lines);
+
+          // Fast-return for empty result.
+          if keep_start >= keep_end {
+            return Cow::Owned(String::new());
+          }
+
+          // Write one logical line body:
+          // - optionally dedent (only non-first, non-blank lines),
+          // - unescape \"\"\" -> """
+          #[cfg_attr(not(tarpaulin), inline(always))]
+          fn write_line(out: &mut String, line: &str, dedent: usize, is_first_kept: bool) {
+            let body = if is_first_kept || is_blank_line(line.as_bytes()) {
+              line
             } else {
-              i += 1;
-            }
-          }
-          // Flush tail
-          unsafe {
-            out
-              .as_mut_vec()
-              .extend_from_slice(&body.as_bytes()[chunk_start..]);
-          }
-        }
+              chop_indent(line, dedent)
+            };
 
-        // Iterate logical lines of `inner`, honoring CR, LF, or CRLF.
-        let mut out = String::with_capacity(cap);
-        let mut i = 0usize;
-        let bytes = inner.as_bytes();
-        let mut line_idx = 0usize;
-        let mut wrote_any = false;
-
-        while line_idx < total_lines {
-          // find [line_start, line_end) + terminator length
-          let line_start = i;
-          let mut line_end = i;
-          let mut term_len = 0usize;
-
-          while line_end < bytes.len() {
-            match bytes[line_end] {
-              b'\n' => {
-                term_len = 1;
-                break;
-              }
-              b'\r' => {
-                if line_end + 1 < bytes.len() && bytes[line_end + 1] == b'\n' {
-                  term_len = 2;
-                } else {
-                  term_len = 1;
+            // Copy with `\"\"\"` → `"""` (drop the backslash)
+            let b = body.as_bytes();
+            let mut i = 0usize;
+            let mut chunk_start = 0usize;
+            while i < b.len() {
+              if b[i] == b'\\'
+                && i + 3 < b.len()
+                && b[i + 1] == b'"'
+                && b[i + 2] == b'"'
+                && b[i + 3] == b'"'
+              {
+                // Flush up to the backslash
+                // (safe to slice: split points are ASCII)
+                unsafe {
+                  out
+                    .as_mut_vec()
+                    .extend_from_slice(&body.as_bytes()[chunk_start..i]);
                 }
-                break;
+                out.push_str(r#"""""#); // three quotes
+                i += 4; // skip backslash + 3 quotes
+                chunk_start = i;
+              } else {
+                i += 1;
               }
-              _ => line_end += 1,
             }
-          }
-          // After the loop, line_end points to the first terminator byte (or end of slice).
-          let body = &inner[line_start..line_end];
-
-          // Keep line?
-          if line_idx >= keep_start && line_idx < keep_end {
-            let is_first_kept = !wrote_any;
-            write_line(&mut out, body, common_indent, is_first_kept);
-            wrote_any = true;
-
-            // Emit normalized newline between kept lines
-            if line_idx + 1 < keep_end {
-              out.push('\n');
+            // Flush tail
+            unsafe {
+              out
+                .as_mut_vec()
+                .extend_from_slice(&body.as_bytes()[chunk_start..]);
             }
           }
 
-          // Advance past the terminator
-          i = (line_end + term_len).min(inner.len());
-          line_idx += 1;
+          // Iterate logical lines of `inner`, honoring CR, LF, or CRLF.
+          let mut out = String::with_capacity(cap);
+          let mut i = 0usize;
+          let bytes = inner.as_bytes();
+          let mut line_idx = 0usize;
+          let mut wrote_any = false;
+
+          while line_idx < total_lines {
+            // find [line_start, line_end) + terminator length
+            let line_start = i;
+            let mut line_end = i;
+            let mut term_len = 0usize;
+
+            while line_end < bytes.len() {
+              match bytes[line_end] {
+                b'\n' => {
+                  term_len = 1;
+                  break;
+                }
+                b'\r' => {
+                  if line_end + 1 < bytes.len() && bytes[line_end + 1] == b'\n' {
+                    term_len = 2;
+                  } else {
+                    term_len = 1;
+                  }
+                  break;
+                }
+                _ => line_end += 1,
+              }
+            }
+            // After the loop, line_end points to the first terminator byte (or end of slice).
+            let body = &inner[line_start..line_end];
+
+            // Keep line?
+            if line_idx >= keep_start && line_idx < keep_end {
+              let is_first_kept = !wrote_any;
+              write_line(&mut out, body, common_indent, is_first_kept);
+              wrote_any = true;
+
+              // Emit normalized newline between kept lines
+              if line_idx + 1 < keep_end {
+                out.push('\n');
+              }
+            }
+
+            // Advance past the terminator
+            i = (line_end + term_len).min(inner.len());
+            line_idx += 1;
+          }
+
+          Cow::Owned(out)
         }
-
-        Cow::Owned(out)
       }
     }
   }
-}
+};
 
 // ---- extras that accumulate line-level facts during the sub-lex ----
 #[derive(Default, Debug, Clone, Copy)]

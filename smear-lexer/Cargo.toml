@@ -9,15 +9,14 @@ readme = "README.md"
 description = "Blazing fast lexer for GraphQL and GraphQL-like DSLs"
 
 [features]
-default = ["std", "graphql", "graphqlx", "smallvec"]
-alloc = []
-std = ["thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+default = ["std", "graphql", "graphqlx"]
+alloc = ["logosky/alloc"]
+std = ["thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default", "logosky/default"]
 
 unstable = []
 
 graphql = []
 graphqlx = ["unstable"]
-smallvec = ["dep:smallvec"]
 
 bytes = ["dep:bytes", "logosky/bytes"]
 bstr = ["dep:bstr", "logosky/bstr"]
@@ -32,7 +31,6 @@ logosky.workspace = true
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 
 [lints.rust]
 rust_2018_idioms = "warn"
