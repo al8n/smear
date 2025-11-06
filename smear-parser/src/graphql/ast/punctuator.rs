@@ -26,10 +26,10 @@ macro_rules! punctuator_parser {
               let (span, tok) = tok.into_components();
               match tok {
                 SyntacticToken::$name => Ok($name::new(span)),
-                tok => Err(Error::unexpected_token(tok, SyntaxKind::$name, span).into()),
+                tok => Err(Error::unexpected_token(span, tok, SyntaxKind::$name).into()),
               }
             },
-            Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+            Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
           })
         }
       }

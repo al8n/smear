@@ -543,7 +543,7 @@ where
                     )))
                   }
                   token => Err(
-                    SyntacticTokenError::unexpected_token(token, SyntaxKind::Field, fragment_span)
+                    SyntacticTokenError::unexpected_token(fragment_span, token, SyntaxKind::Field)
                       .into(),
                   ),
                 }
@@ -551,7 +551,7 @@ where
             }
           }
           token => {
-            Err(SyntacticTokenError::unexpected_token(token, SyntaxKind::Spread, span).into())
+            Err(SyntacticTokenError::unexpected_token(span, token, SyntaxKind::Spread).into())
           }
         }
       }

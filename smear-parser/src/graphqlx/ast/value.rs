@@ -255,7 +255,7 @@ where
                     })) => Ident::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
                       return Err(
-                        SyntacticTokenError::unexpected_token(data, SyntaxKind::Identifier, span)
+                        SyntacticTokenError::unexpected_token(span, data, SyntaxKind::Identifier)
                           .into(),
                       );
                     }
@@ -318,7 +318,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
+                    SyntacticTokenError::unexpected_token(span, tok, SyntaxKind::InputValue).into(),
                   );
                 }
               };
@@ -543,7 +543,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
+                    SyntacticTokenError::unexpected_token(span, tok, SyntaxKind::InputValue).into(),
                   );
                 }
               };

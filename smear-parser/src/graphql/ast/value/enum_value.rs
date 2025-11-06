@@ -36,10 +36,10 @@ where
             }
             _ => Ok(EnumValue::new(span, name)),
           },
-          tok => Err(Error::unexpected_token(tok, SyntaxKind::EnumValue, span).into()),
+          tok => Err(Error::unexpected_token(span, tok, SyntaxKind::EnumValue).into()),
         }
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
     })
   }
 }

@@ -1,13 +1,11 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  Lexed, LogoStream, Logos, Source, Token,
-  chumsky::{
+  Lexed, LogoStream, Logos, Source, Token, chumsky::{
     Parseable,
     extra::ParserExtra,
     input::{Cursor, InputRef},
     prelude::*,
-  },
-  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
+  }, error::UnexpectedToken, utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent}
 };
 use smear_lexer::{
   graphql::syntactic::SyntacticLexerErrors,
@@ -17,6 +15,25 @@ use smear_lexer::{
 use smear_scaffold::ast::{DirectiveLocations, OperationType};
 
 use super::*;
+
+const TYPE_KEYWORDS: &[SyntaxKind] = &[
+  SyntaxKind::scalar_KW,
+  SyntaxKind::type_KW,
+  SyntaxKind::interface_KW,
+  SyntaxKind::union_KW,
+  SyntaxKind::enum_KW,
+  SyntaxKind::input_KW,
+];
+
+const TYPE_SYSTEM_EXTENSION_KEYWORDS: &[SyntaxKind] = &[
+  SyntaxKind::scalar_KW,
+  SyntaxKind::type_KW,
+  SyntaxKind::interface_KW,
+  SyntaxKind::union_KW,
+  SyntaxKind::enum_KW,
+  SyntaxKind::input_KW,
+  SyntaxKind::schema_KW,
+];
 
 /// Type definition for GraphQL specification.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
@@ -235,24 +252,19 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, before, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::TypeKeywords,
-              span,
-            )
-            .into(),
+            SyntacticTokenError::UnexpectedToken(UnexpectedToken::expected_one_of(span, TYPE_KEYWORDS).with_found(SyntacticToken::Identifier(ident))).into()
           ),
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => {
-          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeDefinition, span).into())
+          Err(SyntacticTokenError::unexpected_token(span, data, SyntaxKind::TypeDefinition).into())
         }
       }
     })
@@ -464,7 +476,7 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span: extend_span,
@@ -477,29 +489,28 @@ where
               Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into())
             }
             Some(Lexed::Error(errs)) => {
-              Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+              Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
             }
             Some(Lexed::Token(Spanned {
               span,
               data: SyntacticToken::Identifier(ident),
             })) => match Self::parser_inner(inp, before, &ident) {
               None => Err(
-                SyntacticTokenError::unexpected_token(
-                  SyntacticToken::Identifier(ident),
-                  SyntaxKind::Keyword(&["scalar", "type", "interface", "union", "enum", "input"]),
-                  span,
+                SyntacticTokenError::UnexpectedToken(
+                  UnexpectedToken::expected_one_of(span, TYPE_KEYWORDS)
+                  .with_found(SyntacticToken::Identifier(ident))
                 )
                 .into(),
               ),
               Some(res) => res,
             },
             Some(Lexed::Token(Spanned { span, data })) => Err(
-              SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeExtension, span).into(),
+              SyntacticTokenError::unexpected_token(span, data, SyntaxKind::TypeExtension).into(),
             ),
           }
         }
         Some(Lexed::Token(Spanned { span, data })) => {
-          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::extend_KW, span).into())
+          Err(SyntacticTokenError::unexpected_token(span, data, SyntaxKind::extend_KW).into())
         }
       }
     })
@@ -648,33 +659,31 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, before, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::Keyword(&[
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "directive",
-                "schema",
-              ]),
-              span,
+            SyntacticTokenError::UnexpectedToken(
+              UnexpectedToken::expected_one_of(span, &[
+                SyntaxKind::scalar_KW,
+                SyntaxKind::type_KW,
+                SyntaxKind::interface_KW,
+                SyntaxKind::union_KW,
+                SyntaxKind::enum_KW,
+                SyntaxKind::input_KW,
+                SyntaxKind::directive_KW,
+                SyntaxKind::schema_KW,
+              ]).with_found(SyntacticToken::Identifier(ident))
             )
             .into(),
           ),
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemDefinition, span)
+          SyntacticTokenError::unexpected_token(span, data, SyntaxKind::TypeSystemDefinition)
             .into(),
         ),
       }
@@ -839,25 +848,15 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
         match inp.next() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(Lexed::Error(errs)) => {
-            Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+            Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
           }
           Some(Lexed::Token(Spanned {
             span: ext_span,
             data: SyntacticToken::Identifier(ext_ident),
           })) => match TypeSystemExtension::parser_inner(inp, before, &ext_ident) {
             None => Err(
-              SyntacticTokenError::unexpected_token(
-                SyntacticToken::Identifier(ext_ident),
-                SyntaxKind::Keyword(&[
-                  "scalar",
-                  "type",
-                  "interface",
-                  "union",
-                  "enum",
-                  "input",
-                  "schema",
-                ]),
-                ext_span,
+              SyntacticTokenError::UnexpectedToken(
+                UnexpectedToken::expected_one_of(ext_span, TYPE_SYSTEM_EXTENSION_KEYWORDS).with_found(SyntacticToken::Identifier(ext_ident))
               )
               .into(),
             ),
@@ -865,7 +864,7 @@ impl<S, Ty> TypeSystemDefinitionOrExtension<S, Ty> {
             Some(Err(errs)) => Err(errs),
           },
           Some(Lexed::Token(Spanned { span, data })) => Err(
-            SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemExtension, span)
+            SyntacticTokenError::unexpected_token(span, data, SyntaxKind::TypeSystemExtension)
               .into(),
           ),
         }
@@ -913,27 +912,26 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span,
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, before, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::Keyword(&[
-                "extend",
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "directive",
-                "schema",
-              ]),
-              span,
+            SyntacticTokenError::UnexpectedToken(
+              UnexpectedToken::expected_one_of(span, &[
+                SyntaxKind::extend_KW,
+                SyntaxKind::scalar_KW,
+                SyntaxKind::type_KW,
+                SyntaxKind::interface_KW,
+                SyntaxKind::union_KW,
+                SyntaxKind::enum_KW,
+                SyntaxKind::input_KW,
+                SyntaxKind::directive_KW,
+                SyntaxKind::schema_KW,
+              ])
+              .with_found(SyntacticToken::Identifier(ident))
             )
             .into(),
           ),
@@ -961,9 +959,9 @@ where
         }),
         Some(Lexed::Token(Spanned { span, data })) => Err(
           SyntacticTokenError::unexpected_token(
+            span,
             data,
             SyntaxKind::TypeSystemDefinitionOrExtension,
-            span,
           )
           .into(),
         ),
@@ -1173,7 +1171,7 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span: _,
@@ -1184,17 +1182,20 @@ where
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, &before, span, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::Keyword(&["fragment", "query", "mutation", "subscription"]),
-              span,
+            SyntacticTokenError::UnexpectedToken(
+              UnexpectedToken::expected_one_of(span, &[
+                SyntaxKind::fragment_KW,
+                SyntaxKind::query_KW,
+                SyntaxKind::mutation_KW,
+                SyntaxKind::subscription_KW,
+              ]).with_found(SyntacticToken::Identifier(ident))
             )
             .into(),
           ),
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, SyntaxKind::ExecutableDefinition, span)
+          SyntacticTokenError::unexpected_token(span, data, SyntaxKind::ExecutableDefinition)
             .into(),
         ),
       }
@@ -1310,7 +1311,7 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span: _,
@@ -1321,30 +1322,28 @@ where
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, before, span, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::Keyword(&[
-                "fragment",
-                "query",
-                "mutation",
-                "subscription",
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "directive",
-                "schema",
-              ]),
-              span,
+            SyntacticTokenError::UnexpectedToken(
+              UnexpectedToken::expected_one_of(span, &[
+                SyntaxKind::fragment_KW,
+                SyntaxKind::query_KW,
+                SyntaxKind::mutation_KW,
+                SyntaxKind::subscription_KW,
+                SyntaxKind::scalar_KW,
+                SyntaxKind::type_KW,
+                SyntaxKind::interface_KW,
+                SyntaxKind::union_KW,
+                SyntaxKind::enum_KW,
+                SyntaxKind::input_KW,
+                SyntaxKind::directive_KW,
+                SyntaxKind::schema_KW,
+              ]).with_found(SyntacticToken::Identifier(ident))
             )
             .into(),
           ),
           Some(res) => res,
         },
         Some(Lexed::Token(Spanned { span, data })) => {
-          Err(SyntacticTokenError::unexpected_token(data, SyntaxKind::Definition, span).into())
+          Err(SyntacticTokenError::unexpected_token(span, data, SyntaxKind::Definition).into())
         }
       }
     })
@@ -1419,25 +1418,15 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
         match inp.next() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(Lexed::Error(errs)) => {
-            Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+            Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
           }
           Some(Lexed::Token(Spanned {
             span: ext_span,
             data: SyntacticToken::Identifier(ext_ident),
           })) => match TypeSystemExtension::parser_inner(inp, before, &ext_ident) {
             None => Err(
-              SyntacticTokenError::unexpected_token(
-                SyntacticToken::Identifier(ext_ident),
-                SyntaxKind::Keyword(&[
-                  "scalar",
-                  "type",
-                  "interface",
-                  "union",
-                  "enum",
-                  "input",
-                  "schema",
-                ]),
-                ext_span,
+              SyntacticTokenError::UnexpectedToken(
+                UnexpectedToken::expected_one_of(ext_span, TYPE_SYSTEM_EXTENSION_KEYWORDS).with_found(SyntacticToken::Identifier(ext_ident))
               )
               .into(),
             ),
@@ -1445,7 +1434,7 @@ impl<S, Ty> DefinitionOrExtension<S, Ty> {
             Some(Err(errs)) => Err(errs),
           },
           Some(Lexed::Token(Spanned { span, data })) => Err(
-            SyntacticTokenError::unexpected_token(data, SyntaxKind::TypeSystemExtension, span)
+            SyntacticTokenError::unexpected_token(span, data, SyntaxKind::TypeSystemExtension)
               .into(),
           ),
         }
@@ -1495,7 +1484,7 @@ where
       match inp.next() {
         None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
         Some(Lexed::Error(errs)) => {
-          Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+          Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
         }
         Some(Lexed::Token(Spanned {
           span: _,
@@ -1508,24 +1497,22 @@ where
           data: SyntacticToken::Identifier(ident),
         })) => match Self::parser_inner(inp, before, span, &ident) {
           None => Err(
-            SyntacticTokenError::unexpected_token(
-              SyntacticToken::Identifier(ident),
-              SyntaxKind::Keyword(&[
-                "extend",
-                "fragment",
-                "query",
-                "mutation",
-                "subscription",
-                "scalar",
-                "type",
-                "interface",
-                "union",
-                "enum",
-                "input",
-                "directive",
-                "schema",
-              ]),
-              span,
+            SyntacticTokenError::UnexpectedToken(
+              UnexpectedToken::expected_one_of(span, &[
+                SyntaxKind::extend_KW,
+                SyntaxKind::fragment_KW,
+                SyntaxKind::query_KW,
+                SyntaxKind::mutation_KW,
+                SyntaxKind::subscription_KW,
+                SyntaxKind::scalar_KW,
+                SyntaxKind::type_KW,
+                SyntaxKind::interface_KW,
+                SyntaxKind::union_KW,
+                SyntaxKind::enum_KW,
+                SyntaxKind::input_KW,
+                SyntaxKind::directive_KW,
+                SyntaxKind::schema_KW,
+              ]).with_found(SyntacticToken::Identifier(ident))
             )
             .into(),
           ),
@@ -1552,7 +1539,7 @@ where
           ))
         }),
         Some(Lexed::Token(Spanned { span, data })) => Err(
-          SyntacticTokenError::unexpected_token(data, SyntaxKind::DefinitionOrExtension, span)
+          SyntacticTokenError::unexpected_token(span, data, SyntaxKind::DefinitionOrExtension)
             .into(),
         ),
       }

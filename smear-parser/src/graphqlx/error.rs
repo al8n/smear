@@ -73,11 +73,11 @@ pub enum Error<S, T, Char = char, Exp: 'static = SyntaxKind, StateError = ()> {
 impl<S, T, Char, SyntaxKind: 'static, StateError> Error<S, T, Char, SyntaxKind, StateError> {
   /// Creates an unexpected token error.
   #[inline]
-  pub const fn unexpected_token(found: T, expected: SyntaxKind, span: Span) -> Self {
-    Self::UnexpectedToken(UnexpectedToken::with_found(
+  pub const fn unexpected_token(span: Span, found: T, expected: SyntaxKind) -> Self {
+    Self::UnexpectedToken(UnexpectedToken::expected_one_with_found(
       span,
       found,
-      Expected::One(expected),
+      expected,
     ))
   }
 
@@ -311,11 +311,11 @@ where
                 Some(Lexed::Token(found_tok)) => {
                   let found_span = found_tok.span();
                   let found_tok = found_tok.as_ref().into_data();
-                  Error::UnexpectedToken(UnexpectedToken::with_found(
+                  Error::unexpected_token(
                     *found_span,
                     found_tok.clone(),
-                    Expected::One(SyntaxKind::from(expected_tok.kind())),
-                  ))
+                    SyntaxKind::from(expected_tok.kind()),
+                  )
                 }
                 Some(Lexed::Error(err)) => Error::Lexer(Spanned::new(span, err.clone())),
               }

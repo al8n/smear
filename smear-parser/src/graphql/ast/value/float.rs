@@ -28,10 +28,10 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           SyntacticToken::LitFloat(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, SyntaxKind::Float, span).into()),
+          tok => Err(Error::unexpected_token(span, tok, SyntaxKind::Float).into()),
         }
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
     })
   }
 }

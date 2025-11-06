@@ -29,10 +29,10 @@ where
         Ok(match tok {
           SyntacticToken::LitInlineStr(raw) => StringValue::new(span, raw.into()),
           SyntacticToken::LitBlockStr(raw) => StringValue::new(span, raw.into()),
-          tok => return Err(Error::unexpected_token(tok, SyntaxKind::String, span).into()),
+          tok => return Err(Error::unexpected_token(span, tok, SyntaxKind::String).into()),
         })
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
     })
   }
 }
@@ -55,10 +55,10 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           SyntacticToken::LitInlineStr(raw) => InlineStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, SyntaxKind::InlineString, span).into()),
+          tok => return Err(Error::unexpected_token(span, tok, SyntaxKind::InlineString).into()),
         })
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
     })
   }
 }
@@ -81,10 +81,10 @@ where
         let (span, tok) = tok.into_components();
         Ok(match tok {
           SyntacticToken::LitBlockStr(raw) => BlockStringValue::new(span, raw),
-          tok => return Err(Error::unexpected_token(tok, SyntaxKind::BlockString, span).into()),
+          tok => return Err(Error::unexpected_token(span, tok, SyntaxKind::BlockString).into()),
         })
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+      Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
     })
   }
 }

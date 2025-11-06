@@ -28,6 +28,7 @@ logosky = { workspace = true, features = ["chumsky"] }
 smear-scaffold.workspace = true
 smear-lexer.workspace = true
 paste = "1"
+generic-array = { version = "1", default-features = false }
 
 bytes = { workspace = true, optional = true }
 

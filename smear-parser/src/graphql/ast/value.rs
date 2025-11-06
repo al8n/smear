@@ -168,7 +168,7 @@ where
           None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+              Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), err).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
               let output = match token {
@@ -195,14 +195,14 @@ where
                     })) => Name::new(span, name),
                     Some(Lexed::Token(Spanned { span, data })) => {
                       return Err(
-                        SyntacticTokenError::unexpected_token(data, SyntaxKind::Name, span).into(),
+                        SyntacticTokenError::unexpected_token(span, data, SyntaxKind::Name).into(),
                       );
                     }
                     Some(Lexed::Error(err)) => {
                       return Err(
                         SyntacticTokenError::from_lexer_errors(
-                          err,
                           inp.span_since(&current_cursor),
+                          err,
                         )
                         .into(),
                       );
@@ -210,8 +210,8 @@ where
                     None => {
                       return Err(
                         SyntacticTokenError::unexpected_end_of_variable_value(
-                          VariableValueHint::Name,
                           inp.span_since(&before),
+                          VariableValueHint::Name,
                         )
                         .into(),
                       );
@@ -257,7 +257,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::InputValue, span).into(),
+                    SyntacticTokenError::unexpected_token(span, tok, SyntaxKind::InputValue).into(),
                   );
                 }
               };
@@ -380,7 +380,7 @@ where
           None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
           Some(tok) => match tok {
             Lexed::Error(err) => {
-              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
+              Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), err).into())
             }
             Lexed::Token(Spanned { span, data: token }) => {
               let output = match token {
@@ -436,7 +436,7 @@ where
                 }
                 tok => {
                   return Err(
-                    SyntacticTokenError::unexpected_token(tok, SyntaxKind::ConstInputValue, span)
+                    SyntacticTokenError::unexpected_token(span, tok, SyntaxKind::ConstInputValue)
                       .into(),
                   );
                 }

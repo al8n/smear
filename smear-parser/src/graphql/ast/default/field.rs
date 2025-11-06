@@ -259,7 +259,7 @@ where
     match inp.next() {
       None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
       Some(Lexed::Error(errs)) => {
-        Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
+        Err(SyntacticTokenError::from_lexer_errors(inp.span_since(&before), errs).into())
       }
       Some(Lexed::Token(Spanned { span, data: token })) => {
         match token {
@@ -272,7 +272,7 @@ where
                   .into(),
               ),
               Some(Lexed::Error(errs)) => Err(
-                SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&current_cursor))
+                SyntacticTokenError::from_lexer_errors(inp.span_since(&current_cursor), errs)
                   .into(),
               ),
               Some(Lexed::Token(Spanned {
@@ -350,7 +350,7 @@ where
                     )))
                   }
                   token => Err(
-                    SyntacticTokenError::unexpected_token(token, SyntaxKind::Field, fragment_span)
+                    SyntacticTokenError::unexpected_token(fragment_span, token, SyntaxKind::Field)
                       .into(),
                   ),
                 }
@@ -358,7 +358,7 @@ where
             }
           }
           token => {
-            Err(SyntacticTokenError::unexpected_token(token, SyntaxKind::Spread, span).into())
+            Err(SyntacticTokenError::unexpected_token(span, token, SyntaxKind::Spread).into())
           }
         }
       }

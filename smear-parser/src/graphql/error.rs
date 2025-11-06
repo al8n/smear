@@ -11,20 +11,20 @@ use logosky::{
   error::{
     DefaultContainer, Invalid, InvalidBooleanLiteral, InvalidEnumValueLiteral, InvalidNullLiteral,
     Unclosed, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEnd,
-    UnexpectedEot, UnexpectedKeyword, UnexpectedToken, UnknownLexeme,
+    UnexpectedEot, UnexpectedKeyword, UnexpectedToken, UnknownLexeme, IncompleteSyntax,
   },
   utils::{CharLen, Expected, Message, Span, Spanned},
 };
 
 use super::SyntaxKind as Exp;
 
-use crate::graphql::syntax::{DirectiveLocationSyntax, FragmentNameSyntax, OperationTypeSyntax};
+use crate::graphql::syntax::*;
 pub use crate::{
   error::ParseVariableValueError,
   graphql::SyntaxKind,
   hints::{
-    EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-    ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
+    // EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
+    // ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
     VariableValueHint,
   },
   lexer::graphql::error::LexerErrors,
@@ -43,6 +43,7 @@ pub type Extra<S, T, Char = char, SyntaxKind = Exp, StateError = ()> =
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum Error<S, T, Char = char, SyntaxKind: 'static = Exp, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(Spanned<LexerErrors<Char, StateError>>),
@@ -72,6 +73,18 @@ pub enum Error<S, T, Char = char, SyntaxKind: 'static = Exp, StateError = ()> {
   UnknownDirectiveLocation(UnknownLexeme<Char, DirectiveLocationSyntax>),
   /// An unknown operation type was found.
   UnknownOperationType(UnknownLexeme<Char, OperationTypeSyntax>),
+  /// An unexpected end was found in an object type extension.
+  IncompleteObjectExtension(IncompleteSyntax<ObjectTypeExtensionSyntax>),
+  /// An unexpected end was found in an interface type extension.
+  IncompleteInterfaceExtension(IncompleteSyntax<InterfaceTypeExtensionSyntax>),
+  /// An unexpected end was found in an enum type extension.
+  IncompleteEnumExtension(IncompleteSyntax<EnumTypeExtensionSyntax>),
+  /// An unexpected end was found in an input object type extension.
+  IncompleteInputObjectExtension(IncompleteSyntax<InputObjectTypeExtensionSyntax>),
+  /// An unexpected end was found in a union type extension.
+  IncompleteUnionExtension(IncompleteSyntax<UnionTypeExtensionSyntax>),
+  /// An unexpected end was found in a schema extension.
+  IncompleteSchemaExtension(IncompleteSyntax<SchemaExtensionSyntax>),
   /// An end of input was found.
   EndOfInput(UnexpectedEot),
   /// Some other error.
@@ -81,17 +94,17 @@ pub enum Error<S, T, Char = char, SyntaxKind: 'static = Exp, StateError = ()> {
 impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateError> {
   /// Creates an unexpected token error.
   #[inline]
-  pub const fn unexpected_token(found: T, expected: SyntaxKind, span: Span) -> Self {
-    Self::UnexpectedToken(UnexpectedToken::with_found(
+  pub const fn unexpected_token(span: Span, found: T, expected: SyntaxKind) -> Self {
+    Self::UnexpectedToken(UnexpectedToken::expected_one_with_found(
       span,
       found,
-      Expected::One(expected),
+      expected
     ))
   }
 
   /// Creates an unexpected end in variable value error.
   #[inline]
-  pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
+  pub const fn unexpected_end_of_variable_value(span: Span, hint: VariableValueHint) -> Self {
     Self::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
       span,
       Message::from_static("variable value"),
@@ -101,7 +114,7 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
 
   /// Creates an unexpected keyword error.
   #[inline]
-  pub const fn unexpected_keyword(found: S, expected_kw: &'static str, span: Span) -> Self {
+  pub const fn unexpected_keyword(span: Span, found: S, expected_kw: &'static str) -> Self {
     Self::UnexpectedKeyword(UnexpectedKeyword::new(
       span,
       found,
@@ -135,7 +148,7 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
 
   /// Creates an error from a lexer error.
   #[inline]
-  pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
+  pub const fn from_lexer_errors(span: Span, err: LexerErrors<Char, StateError>) -> Self {
     Self::Lexer(Spanned::new(span, err))
   }
 
@@ -219,6 +232,12 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
       Self::UnknownOperationType(e) => e.span(),
       Self::EndOfInput(e) => e.span(),
       Self::Other(e) => *e.span(),
+      Self::IncompleteObjectExtension(e) => e.span(),
+      Self::IncompleteInterfaceExtension(e) => e.span(),
+      Self::IncompleteEnumExtension(e) => e.span(),
+      Self::IncompleteInputObjectExtension(e) => e.span(),
+      Self::IncompleteUnionExtension(e) => e.span(),
+      Self::IncompleteSchemaExtension(e) => e.span(),
     }
   }
 }
@@ -319,11 +338,11 @@ where
                 Some(Lexed::Token(found_tok)) => {
                   let found_span = found_tok.span();
                   let found_tok = found_tok.as_ref().into_data();
-                  Error::UnexpectedToken(UnexpectedToken::with_found(
+                  Error::unexpected_token(
                     *found_span,
                     found_tok.clone(),
-                    Expected::One(SyntaxKind::from(expected_tok.kind())),
-                  ))
+                    SyntaxKind::from(expected_tok.kind())
+                  )
                 }
                 Some(Lexed::Error(err)) => Error::Lexer(Spanned::new(span, err.clone())),
               }

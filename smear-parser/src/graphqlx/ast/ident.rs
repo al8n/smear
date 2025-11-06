@@ -79,7 +79,7 @@ where
         let (span, tok) = tok.into_components();
         match tok {
           SyntacticToken::Identifier(name) => Ok(Name::new(span, name)),
-          tok => Err(Error::unexpected_token(tok, SyntaxKind::Identifier, span).into()),
+          tok => Err(Error::unexpected_token(span, tok, SyntaxKind::Identifier).into()),
         }
       }
       Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),

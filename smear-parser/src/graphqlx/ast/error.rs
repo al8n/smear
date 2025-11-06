@@ -14,9 +14,9 @@ where
   #[inline]
   fn missing_dollar_token(name: Ident<S>, span: Span) -> Self {
     Self::unexpected_token(
+      span,
       SyntacticToken::Identifier(name.into_components().1),
       SyntaxKind::Dollar,
-      span,
     )
   }
 

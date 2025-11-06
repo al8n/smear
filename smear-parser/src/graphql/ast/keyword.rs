@@ -35,12 +35,12 @@ macro_rules! keyword_parser {
                   SyntacticToken::Identifier(name) => if $kw.equivalent(&name) {
                     Ok(<$name>::new(span))
                   } else {
-                    Err(Error::unexpected_keyword(name, $kw, span).into())
+                    Err(Error::unexpected_keyword(span, name, $kw).into())
                   },
-                  tok => Err(Error::unexpected_token(tok, SyntaxKind::[< $kw _KW >], span).into()),
+                  tok => Err(Error::unexpected_token(span, tok, SyntaxKind::[< $kw _KW >]).into()),
                 }
               },
-              Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
+              Lexed::Error(err) => Err(Error::from_lexer_errors(span, err).into()),
             })
           }
         }

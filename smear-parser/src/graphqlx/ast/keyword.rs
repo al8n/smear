@@ -39,7 +39,7 @@ macro_rules! keyword_parser {
                   } else {
                     Err(Error::unexpected_keyword(name, $kw, span).into())
                   },
-                  tok => Err(Error::unexpected_token(tok, SyntaxKind::[< $kw _KW >], span).into()),
+                  tok => Err(Error::unexpected_token(span, tok, SyntaxKind::[< $kw _KW >]).into()),
                 }
               },
               Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
