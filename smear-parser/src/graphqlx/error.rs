@@ -8,346 +8,229 @@ use logosky::{
     error::{self, LabelError},
     util::{Maybe, MaybeRef},
   },
-  utils::{Span, UnexpectedEnd, UnexpectedKeyword, UnexpectedToken},
+  error::{
+    DefaultContainer, Invalid, InvalidBooleanLiteral, InvalidEnumValueLiteral, InvalidNullLiteral,
+    Unclosed, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEnd,
+    UnexpectedEot, UnexpectedKeyword, UnexpectedToken, UnknownLexeme,
+  },
+  utils::{CharLen, Expected, Message, Span, Spanned},
 };
 
-use super::SyntaxKind;
+use super::{
+  SyntaxKind,
+  syntax::{DirectiveLocationSyntax, FragmentTypePathSyntax, OperationTypeSyntax},
+};
 
 pub use crate::{
-  hints::{
-    EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-    ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
-    VariableValueHint,
-  },
+  hints::{ObjectFieldValueHint, VariableValueHint},
   lexer::graphqlx::error::LexerErrors,
 };
+
+/// A malformed fragment type path error.
+pub type InvalidFragmentTypePath = Invalid<FragmentTypePathSyntax>;
 
 /// An extra alias
 pub type Extra<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
   logosky::chumsky::extra::Err<Errors<S, T, Char, Exp, StateError>>;
 
-/// An unclosed structure error.
-#[derive(Debug, Copy, Clone, IsVariant)]
-pub enum Unclosed {
-  /// An unclosed bracket.
-  Bracket,
-  /// An unclosed brace.
-  Brace,
-}
-
-/// Invalid enum value name
-#[derive(Debug, Copy, Clone, IsVariant)]
-pub enum InvalidEnumValue {
-  /// Enum value is `true`
-  True,
-  /// Enum value is `false`
-  False,
-  /// Enum value is `null`
-  Null,
-}
-
 /// The data of a parser error.
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ErrorData<S, T, Char = char, Exp = SyntaxKind, StateError = ()> {
+#[non_exhaustive]
+pub enum Error<S, T, Char = char, Exp: 'static = SyntaxKind, StateError = ()> {
   /// One or more errors from the lexer.
-  Lexer(LexerErrors<Char, StateError>),
-  /// An integer value could not be parsed due to overflow.
-  #[from(skip)]
-  IntOverflow(S),
-  /// A floating point value could not be parsed due to overflow
-  #[from(skip)]
-  FloatOverflow(S),
+  Lexer(Spanned<LexerErrors<Char, StateError>>),
   /// An enum value is invalid.
-  #[from(skip)]
-  InvalidEnumValue(InvalidEnumValue),
+  InvalidEnumValue(InvalidEnumValueLiteral),
   /// A boolean value is invalid.
-  #[from(skip)]
-  InvalidBooleanValue(S),
+  InvalidBooleanValue(InvalidBooleanLiteral),
   /// A null value is invalid.
-  #[from(skip)]
-  InvalidNullValue(S),
+  InvalidNullValue(InvalidNullLiteral),
   /// A fragment type path is invalid.
-  #[from(skip)]
-  InvalidFragmentTypePath,
-  /// A list or object was not closed.
-  Unclosed(Unclosed),
+  InvalidFragmentTypePath(InvalidFragmentTypePath),
+  /// A list was not closed.
+  UnclosedBracket(UnclosedBracket),
+  /// A brace was not closed.
+  UnclosedBrace(UnclosedBrace),
+  /// An angle bracket was not closed.
+  UnclosedAngle(UnclosedAngle),
+  /// A parenthesis was not closed.
+  UnclosedParen(UnclosedParen),
   /// An unexpected token was found.
-  UnexpectedToken(UnexpectedToken<T, Exp>),
+  UnexpectedToken(UnexpectedToken<'static, T, Exp>),
   /// An unexpected keyword was found.
-  UnexpectedKeyword(UnexpectedKeyword<S>),
+  UnexpectedKeyword(UnexpectedKeyword<'static, S>),
   /// An unexpected end was found in a variable value.
   UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
   /// An unknown directive location was found.
-  #[from(skip)]
-  UnknownDirectiveLocation(S),
+  UnknownDirectiveLocation(UnknownLexeme<Char, DirectiveLocationSyntax>),
   /// An unknown operation type was found.
-  #[from(skip)]
-  UnknownOperationType(S),
-  /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
-  /// An unexpected end was found in an interface type extension.
-  UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
-  /// An unexpected end was found in an enum type extension.
-  UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
-  /// An unexpected end was found in an input object type extension.
-  UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
-  /// An unexpected end was found in a union type extension.
-  UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
-  /// An unexpected end was found in a schema extension.
-  UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
+  UnknownOperationType(UnknownLexeme<Char, OperationTypeSyntax>),
   /// An end of input was found.
-  EndOfInput,
+  EndOfInput(UnexpectedEot),
   /// Some other error.
-  Other(Cow<'static, str>),
+  Other(Spanned<Message>),
 }
 
-/// A parser error.
-#[derive(Debug, Clone)]
-pub struct Error<S, T, Char = char, Exp = SyntaxKind, StateError = ()> {
-  span: Span,
-  data: ErrorData<S, T, Char, Exp, StateError>,
-}
-
-impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateError> {
-  /// Creates a new error.
-  #[inline]
-  pub const fn new(span: Span, data: ErrorData<S, T, Char, SyntaxKind, StateError>) -> Self {
-    Self { span, data }
-  }
-
+impl<S, T, Char, SyntaxKind: 'static, StateError> Error<S, T, Char, SyntaxKind, StateError> {
   /// Creates an unexpected token error.
   #[inline]
   pub const fn unexpected_token(found: T, expected: SyntaxKind, span: Span) -> Self {
-    Self::new(
+    Self::UnexpectedToken(UnexpectedToken::with_found(
       span,
-      ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
-    )
+      found,
+      Expected::One(expected),
+    ))
   }
 
   /// Creates an unexpected end in variable value error.
   #[inline]
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    Self::new(
+    Self::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
       span,
-      ErrorData::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
-        Cow::Borrowed("variable value"),
-        hint,
-      )),
-    )
+      Message::from_static("variable value"),
+      hint,
+    ))
   }
 
   /// Creates an unexpected keyword error.
   #[inline]
   pub const fn unexpected_keyword(found: S, expected_kw: &'static str, span: Span) -> Self {
-    Self::new(
+    Self::UnexpectedKeyword(UnexpectedKeyword::new(
       span,
-      ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(found, expected_kw)),
-    )
-  }
-
-  /// Creates an unexpected end in object field value error.
-  #[inline]
-  pub const fn unexpected_end_of_object_field_value(
-    hint: ObjectFieldValueHint,
-    span: Span,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
-        Cow::Borrowed("object field value"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_object_extension(
-    span: Span,
-    hint: ObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfObjectExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in interface type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_interface_extension(
-    span: Span,
-    hint: InterfaceTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("interface type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in enum type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfEnumExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("enum type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in input object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_input_object_extension(
-    span: Span,
-    hint: InputObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInputObjectExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("input object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in union type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfUnionExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("union type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in schema extension error.
-  #[inline]
-  pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfSchemaExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("schema extension"),
-        hint,
-      )),
-    )
+      found,
+      Expected::One(expected_kw),
+    ))
   }
 
   /// Creates an unclosed bracket error.
   #[inline]
   pub const fn unclosed_bracket(span: Span) -> Self {
-    Self::new(span, ErrorData::Unclosed(Unclosed::Bracket))
+    Self::UnclosedBracket(Unclosed::bracket(span))
   }
 
   /// Creates an unclosed brace error.
   #[inline]
   pub const fn unclosed_brace(span: Span) -> Self {
-    Self::new(span, ErrorData::Unclosed(Unclosed::Bracket))
+    Self::UnclosedBrace(Unclosed::brace(span))
+  }
+
+  /// Creates an unclosed angle bracket error.
+  #[inline]
+  pub const fn unclosed_angle(span: Span) -> Self {
+    Self::UnclosedAngle(Unclosed::angle(span))
+  }
+
+  /// Creates an unclosed parenthesis error.
+  #[inline]
+  pub const fn unclosed_paren(span: Span) -> Self {
+    Self::UnclosedParen(Unclosed::paren(span))
   }
 
   /// Creates an error from a lexer error.
   #[inline]
   pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
-    Self::new(span, ErrorData::Lexer(err))
+    Self::Lexer(Spanned::new(span, err))
   }
 
   /// Creates an unexpected end of input error.
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
-    Self::new(span, ErrorData::EndOfInput)
+    Self::EndOfInput(UnexpectedEot::eot(span))
   }
 
   /// Creates an invalid fragment type path error.
   #[inline]
   pub const fn invalid_fragment_type_path(span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidFragmentTypePath)
-  }
-
-  /// Creates an invalid enum value error.
-  #[inline]
-  pub const fn invalid_enum_value(value: InvalidEnumValue, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidEnumValue(value))
-  }
-
-  /// Creates an invalid boolean value error.
-  #[inline]
-  pub const fn invalid_boolean_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidBooleanValue(value))
-  }
-
-  /// Creates an invalid null value error.
-  #[inline]
-  pub const fn invalid_null_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidNullValue(value))
+    Self::InvalidFragmentTypePath(InvalidFragmentTypePath::with_knowledge(
+      span,
+      FragmentTypePathSyntax(()),
+    ))
   }
 
   /// Creates an unknown directive location error.
   #[inline]
-  pub const fn unknown_directive_location(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownDirectiveLocation(value))
+  pub const fn unknown_directive_location(span: Span) -> Self {
+    Self::UnknownDirectiveLocation(UnknownLexeme::from_range_const(
+      span,
+      DirectiveLocationSyntax(()),
+    ))
   }
 
   /// Creates an unknown operation type error.
   #[inline]
-  pub const fn unknown_operation_type(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownOperationType(value))
+  pub const fn unknown_operation_type(span: Span) -> Self {
+    Self::UnknownOperationType(UnknownLexeme::from_range_const(
+      span,
+      OperationTypeSyntax(()),
+    ))
+  }
+
+  /// Creates an invalid enum value error.
+  #[inline]
+  pub const fn invalid_enum_value(span: Span) -> Self {
+    Self::InvalidEnumValue(InvalidEnumValueLiteral::enum_value(span))
+  }
+
+  /// Creates an invalid boolean value error.
+  #[inline]
+  pub const fn invalid_boolean_value(span: Span) -> Self {
+    Self::InvalidBooleanValue(InvalidBooleanLiteral::boolean(span))
+  }
+
+  /// Creates an invalid null value error.
+  #[inline]
+  pub const fn invalid_null_value(span: Span) -> Self {
+    Self::InvalidNullValue(InvalidNullLiteral::null(span))
+  }
+
+  /// Creates a other error.
+  #[inline]
+  pub fn other(span: Span, msg: impl Into<Cow<'static, str>>) -> Self {
+    Self::Other(Spanned::new(span, Message::from(msg.into())))
   }
 
   /// Returns the span of the error.
   #[inline]
-  pub const fn span(&self) -> Span {
-    self.span
-  }
-
-  /// Returns the data of the error.
-  #[inline]
-  pub const fn data(&self) -> &ErrorData<S, T, Char, SyntaxKind, StateError> {
-    &self.data
-  }
-
-  /// Returns a mutable reference to the data of the error.
-  #[inline]
-  pub const fn data_mut(&mut self) -> &mut ErrorData<S, T, Char, SyntaxKind, StateError> {
-    &mut self.data
-  }
-
-  /// Consumes the error and returns its data.
-  #[inline]
-  pub fn into_data(self) -> ErrorData<S, T, Char, SyntaxKind, StateError> {
-    self.data
+  pub fn span(&self) -> Span
+  where
+    Char: CharLen,
+  {
+    match self {
+      Self::Lexer(spanned) => *spanned.span(),
+      Self::InvalidEnumValue(e) => e.span(),
+      Self::InvalidBooleanValue(e) => e.span(),
+      Self::InvalidNullValue(e) => e.span(),
+      Self::InvalidFragmentTypePath(e) => e.span(),
+      Self::UnclosedBracket(unclosed) => unclosed.span(),
+      Self::UnclosedBrace(unclosed) => unclosed.span(),
+      Self::UnclosedAngle(unclosed) => unclosed.span(),
+      Self::UnclosedParen(unclosed) => unclosed.span(),
+      Self::UnexpectedToken(e) => e.span(),
+      Self::UnexpectedKeyword(e) => e.span(),
+      Self::UnexpectedEndOfVariableValue(e) => e.span(),
+      Self::UnexpectedEndOfObjectFieldValue(e) => e.span(),
+      Self::UnknownDirectiveLocation(e) => e.span(),
+      Self::UnknownOperationType(e) => e.span(),
+      Self::EndOfInput(e) => e.span(),
+      Self::Other(e) => *e.span(),
+    }
   }
 }
 
-#[cfg(feature = "smallvec")]
-type DefaultErrorsContainer<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
-  smallvec::SmallVec<[Error<S, T, Char, Exp, StateError>; 1]>;
-
-#[cfg(not(feature = "smallvec"))]
-type DefaultErrorsContainer<S, T, Char = char, Exp = SyntaxKind, StateError = ()> =
-  std::vec::Vec<Error<S, T, Char, Exp, StateError>>;
-
 /// A container for storing multiple parser errors.
 #[derive(Debug, Clone, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct Errors<S, T, Char = char, Exp = SyntaxKind, StateError = ()>(
-  DefaultErrorsContainer<S, T, Char, Exp, StateError>,
+pub struct Errors<S, T, Char = char, Exp: 'static = SyntaxKind, StateError = ()>(
+  DefaultContainer<Error<S, T, Char, Exp, StateError>>,
 );
 
 impl<S, T, Char, SyntaxKind, StateError> Default for Errors<S, T, Char, SyntaxKind, StateError> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn default() -> Self {
-    Self(DefaultErrorsContainer::default())
+    Self(DefaultContainer::default())
   }
 }
 
@@ -364,7 +247,7 @@ impl<S, T, Char, SyntaxKind, StateError> Errors<S, T, Char, SyntaxKind, StateErr
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
-    Self(DefaultErrorsContainer::with_capacity(capacity))
+    Self(DefaultContainer::with_capacity(capacity))
   }
 }
 
@@ -373,7 +256,7 @@ impl<S, T, Char, SyntaxKind, StateError> IntoIterator
 {
   type Item = Error<S, T, Char, SyntaxKind, StateError>;
   type IntoIter =
-    <DefaultErrorsContainer<S, T, Char, SyntaxKind, StateError> as IntoIterator>::IntoIter;
+    <DefaultContainer<Error<S, T, Char, SyntaxKind, StateError>> as IntoIterator>::IntoIter;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn into_iter(self) -> Self::IntoIter {
@@ -395,9 +278,9 @@ impl<'a, S, T, Char, SyntaxKind, StateError>
   for Errors<S, T, Char, SyntaxKind, StateError>
 where
   T: Token<'a>,
+  SyntaxKind: From<<T as Token<'a>>::Kind>,
   T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
   <T::Logos as Logos<'a>>::Extras: Copy,
-  SyntaxKind: From<T::Kind>,
   Char: Clone,
   StateError: Clone,
 {
@@ -427,29 +310,32 @@ where
             Lexed::Token(expected_tok) => {
               let expected_tok = expected_tok.as_ref().into_data();
               match found_lexed {
-                None => {
-                  ErrorData::UnexpectedToken(UnexpectedToken::new(expected_tok.kind().into()))
-                }
+                None => Error::UnexpectedToken(UnexpectedToken::new(
+                  span,
+                  Expected::One(SyntaxKind::from(expected_tok.kind())),
+                )),
                 Some(Lexed::Token(found_tok)) => {
+                  let found_span = found_tok.span();
                   let found_tok = found_tok.as_ref().into_data();
-                  ErrorData::UnexpectedToken(UnexpectedToken::with_found(
+                  Error::UnexpectedToken(UnexpectedToken::with_found(
+                    *found_span,
                     found_tok.clone(),
-                    expected_tok.kind().into(),
+                    Expected::One(SyntaxKind::from(expected_tok.kind())),
                   ))
                 }
-                Some(Lexed::Error(err)) => ErrorData::Lexer(err.clone()),
+                Some(Lexed::Error(err)) => Error::Lexer(Spanned::new(span, err.clone())),
               }
             }
-            Lexed::Error(err) => ErrorData::Lexer(err.clone()),
+            Lexed::Error(err) => Error::Lexer(Spanned::new(span, err.clone())),
           }
         }
-        DefaultExpected::Any => ErrorData::Other("DefaultExpected::Any".into()),
-        DefaultExpected::SomethingElse => ErrorData::Other("DefaultExpected::SomethingElse".into()),
-        DefaultExpected::EndOfInput => ErrorData::EndOfInput,
-        _ => ErrorData::Other("unknown expected".into()),
+        DefaultExpected::Any => Error::other(span, "expected any token"),
+        DefaultExpected::SomethingElse => Error::other(span, "expected something else"),
+        DefaultExpected::EndOfInput => Error::unexpected_end_of_input(span),
+        _ => Error::other(span, "unknown expected"),
       };
 
-      errs.push(Error::new(span, ed));
+      errs.push(ed);
     }
 
     errs

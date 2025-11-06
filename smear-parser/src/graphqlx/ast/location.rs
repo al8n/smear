@@ -101,7 +101,7 @@ where
                   keywords::InputFieldDefinitionLocation::new(span),
                 ))
               }
-              _ => return Err(Error::unknown_directive_location(name, span).into()),
+              _ => return Err(Error::unknown_directive_location(span).into()),
             }
           }),
           tok => Err(Error::unexpected_token(tok, SyntaxKind::DirectiveLocation, span).into()),

@@ -8,13 +8,14 @@ use logosky::{
     error::{self, LabelError},
     util::{Maybe, MaybeRef},
   },
-  utils::{Span, UnexpectedEnd},
+  error::{UnexpectedEnd, UnexpectedKeyword, UnexpectedToken},
+  utils::Span,
 };
 
 use super::SyntaxKind as Exp;
 
 pub use crate::{
-  error::{ParseVariableValueError, UnexpectedKeyword, UnexpectedToken},
+  error::ParseVariableValueError,
   hints::{
     EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
     ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,

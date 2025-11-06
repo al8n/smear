@@ -6,7 +6,7 @@ use logosky::{
 };
 use smear_lexer::graphqlx::syntactic::SyntacticLexerErrors;
 
-use crate::{graphqlx::error::InvalidEnumValue, value::EnumValue as EnumValueInner};
+use crate::value::EnumValue as EnumValueInner;
 
 use super::super::*;
 
@@ -84,15 +84,15 @@ where
   {
     Path::parser().try_map(|path, span: Span| {
       if "true".equivalent(&path) {
-        return Err(Error::invalid_enum_value(InvalidEnumValue::True, span).into());
+        return Err(Errors::from(Error::invalid_enum_value(span)));
       }
 
       if "false".equivalent(&path) {
-        return Err(Error::invalid_enum_value(InvalidEnumValue::False, span).into());
+        return Err(Errors::from(Error::invalid_enum_value(span)));
       }
 
       if "null".equivalent(&path) {
-        return Err(Error::invalid_enum_value(InvalidEnumValue::Null, span).into());
+        return Err(Errors::from(Error::invalid_enum_value(span)));
       }
 
       Ok(EnumValue::new(path))

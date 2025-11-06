@@ -31,7 +31,7 @@ where
           SyntacticToken::Identifier(ident) => Ok(match () {
             () if "true".equivalent(&ident) => BooleanValue::new(span, true),
             () if "false".equivalent(&ident) => BooleanValue::new(span, false),
-            _ => return Err(Error::invalid_boolean_value(ident, span).into()),
+            _ => return Err(Error::invalid_boolean_value(span).into()),
           }),
           tok => Err(Error::unexpected_token(tok, SyntaxKind::BooleanValue, span).into()),
         }
