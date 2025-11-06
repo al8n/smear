@@ -212,3 +212,8 @@ pub enum WhiteSpaceHint {
   #[display("'\\t'")]
   Tab,
 }
+
+/// A knowledge for spread operator.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[display("spread operator")]
+pub struct SpreadOperator;

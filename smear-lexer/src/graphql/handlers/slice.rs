@@ -1,34 +1,27 @@
 use crate::{
-  graphql::error::DecimalError,
+  graphql::{GraphQL, error::IntError},
   handlers::{self, is_ignored_byte},
   hints::{ExponentHint, FloatHint},
 };
 use logosky::{
   Source,
   logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, tracker::Limiter},
+  utils::{Lexeme, Span, tracker::Limiter},
 };
 
 use super::error::{self, FloatError};
 
 type LexerError<Extras> = error::LexerError<u8, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<u8, Extras>;
-type LexerErrorData<Extras> = error::LexerErrorData<u8, Extras>;
 
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn default_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> error::LexerErrors<u8, Extras>
+pub(crate) fn default_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerErrors<Extras>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  match lexer.slice().as_ref().iter().next() {
-    Some(&ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }
-  .into()
+  crate::handlers::slice::default_error::<S, T, GraphQL, LexerError<Extras>>(lexer).into()
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -43,7 +36,7 @@ where
   match lexer.slice().as_ref().iter().next() {
     Some(&ch) => {
       lexer.extras.increase_token();
-      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
+      LexerError::unknown_char(lexer.span().start, ch)
     }
     None => LexerError::unexpected_eoi(lexer.span().into()),
   }
@@ -61,7 +54,7 @@ where
 {
   let span = lexer.span();
   let pos = span.start;
-  Err(error::LexerError::unexpected_char(span.into(), b'+', pos))
+  Err(error::LexerError::unexpected_char(pos, b'+'))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -75,7 +68,7 @@ where
 {
   let span = lexer.span();
   let pos = span.start;
-  Err(error::LexerError::unexpected_char(span.into(), b'-', pos))
+  Err(error::LexerError::unexpected_char(pos, b'-'))
 }
 
 #[inline]
@@ -84,7 +77,7 @@ pub(crate) fn leading_zero_error<'a, S, E, T, Extras>(
   leading_zeros: impl FnOnce(Lexeme<u8>) -> E,
 ) -> LexerError<Extras>
 where
-  E: Into<LexerErrorData<Extras>>,
+  E: Into<LexerError<Extras>>,
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
@@ -112,13 +105,12 @@ where
   }
 
   let l = if zeros == 1 {
-    let pc = PositionedChar::with_position(b'0', zero_start_at);
-    Lexeme::Char(pc)
+    Lexeme::from_char(zero_start_at, b'0')
   } else {
-    Lexeme::Span(Span::from(zero_start_at..(zero_start_at + zeros)))
+    Lexeme::from_range(zero_start_at..(zero_start_at + zeros))
   };
 
-  LexerError::new(lexer.span(), leading_zeros(l).into())
+  leading_zeros(l).into()
 }
 
 #[allow(clippy::result_large_err)]
@@ -129,8 +121,8 @@ fn handle_leading_zero_and_number_suffix_error<'a, S, T, LE, SE, Extras>(
   unexpected_suffix: impl FnOnce(Lexeme<u8>) -> SE,
 ) -> Result<S::Slice<'a>, LexerErrors<Extras>>
 where
-  LE: Into<LexerErrorData<Extras>>,
-  SE: Into<LexerErrorData<Extras>>,
+  LE: Into<LexerError<Extras>>,
+  SE: Into<LexerError<Extras>>,
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
@@ -139,10 +131,10 @@ where
   let mut errs = LexerErrors::default();
   errs.push(err);
 
-  match handle_decimal_suffix(lexer, unexpected_suffix) {
+  match handle_number_suffix(lexer, unexpected_suffix) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(LexerError::new(lexer.span(), e.into()));
+      errs.push(e);
       Err(errs)
     }
   }
@@ -164,9 +156,9 @@ where
     |err| {
       let mut token_span = span;
       token_span.bump_start(err.end());
-      DecimalError::leading_zeros(token_span, err)
+      IntError::leading_zeros(token_span, err)
     },
-    |err| DecimalError::unexpected_suffix(span, err),
+    |err| IntError::unexpected_suffix(span, err),
   )
 }
 
@@ -222,12 +214,9 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
-  LexerError::float(
-    lexer.span().into(),
-    super::fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
-  )
+  LexerError::float(super::fractional_error(lexer, remainder_len, iter, |ch| {
+    is_ignored_byte(remainder_slice, ch)
+  }))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -278,21 +267,25 @@ where
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
 
-  LexerError::float(
-    lexer.span().into(),
-    handlers::lit_float_suffix_error::<_, super::GraphQLNumber, _, _, _, _>(
-      "float",
-      lexer,
-      remainder_len,
-      iter,
-      |b| is_ignored_byte(remainder_slice, b),
-      || match slice_bytes.iter().last().copied() {
-        Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
-        Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
-        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-      },
-    ),
-  )
+  LexerError::float(handlers::lit_float_suffix_error::<
+    _,
+    super::GraphQLNumber,
+    _,
+    _,
+    _,
+    _,
+  >(
+    "float",
+    lexer,
+    remainder_len,
+    iter,
+    |b| is_ignored_byte(remainder_slice, b),
+    || match slice_bytes.iter().last().copied() {
+      Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
+      Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
+      _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
+    },
+  ))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -328,7 +321,7 @@ where
   Err(errs)
 }
 
-fn handle_decimal_suffix<'a, S, T, E, Extras>(
+fn handle_number_suffix<'a, S, T, E, Extras>(
   lexer: &mut Lexer<'a, T>,
   unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
@@ -336,17 +329,17 @@ where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
-  E: Into<LexerErrorData<Extras>>,
+  E: Into<LexerError<Extras>>,
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
-  super::handle_decimal_suffix(
+  super::handle_graphql_number_suffix(
     lexer,
     remainder_len,
     remainder.as_ref().iter().copied(),
     unexpected_suffix,
   )
-  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+  .map_err(Into::into)
 }
 
 pub(crate) fn handle_int_suffix<'a, S, T, Extras>(
@@ -358,7 +351,7 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let span: Span = lexer.span().into();
-  handle_decimal_suffix(lexer, |e| error::DecimalError::unexpected_suffix(span, e))
+  handle_number_suffix(lexer, |e| error::IntError::unexpected_suffix(span, e))
 }
 
 pub(crate) fn handle_float_suffix<'a, S, T, Extras>(
@@ -370,5 +363,5 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let span: Span = lexer.span().into();
-  handle_decimal_suffix(lexer, |e| error::FloatError::unexpected_suffix(span, e))
+  handle_number_suffix(lexer, |e| error::FloatError::unexpected_suffix(span, e))
 }

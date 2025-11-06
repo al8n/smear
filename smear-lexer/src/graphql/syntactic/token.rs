@@ -5,7 +5,7 @@ macro_rules! token {
         Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
       use crate::{
-        error::StringErrors,
+        error::{StringError, Wrapper},
         graphql::{
           error::{LexerErrors, LexerError},
           handlers::{
@@ -21,6 +21,7 @@ macro_rules! token {
       type TokenError = LexerError<$char, RecursionLimitExceeded>;
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
+      type UnderlyingErrorContainer = <TokenErrors as Wrapper>::Underlying;
 
       impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for SyntacticToken<$slice> {
         type Kind = SyntacticTokenKind;
@@ -118,12 +119,16 @@ macro_rules! token {
         Int($slice),
 
         #[token("\"", |lexer| {
-          <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+          <LitInlineStr<_> as Lexable<_, UnderlyingErrorContainer>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>, $char, StringError<$char>, TokenError>::from_mut(lexer))
+            .map(Into::into)
+            .map_err(TokenErrors::from_underlying)
         })]
         LitInlineStr(LitInlineStr<$slice>),
 
         #[token("\"\"\"", |lexer| {
-          <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+          <LitBlockStr<_> as Lexable<_, UnderlyingErrorContainer>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>, $char, StringError<$char>, TokenError>::from_mut(lexer))
+            .map(Into::into)
+            .map_err(TokenErrors::from_underlying)
         })]
         LitBlockStr(LitBlockStr<$slice>),
       }

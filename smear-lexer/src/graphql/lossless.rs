@@ -20,9 +20,6 @@ pub type Lexer<'a, S = &'a str> = logosky::Tokenizer<'a, LosslessToken<S>>;
 
 /// The char type used for the lossless token.
 pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on lossless [`Token`].
-pub type LosslessLexerErrorData<'a, S> =
-  error::LexerErrorData<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
 /// The error type for lexing based on lossless [`Token`].
 pub type LosslessLexerError<'a, S> =
   error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;

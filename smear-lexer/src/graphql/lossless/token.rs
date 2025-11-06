@@ -2,10 +2,10 @@ macro_rules! token {
   ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
     mod $mod {
       use logosky::{
-        Logos, Lexable, utils::tracker::{LimitExceeded, Limiter},
+        Logos, Lexable, utils::tracker::{LimitExceeded, Limiter, Tracker},
       };
       use crate::{
-        error::StringErrors,
+        error::{StringError, Wrapper},
         graphql::{
           error::{LexerErrors, LexerError},
           handlers::{
@@ -22,6 +22,7 @@ macro_rules! token {
       type TokenError = LexerError<$char, LimitExceeded>;
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
+      type UnderlyingErrorContainer = <TokenErrors as $crate::error::Wrapper>::Underlying;
 
       impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
@@ -145,15 +146,45 @@ macro_rules! token {
         })]
         Int($slice),
         #[token("\"", |lexer| {
-          tt_hook_and_then(lexer, |lexer| {
-            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
-          })
+          match <LitInlineStr<_> as Lexable<_, UnderlyingErrorContainer>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>, $char, StringError<$char>, TokenError>::from_mut(lexer))
+            .map(Into::into)
+            .map_err(TokenErrors::from_underlying)
+          {
+            Ok(lit) => {
+              lexer.increase_token_and_check().map_err(|e| TokenErrors::from(TokenError::state(lexer.span().into(), e)))?;
+              Ok(lit)
+            },
+            Err(mut errs) => {
+              match lexer.increase_token_and_check() {
+                Ok(_) => Err(errs),
+                Err(state_err) => {
+                  errs.push(TokenError::state(lexer.span().into(), state_err));
+                  Err(errs)
+                }
+              }
+            },
+          }
         })]
         LitInlineStr(LitInlineStr<$slice>),
         #[token("\"\"\"", |lexer| {
-          tt_hook_and_then(lexer, |lexer| {
-            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
-          })
+          match <LitBlockStr<_> as Lexable<_, UnderlyingErrorContainer>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>, $char, StringError<$char>, TokenError>::from_mut(lexer))
+            .map(Into::into)
+            .map_err(TokenErrors::from_underlying)
+          {
+            Ok(lit) => {
+              lexer.increase_token_and_check().map_err(|e| TokenErrors::from(TokenError::state(lexer.span().into(), e)))?;
+              Ok(lit)
+            },
+            Err(mut errs) => {
+              match lexer.increase_token_and_check() {
+                Ok(_) => Err(errs),
+                Err(state_err) => {
+                  errs.push(TokenError::state(lexer.span().into(), state_err));
+                  Err(errs)
+                }
+              }
+            },
+          }
         })]
         LitBlockStr(LitBlockStr<$slice>),
       }

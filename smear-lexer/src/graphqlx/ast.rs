@@ -21,9 +21,6 @@ pub type Lexer<'a, S = &'a str> = logosky::Tokenizer<'a, SyntacticToken<S>>;
 
 /// The char type used for the syntactic token.
 pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on syntactic [`Token`].
-pub type SyntacticLexerErrorData<'a, S> =
-  error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic [`Token`].
 pub type SyntacticLexerError<'a, S> =
   error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;

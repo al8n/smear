@@ -3,13 +3,16 @@ use logosky::{
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::Lexer,
   utils::{
-    CharLen, Lexeme, PositionedChar, Span,
+    CharLen, Lexeme,
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
 };
 
 use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
+
+pub(crate) mod slice;
+pub(crate) mod str;
 
 #[cfg_attr(not(tarpaulin), inline(always))]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
@@ -190,10 +193,9 @@ where
 
         let l = if curr == 1 {
           // only one invalid char
-          let pc = PositionedChar::with_position(item, span.end);
-          Lexeme::Char(pc)
+          Lexeme::from_char(span.end, item)
         } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
+          Lexeme::from_range(span.end..(span.end + curr))
         };
         return Err(unexpected_suffix(l));
       }
@@ -203,10 +205,9 @@ where
       lexer.bump(remainder_len);
 
       let l = if remainder_len == 1 {
-        let pc = PositionedChar::with_position(item, span.end);
-        Lexeme::Char(pc)
+        Lexeme::from_char(span.end, item)
       } else {
-        Lexeme::Span(Span::from(span.end..(span.end + remainder_len)))
+        Lexeme::from_range(span.end..(span.end + remainder_len))
       };
 
       // return the range of the invalid sequence
@@ -233,8 +234,10 @@ where
   E: From<UnexpectedEnd<H>> + From<UnexpectedLexeme<Char, H>>,
 {
   match remainder.next() {
-    None => UnexpectedEnd::with_name(name.into(), hint()).into(),
-    Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name(name.into(), hint()).into(),
+    None => UnexpectedEnd::with_name(lexer.span().into(), name.into(), hint()).into(),
+    Some(ch) if is_ignored_char(&ch) => {
+      UnexpectedEnd::with_name(lexer.span().into(), name.into(), hint()).into()
+    }
     Some(ch) if ch.is_first_invalid_char() => {
       // The first char is already consumed.
       let mut curr = 1;
@@ -250,10 +253,9 @@ where
         lexer.bump(curr);
 
         let l = if curr == 1 {
-          let pc = PositionedChar::with_position(ch, span.end);
-          Lexeme::Char(pc)
+          Lexeme::from_char(span.end, ch)
         } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
+          Lexeme::from_range(span.end..(span.end + curr))
         };
 
         return UnexpectedLexeme::new(l, hint()).into();
@@ -263,10 +265,9 @@ where
       // bump the lexer to the end of the invalid sequence
       lexer.bump(remainder_len);
       let l = if remainder_len == 1 {
-        let pc = PositionedChar::with_position(ch, span.end);
-        Lexeme::Char(pc)
+        Lexeme::from_char(span.end, ch)
       } else {
-        Lexeme::Span(Span::from(span.end..(span.end + remainder_len)))
+        Lexeme::from_range(span.end..(span.end + remainder_len))
       };
 
       UnexpectedLexeme::new(l, hint()).into()
@@ -275,7 +276,7 @@ where
       let span = lexer.span();
       lexer.bump(ch.char_len());
 
-      let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
+      let l = Lexeme::from_char(span.end, ch);
       UnexpectedLexeme::new(l, hint()).into()
     }
   }

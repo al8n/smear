@@ -3,11 +3,6 @@ use std::{borrow::Cow, string::String};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::utils::human_display::DisplayHuman;
 
-pub(crate) use self::{
-  str::{BlockStringToken, lex_block_str_from_str},
-  u8_slice::{BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes},
-};
-
 mod str;
 mod u8_slice;
 

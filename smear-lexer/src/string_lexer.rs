@@ -1,16 +1,16 @@
 use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
-  logos::Lexer,
+  // logos::Lexer,
   utils::{
     human_display::DisplayHuman,
     sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
 
-use crate::error::{StringError, StringErrors};
-
 pub use block::{LitBlockStr, LitComplexBlockStr};
 pub use inline::{LitComplexInlineStr, LitInlineStr};
+
+use crate::error::StringError;
 
 macro_rules! variant_type {
   (
@@ -282,52 +282,53 @@ impl<S> LitStr<S> {
   }
 }
 
+mod sealed {
+  use super::StringError;
+
+  // Logos requires that we implement Default for error types.
+  #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::TryUnwrap)]
+  pub enum StringErrorWrapper<Char> {
+    Err(StringError<Char>),
+    #[from(skip)]
+    Default,
+  }
+
+  impl<Char> Default for StringErrorWrapper<Char> {
+    #[cfg_attr(not(tarpaulin), inline(always))]
+    fn default() -> Self {
+      Self::Default
+    }
+  }
+
+  impl<Char> StringErrorWrapper<Char> {
+    pub fn bump(&mut self, n: usize) -> &mut Self {
+      match self {
+        Self::Err(err) => {
+          err.bump(n);
+        }
+        Self::Default => unreachable!("Default error should never be constructed during lexing"),
+      };
+
+      self
+    }
+  }
+}
+
 #[derive(Deref, DerefMut)]
 #[repr(transparent)]
-pub(super) struct SealedWrapper<L: ?Sized>(L);
+pub(super) struct SealedWrapper<L: ?Sized, Char: ?Sized, StringError: ?Sized, Error: ?Sized> {
+  _string_err: core::marker::PhantomData<StringError>,
+  _err: core::marker::PhantomData<Error>,
+  _char: core::marker::PhantomData<Char>,
+  #[deref]
+  #[deref_mut]
+  lexer: L,
+}
 
-impl<T> SealedWrapper<T> {
+impl<T, Char, StringError, Error> SealedWrapper<T, Char, StringError, Error> {
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub const fn from_mut(t: &mut T) -> &mut Self {
     // Safety: This is safe because SealedWrapper is repr(transparent) over T
     unsafe { &mut *(t as *mut T as *mut Self) }
-  }
-}
-
-impl<'de: 'a, 'a> TryFrom<&'de str> for LitStr<&'a str> {
-  type Error = StringErrors<char>;
-
-  #[inline]
-  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
-    if value.starts_with("\"\"\"") {
-      let mut lexer = Lexer::<block::BlockStringToken>::new(value);
-      lexer.bump(3);
-      block::lex_block_str_from_str(SealedWrapper::from_mut(&mut lexer)).map(Self::Block)
-    } else if value.starts_with('"') {
-      let mut lexer = Lexer::<inline::StringToken>::new(value);
-      lexer.bump(1);
-      inline::lex_inline_str_from_str(SealedWrapper::from_mut(&mut lexer)).map(Self::Inline)
-    } else {
-      Err(StringError::unopened_string(value.chars().next(), 0).into())
-    }
-  }
-}
-
-impl<'de: 'a, 'a> TryFrom<&'de [u8]> for LitStr<&'a [u8]> {
-  type Error = StringErrors<u8>;
-
-  #[inline]
-  fn try_from(value: &'de [u8]) -> Result<Self, Self::Error> {
-    if value.starts_with(b"\"\"\"") {
-      let mut lexer = Lexer::<block::BytesBlockStringToken>::new(value);
-      lexer.bump(3);
-      block::lex_block_str_from_bytes(SealedWrapper::from_mut(&mut lexer)).map(Self::Block)
-    } else if value.starts_with(b"\"") {
-      let mut lexer = Lexer::<inline::BytesStringToken>::new(value);
-      lexer.bump(1);
-      inline::lex_inline_str_from_bytes(SealedWrapper::from_mut(&mut lexer)).map(Self::Inline)
-    } else {
-      Err(StringError::unopened_string(value.first().copied(), 0).into())
-    }
   }
 }

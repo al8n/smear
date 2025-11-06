@@ -44,6 +44,11 @@ pub mod lossless;
 mod ast;
 mod handlers;
 
+/// A language marker for GraphQLx.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
+#[display("GraphQLx")]
+pub struct GraphQLx(pub(crate) ());
+
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
 #[derive(
   Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, TryUnwrap, Unwrap,

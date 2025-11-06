@@ -12,6 +12,7 @@ use logosky::{
 };
 
 use crate::{
+  graphqlx::error::{FloatError, HexFloatError, LexerError, LexerErrors},
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::{FloatHint, HexFloatHint},
 };
@@ -24,7 +25,7 @@ pub(super) mod str;
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<(), error::LexerError<C, LimitExceeded>>
+) -> Result<(), LexerError<C, LimitExceeded>>
 where
   T: Logos<'a, Extras = Limiter>,
 {
@@ -34,8 +35,8 @@ where
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
-  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
-) -> Result<O, error::LexerError<C, LimitExceeded>>
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, LexerError<C, LimitExceeded>>,
+) -> Result<O, LexerError<C, LimitExceeded>>
 where
   T: Logos<'a, Extras = Limiter>,
 {
@@ -46,8 +47,8 @@ where
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
-  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
-) -> Result<O, error::LexerErrors<C, LimitExceeded>>
+  f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, LexerErrors<C, LimitExceeded>>,
+) -> Result<O, LexerErrors<C, LimitExceeded>>
 where
   T: Logos<'a, Extras = Limiter>,
 {
@@ -58,7 +59,7 @@ where
 pub(super) fn tt_hook_map<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
-) -> Result<O, error::LexerError<C, LimitExceeded>>
+) -> Result<O, LexerError<C, LimitExceeded>>
 where
   T: Logos<'a, Extras = Limiter>,
 {
@@ -68,7 +69,7 @@ where
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn tt_hook<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<(), error::LexerError<C, LimitExceeded>>
+) -> Result<(), LexerError<C, LimitExceeded>>
 where
   T: Logos<'a, Extras = Limiter>,
 {
@@ -78,7 +79,7 @@ where
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(super) fn increase_recursion_depth<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
+) -> Result<(), LexerError<C, RecursionLimitExceeded>>
 where
   T: Logos<'a, Extras = RecursionLimiter>,
 {
@@ -90,25 +91,22 @@ fn handle_hex_float_missing_exponent_then_check_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
-) -> Result<S::Slice<'a>, error::LexerErrors<Char, E>>
+) -> Result<S::Slice<'a>, LexerErrors<Char, E>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxHexNumber>,
 {
   let span: Span = lexer.span().into();
-  let mut errs = error::LexerErrors::default();
-  errs.push(error::LexerError::new(
-    span,
-    error::LexerErrorData::HexFloat(error::HexFloatError::MissingExponent(span)),
-  ));
+  let mut errs = LexerErrors::new();
+  errs.push(LexerError::hex_float(HexFloatError::MissingExponent(span)));
 
   match handle_valid_hex_suffix(lexer, remainder_len, remainder, |err| {
-    error::HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+    HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
   }) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e.into());
       Err(errs)
     }
   }
@@ -166,25 +164,22 @@ fn handle_float_missing_integer_part_error_then_check_suffix<'a, Char, S, T, Ext
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
-) -> Result<S::Slice<'a>, error::LexerErrors<Char, Extras>>
+) -> Result<S::Slice<'a>, LexerErrors<Char, Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxNumber>,
 {
   let span: Span = lexer.span().into();
-  let mut errs = error::LexerErrors::default();
-  errs.push(error::LexerError::new(
-    span,
-    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart(span)),
-  ));
+  let mut errs = LexerErrors::new();
+  errs.push(LexerError::float(FloatError::MissingIntegerPart(span)));
 
   match handle_decimal_suffix(lexer, remainder_len, remainder, |err| {
-    error::FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+    FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
   }) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e.into());
       Err(errs)
     }
   }
@@ -196,25 +191,24 @@ fn handle_hex_float_missing_integer_part_error_then_check_suffix<'a, Char, S, T,
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
-) -> Result<S::Slice<'a>, error::LexerErrors<Char, Extras>>
+) -> Result<S::Slice<'a>, LexerErrors<Char, Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLxHexExponent>,
 {
   let span: Span = lexer.span().into();
-  let mut errs = error::LexerErrors::default();
-  errs.push(error::LexerError::new(
+  let mut errs = LexerErrors::new();
+  errs.push(LexerError::hex_float(HexFloatError::MissingIntegerPart(
     span,
-    error::LexerErrorData::HexFloat(error::HexFloatError::MissingIntegerPart(span)),
-  ));
+  )));
 
   match handle_hex_float_suffix(lexer, remainder_len, remainder, |err| {
-    error::HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
+    HexFloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, err))
   }) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e.into());
       Err(errs)
     }
   }

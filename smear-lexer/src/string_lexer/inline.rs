@@ -7,11 +7,6 @@ use logosky::utils::{
 use super::LitPlainStr;
 use std::{borrow::Cow, string::String};
 
-pub(crate) use self::{
-  str::{StringToken, lex_inline_str_from_str},
-  u8_slice::{StringToken as BytesStringToken, lex_inline_str_from_bytes},
-};
-
 mod str;
 mod u8_slice;
 

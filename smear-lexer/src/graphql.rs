@@ -34,6 +34,11 @@ pub mod syntactic;
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
+/// A language marker for GraphQL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Display)]
+#[display("GraphQL")]
+pub struct GraphQL(pub(crate) ());
+
 mod handlers;
 
 #[cfg(test)]

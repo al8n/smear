@@ -1,5 +1,8 @@
 use crate::{
-  graphqlx::error::{BinaryError, DecimalError, FloatError, HexError, HexFloatError, OctalError},
+  graphqlx::{
+    GraphQLx,
+    error::{BinaryError, DecimalError, FloatError, HexError, HexFloatError, OctalError},
+  },
   handlers::{self, is_ignored_byte},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
 };
@@ -14,28 +17,19 @@ use super::error;
 
 type LexerError<Extras> = error::LexerError<u8, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<u8, Extras>;
-type LexerErrorData<Extras> = error::LexerErrorData<u8, Extras>;
 
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn default_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> error::LexerErrors<u8, Extras>
+pub(crate) fn default_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerErrors<Extras>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  match lexer.slice().as_ref().iter().next() {
-    Some(&ch) => LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start),
-    None => LexerError::unexpected_eoi(lexer.span().into()),
-  }
-  .into()
+  crate::handlers::slice::default_error::<S, T, GraphQLx, LexerError<Extras>>(lexer).into()
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
-pub(crate) fn cst_default_error<'a, S, T, Extras>(
-  lexer: &mut Lexer<'a, T>,
-) -> error::LexerErrors<u8, Extras>
+pub(crate) fn cst_default_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerErrors<Extras>
 where
   T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
@@ -44,7 +38,7 @@ where
   match lexer.slice().as_ref().iter().next() {
     Some(&ch) => {
       lexer.extras.increase_token();
-      LexerError::unknown_char(lexer.span().into(), ch, lexer.span().start)
+      LexerError::unknown_char(lexer.span().start, ch)
     }
     None => LexerError::unexpected_eoi(lexer.span().into()),
   }
@@ -64,12 +58,12 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
-  Err(LexerError::float(
-    lexer.span().into(),
-    super::fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
-  ))
+  Err(LexerError::float(super::fractional_error(
+    lexer,
+    remainder_len,
+    iter,
+    |ch| is_ignored_byte(remainder_slice, ch),
+  )))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -85,12 +79,12 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
-  Err(LexerError::hex_float(
-    lexer.span().into(),
-    super::hex_fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
-  ))
+  Err(LexerError::hex_float(super::hex_fractional_error(
+    lexer,
+    remainder_len,
+    iter,
+    |ch| is_ignored_byte(remainder_slice, ch),
+  )))
 }
 
 #[inline]
@@ -108,21 +102,25 @@ where
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
 
-  LexerError::float(
-    lexer.span().into(),
-    handlers::lit_float_suffix_error::<_, super::GraphQLxNumber, _, _, _, _>(
-      "float",
-      lexer,
-      remainder_len,
-      iter,
-      |b| is_ignored_byte(remainder_slice, b),
-      || match slice_bytes.iter().last().copied() {
-        Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
-        Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
-        _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
-      },
-    ),
-  )
+  LexerError::float(handlers::lit_float_suffix_error::<
+    _,
+    super::GraphQLxNumber,
+    _,
+    _,
+    _,
+    _,
+  >(
+    "float",
+    lexer,
+    remainder_len,
+    iter,
+    |b| is_ignored_byte(remainder_slice, b),
+    || match slice_bytes.iter().last().copied() {
+      Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
+      Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
+      _ => unreachable!("regex should ensure the last char is 'e', 'E', '+' or '-"),
+    },
+  ))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -152,21 +150,25 @@ where
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
 
-  LexerError::hex_float(
-    lexer.span().into(),
-    handlers::lit_float_suffix_error::<_, super::GraphQLxHexExponent, _, _, _, _>(
-      "hex float",
-      lexer,
-      remainder_len,
-      iter,
-      |b| is_ignored_byte(remainder_slice, b),
-      || match slice_bytes.last().copied() {
-        Some(b'p' | b'P') => HexFloatHint::Exponent(HexExponentHint::SignOrDigit),
-        Some(b'+' | b'-' | b'_') => HexFloatHint::Exponent(HexExponentHint::Digit),
-        _ => unreachable!("regex should ensure the last char is 'p', 'P', '+', '-' or '_'"),
-      },
-    ),
-  )
+  LexerError::hex_float(handlers::lit_float_suffix_error::<
+    _,
+    super::GraphQLxHexExponent,
+    _,
+    _,
+    _,
+    _,
+  >(
+    "hex float",
+    lexer,
+    remainder_len,
+    iter,
+    |b| is_ignored_byte(remainder_slice, b),
+    || match slice_bytes.last().copied() {
+      Some(b'p' | b'P') => HexFloatHint::Exponent(HexExponentHint::SignOrDigit),
+      Some(b'+' | b'-' | b'_') => HexFloatHint::Exponent(HexExponentHint::Digit),
+      _ => unreachable!("regex should ensure the last char is 'p', 'P', '+', '-' or '_'"),
+    },
+  ))
 }
 
 #[cfg_attr(not(tarpaulin), inline(always))]
@@ -246,7 +248,7 @@ where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
-  E: Into<LexerErrorData<Extras>>,
+  E: Into<LexerError<Extras>>,
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
@@ -256,7 +258,7 @@ where
     remainder.as_ref().iter().copied(),
     unexpected_suffix,
   )
-  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+  .map_err(Into::into)
 }
 
 pub(crate) fn handle_int_suffix<'a, S, T, Extras>(
@@ -291,7 +293,7 @@ where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
-  E: Into<LexerErrorData<Extras>>,
+  E: Into<LexerError<Extras>>,
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
@@ -301,7 +303,7 @@ where
     remainder.as_ref().iter().copied(),
     unexpected_suffix,
   )
-  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+  .map_err(Into::into)
 }
 
 #[allow(clippy::result_large_err)]
@@ -314,22 +316,22 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let mut errs = error::LexerErrors::default();
+  let mut errs = LexerErrors::default();
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::binary(
-      lexer.span().into(),
-      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name("binary".into(), BinaryHint::Digit)),
-    ));
+    let span = lexer.span().into();
+    errs.push(LexerError::binary(BinaryError::UnexpectedEnd(
+      UnexpectedEnd::with_name(span, "binary".into(), BinaryHint::Digit),
+    )));
     return Err(errs);
   }
 
   match handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e);
       Err(errs)
     }
   }
@@ -343,7 +345,7 @@ where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
-  E: Into<LexerErrorData<Extras>>,
+  E: Into<LexerError<Extras>>,
 {
   let remainder = lexer.remainder();
   let remainder_len = remainder.as_ref().len();
@@ -353,7 +355,7 @@ where
     remainder.as_ref().iter().copied(),
     unexpected_suffix,
   )
-  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+  .map_err(Into::into)
 }
 
 #[allow(clippy::result_large_err)]
@@ -366,22 +368,22 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let mut errs = error::LexerErrors::default();
+  let mut errs = LexerErrors::default();
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::octal(
-      lexer.span().into(),
-      OctalError::UnexpectedEnd(UnexpectedEnd::with_name("octal".into(), OctalHint::Digit)),
-    ));
+    let span = lexer.span().into();
+    errs.push(LexerError::octal(OctalError::UnexpectedEnd(
+      UnexpectedEnd::with_name(span, "octal".into(), OctalHint::Digit),
+    )));
     return Err(errs);
   }
 
   match handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e);
       Err(errs)
     }
   }
@@ -404,7 +406,7 @@ where
     remainder.as_ref().iter().copied(),
     |err| HexFloatError::unexpected_suffix(span, err),
   )
-  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+  .map_err(Into::into)
 }
 
 #[allow(clippy::result_large_err)]
@@ -417,22 +419,22 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  let mut errs = error::LexerErrors::default();
+  let mut errs = LexerErrors::default();
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::hex(
-      lexer.span().into(),
-      HexError::UnexpectedEnd(UnexpectedEnd::with_name("hex".into(), HexHint::Digit)),
-    ));
+    let span = lexer.span().into();
+    errs.push(LexerError::hex(HexError::UnexpectedEnd(
+      UnexpectedEnd::with_name(span, "hex".into(), HexHint::Digit),
+    )));
     return Err(errs);
   }
 
   match handle_valid_hex_suffix(lexer) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(e);
       Err(errs)
     }
   }

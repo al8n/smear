@@ -142,3 +142,24 @@ mod handlers;
 pub mod __private {
   pub use logosky;
 }
+
+#[doc(hidden)]
+pub trait Lxr: sealed::Sealed {}
+
+mod sealed {
+  pub trait Sealed: core::fmt::Display + core::fmt::Debug + Copy + 'static {
+    const INIT: Self;
+  }
+
+  #[cfg(feature = "graphql")]
+  impl Sealed for super::graphql::GraphQL {
+    const INIT: Self = super::graphql::GraphQL(());
+  }
+
+  #[cfg(feature = "graphqlx")]
+  impl Sealed for super::graphqlx::GraphQLx {
+    const INIT: Self = super::graphqlx::GraphQLx(());
+  }
+
+  impl<T: Sealed> super::Lxr for T {}
+}

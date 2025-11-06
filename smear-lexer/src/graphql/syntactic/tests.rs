@@ -187,7 +187,7 @@ fn test_recursion_limit() {
     match result {
       Lexed::Token(_) => {}
       Lexed::Error(mut errors) => {
-        let err = errors.pop().unwrap().into_data().unwrap_state();
+        let err = errors.pop().unwrap().unwrap_state();
         assert_eq!(err.depth(), depth);
         assert_eq!(err.limitation(), depth - 1);
         return;

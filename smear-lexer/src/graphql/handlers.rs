@@ -12,6 +12,7 @@ use logosky::{
 };
 
 use crate::{
+  graphql::error::{FloatError, LexerError, LexerErrors},
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::FloatHint,
 };
@@ -91,25 +92,22 @@ pub(super) fn handle_float_missing_integer_part_error_then_check_suffix<'a, Char
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,
-) -> Result<S::Slice<'a>, error::LexerErrors<Char, Extras>>
+) -> Result<S::Slice<'a>, LexerErrors<Char, Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   Char: Copy + ValidateNumberChar<GraphQLNumber>,
 {
   let span: Span = lexer.span().into();
-  let mut errs = error::LexerErrors::default();
-  errs.push(error::LexerError::new(
-    span,
-    error::LexerErrorData::Float(error::FloatError::MissingIntegerPart(span)),
-  ));
+  let mut errs: LexerErrors<Char, Extras> = LexerErrors::default();
+  errs.push(LexerError::float(FloatError::MissingIntegerPart(span)));
 
-  match handle_decimal_suffix(lexer, remainder_len, remainder, |e| {
-    error::FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, e))
+  match handle_graphql_number_suffix(lexer, remainder_len, remainder, |e| {
+    FloatError::UnexpectedSuffix(UnexpectedSuffix::new(span, e))
   }) {
     Ok(_) => Err(errs),
     Err(e) => {
-      errs.push(error::LexerError::new(lexer.span(), e.into()));
+      errs.push(LexerError::float(e));
       Err(errs)
     }
   }
@@ -139,7 +137,7 @@ where
 }
 
 #[inline]
-fn handle_decimal_suffix<'a, Char, S, T, E>(
+fn handle_graphql_number_suffix<'a, Char, S, T, E>(
   lexer: &mut Lexer<'a, T>,
   remainder_len: usize,
   remainder: impl Iterator<Item = Char>,

@@ -1,14 +1,18 @@
 use logosky::{
   Lexable, Source,
+  error::ErrorContainer,
   logos::{Lexer, Logos},
 };
 
-use crate::error::{StringError, StringErrors};
+use crate::error::StringError;
 
-use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
+use super::{
+  super::{SealedWrapper, sealed::StringErrorWrapper},
+  BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr,
+};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = logosky::logos, source = [u8], error(StringError<u8>))]
+#[logos(crate = logosky::logos, source = [u8], error(StringErrorWrapper<u8>))]
 pub(crate) enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
@@ -28,92 +32,105 @@ pub(crate) enum BlockStringToken {
   Quote,
 }
 
-impl<'a, S, T> Lexable<&mut SealedWrapper<Lexer<'a, T>>, StringErrors<u8>>
+impl<'a, S, T, Error, Container>
+  Lexable<&mut SealedWrapper<Lexer<'a, T>, u8, StringError<u8>, Error>, Container>
   for LitBlockStr<S::Slice<'a>>
 where
   T: Logos<'a, Source = S>,
   S: Source + ?Sized + 'a,
   S::Slice<'a>: AsRef<[u8]>,
+  Container: ErrorContainer<Error>,
+  Error: From<StringError<u8>>,
 {
   #[inline]
-  fn lex(lexer: &mut SealedWrapper<Lexer<'a, T>>) -> Result<Self, StringErrors<u8>>
+  fn lex(
+    lexer: &mut SealedWrapper<Lexer<'a, T>, u8, StringError<u8>, Error>,
+  ) -> Result<Self, Container>
   where
     Self: Sized,
   {
-    lex_block_str_from_bytes(lexer)
+    BlockStringToken::lex_block_str(lexer)
   }
 }
 
-#[inline]
-pub(crate) fn lex_block_str_from_bytes<'a, S, T>(
-  lexer: &mut SealedWrapper<Lexer<'a, T>>,
-) -> Result<LitBlockStr<S::Slice<'a>>, StringErrors<u8>>
-where
-  T: Logos<'a, Source = S>,
-  S: Source + ?Sized + 'a,
-  S::Slice<'a>: AsRef<[u8]>,
-{
-  let remainder = lexer.remainder();
-  let remainder_bytes = remainder.as_ref();
-  let lexer_span = lexer.span();
-  let mut string_lexer = BlockStringToken::lexer(remainder_bytes);
-  let mut errs = StringErrors::default();
+impl BlockStringToken {
+  #[inline]
+  pub(crate) fn lex_block_str<'a, S, T, Error, Container>(
+    lexer: &mut SealedWrapper<Lexer<'a, T>, u8, StringError<u8>, Error>,
+  ) -> Result<LitBlockStr<S::Slice<'a>>, Container>
+  where
+    T: Logos<'a, Source = S>,
+    S: Source + ?Sized + 'a,
+    S::Slice<'a>: AsRef<[u8]>,
+    Container: ErrorContainer<Error>,
+    Error: From<StringError<u8>>,
+  {
+    let remainder = lexer.remainder();
+    let remainder_bytes = remainder.as_ref();
+    let lexer_span = lexer.span();
+    let mut string_lexer = BlockStringToken::lexer(remainder_bytes);
+    let mut errs = Container::new();
 
-  let mut num_escaped_triple_quotes = 0;
-  while let Some(string_token) = string_lexer.next() {
-    match string_token {
-      Err(mut e) => {
-        e.bump(lexer_span.end);
-        errs.push(e);
-      }
-      Ok(BlockStringToken::EscapedTripleQuote) => {
-        num_escaped_triple_quotes += 1;
-      }
-      Ok(BlockStringToken::Continue | BlockStringToken::Backslash | BlockStringToken::Quote) => {}
-      Ok(BlockStringToken::TripleQuote) => {
-        // Outer lexer consumes up to (and including) the closing """
-        lexer.bump(string_lexer.span().end);
-
-        // inner content (between opening and closing)
-        let content = &remainder_bytes[..string_lexer.span().start];
-
-        // sub-lex the inner content to compute normalization knobs (no allocations)
-        let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-        while lines.next().is_some() {
-          // callbacks already updated `lines.extras`
+    let mut num_escaped_triple_quotes = 0;
+    while let Some(string_token) = string_lexer.next() {
+      match string_token {
+        Err(mut e) => {
+          e.bump(lexer_span.end);
+          errs.push(
+            e.try_unwrap_err()
+              .expect("StringError::Default error should not be constructed during lexing")
+              .into(),
+          );
         }
-
-        // Build the normalization plan + exact capacity
-        let plan = super::compute_block_normalization_plan(
-          &lines.extras,
-          !content.is_empty(),
-          num_escaped_triple_quotes,
-        );
-
-        if plan.is_clean {
-          return Ok(LitPlainStr::new(lexer.slice()).into());
+        Ok(BlockStringToken::EscapedTripleQuote) => {
+          num_escaped_triple_quotes += 1;
         }
+        Ok(BlockStringToken::Continue | BlockStringToken::Backslash | BlockStringToken::Quote) => {}
+        Ok(BlockStringToken::TripleQuote) => {
+          // Outer lexer consumes up to (and including) the closing """
+          lexer.bump(string_lexer.span().end);
 
-        return Ok(
-          LitComplexBlockStr::new(
-            lexer.slice(),
+          // inner content (between opening and closing)
+          let content = &remainder_bytes[..string_lexer.span().start];
+
+          // sub-lex the inner content to compute normalization knobs (no allocations)
+          let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+          while lines.next().is_some() {
+            // callbacks already updated `lines.extras`
+          }
+
+          // Build the normalization plan + exact capacity
+          let plan = super::compute_block_normalization_plan(
+            &lines.extras,
+            !content.is_empty(),
             num_escaped_triple_quotes,
-            lines.extras.has_cr_terminators,
-            lines.extras.leading_blank_lines,
-            plan.effective_trailing,
-            plan.common_indent,
-            plan.total_lines,
-            plan.required_capacity,
-          )
-          .into(),
-        );
+          );
+
+          if plan.is_clean {
+            return Ok(LitPlainStr::new(lexer.slice()).into());
+          }
+
+          return Ok(
+            LitComplexBlockStr::new(
+              lexer.slice(),
+              num_escaped_triple_quotes,
+              lines.extras.has_cr_terminators,
+              lines.extras.leading_blank_lines,
+              plan.effective_trailing,
+              plan.common_indent,
+              plan.total_lines,
+              plan.required_capacity,
+            )
+            .into(),
+          );
+        }
       }
     }
-  }
 
-  lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_block_string());
-  Err(errs)
+    lexer.bump(string_lexer.span().end);
+    errs.push(StringError::unterminated_block_string(lexer.span().into()).into());
+    Err(errs)
+  }
 }
 
 // ---- sub-lexer over inner block-string content ----
