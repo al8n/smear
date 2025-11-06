@@ -1,4 +1,4 @@
-use logosky::Tokenizer;
+use logosky::{Lexed, Tokenizer, utils::Spanned};
 
 use super::*;
 
@@ -172,7 +172,13 @@ fn test_bom_lexing() {
 
   let mut lexer = Tokenizer::<StrLosslessToken<'_>>::new(input).into_iter();
 
-  assert_eq!(lexer.next(), None);
+  assert!(matches!(
+    lexer.next(),
+    Some(Lexed::Token(Spanned {
+      data: LosslessToken::Bom(_),
+      ..
+    }))
+  ));
 }
 
 #[cfg(any(feature = "std", feature = "alloc"))]
