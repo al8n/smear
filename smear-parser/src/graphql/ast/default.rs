@@ -4,7 +4,7 @@
 //! with concrete GraphQL types. These aliases form the public API for parsing standard GraphQL.
 
 use super::*;
-use smear_scaffold::ast::{self as scaffold, DirectiveLocations, Location, OperationType};
+use crate::scaffold::ast::{self as scaffold, DirectiveLocations, Location, OperationType};
 
 pub use field::*;
 

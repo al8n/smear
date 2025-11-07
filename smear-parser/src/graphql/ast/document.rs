@@ -12,7 +12,7 @@ use smear_lexer::{
   keywords::{Mutation, Query, Subscription},
   punctuator::RBrace,
 };
-use smear_scaffold::ast::{DirectiveLocations, OperationType};
+use crate::scaffold::ast::{DirectiveLocations, OperationType};
 
 use super::*;
 
@@ -1044,7 +1044,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
         )) {
           Err(err) => Err(err),
           Ok((name, variable_definitions, directives, selection_set)) => Ok(Self::Operation(
-            smear_scaffold::ast::OperationDefinition::Named(NamedOperationDefinition::new(
+            crate::scaffold::ast::OperationDefinition::Named(NamedOperationDefinition::new(
               inp.span_since(before),
               op_type,
               name,
@@ -1129,7 +1129,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
         Some(_) => Ok(Self::Operation(OperationDefinition::Shorthand(
           SelectionSet::new(inp.span_since(&before), selections),
         ))),
-        None => Err(SyntacticTokenError::unclosed_object(inp.span_since(&before)).into()),
+        None => Err(SyntacticTokenError::unclosed_brace(inp.span_since(&before)).into()),
       },
     }
   }

@@ -5,7 +5,7 @@ use logosky::{
   utils::{AsSpan, IntoSpan, Span},
 };
 use smear_lexer::punctuator::{Bang, FatArrow, LAngle, LBracket, PathSeparator, RAngle, RBracket};
-use smear_scaffold::ast::{self as scaffold, ListType, MapType, SetType};
+use crate::scaffold::ast::{self as scaffold, ListType, MapType, SetType};
 use std::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 use crate::ident::Ident;

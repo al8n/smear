@@ -19,6 +19,7 @@ cst = ["rowan", "logosky/rowan"]
 derive_more.workspace = true
 logosky = { workspace = true, features = ["chumsky"] }
 smear-lexer.workspace = true
+generic-array = { version = "1", default-features = false }
 
 rowan = { version = "0.16", optional = true }
 

@@ -1,18 +1,21 @@
-use crate::{hints::VariableValueHint, lexer::graphql::syntactic::SyntacticLexerErrors};
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use logosky::{
+  Lexed, LogoStream, Source, Token,
+  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
+  error::IncompleteSyntax,
+  logos::Logos,
+  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
+};
+use smear_lexer::{punctuator::{RBrace, RBracket}, graphql::syntactic::SyntacticLexerErrors};
 
 use super::{
   DefaultVec, Name, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenizer,
   SyntaxKind,
 };
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexed, LogoStream, Source, Token,
-  chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
-  logos::Logos,
-  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
-};
-use smear_lexer::punctuator::{RBrace, RBracket};
-use smear_scaffold::{
+
+use crate::graphql::syntax::{VariableValueSyntax, VariableValueComponent};
+
+use crate::scaffold::{
   ast as scaffold,
   error::{UnclosedBraceError, UnclosedBracketError},
 };
@@ -208,13 +211,10 @@ where
                       );
                     }
                     None => {
-                      return Err(
-                        SyntacticTokenError::unexpected_end_of_variable_value(
-                          inp.span_since(&before),
-                          VariableValueHint::Name,
-                        )
-                        .into(),
-                      );
+                      // Dollar is present, name is missing
+                      let span = inp.span_since(&before);
+                      let components = IncompleteSyntax::<VariableValueSyntax>::new(span, VariableValueComponent::Name);
+                      return Err(SyntacticTokenError::IncompleteVariableValue(components).into());
                     }
                   };
                   Self::Variable(VariableValue::new(inp.span_since(&before), name))

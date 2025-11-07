@@ -61,6 +61,7 @@ pub trait UnexpectedEndOfUnionExtensionError {
   fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self;
 }
 
+
 /// An error which can occur when an unexpected end of input is encountered
 /// while parsing a schema extension.
 pub trait UnexpectedEndOfSchemaExtensionError {

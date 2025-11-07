@@ -1,6 +1,4 @@
-use crate::{
-  hints::VariableValueHint, ident::Ident, lexer::graphqlx::syntactic::SyntacticLexerErrors,
-};
+
 
 use super::{
   DefaultVec, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors, SyntacticTokenizer,
@@ -11,13 +9,19 @@ use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use logosky::{
   Lexed, LogoStream, Source, Token,
   chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*},
+  error::IncompleteSyntax,
   logos::Logos,
   utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
 };
 use smear_lexer::punctuator::{LBrace, PathSeparator, RBrace, RBracket};
-use smear_scaffold::{
-  ast::{self as scaffold, Path},
-  error::{UnclosedBraceError, UnclosedBracketError},
+use crate::{
+  graphqlx::syntax::{VariableValueSyntax, VariableValueComponent},
+  scaffold::{
+    ast::{self as scaffold, Path},
+    error::{UnclosedBraceError, UnclosedBracketError},
+  },
+  ident::Ident,
+  lexer::graphqlx::syntactic::SyntacticLexerErrors,
 };
 
 pub use boolean_value::*;
@@ -269,13 +273,10 @@ where
                       );
                     }
                     None => {
-                      return Err(
-                        SyntacticTokenError::unexpected_end_of_variable_value(
-                          VariableValueHint::Name,
-                          inp.span_since(&before),
-                        )
-                        .into(),
-                      );
+                      // Dollar is present, name is missing
+                      let span = inp.span_since(&before);
+                      let components = IncompleteSyntax::<VariableValueSyntax>::new(span, VariableValueComponent::Name);
+                      return Err(SyntacticTokenError::IncompleteVariableValue(components).into());
                     }
                   };
                   Self::Variable(VariableValue::new(inp.span_since(&before), name))

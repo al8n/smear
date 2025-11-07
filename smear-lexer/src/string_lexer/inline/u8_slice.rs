@@ -148,9 +148,9 @@ fn handle_invalid_escaped_unicode<'a>(
     let span = lexer.span();
     lexer.bump(take); // consume what was there to make progress
     return Err(
-      UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(
-        span.start..span.end + take,
-      ))
+      UnicodeEscapeError::incomplete_fixed_unicode_escape(
+        (span.start..span.end + take).into(),
+      )
       .into(),
     );
   }
@@ -178,7 +178,7 @@ fn handle_invalid_escaped_unicode<'a>(
           UnicodeEscapeError::malformed_fixed_unicode_escape(digits, lexer.span().into())
         }
         None => {
-          UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(lexer.span()))
+          UnicodeEscapeError::incomplete_fixed_unicode_escape(lexer.span().into())
         }
       }
     }
@@ -201,7 +201,7 @@ fn handle_invalid_escaped_unicode<'a>(
           UnicodeEscapeError::malformed_fixed_unicode_escape(digits, lexer.span().into())
         }
         None => {
-          UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(lexer.span()))
+          UnicodeEscapeError::incomplete_fixed_unicode_escape(lexer.span().into())
         }
       }
     }
@@ -223,7 +223,7 @@ fn handle_invalid_escaped_unicode<'a>(
           UnicodeEscapeError::malformed_fixed_unicode_escape(digits, lexer.span().into())
         }
         None => {
-          UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(lexer.span()))
+          UnicodeEscapeError::incomplete_fixed_unicode_escape(lexer.span().into())
         }
       }
     }
@@ -232,7 +232,7 @@ fn handle_invalid_escaped_unicode<'a>(
       lexer.bump(1);
 
       if a.is_ascii_hexdigit() {
-        UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(lexer.span()))
+        UnicodeEscapeError::incomplete_fixed_unicode_escape(lexer.span().into())
       } else {
         UnicodeEscapeError::malformed_fixed_unicode_escape(
           PositionedChar::with_position(*a, span.end).into(),
@@ -240,7 +240,7 @@ fn handle_invalid_escaped_unicode<'a>(
         )
       }
     }
-    [] => UnicodeEscapeError::incomplete_fixed_unicode_escape(Lexeme::from_range(lexer.span())),
+    [] => UnicodeEscapeError::incomplete_fixed_unicode_escape(lexer.span().into()),
     _ => unreachable!("impossible array length"),
   };
 

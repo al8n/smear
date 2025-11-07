@@ -9,8 +9,8 @@ description = "Blazing fast, fully spec-compliant, reusable parser combinators f
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-lexer/alloc", "smear-scaffold/alloc", "smear-parser/alloc"]
-std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default", "smear-lexer/std", "smear-scaffold/std", "smear-parser/std"]
+alloc = ["smear-lexer/alloc", "smear-parser/alloc"]
+std = ["thiserror/default", "either/default", "bytes?/default", "bstr?/default", "hipstr?/default", "smear-lexer/std", "smear-parser/std"]
 
 unstable = ["smear-lexer/unstable", "smear-parser/unstable"]
 
@@ -29,7 +29,6 @@ paste = "1"
 thiserror.workspace = true
 logosky = { workspace = true, features = ["either"] }
 smear-lexer.workspace = true
-smear-scaffold.workspace = true
 smear-parser.workspace = true
 
 rowan = { version = "0.16", optional = true }

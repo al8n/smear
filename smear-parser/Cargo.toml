@@ -10,8 +10,8 @@ description = "High-performance parser for GraphQL and GraphQL-like DSLs"
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-scaffold/alloc", "smear-lexer/alloc", "logosky/alloc"]
-std = ["smear-scaffold/std", "smear-lexer/std", "logosky/default"]
+alloc = ["smear-lexer/alloc", "logosky/alloc"]
+std = ["smear-lexer/std", "logosky/default"]
 
 unstable = ["smear-lexer/unstable"]
 
@@ -22,15 +22,17 @@ bytes = ["dep:bytes", "smear-lexer/bytes", "logosky/bytes"]
 bstr = ["smear-lexer/bstr", "logosky/bstr"]
 hipstr = ["smear-lexer/hipstr", "logosky/hipstr"]
 
+cst = ["rowan", "logosky/rowan"]
+
 [dependencies]
 derive_more.workspace = true
 logosky = { workspace = true, features = ["chumsky"] }
-smear-scaffold.workspace = true
 smear-lexer.workspace = true
 paste = "1"
 generic-array = { version = "1", default-features = false }
 
 bytes = { workspace = true, optional = true }
+rowan = { version = "0.16", optional = true }
 
 [lints.rust]
 rust_2018_idioms = "warn"

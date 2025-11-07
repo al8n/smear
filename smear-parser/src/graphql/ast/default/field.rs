@@ -8,7 +8,6 @@ use smear_lexer::{
   graphql::syntactic::SyntacticLexerErrors,
   punctuator::{At, RBrace},
 };
-use smear_scaffold::error::UnclosedBraceError;
 
 use super::*;
 

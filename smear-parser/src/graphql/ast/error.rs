@@ -1,18 +1,13 @@
-use crate::{error::ParseVariableValueError, hints::*};
+use crate::error::MissingDollarTokenError;
 use logosky::{
   Token,
   utils::{IntoComponents, Span},
 };
-use smear_scaffold::error::{
-  UnclosedBraceError, UnclosedBracketError, UnexpectedEndOfEnumExtensionError,
-  UnexpectedEndOfInputObjectExtensionError, UnexpectedEndOfInterfaceExtensionError,
-  UnexpectedEndOfObjectExtensionError, UnexpectedEndOfSchemaExtensionError,
-  UnexpectedEndOfUnionExtensionError,
-};
+use crate::scaffold::error::{UnclosedBraceError, UnclosedBracketError};
 
 use super::*;
 
-impl<'a, S> ParseVariableValueError<Name<S>> for SyntacticTokenError<'a, S>
+impl<'a, S> MissingDollarTokenError<Name<S>> for SyntacticTokenError<'a, S>
 where
   SyntacticToken<S>: Token<'a>,
 {
@@ -24,165 +19,28 @@ where
       SyntaxKind::Dollar,
     )
   }
-
-  #[inline]
-  fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    Self::unexpected_end_of_variable_value(span, hint)
-  }
 }
 
-impl<'a, S> ParseVariableValueError<Name<S>> for SyntacticTokenErrors<'a, S>
+impl<'a, S> MissingDollarTokenError<Name<S>> for SyntacticTokenErrors<'a, S>
 where
   SyntacticToken<S>: Token<'a>,
 {
   #[inline]
   fn missing_dollar_token(name: Name<S>, span: Span) -> Self {
-    <SyntacticTokenError<'a, S> as ParseVariableValueError<Name<S>>>::missing_dollar_token(
+    <SyntacticTokenError<'a, S> as MissingDollarTokenError<Name<S>>>::missing_dollar_token(
       name, span,
     )
     .into()
   }
-
-  #[inline]
-  fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    <SyntacticTokenError<'a, S> as ParseVariableValueError<Name<S>>>::unexpected_end_of_variable_value(
-      hint, span,
-    )
-    .into()
-  }
 }
 
-impl<'a, S> UnexpectedEndOfObjectExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_object_extension(span: Span, hint: ObjectTypeExtensionHint) -> Self {
-    Self::unexpected_end_of_object_extension(span, hint)
-  }
-}
+// ============================================================================
+// From<IncompleteSyntax<*Syntax>> implementations
+// ============================================================================
+//
+// Note: The Error enum derives From, which automatically generates From
+// implementations for all IncompleteSyntax variants. No manual implementations needed!
 
-impl<'a, S> UnexpectedEndOfObjectExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_object_extension(span: Span, hint: ObjectTypeExtensionHint) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfObjectExtensionError>::unexpected_end_of_object_extension(span, hint).into()
-  }
-}
-
-impl<'a, S> UnexpectedEndOfInterfaceExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_interface_extension(span: Span, hint: InterfaceTypeExtensionHint) -> Self {
-    Self::unexpected_end_of_interface_extension(span, hint)
-  }
-}
-
-impl<'a, S> UnexpectedEndOfInterfaceExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_interface_extension(span: Span, hint: InterfaceTypeExtensionHint) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfInterfaceExtensionError>::unexpected_end_of_interface_extension(span, hint).into()
-  }
-}
-
-impl<'a, S> UnexpectedEndOfEnumExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
-    Self::unexpected_end_of_enum_extension(span, hint)
-  }
-}
-
-impl<'a, S> UnexpectedEndOfEnumExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfEnumExtensionError>::unexpected_end_of_enum_extension(
-      span, hint,
-    )
-    .into()
-  }
-}
-
-impl<'a, S> UnexpectedEndOfInputObjectExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_input_object_extension(
-    span: Span,
-    hint: InputObjectTypeExtensionHint,
-  ) -> Self {
-    Self::unexpected_end_of_input_object_extension(span, hint)
-  }
-}
-
-impl<'a, S> UnexpectedEndOfInputObjectExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_input_object_extension(
-    span: Span,
-    hint: InputObjectTypeExtensionHint,
-  ) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfInputObjectExtensionError>::unexpected_end_of_input_object_extension(span, hint).into()
-  }
-}
-
-impl<'a, S> UnexpectedEndOfSchemaExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
-    Self::unexpected_end_of_schema_extension(span, hint)
-  }
-}
-
-impl<'a, S> UnexpectedEndOfSchemaExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfSchemaExtensionError>::unexpected_end_of_schema_extension(span, hint).into()
-  }
-}
-
-impl<'a, S> UnexpectedEndOfUnionExtensionError for SyntacticTokenError<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
-    Self::unexpected_end_of_union_extension(span, hint)
-  }
-}
-
-impl<'a, S> UnexpectedEndOfUnionExtensionError for SyntacticTokenErrors<'a, S>
-where
-  SyntacticToken<S>: Token<'a>,
-{
-  #[inline]
-  fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
-    <SyntacticTokenError<'a, S> as UnexpectedEndOfUnionExtensionError>::unexpected_end_of_union_extension(
-      span, hint,
-    )
-    .into()
-  }
-}
 
 impl<'a, S> UnclosedBraceError for SyntacticTokenError<'a, S>
 where

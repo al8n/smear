@@ -17,5 +17,8 @@ pub mod error;
 /// Hint types for parser errors
 pub mod hints;
 
+/// Syntax type definitions for error reporting
+pub mod syntax;
+
 /// The scaffold AST nodes
 pub mod ast;

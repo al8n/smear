@@ -4,7 +4,7 @@ use logosky::{
   utils::{Span, cmp::Equivalent},
 };
 use smear_lexer::{graphqlx::syntactic::SyntacticLexerErrors, keywords};
-use smear_scaffold::ast::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation};
+use crate::scaffold::ast::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation};
 
 use super::*;
 

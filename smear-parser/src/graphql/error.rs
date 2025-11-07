@@ -10,7 +10,7 @@ use logosky::{
   },
   error::{
     DefaultContainer, Invalid, InvalidBooleanLiteral, InvalidEnumValueLiteral, InvalidNullLiteral,
-    Unclosed, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEnd,
+    Unclosed, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen,
     UnexpectedEot, UnexpectedKeyword, UnexpectedToken, UnknownLexeme, IncompleteSyntax,
   },
   utils::{CharLen, Expected, Message, Span, Spanned},
@@ -19,14 +19,10 @@ use logosky::{
 use super::SyntaxKind as Exp;
 
 use crate::graphql::syntax::*;
+
 pub use crate::{
-  error::ParseVariableValueError,
+  error::MissingDollarTokenError,
   graphql::SyntaxKind,
-  hints::{
-    // EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-    // ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
-    VariableValueHint,
-  },
   lexer::graphql::error::LexerErrors,
 };
 
@@ -34,6 +30,73 @@ pub use core::num::{IntErrorKind, ParseFloatError, ParseIntError};
 
 /// A malformed fragment name error.
 pub type InvalidFragmentName = Invalid<FragmentNameSyntax>;
+
+// ============================================================================
+// Incomplete Syntax Type Aliases
+// ============================================================================
+
+/// Incomplete named type syntax
+pub type IncompleteNamedTypeSyntax = IncompleteSyntax<NamedTypeSyntax>;
+/// Incomplete list type syntax
+pub type IncompleteListTypeSyntax = IncompleteSyntax<ListTypeSyntax>;
+/// Incomplete scalar type definition syntax
+pub type IncompleteScalarTypeDefinitionSyntax = IncompleteSyntax<ScalarTypeDefinitionSyntax>;
+/// Incomplete object type definition syntax
+pub type IncompleteObjectTypeDefinitionSyntax = IncompleteSyntax<ObjectTypeDefinitionSyntax>;
+/// Incomplete interface type definition syntax
+pub type IncompleteInterfaceTypeDefinitionSyntax = IncompleteSyntax<InterfaceTypeDefinitionSyntax>;
+/// Incomplete union type definition syntax
+pub type IncompleteUnionTypeDefinitionSyntax = IncompleteSyntax<UnionTypeDefinitionSyntax>;
+/// Incomplete enum type definition syntax
+pub type IncompleteEnumTypeDefinitionSyntax = IncompleteSyntax<EnumTypeDefinitionSyntax>;
+/// Incomplete input object type definition syntax
+pub type IncompleteInputObjectTypeDefinitionSyntax = IncompleteSyntax<InputObjectTypeDefinitionSyntax>;
+/// Incomplete scalar type extension syntax
+pub type IncompleteScalarTypeExtensionSyntax = IncompleteSyntax<ScalarTypeExtensionSyntax>;
+/// Incomplete object type extension syntax
+pub type IncompleteObjectTypeExtensionSyntax = IncompleteSyntax<ObjectTypeExtensionSyntax>;
+/// Incomplete interface type extension syntax
+pub type IncompleteInterfaceTypeExtensionSyntax = IncompleteSyntax<InterfaceTypeExtensionSyntax>;
+/// Incomplete union type extension syntax
+pub type IncompleteUnionTypeExtensionSyntax = IncompleteSyntax<UnionTypeExtensionSyntax>;
+/// Incomplete enum type extension syntax
+pub type IncompleteEnumTypeExtensionSyntax = IncompleteSyntax<EnumTypeExtensionSyntax>;
+/// Incomplete input object type extension syntax
+pub type IncompleteInputObjectTypeExtensionSyntax = IncompleteSyntax<InputObjectTypeExtensionSyntax>;
+/// Incomplete field definition syntax
+pub type IncompleteFieldDefinitionSyntax = IncompleteSyntax<FieldDefinitionSyntax>;
+/// Incomplete input value definition syntax
+pub type IncompleteInputValueDefinitionSyntax = IncompleteSyntax<InputValueDefinitionSyntax>;
+/// Incomplete directive definition syntax
+pub type IncompleteDirectiveDefinitionSyntax = IncompleteSyntax<DirectiveDefinitionSyntax>;
+/// Incomplete directive syntax
+pub type IncompleteDirectiveSyntax = IncompleteSyntax<DirectiveSyntax>;
+/// Incomplete schema definition syntax
+pub type IncompleteSchemaDefinitionSyntax = IncompleteSyntax<SchemaDefinitionSyntax>;
+/// Incomplete schema extension syntax
+pub type IncompleteSchemaExtensionSyntax = IncompleteSyntax<SchemaExtensionSyntax>;
+/// Incomplete root operation type definition syntax
+pub type IncompleteRootOperationTypeDefinitionSyntax = IncompleteSyntax<RootOperationTypeDefinitionSyntax>;
+/// Incomplete enum value definition syntax
+pub type IncompleteEnumValueDefinitionSyntax = IncompleteSyntax<EnumValueDefinitionSyntax>;
+/// Incomplete named operation definition syntax
+pub type IncompleteNamedOperationDefinitionSyntax = IncompleteSyntax<NamedOperationDefinitionSyntax>;
+/// Incomplete fragment definition syntax
+pub type IncompleteFragmentDefinitionSyntax = IncompleteSyntax<FragmentDefinitionSyntax>;
+/// Incomplete fragment spread syntax
+pub type IncompleteFragmentSpreadSyntax = IncompleteSyntax<FragmentSpreadSyntax>;
+/// Incomplete inline fragment syntax
+pub type IncompleteInlineFragmentSyntax = IncompleteSyntax<InlineFragmentSyntax>;
+/// Incomplete field syntax
+pub type IncompleteFieldSyntax = IncompleteSyntax<FieldSyntax>;
+/// Incomplete variable definition syntax
+pub type IncompleteVariableDefinitionSyntax = IncompleteSyntax<VariableDefinitionSyntax>;
+/// Incomplete argument syntax
+pub type IncompleteArgumentSyntax = IncompleteSyntax<ArgumentSyntax>;
+/// Incomplete object field syntax
+pub type IncompleteObjectFieldSyntax = IncompleteSyntax<ObjectFieldSyntax>;
+/// Incomplete type condition syntax
+pub type IncompleteTypeConditionSyntax = IncompleteSyntax<TypeConditionSyntax>;
 
 /// An extra alias
 pub type Extra<S, T, Char = char, SyntaxKind = Exp, StateError = ()> =
@@ -68,7 +131,7 @@ pub enum Error<S, T, Char = char, SyntaxKind: 'static = Exp, StateError = ()> {
   /// An unexpected keyword was found.
   UnexpectedKeyword(UnexpectedKeyword<'static, S>),
   /// An unexpected end was found in a variable value.
-  UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
+  IncompleteVariableValue(IncompleteSyntax<VariableValueSyntax>),
   /// An unknown directive location was found.
   UnknownDirectiveLocation(UnknownLexeme<Char, DirectiveLocationSyntax>),
   /// An unknown operation type was found.
@@ -99,16 +162,6 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
       span,
       found,
       expected
-    ))
-  }
-
-  /// Creates an unexpected end in variable value error.
-  #[inline]
-  pub const fn unexpected_end_of_variable_value(span: Span, hint: VariableValueHint) -> Self {
-    Self::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
-      span,
-      Message::from_static("variable value"),
-      hint,
     ))
   }
 
@@ -203,6 +256,36 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
     Self::InvalidNullValue(InvalidNullLiteral::null(span))
   }
 
+  /// Creates an unknown error in object type extension.
+  #[inline]
+  pub const fn unexpected_end_of_object_extension(components: IncompleteSyntax<ObjectTypeExtensionSyntax>) -> Self {
+    Self::IncompleteObjectExtension(components)
+  }
+
+  /// Creates an unknown error in interface type extension.
+  #[inline]
+  pub const fn unexpected_end_of_interface_extension(components: IncompleteSyntax<InterfaceTypeExtensionSyntax>) -> Self {
+    Self::IncompleteInterfaceExtension(components)
+  }
+
+  /// Creates an unknown error in enum type extension.
+  #[inline]
+  pub const fn unexpected_end_of_enum_extension(components: IncompleteSyntax<EnumTypeExtensionSyntax>) -> Self {
+    Self::IncompleteEnumExtension(components)
+  }
+
+  /// Creates an unknown error in input object type extension.
+  #[inline]
+  pub const fn unexpected_end_of_input_object_extension(components: IncompleteSyntax<InputObjectTypeExtensionSyntax>) -> Self {
+    Self::IncompleteInputObjectExtension(components)
+  }
+
+  /// Creates an unknown error in union type extension.
+  #[inline]
+  pub const fn unexpected_end_of_union_extension(components: IncompleteSyntax<UnionTypeExtensionSyntax>) -> Self {
+    Self::IncompleteUnionExtension(components)
+  }
+
   /// Creates a other error.
   #[inline]
   pub fn other(span: Span, msg: impl Into<Cow<'static, str>>) -> Self {
@@ -227,7 +310,7 @@ impl<S, T, Char, SyntaxKind, StateError> Error<S, T, Char, SyntaxKind, StateErro
       Self::UnclosedParen(unclosed) => unclosed.span(),
       Self::UnexpectedToken(e) => e.span(),
       Self::UnexpectedKeyword(e) => e.span(),
-      Self::UnexpectedEndOfVariableValue(e) => e.span(),
+      Self::IncompleteVariableValue(e) => e.span(),
       Self::UnknownDirectiveLocation(e) => e.span(),
       Self::UnknownOperationType(e) => e.span(),
       Self::EndOfInput(e) => e.span(),

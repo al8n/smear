@@ -1,13 +1,12 @@
-use crate::{error::ParseVariableValueError, hints::VariableValueHint};
 use logosky::{
   Token,
   utils::{IntoComponents, Span},
 };
-use smear_scaffold::error::{InvalidFragmentTypePath, UnclosedBraceError, UnclosedBracketError};
+use crate::{scaffold::error::{InvalidFragmentTypePath, UnclosedBraceError, UnclosedBracketError}, error::MissingDollarTokenError};
 
 use super::*;
 
-impl<'a, S> ParseVariableValueError<Ident<S>> for SyntacticTokenError<'a, S>
+impl<'a, S> MissingDollarTokenError<Ident<S>> for SyntacticTokenError<'a, S>
 where
   SyntacticToken<S>: Token<'a>,
 {
@@ -19,33 +18,27 @@ where
       SyntaxKind::Dollar,
     )
   }
-
-  #[inline]
-  fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    Self::unexpected_end_of_variable_value(hint, span)
-  }
 }
 
-impl<'a, S> ParseVariableValueError<Ident<S>> for SyntacticTokenErrors<'a, S>
+impl<'a, S> MissingDollarTokenError<Ident<S>> for SyntacticTokenErrors<'a, S>
 where
   SyntacticToken<S>: Token<'a>,
 {
   #[inline]
   fn missing_dollar_token(name: Ident<S>, span: Span) -> Self {
-    <SyntacticTokenError<'a, S> as ParseVariableValueError<Ident<S>>>::missing_dollar_token(
+    <SyntacticTokenError<'a, S> as MissingDollarTokenError<Ident<S>>>::missing_dollar_token(
       name, span,
     )
     .into()
   }
-
-  #[inline]
-  fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    <SyntacticTokenError<'a, S> as ParseVariableValueError<Ident<S>>>::unexpected_end_of_variable_value(
-      hint, span,
-    )
-    .into()
-  }
 }
+
+// ============================================================================
+// From<IncompleteSyntax<*Syntax>> implementations
+// ============================================================================
+//
+// Note: The Error enum derives From, which automatically generates From
+// implementations for all IncompleteSyntax variants. No manual implementations needed!
 
 impl<'a, S> UnclosedBraceError for SyntacticTokenError<'a, S>
 where

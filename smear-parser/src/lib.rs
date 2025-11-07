@@ -14,8 +14,37 @@ extern crate std;
 /// Re-export of smear-lexer for convenience
 pub use smear_lexer as lexer;
 
-/// Re-export of smear-scaffold for convenience
-pub use smear_scaffold as scaffold;
+/// Scaffold module - generic, reusable AST scaffolding for GraphQL-like languages.
+///
+/// This module provides generic traits, types, and utilities that can be used
+/// to build parsers for GraphQL and GraphQL-like DSLs.
+pub mod scaffold {
+  /// Parser error traits
+  pub mod error {
+    pub use crate::scaffold_error::*;
+  }
+
+  /// The scaffold AST nodes
+  pub mod ast {
+    pub use crate::ast_scaffold::*;
+  }
+
+  /// Syntax type definitions for error reporting
+  #[cfg(any(feature = "graphql", feature = "graphqlx"))]
+  pub mod syntax {
+    /// GraphQL syntax types and components
+    #[cfg(feature = "graphql")]
+    pub mod graphql {
+      pub use crate::syntax::graphql::*;
+    }
+
+    /// GraphQLx syntax types and components
+    #[cfg(feature = "graphqlx")]
+    pub mod graphqlx {
+      pub use crate::syntax::graphqlx::*;
+    }
+  }
+}
 
 /// Parser combinators for standard GraphQL (draft specification).
 ///
@@ -144,11 +173,19 @@ pub mod graphql;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
+// Scaffold internals (not public API, use via scaffold module)
+mod scaffold_error;
+mod ast_scaffold;
+
 /// Common error types and traits for parser implementations.
 pub mod error;
 
-/// Hint types for parsers.
-pub mod hints;
+// /// Hint types for parsers.
+// pub mod hints;
+
+/// Syntax type definitions for error reporting
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod syntax;
 
 /// Common value parsers shared between GraphQL and GraphQLx.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]

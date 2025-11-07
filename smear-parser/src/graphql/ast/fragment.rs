@@ -4,7 +4,7 @@ use logosky::{
   utils::{IntoComponents, Span, cmp::Equivalent},
 };
 use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
-use smear_scaffold::ast::{self as scaffold, FragmentName};
+use crate::scaffold::ast::{self as scaffold, FragmentName};
 
 use super::*;
 

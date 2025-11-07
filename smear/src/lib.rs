@@ -8,11 +8,8 @@ extern crate alloc as std;
 #[cfg(feature = "std")]
 extern crate std;
 
-/// Hint system for expected GraphQL tokens.
-///
-/// Provides hints about what tokens were expected during parsing, useful for
-/// generating helpful error messages and IDE integration.
-pub mod hints;
+// Hint system deprecated - replaced with Syntax trait approach
+// pub mod hints;
 
 /// Scaffold structures for building GraphQL-like DSLs.
 ///
@@ -57,7 +54,7 @@ pub mod hints;
 /// // Use standard Document with your custom definitions
 /// type MyDocument = scaffold::Document<MyDefinition>;
 /// ```
-pub use smear_scaffold as scaffold;
+pub use smear_parser::scaffold;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///

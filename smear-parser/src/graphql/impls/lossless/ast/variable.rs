@@ -1,9 +1,10 @@
 use chumsky::{Parser, extra::ParserExtra};
-use logosky::Parseable;
+use logosky::{Parseable, error::IncompleteSyntax, utils::syntax::Syntax};
 
 use crate::{
-  error::{Error, VariableValueHint},
+  error::Error,
   parser::ast::{Dollar, Name, Variable},
+  graphql::syntax::{VariableValueSyntax, VariableValueComponent},
 };
 
 use super::*;
@@ -38,10 +39,14 @@ impl<'a> Parseable<'a, LosslessTokenizer<'a>, Token<'a>, LosslessTokenErrors<'a,
       let slice = exa.slice();
       match (dollar, name) {
         (None, None) => {
-          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Dollar, span).into())
+          // Both dollar and name are missing - first missing component is Dollar
+          let components = IncompleteSyntax::<VariableValueSyntax>::new(span, VariableValueComponent::Dollar);
+          Err(Error::IncompleteVariableValue(components).into())
         }
         (Some(_), None) => {
-          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Name, span).into())
+          // Dollar is present, name is missing
+          let components = IncompleteSyntax::<VariableValueSyntax>::new(span, VariableValueComponent::Name);
+          Err(Error::IncompleteVariableValue(components).into())
         }
         (None, Some(name)) => Err(
           Error::unexpected_token(Token::Identifier(name.source()), TokenKind::Dollar, span).into(),
