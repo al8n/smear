@@ -1,15 +1,16 @@
 use core::fmt::Display;
 
 use logosky::{
-  LogoStream, Logos, Source, Token, chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*}, error::IncompleteSyntax, utils::{
+  LogoStream, Logos, Source, Token, chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*}, utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     human_display::DisplayHuman,
     sdl_display::{DisplayCompact, DisplayPretty},
+    syntax::AstNode,
   }
 };
 use smear_lexer::punctuator::Dollar;
 
-use crate::{error::MissingDollarTokenError, graphql::syntax::VariableValueSyntax};
+use crate::error::MissingDollarTokenError;
 
 /// A variable value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -106,7 +107,7 @@ where
 
 impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for VariableValue<Name>
 where
-  Error: From<IncompleteSyntax<VariableValueSyntax>>,
+  Error: MissingDollarTokenError<Name>,
   Name: Parseable<'a, I, T, Error>,
   Dollar: Parseable<'a, I, T, Error>,
 {
@@ -131,4 +132,16 @@ where
         Err(Error::missing_dollar_token(name, exa.span()))
       })))
   }
+}
+
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `VariableValue` in the GraphQL language.
+///
+/// This associates the variable value AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name> AstNode<smear_lexer::graphql::GraphQL> for VariableValue<Name> {
+  type Syntax = crate::graphql::syntax::VariableValueSyntax;
 }

@@ -7,6 +7,7 @@ use logosky::{
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     sdl_display::{DisplayCompact, DisplayPretty},
+    syntax::AstNode,
   },
 };
 use smear_lexer::{
@@ -615,4 +616,27 @@ where
   {
     Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
   }
+}
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `UnionTypeDefinition` in the GraphQL language.
+///
+/// This associates the union type definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives, MemberTypes> AstNode<smear_lexer::graphql::GraphQL>
+  for UnionTypeDefinition<Name, Directives, MemberTypes>
+{
+  type Syntax = crate::syntax::graphql::UnionTypeDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `UnionTypeExtension` in the GraphQL language.
+///
+/// This associates the union type extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives, MemberTypes> AstNode<smear_lexer::graphql::GraphQL>
+  for UnionTypeExtension<Name, Directives, MemberTypes>
+{
+  type Syntax = crate::syntax::graphql::UnionTypeExtensionSyntax;
 }

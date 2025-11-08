@@ -1,7 +1,7 @@
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 use smear_lexer::keywords::{Extend, Schema};
 
@@ -700,4 +700,27 @@ where
   {
     Self::parser_with(Directives::parser(), RootOperationTypesDefinition::parser())
   }
+}
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `SchemaDefinition` in the GraphQL language.
+///
+/// This associates the schema definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Directives, RootOperationTypesDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+{
+  type Syntax = crate::syntax::graphql::SchemaDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `SchemaExtension` in the GraphQL language.
+///
+/// This associates the schema extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Directives, RootOperationTypesDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for SchemaExtension<Directives, RootOperationTypesDefinition>
+{
+  type Syntax = crate::syntax::graphql::SchemaExtensionSyntax;
 }

@@ -7,6 +7,7 @@ use logosky::{
   utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     sdl_display::{DisplayCompact, DisplayPretty},
+    syntax::AstNode,
   },
 };
 use smear_lexer::{
@@ -760,4 +761,27 @@ where
       FieldsDefinition::parser(),
     )
   }
+}
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `InterfaceTypeDefinition` in the GraphQL language.
+///
+/// This associates the interface type definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+{
+  type Syntax = crate::syntax::graphql::InterfaceTypeDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `InterfaceTypeExtension` in the GraphQL language.
+///
+/// This associates the interface type extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+{
+  type Syntax = crate::syntax::graphql::InterfaceTypeExtensionSyntax;
 }

@@ -1,7 +1,7 @@
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 
 // Error traits moved to From implementations
@@ -659,4 +659,27 @@ where
       FieldsDefinition::parser(),
     )
   }
+}
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `ObjectTypeDefinition` in the GraphQL language.
+///
+/// This associates the object type definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+{
+  type Syntax = crate::syntax::graphql::ObjectTypeDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `ObjectTypeExtension` in the GraphQL language.
+///
+/// This associates the object type extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+{
+  type Syntax = crate::syntax::graphql::ObjectTypeExtensionSyntax;
 }

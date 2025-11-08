@@ -1,7 +1,7 @@
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{self, Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 use smear_lexer::{
   keywords::{Enum, Extend},
@@ -901,4 +901,27 @@ where
       EnumValuesDefinition::parser(),
     )
   }
+}
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `EnumTypeDefinition` in the GraphQL language.
+///
+/// This associates the enum type definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives, EnumValuesDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+{
+  type Syntax = crate::syntax::graphql::EnumTypeDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `EnumTypeExtension` in the GraphQL language.
+///
+/// This associates the enum type extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives, EnumValuesDefinition> AstNode<smear_lexer::graphql::GraphQL>
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+{
+  type Syntax = crate::syntax::graphql::EnumTypeExtensionSyntax;
 }

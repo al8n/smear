@@ -1,7 +1,7 @@
 use logosky::{
   Logos, Source, Token,
   chumsky::{LogoStream, Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 
 use smear_lexer::punctuator::{Bang, LBracket, RBracket};
@@ -175,4 +175,16 @@ where
   {
     Self::parser_with(Type::parser())
   }
+}
+
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `ListType` in the GraphQL language.
+///
+/// This associates the list type AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Type> AstNode<smear_lexer::graphql::GraphQL> for ListType<Type> {
+  type Syntax = crate::syntax::graphql::ListTypeSyntax;
 }

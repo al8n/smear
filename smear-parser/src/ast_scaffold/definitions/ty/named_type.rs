@@ -1,7 +1,7 @@
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 
 use smear_lexer::punctuator::Bang;
@@ -156,4 +156,16 @@ where
   {
     Self::parser_with(Name::parser())
   }
+}
+
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `NamedType` in the GraphQL language.
+///
+/// This associates the named type AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name> AstNode<smear_lexer::graphql::GraphQL> for NamedType<Name> {
+  type Syntax = crate::syntax::graphql::NamedTypeSyntax;
 }

@@ -1,7 +1,7 @@
 
 use derive_more::Display;
-use generic_array::GenericArray;
 use logosky::utils::{
+  FrozenGenericVec, GenericVec,
   human_display::DisplayHuman,
   syntax::Syntax,
   typenum::{U1, U2, U3, U4, U5, U6},
@@ -590,14 +590,17 @@ impl Syntax for NamedTypeSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [NamedTypeComponent::Name, NamedTypeComponent::Bang]
-      .into_iter()
-      .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(NamedTypeComponent::Name);
+    vec.push(NamedTypeComponent::Bang);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [NamedTypeComponent::Name].into_iter().collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(NamedTypeComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -619,25 +622,21 @@ impl Syntax for ListTypeSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ListTypeComponent::LBracket,
-      ListTypeComponent::ElementType,
-      ListTypeComponent::RBracket,
-      ListTypeComponent::Bang,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ListTypeComponent::LBracket);
+    vec.push(ListTypeComponent::ElementType);
+    vec.push(ListTypeComponent::RBracket);
+    vec.push(ListTypeComponent::Bang);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ListTypeComponent::LBracket,
-      ListTypeComponent::ElementType,
-      ListTypeComponent::RBracket,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ListTypeComponent::LBracket);
+    vec.push(ListTypeComponent::ElementType);
+    vec.push(ListTypeComponent::RBracket);
+    vec.freeze()
   }
 }
 
@@ -677,23 +676,19 @@ impl Syntax for ScalarTypeDefinitionSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ScalarTypeDefinitionComponent::ScalarKeyword,
-      ScalarTypeDefinitionComponent::Name,
-      ScalarTypeDefinitionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ScalarTypeDefinitionComponent::ScalarKeyword);
+    vec.push(ScalarTypeDefinitionComponent::Name);
+    vec.push(ScalarTypeDefinitionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ScalarTypeDefinitionComponent::ScalarKeyword,
-      ScalarTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ScalarTypeDefinitionComponent::ScalarKeyword);
+    vec.push(ScalarTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -715,25 +710,21 @@ impl Syntax for ObjectTypeDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ObjectTypeDefinitionComponent::TypeKeyword,
-      ObjectTypeDefinitionComponent::Name,
-      ObjectTypeDefinitionComponent::ImplementsInterfaces,
-      ObjectTypeDefinitionComponent::Directives,
-      ObjectTypeDefinitionComponent::FieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectTypeDefinitionComponent::TypeKeyword);
+    vec.push(ObjectTypeDefinitionComponent::Name);
+    vec.push(ObjectTypeDefinitionComponent::ImplementsInterfaces);
+    vec.push(ObjectTypeDefinitionComponent::Directives);
+    vec.push(ObjectTypeDefinitionComponent::FieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ObjectTypeDefinitionComponent::TypeKeyword,
-      ObjectTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectTypeDefinitionComponent::TypeKeyword);
+    vec.push(ObjectTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -755,25 +746,21 @@ impl Syntax for InterfaceTypeDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InterfaceTypeDefinitionComponent::InterfaceKeyword,
-      InterfaceTypeDefinitionComponent::Name,
-      InterfaceTypeDefinitionComponent::ImplementsInterfaces,
-      InterfaceTypeDefinitionComponent::Directives,
-      InterfaceTypeDefinitionComponent::FieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InterfaceTypeDefinitionComponent::InterfaceKeyword);
+    vec.push(InterfaceTypeDefinitionComponent::Name);
+    vec.push(InterfaceTypeDefinitionComponent::ImplementsInterfaces);
+    vec.push(InterfaceTypeDefinitionComponent::Directives);
+    vec.push(InterfaceTypeDefinitionComponent::FieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InterfaceTypeDefinitionComponent::InterfaceKeyword,
-      InterfaceTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InterfaceTypeDefinitionComponent::InterfaceKeyword);
+    vec.push(InterfaceTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -795,24 +782,20 @@ impl Syntax for UnionTypeDefinitionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      UnionTypeDefinitionComponent::UnionKeyword,
-      UnionTypeDefinitionComponent::Name,
-      UnionTypeDefinitionComponent::Directives,
-      UnionTypeDefinitionComponent::UnionMembers,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(UnionTypeDefinitionComponent::UnionKeyword);
+    vec.push(UnionTypeDefinitionComponent::Name);
+    vec.push(UnionTypeDefinitionComponent::Directives);
+    vec.push(UnionTypeDefinitionComponent::UnionMembers);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      UnionTypeDefinitionComponent::UnionKeyword,
-      UnionTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(UnionTypeDefinitionComponent::UnionKeyword);
+    vec.push(UnionTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -834,24 +817,20 @@ impl Syntax for EnumTypeDefinitionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      EnumTypeDefinitionComponent::EnumKeyword,
-      EnumTypeDefinitionComponent::Name,
-      EnumTypeDefinitionComponent::Directives,
-      EnumTypeDefinitionComponent::EnumValuesDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumTypeDefinitionComponent::EnumKeyword);
+    vec.push(EnumTypeDefinitionComponent::Name);
+    vec.push(EnumTypeDefinitionComponent::Directives);
+    vec.push(EnumTypeDefinitionComponent::EnumValuesDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      EnumTypeDefinitionComponent::EnumKeyword,
-      EnumTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumTypeDefinitionComponent::EnumKeyword);
+    vec.push(EnumTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -873,24 +852,20 @@ impl Syntax for InputObjectTypeDefinitionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InputObjectTypeDefinitionComponent::InputKeyword,
-      InputObjectTypeDefinitionComponent::Name,
-      InputObjectTypeDefinitionComponent::Directives,
-      InputObjectTypeDefinitionComponent::InputFieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InputObjectTypeDefinitionComponent::InputKeyword);
+    vec.push(InputObjectTypeDefinitionComponent::Name);
+    vec.push(InputObjectTypeDefinitionComponent::Directives);
+    vec.push(InputObjectTypeDefinitionComponent::InputFieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InputObjectTypeDefinitionComponent::InputKeyword,
-      InputObjectTypeDefinitionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InputObjectTypeDefinitionComponent::InputKeyword);
+    vec.push(InputObjectTypeDefinitionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -917,25 +892,21 @@ impl Syntax for ScalarTypeExtensionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ScalarTypeExtensionComponent::ExtendKeyword,
-      ScalarTypeExtensionComponent::ScalarKeyword,
-      ScalarTypeExtensionComponent::Name,
-      ScalarTypeExtensionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ScalarTypeExtensionComponent::ExtendKeyword);
+    vec.push(ScalarTypeExtensionComponent::ScalarKeyword);
+    vec.push(ScalarTypeExtensionComponent::Name);
+    vec.push(ScalarTypeExtensionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ScalarTypeExtensionComponent::ExtendKeyword,
-      ScalarTypeExtensionComponent::ScalarKeyword,
-      ScalarTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ScalarTypeExtensionComponent::ExtendKeyword);
+    vec.push(ScalarTypeExtensionComponent::ScalarKeyword);
+    vec.push(ScalarTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -957,27 +928,23 @@ impl Syntax for ObjectTypeExtensionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ObjectTypeExtensionComponent::ExtendKeyword,
-      ObjectTypeExtensionComponent::TypeKeyword,
-      ObjectTypeExtensionComponent::Name,
-      ObjectTypeExtensionComponent::ImplementsInterfaces,
-      ObjectTypeExtensionComponent::Directives,
-      ObjectTypeExtensionComponent::FieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectTypeExtensionComponent::ExtendKeyword);
+    vec.push(ObjectTypeExtensionComponent::TypeKeyword);
+    vec.push(ObjectTypeExtensionComponent::Name);
+    vec.push(ObjectTypeExtensionComponent::ImplementsInterfaces);
+    vec.push(ObjectTypeExtensionComponent::Directives);
+    vec.push(ObjectTypeExtensionComponent::FieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ObjectTypeExtensionComponent::ExtendKeyword,
-      ObjectTypeExtensionComponent::TypeKeyword,
-      ObjectTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectTypeExtensionComponent::ExtendKeyword);
+    vec.push(ObjectTypeExtensionComponent::TypeKeyword);
+    vec.push(ObjectTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -999,27 +966,23 @@ impl Syntax for InterfaceTypeExtensionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InterfaceTypeExtensionComponent::ExtendKeyword,
-      InterfaceTypeExtensionComponent::InterfaceKeyword,
-      InterfaceTypeExtensionComponent::Name,
-      InterfaceTypeExtensionComponent::ImplementsInterfaces,
-      InterfaceTypeExtensionComponent::Directives,
-      InterfaceTypeExtensionComponent::FieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InterfaceTypeExtensionComponent::ExtendKeyword);
+    vec.push(InterfaceTypeExtensionComponent::InterfaceKeyword);
+    vec.push(InterfaceTypeExtensionComponent::Name);
+    vec.push(InterfaceTypeExtensionComponent::ImplementsInterfaces);
+    vec.push(InterfaceTypeExtensionComponent::Directives);
+    vec.push(InterfaceTypeExtensionComponent::FieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InterfaceTypeExtensionComponent::ExtendKeyword,
-      InterfaceTypeExtensionComponent::InterfaceKeyword,
-      InterfaceTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InterfaceTypeExtensionComponent::ExtendKeyword);
+    vec.push(InterfaceTypeExtensionComponent::InterfaceKeyword);
+    vec.push(InterfaceTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1041,26 +1004,22 @@ impl Syntax for UnionTypeExtensionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      UnionTypeExtensionComponent::ExtendKeyword,
-      UnionTypeExtensionComponent::UnionKeyword,
-      UnionTypeExtensionComponent::Name,
-      UnionTypeExtensionComponent::Directives,
-      UnionTypeExtensionComponent::UnionMembers,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(UnionTypeExtensionComponent::ExtendKeyword);
+    vec.push(UnionTypeExtensionComponent::UnionKeyword);
+    vec.push(UnionTypeExtensionComponent::Name);
+    vec.push(UnionTypeExtensionComponent::Directives);
+    vec.push(UnionTypeExtensionComponent::UnionMembers);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      UnionTypeExtensionComponent::ExtendKeyword,
-      UnionTypeExtensionComponent::UnionKeyword,
-      UnionTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(UnionTypeExtensionComponent::ExtendKeyword);
+    vec.push(UnionTypeExtensionComponent::UnionKeyword);
+    vec.push(UnionTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1082,26 +1041,22 @@ impl Syntax for EnumTypeExtensionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      EnumTypeExtensionComponent::ExtendKeyword,
-      EnumTypeExtensionComponent::EnumKeyword,
-      EnumTypeExtensionComponent::Name,
-      EnumTypeExtensionComponent::Directives,
-      EnumTypeExtensionComponent::EnumValuesDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumTypeExtensionComponent::ExtendKeyword);
+    vec.push(EnumTypeExtensionComponent::EnumKeyword);
+    vec.push(EnumTypeExtensionComponent::Name);
+    vec.push(EnumTypeExtensionComponent::Directives);
+    vec.push(EnumTypeExtensionComponent::EnumValuesDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      EnumTypeExtensionComponent::ExtendKeyword,
-      EnumTypeExtensionComponent::EnumKeyword,
-      EnumTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumTypeExtensionComponent::ExtendKeyword);
+    vec.push(EnumTypeExtensionComponent::EnumKeyword);
+    vec.push(EnumTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1123,26 +1078,22 @@ impl Syntax for InputObjectTypeExtensionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InputObjectTypeExtensionComponent::ExtendKeyword,
-      InputObjectTypeExtensionComponent::InputKeyword,
-      InputObjectTypeExtensionComponent::Name,
-      InputObjectTypeExtensionComponent::Directives,
-      InputObjectTypeExtensionComponent::InputFieldsDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InputObjectTypeExtensionComponent::ExtendKeyword);
+    vec.push(InputObjectTypeExtensionComponent::InputKeyword);
+    vec.push(InputObjectTypeExtensionComponent::Name);
+    vec.push(InputObjectTypeExtensionComponent::Directives);
+    vec.push(InputObjectTypeExtensionComponent::InputFieldsDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InputObjectTypeExtensionComponent::ExtendKeyword,
-      InputObjectTypeExtensionComponent::InputKeyword,
-      InputObjectTypeExtensionComponent::Name,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InputObjectTypeExtensionComponent::ExtendKeyword);
+    vec.push(InputObjectTypeExtensionComponent::InputKeyword);
+    vec.push(InputObjectTypeExtensionComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1192,26 +1143,22 @@ impl Syntax for FieldDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      FieldDefinitionComponent::Name,
-      FieldDefinitionComponent::ArgumentsDefinition,
-      FieldDefinitionComponent::Colon,
-      FieldDefinitionComponent::Type,
-      FieldDefinitionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(FieldDefinitionComponent::Name);
+    vec.push(FieldDefinitionComponent::ArgumentsDefinition);
+    vec.push(FieldDefinitionComponent::Colon);
+    vec.push(FieldDefinitionComponent::Type);
+    vec.push(FieldDefinitionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      FieldDefinitionComponent::Name,
-      FieldDefinitionComponent::Colon,
-      FieldDefinitionComponent::Type,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(FieldDefinitionComponent::Name);
+    vec.push(FieldDefinitionComponent::Colon);
+    vec.push(FieldDefinitionComponent::Type);
+    vec.freeze()
   }
 }
 
@@ -1245,26 +1192,22 @@ impl Syntax for InputValueDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InputValueDefinitionComponent::Name,
-      InputValueDefinitionComponent::Colon,
-      InputValueDefinitionComponent::Type,
-      InputValueDefinitionComponent::DefaultValue,
-      InputValueDefinitionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InputValueDefinitionComponent::Name);
+    vec.push(InputValueDefinitionComponent::Colon);
+    vec.push(InputValueDefinitionComponent::Type);
+    vec.push(InputValueDefinitionComponent::DefaultValue);
+    vec.push(InputValueDefinitionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InputValueDefinitionComponent::Name,
-      InputValueDefinitionComponent::Colon,
-      InputValueDefinitionComponent::Type,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InputValueDefinitionComponent::Name);
+    vec.push(InputValueDefinitionComponent::Colon);
+    vec.push(InputValueDefinitionComponent::Type);
+    vec.freeze()
   }
 }
 
@@ -1314,30 +1257,26 @@ impl Syntax for DirectiveDefinitionSyntax {
   type COMPONENTS = U6; // Extended to account for all possible components
   type REQUIRED = U5;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      DirectiveDefinitionComponent::DirectiveKeyword,
-      DirectiveDefinitionComponent::At,
-      DirectiveDefinitionComponent::Name,
-      DirectiveDefinitionComponent::ArgumentsDefinition,
-      DirectiveDefinitionComponent::RepeatableKeyword,
-      DirectiveDefinitionComponent::OnKeyword,
-      //DirectiveDefinitionComponent::DirectiveLocations, // Commented out because GenericArray size is 6 not 7
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(DirectiveDefinitionComponent::DirectiveKeyword);
+    vec.push(DirectiveDefinitionComponent::At);
+    vec.push(DirectiveDefinitionComponent::Name);
+    vec.push(DirectiveDefinitionComponent::ArgumentsDefinition);
+    vec.push(DirectiveDefinitionComponent::RepeatableKeyword);
+    vec.push(DirectiveDefinitionComponent::OnKeyword);
+    //vec.push(DirectiveDefinitionComponent::DirectiveLocations); // Commented out because GenericArray size is 6 not 7
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      DirectiveDefinitionComponent::DirectiveKeyword,
-      DirectiveDefinitionComponent::At,
-      DirectiveDefinitionComponent::Name,
-      DirectiveDefinitionComponent::OnKeyword,
-      DirectiveDefinitionComponent::DirectiveLocations,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(DirectiveDefinitionComponent::DirectiveKeyword);
+    vec.push(DirectiveDefinitionComponent::At);
+    vec.push(DirectiveDefinitionComponent::Name);
+    vec.push(DirectiveDefinitionComponent::OnKeyword);
+    vec.push(DirectiveDefinitionComponent::DirectiveLocations);
+    vec.freeze()
   }
 }
 
@@ -1359,20 +1298,19 @@ impl Syntax for DirectiveSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      DirectiveComponent::At,
-      DirectiveComponent::Name,
-      DirectiveComponent::Arguments,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(DirectiveComponent::At);
+    vec.push(DirectiveComponent::Name);
+    vec.push(DirectiveComponent::Arguments);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [DirectiveComponent::At, DirectiveComponent::Name]
-      .into_iter()
-      .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(DirectiveComponent::At);
+    vec.push(DirectiveComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1434,23 +1372,19 @@ impl Syntax for SchemaDefinitionSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      SchemaDefinitionComponent::SchemaKeyword,
-      SchemaDefinitionComponent::Directives,
-      SchemaDefinitionComponent::RootOperationTypesDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(SchemaDefinitionComponent::SchemaKeyword);
+    vec.push(SchemaDefinitionComponent::Directives);
+    vec.push(SchemaDefinitionComponent::RootOperationTypesDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      SchemaDefinitionComponent::SchemaKeyword,
-      SchemaDefinitionComponent::RootOperationTypesDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(SchemaDefinitionComponent::SchemaKeyword);
+    vec.push(SchemaDefinitionComponent::RootOperationTypesDefinition);
+    vec.freeze()
   }
 }
 
@@ -1472,24 +1406,20 @@ impl Syntax for SchemaExtensionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      SchemaExtensionComponent::ExtendKeyword,
-      SchemaExtensionComponent::SchemaKeyword,
-      SchemaExtensionComponent::Directives,
-      SchemaExtensionComponent::RootOperationTypesDefinition,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(SchemaExtensionComponent::ExtendKeyword);
+    vec.push(SchemaExtensionComponent::SchemaKeyword);
+    vec.push(SchemaExtensionComponent::Directives);
+    vec.push(SchemaExtensionComponent::RootOperationTypesDefinition);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      SchemaExtensionComponent::ExtendKeyword,
-      SchemaExtensionComponent::SchemaKeyword,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(SchemaExtensionComponent::ExtendKeyword);
+    vec.push(SchemaExtensionComponent::SchemaKeyword);
+    vec.freeze()
   }
 }
 
@@ -1511,24 +1441,20 @@ impl Syntax for RootOperationTypeDefinitionSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      RootOperationTypeDefinitionComponent::OperationType,
-      RootOperationTypeDefinitionComponent::Colon,
-      RootOperationTypeDefinitionComponent::NamedType,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(RootOperationTypeDefinitionComponent::OperationType);
+    vec.push(RootOperationTypeDefinitionComponent::Colon);
+    vec.push(RootOperationTypeDefinitionComponent::NamedType);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      RootOperationTypeDefinitionComponent::OperationType,
-      RootOperationTypeDefinitionComponent::Colon,
-      RootOperationTypeDefinitionComponent::NamedType,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(RootOperationTypeDefinitionComponent::OperationType);
+    vec.push(RootOperationTypeDefinitionComponent::Colon);
+    vec.push(RootOperationTypeDefinitionComponent::NamedType);
+    vec.freeze()
   }
 }
 
@@ -1566,19 +1492,17 @@ impl Syntax for EnumValueDefinitionSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      EnumValueDefinitionComponent::EnumValue,
-      EnumValueDefinitionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumValueDefinitionComponent::EnumValue);
+    vec.push(EnumValueDefinitionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [EnumValueDefinitionComponent::EnumValue]
-      .into_iter()
-      .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(EnumValueDefinitionComponent::EnumValue);
+    vec.freeze()
   }
 }
 
@@ -1696,25 +1620,21 @@ impl Syntax for NamedOperationDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      NamedOperationDefinitionComponent::OperationType,
-      NamedOperationDefinitionComponent::Name,
-      NamedOperationDefinitionComponent::VariablesDefinition,
-      NamedOperationDefinitionComponent::Directives,
-      NamedOperationDefinitionComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(NamedOperationDefinitionComponent::OperationType);
+    vec.push(NamedOperationDefinitionComponent::Name);
+    vec.push(NamedOperationDefinitionComponent::VariablesDefinition);
+    vec.push(NamedOperationDefinitionComponent::Directives);
+    vec.push(NamedOperationDefinitionComponent::SelectionSet);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      NamedOperationDefinitionComponent::OperationType,
-      NamedOperationDefinitionComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(NamedOperationDefinitionComponent::OperationType);
+    vec.push(NamedOperationDefinitionComponent::SelectionSet);
+    vec.freeze()
   }
 }
 
@@ -1748,27 +1668,23 @@ impl Syntax for FragmentDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U4;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      FragmentDefinitionComponent::FragmentKeyword,
-      FragmentDefinitionComponent::FragmentName,
-      FragmentDefinitionComponent::TypeCondition,
-      FragmentDefinitionComponent::Directives,
-      FragmentDefinitionComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(FragmentDefinitionComponent::FragmentKeyword);
+    vec.push(FragmentDefinitionComponent::FragmentName);
+    vec.push(FragmentDefinitionComponent::TypeCondition);
+    vec.push(FragmentDefinitionComponent::Directives);
+    vec.push(FragmentDefinitionComponent::SelectionSet);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      FragmentDefinitionComponent::FragmentKeyword,
-      FragmentDefinitionComponent::FragmentName,
-      FragmentDefinitionComponent::TypeCondition,
-      FragmentDefinitionComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(FragmentDefinitionComponent::FragmentKeyword);
+    vec.push(FragmentDefinitionComponent::FragmentName);
+    vec.push(FragmentDefinitionComponent::TypeCondition);
+    vec.push(FragmentDefinitionComponent::SelectionSet);
+    vec.freeze()
   }
 }
 
@@ -1790,23 +1706,19 @@ impl Syntax for FragmentSpreadSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      FragmentSpreadComponent::Spread,
-      FragmentSpreadComponent::FragmentName,
-      FragmentSpreadComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(FragmentSpreadComponent::Spread);
+    vec.push(FragmentSpreadComponent::FragmentName);
+    vec.push(FragmentSpreadComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      FragmentSpreadComponent::Spread,
-      FragmentSpreadComponent::FragmentName,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(FragmentSpreadComponent::Spread);
+    vec.push(FragmentSpreadComponent::FragmentName);
+    vec.freeze()
   }
 }
 
@@ -1828,24 +1740,20 @@ impl Syntax for InlineFragmentSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      InlineFragmentComponent::Spread,
-      InlineFragmentComponent::TypeCondition,
-      InlineFragmentComponent::Directives,
-      InlineFragmentComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(InlineFragmentComponent::Spread);
+    vec.push(InlineFragmentComponent::TypeCondition);
+    vec.push(InlineFragmentComponent::Directives);
+    vec.push(InlineFragmentComponent::SelectionSet);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      InlineFragmentComponent::Spread,
-      InlineFragmentComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(InlineFragmentComponent::Spread);
+    vec.push(InlineFragmentComponent::SelectionSet);
+    vec.freeze()
   }
 }
 
@@ -1871,20 +1779,20 @@ impl Syntax for FieldSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U1;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      FieldComponent::Alias,
-      FieldComponent::Name,
-      FieldComponent::Arguments,
-      FieldComponent::Directives,
-      FieldComponent::SelectionSet,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(FieldComponent::Alias);
+    vec.push(FieldComponent::Name);
+    vec.push(FieldComponent::Arguments);
+    vec.push(FieldComponent::Directives);
+    vec.push(FieldComponent::SelectionSet);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [FieldComponent::Name].into_iter().collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(FieldComponent::Name);
+    vec.freeze()
   }
 }
 
@@ -1934,28 +1842,24 @@ impl Syntax for VariableDefinitionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U4;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      VariableDefinitionComponent::Dollar,
-      VariableDefinitionComponent::Variable,
-      VariableDefinitionComponent::Colon,
-      VariableDefinitionComponent::Type,
-      VariableDefinitionComponent::DefaultValue,
-      VariableDefinitionComponent::Directives,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(VariableDefinitionComponent::Dollar);
+    vec.push(VariableDefinitionComponent::Variable);
+    vec.push(VariableDefinitionComponent::Colon);
+    vec.push(VariableDefinitionComponent::Type);
+    vec.push(VariableDefinitionComponent::DefaultValue);
+    vec.push(VariableDefinitionComponent::Directives);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      VariableDefinitionComponent::Dollar,
-      VariableDefinitionComponent::Variable,
-      VariableDefinitionComponent::Colon,
-      VariableDefinitionComponent::Type,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(VariableDefinitionComponent::Dollar);
+    vec.push(VariableDefinitionComponent::Variable);
+    vec.push(VariableDefinitionComponent::Colon);
+    vec.push(VariableDefinitionComponent::Type);
+    vec.freeze()
   }
 }
 
@@ -2005,24 +1909,20 @@ impl Syntax for ArgumentSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ArgumentComponent::Name,
-      ArgumentComponent::Colon,
-      ArgumentComponent::Value,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ArgumentComponent::Name);
+    vec.push(ArgumentComponent::Colon);
+    vec.push(ArgumentComponent::Value);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ArgumentComponent::Name,
-      ArgumentComponent::Colon,
-      ArgumentComponent::Value,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ArgumentComponent::Name);
+    vec.push(ArgumentComponent::Colon);
+    vec.push(ArgumentComponent::Value);
+    vec.freeze()
   }
 }
 
@@ -2144,24 +2044,20 @@ impl Syntax for ObjectFieldSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      ObjectFieldComponent::Name,
-      ObjectFieldComponent::Colon,
-      ObjectFieldComponent::Value,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectFieldComponent::Name);
+    vec.push(ObjectFieldComponent::Colon);
+    vec.push(ObjectFieldComponent::Value);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      ObjectFieldComponent::Name,
-      ObjectFieldComponent::Colon,
-      ObjectFieldComponent::Value,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(ObjectFieldComponent::Name);
+    vec.push(ObjectFieldComponent::Colon);
+    vec.push(ObjectFieldComponent::Value);
+    vec.freeze()
   }
 }
 
@@ -2187,22 +2083,18 @@ impl Syntax for TypeConditionSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [
-      TypeConditionComponent::OnKeyword,
-      TypeConditionComponent::NamedType,
-    ]
-    .into_iter()
-    .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(TypeConditionComponent::OnKeyword);
+    vec.push(TypeConditionComponent::NamedType);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [
-      TypeConditionComponent::OnKeyword,
-      TypeConditionComponent::NamedType,
-    ]
-    .into_iter()
-    .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(TypeConditionComponent::OnKeyword);
+    vec.push(TypeConditionComponent::NamedType);
+    vec.freeze()
   }
 }
 
@@ -2352,15 +2244,17 @@ impl Syntax for VariableValueSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U2;
 
-  fn possible_components() -> GenericArray<Self::Component, Self::COMPONENTS> {
-    [VariableValueComponent::Dollar, VariableValueComponent::Name]
-      .into_iter()
-      .collect()
+  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
+    let mut vec = GenericVec::new();
+    vec.push(VariableValueComponent::Dollar);
+    vec.push(VariableValueComponent::Name);
+    vec.freeze()
   }
 
-  fn required_components() -> GenericArray<Self::Component, Self::REQUIRED> {
-    [VariableValueComponent::Dollar, VariableValueComponent::Name]
-      .into_iter()
-      .collect()
+  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
+    let mut vec = GenericVec::new();
+    vec.push(VariableValueComponent::Dollar);
+    vec.push(VariableValueComponent::Name);
+    vec.freeze()
   }
 }

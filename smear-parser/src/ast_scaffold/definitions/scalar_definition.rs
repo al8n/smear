@@ -1,7 +1,7 @@
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+  utils::{AsSpan, IntoComponents, IntoSpan, Span, syntax::AstNode},
 };
 use smear_lexer::keywords::{Extend, Scalar};
 
@@ -432,4 +432,24 @@ where
   {
     Self::parser_with(Name::parser(), Directives::parser())
   }
+}
+
+// ============================================================================
+// AstNode implementations (GraphQL)
+// ============================================================================
+
+/// Implements `AstNode` for `ScalarTypeDefinition` in the GraphQL language.
+///
+/// This associates the scalar type definition AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeDefinition<Name, Directives> {
+  type Syntax = crate::syntax::graphql::ScalarTypeDefinitionSyntax;
+}
+
+/// Implements `AstNode` for `ScalarTypeExtension` in the GraphQL language.
+///
+/// This associates the scalar type extension AST node with its corresponding syntax type,
+/// enabling type-safe error handling and generic parser implementation.
+impl<Name, Directives> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeExtension<Name, Directives> {
+  type Syntax = crate::syntax::graphql::ScalarTypeExtensionSyntax;
 }
