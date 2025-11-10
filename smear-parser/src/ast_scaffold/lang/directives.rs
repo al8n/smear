@@ -16,27 +16,28 @@ use std::vec::Vec;
 ///
 /// Spec: [Directive](https://spec.graphql.org/draft/#Directive)
 #[derive(Debug, Clone, Copy)]
-pub struct Directive<Name, Args> {
+pub struct Directive<Name, Args, Lang = ()> {
   span: Span,
   name: Name,
   arguments: Option<Args>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Args> AsSpan<Span> for Directive<Name, Args> {
+impl<Name, Args, Lang> AsSpan<Span> for Directive<Name, Args, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Args> IntoSpan<Span> for Directive<Name, Args> {
+impl<Name, Args, Lang> IntoSpan<Span> for Directive<Name, Args, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Args> IntoComponents for Directive<Name, Args> {
+impl<Name, Args, Lang> IntoComponents for Directive<Name, Args, Lang> {
   type Components = (Span, Name, Option<Args>);
 
   #[inline]
@@ -45,7 +46,7 @@ impl<Name, Args> IntoComponents for Directive<Name, Args> {
   }
 }
 
-impl<Name, Args> Directive<Name, Args> {
+impl<Name, Args, Lang> Directive<Name, Args, Lang> {
   /// Creates a new directive with the given span, name, and optional arguments.
   #[inline]
   pub const fn new(span: Span, name: Name, arguments: Option<Args>) -> Self {
@@ -53,6 +54,8 @@ impl<Name, Args> Directive<Name, Args> {
       span,
       name,
       arguments,
+    
+      _lang: PhantomData,
     }
   }
 

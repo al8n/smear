@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -112,16 +114,17 @@ use smear_lexer::keywords::Fragment;
 ///
 /// Spec: [Fragment Definition](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Definitions)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet> {
+pub struct FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang = ()> {
   span: Span,
   name: FragmentName,
   type_condition: TypeCondition,
   directives: Option<Directives>,
   selection_set: SelectionSet,
+  _lang: PhantomData<Lang>,
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet> AsSpan<Span>
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang> AsSpan<Span>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -129,8 +132,8 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> AsSpan<Span>
   }
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoSpan<Span>
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang> IntoSpan<Span>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -138,8 +141,8 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoSpan<Span>
   }
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoComponents
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang> IntoComponents
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 {
   type Components = (
     Span,
@@ -147,6 +150,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoComponents
     TypeCondition,
     Option<Directives>,
     SelectionSet,
+    PhantomData<Lang>,
   );
 
   #[inline]
@@ -157,12 +161,13 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoComponents
       self.type_condition,
       self.directives,
       self.selection_set,
+      self._lang,
     )
   }
 }
 
-impl<FragmentName, TypeCondition, Directives, SelectionSet>
-  FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
+impl<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
+  FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 {
   /// Creates a new `FragmentDefinition` from its components.
   ///
@@ -186,6 +191,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
       type_condition,
       directives,
       selection_set,
+      _lang: PhantomData,
     }
   }
 
@@ -273,7 +279,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
         directives_parser,
         selection_set_parser,
       ))
-      .map_with(|(name, type_condition, directives, selection_set), exa| {
+      .map_with(|(name, type_condition, directives, selection_set, _lang), exa| {
         Self::new(exa.span(), name, type_condition, directives, selection_set)
       })
   }
@@ -302,6 +308,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
       TypeCondition,
       Option<Directives>,
       SelectionSet,
+    PhantomData<Lang>,
     ),
     E,
   > + Clone
@@ -320,14 +327,14 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
       .then(directives_parser.or_not())
       .then(selection_set_parser)
       .map(|(((name, type_condition), directives), selection_set)| {
-        (name, type_condition, directives, selection_set)
+        (name, type_condition, directives, selection_set, PhantomData)
       })
   }
 }
 
-impl<'a, FragmentName, TypeCondition, Directives, SelectionSet, I, T, Error>
+impl<'a, FragmentName, TypeCondition, Directives, SelectionSet, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
+  for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Lang>
 where
   Fragment: Parseable<'a, I, T, Error>,
   FragmentName: Parseable<'a, I, T, Error>,

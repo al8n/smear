@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
@@ -22,40 +24,42 @@ use std::vec::Vec;
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DefinitionName<Ident, Type, Container = Vec<DefinitionTypeParam<Ident, Type>>> {
+pub struct DefinitionName<Ident, Type, Container = Vec<DefinitionTypeParam<Ident, Type>>, Lang = ()> {
   span: Span,
   ident: Ident,
   generics: Option<DefinitionTypeGenerics<Ident, Type, Container>>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, Container> AsSpan<Span> for DefinitionName<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> AsSpan<Span> for DefinitionName<Ident, Type, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type, Container> IntoSpan<Span> for DefinitionName<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> IntoSpan<Span> for DefinitionName<Ident, Type, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type, Container> IntoComponents for DefinitionName<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> IntoComponents for DefinitionName<Ident, Type, Container, Lang> {
   type Components = (
     Span,
     Ident,
     Option<DefinitionTypeGenerics<Ident, Type, Container>>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ident, self.generics)
+    (self.span, self.ident, self.generics, self._lang)
   }
 }
 
-impl<Ident, Type, Container> DefinitionName<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> DefinitionName<Ident, Type, Container, Lang> {
   /// Creates a new `DefinitionName` with the given identifier and optional generics.
   #[inline]
   const fn new(
@@ -67,6 +71,7 @@ impl<Ident, Type, Container> DefinitionName<Ident, Type, Container> {
       span,
       ident,
       generics,
+      _lang: PhantomData,
     }
   }
 
@@ -113,8 +118,8 @@ impl<Ident, Type, Container> DefinitionName<Ident, Type, Container> {
   }
 }
 
-impl<'a, Ident, Type, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for DefinitionName<Ident, Type, Container>
+impl<'a, Ident, Type, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for DefinitionName<Ident, Type, Container, Lang>
 where
   Equal: Parseable<'a, I, T, Error> + 'a,
   Ident: Parseable<'a, I, T, Error> + 'a,

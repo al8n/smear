@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -148,15 +150,16 @@ use smear_lexer::keywords::{Extend, Input};
 ///
 /// Spec: [Input Object Type Definition](https://spec.graphql.org/draft/#sec-Input-Object-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputObjectTypeDefinition<Name, Directives, FieldsDefinition> {
+pub struct InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   directives: Option<Directives>,
   fields: Option<FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, FieldsDefinition> AsSpan<Span>
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -164,8 +167,8 @@ impl<Name, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, FieldsDefinition> IntoSpan<Span>
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -173,19 +176,19 @@ impl<Name, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, FieldsDefinition> IntoComponents
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> IntoComponents
+  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 {
-  type Components = (Span, Name, Option<Directives>, Option<FieldsDefinition>);
+  type Components = (Span, Name, Option<Directives>, Option<FieldsDefinition>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives, self.fields)
+    (self.span, self.name, self.directives, self.fields, self._lang)
   }
 }
 
-impl<Name, Directives, FieldsDefinition>
-  InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang>
+  InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `InputObjectTypeDefinition` with the given components.
   #[inline]
@@ -200,6 +203,7 @@ impl<Name, Directives, FieldsDefinition>
       name,
       directives,
       fields,
+      _lang: PhantomData,
     }
   }
 
@@ -289,8 +293,8 @@ impl<Name, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<'a, Name, Directives, FieldsDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
@@ -450,14 +454,15 @@ impl<Directives, FieldsDefinition> InputObjectTypeExtensionData<Directives, Fiel
 ///
 /// Spec: [Input Object Type Extension](https://spec.graphql.org/draft/#sec-Input-Object-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct InputObjectTypeExtension<Name, Directives, FieldsDefinition> {
+pub struct InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   data: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, FieldsDefinition> AsSpan<Span>
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -465,8 +470,8 @@ impl<Name, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, FieldsDefinition> IntoSpan<Span>
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -474,23 +479,24 @@ impl<Name, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, FieldsDefinition> IntoComponents
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> IntoComponents
+  for InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 {
   type Components = (
     Span,
     Name,
     InputObjectTypeExtensionData<Directives, FieldsDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
+    (self.span, self.name, self.data, self._lang)
   }
 }
 
-impl<Name, Directives, FieldsDefinition>
-  InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang>
+  InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `InputObjectTypeExtension` with the given components.
   #[inline]
@@ -499,7 +505,7 @@ impl<Name, Directives, FieldsDefinition>
     name: Name,
     data: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
   ) -> Self {
-    Self { span, name, data }
+    Self { span, name, data, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire input object extension.
@@ -610,8 +616,8 @@ impl<Name, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<'a, Name, Directives, FieldsDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 where
   Error:,
   Name: Parseable<'a, I, T, Error>,
@@ -644,8 +650,8 @@ where
 ///
 /// This associates the input object type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::InputObjectTypeDefinitionSyntax;
 }
@@ -654,8 +660,8 @@ impl<Name, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
 ///
 /// This associates the input object type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
+impl<Name, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for InputObjectTypeExtension<Name, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::InputObjectTypeExtensionSyntax;
 }

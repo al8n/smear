@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   Logos, Source, Token,
   chumsky::{LogoStream, Parseable, extra::ParserExtra, prelude::*},
@@ -22,28 +24,29 @@ use smear_lexer::punctuator::{Bang, FatArrow, LAngle, RAngle};
 /// MapType : < Key !? => Value !? > !?
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct MapType<Key, Value> {
+pub struct MapType<Key, Value, Lang = ()> {
   span: Span,
   key: Key,
   value: Value,
   required: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Key, Value> AsSpan<Span> for MapType<Key, Value> {
+impl<Key, Value, Lang> AsSpan<Span> for MapType<Key, Value, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Key, Value> IntoSpan<Span> for MapType<Key, Value> {
+impl<Key, Value, Lang> IntoSpan<Span> for MapType<Key, Value, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Key, Value> IntoComponents for MapType<Key, Value> {
+impl<Key, Value, Lang> IntoComponents for MapType<Key, Value, Lang> {
   type Components = (Span, Key, Value, bool);
 
   #[inline]
@@ -52,7 +55,7 @@ impl<Key, Value> IntoComponents for MapType<Key, Value> {
   }
 }
 
-impl<Key, Value> MapType<Key, Value> {
+impl<Key, Value, Lang> MapType<Key, Value, Lang> {
   /// Creates a new map type instance.
   #[inline]
   pub const fn new(span: Span, key: Key, value: Value, required: bool) -> Self {
@@ -61,7 +64,9 @@ impl<Key, Value> MapType<Key, Value> {
       key,
       value,
       required,
-    }
+    
+        _lang: PhantomData,
+      }
   }
 
   /// Returns a reference to the span covering the entire map type.
@@ -149,6 +154,8 @@ impl<Key, Value> MapType<Key, Value> {
         key,
         value,
         required: bang.is_some(),
+      
+        _lang: PhantomData,
       })
   }
 }

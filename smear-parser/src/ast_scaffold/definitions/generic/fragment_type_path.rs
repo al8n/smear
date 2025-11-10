@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},

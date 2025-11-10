@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -105,24 +107,25 @@ use smear_lexer::punctuator::Colon;
 ///
 /// Spec: [InputValueDefinition](https://spec.graphql.org/draft/#InputValueDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct InputValueDefinition<Name, Type, DefaultValue, Directives> {
+pub struct InputValueDefinition<Name, Type, DefaultValue, Directives, Lang = ()> {
   span: Span,
   name: Name,
   ty: Type,
   default_value: Option<DefaultValue>,
   directives: Option<Directives>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Type, DefaultValue, Directives> AsSpan<Span>
-  for InputValueDefinition<Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives, Lang> AsSpan<Span>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 {
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Type, DefaultValue, Directives> IntoSpan<Span>
-  for InputValueDefinition<Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives, Lang> IntoSpan<Span>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -130,10 +133,10 @@ impl<Name, Type, DefaultValue, Directives> IntoSpan<Span>
   }
 }
 
-impl<Name, Type, DefaultValue, Directives> IntoComponents
-  for InputValueDefinition<Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives, Lang> IntoComponents
+  for InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 {
-  type Components = (Span, Name, Type, Option<DefaultValue>, Option<Directives>);
+  type Components = (Span, Name, Type, Option<DefaultValue>, Option<Directives>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -143,12 +146,13 @@ impl<Name, Type, DefaultValue, Directives> IntoComponents
       self.ty,
       self.default_value,
       self.directives,
+      self._lang,
     )
   }
 }
 
-impl<Name, Type, DefaultValue, Directives>
-  InputValueDefinition<Name, Type, DefaultValue, Directives>
+impl<Name, Type, DefaultValue, Directives, Lang>
+  InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 {
   /// Returns a reference to the span covering the entire input value definition.
   ///
@@ -235,12 +239,13 @@ impl<Name, Type, DefaultValue, Directives>
         ty,
         default_value,
         directives,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, Name, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for InputValueDefinition<Name, Type, DefaultValue, Directives>
+impl<'a, Name, Type, DefaultValue, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for InputValueDefinition<Name, Type, DefaultValue, Directives, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,

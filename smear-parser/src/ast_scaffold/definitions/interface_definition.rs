@@ -166,16 +166,17 @@ where
 ///
 /// Spec: [Interface Type Definition](https://spec.graphql.org/draft/#sec-Interface-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition> {
+pub struct InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   implements: Option<ImplementsInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -183,8 +184,8 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -192,8 +193,8 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
-  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> IntoComponents
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Components = (
     Span,
@@ -201,6 +202,7 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
     Option<ImplementsInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
@@ -211,12 +213,13 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
       self.implements,
       self.directives,
       self.fields_definition,
+      self._lang,
     )
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+  InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `InterfaceTypeDefinition` with the given components.
   #[inline]
@@ -233,6 +236,7 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
       implements,
       directives,
       fields_definition,
+      _lang: PhantomData,
     }
   }
 
@@ -359,9 +363,9 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 where
   Interface: Parseable<'a, I, T, Error>,
   Implements: Parseable<'a, I, T, Error>,
@@ -536,14 +540,15 @@ impl<ImplementsInterfaces, Directives, FieldsDefinition>
 ///   | extend interface Name ImplementsInterfaces
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition> {
+pub struct InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   data: InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -551,8 +556,8 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -560,23 +565,24 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> IntoComponents
-  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> IntoComponents
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Components = (
     Span,
     Name,
     InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
+    (self.span, self.name, self.data, self._lang)
   }
 }
 
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
-  InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
+  InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `InterfaceTypeExtension` with the given components.
   #[inline]
@@ -585,7 +591,7 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
     name: Name,
     data: InterfaceTypeExtensionData<ImplementsInterfaces, Directives, FieldsDefinition>,
   ) -> Self {
-    Self { span, name, data }
+    Self { span, name, data, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire interface extension.
@@ -732,9 +738,9 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 where
   Error:,
   Extend: Parseable<'a, I, T, Error>,
@@ -770,8 +776,8 @@ where
 ///
 /// This associates the interface type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for InterfaceTypeDefinition<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::InterfaceTypeDefinitionSyntax;
 }
@@ -780,8 +786,8 @@ impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AstNode<smear_lex
 ///
 /// This associates the interface type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, ImplementsInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for InterfaceTypeExtension<Name, ImplementsInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::InterfaceTypeExtensionSyntax;
 }

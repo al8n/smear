@@ -204,15 +204,16 @@ where
 ///
 /// Spec: [Union Type Definition](https://spec.graphql.org/draft/#sec-Union-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionTypeDefinition<Name, Directives, MemberTypes> {
+pub struct UnionTypeDefinition<Name, Directives, MemberTypes, Lang = ()> {
   span: Span,
   name: Name,
   directives: Option<Directives>,
   members: Option<MemberTypes>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, MemberTypes> AsSpan<Span>
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> AsSpan<Span>
+  for UnionTypeDefinition<Name, Directives, MemberTypes, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -220,8 +221,8 @@ impl<Name, Directives, MemberTypes> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, MemberTypes> IntoSpan<Span>
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> IntoSpan<Span>
+  for UnionTypeDefinition<Name, Directives, MemberTypes, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -229,18 +230,18 @@ impl<Name, Directives, MemberTypes> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, MemberTypes> IntoComponents
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> IntoComponents
+  for UnionTypeDefinition<Name, Directives, MemberTypes, Lang>
 {
-  type Components = (Span, Name, Option<Directives>, Option<MemberTypes>);
+  type Components = (Span, Name, Option<Directives>, Option<MemberTypes>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives, self.members)
+    (self.span, self.name, self.directives, self.members, self._lang)
   }
 }
 
-impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, MemberTypes> {
+impl<Name, Directives, MemberTypes, Lang> UnionTypeDefinition<Name, Directives, MemberTypes, Lang> {
   /// Creates a new `UnionTypeDefinition` with the given components.
   #[inline]
   pub const fn new(
@@ -254,6 +255,7 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
       name,
       directives,
       members,
+      _lang: PhantomData,
     }
   }
 
@@ -339,8 +341,8 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   }
 }
 
-impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
+impl<'a, Name, Directives, MemberTypes, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for UnionTypeDefinition<Name, Directives, MemberTypes, Lang>
 where
   Union: Parseable<'a, I, T, Error> + Clone,
   Equal: Parseable<'a, I, T, Error> + Clone,
@@ -446,14 +448,15 @@ impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
 ///
 /// Spec: [Union Type Extension](https://spec.graphql.org/draft/#sec-Union-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct UnionTypeExtension<Name, Directives, MemberTypes> {
+pub struct UnionTypeExtension<Name, Directives, MemberTypes, Lang = ()> {
   span: Span,
   name: Name,
   data: UnionTypeExtensionData<Directives, MemberTypes>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, MemberTypes> AsSpan<Span>
-  for UnionTypeExtension<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> AsSpan<Span>
+  for UnionTypeExtension<Name, Directives, MemberTypes, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -461,8 +464,8 @@ impl<Name, Directives, MemberTypes> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, MemberTypes> IntoSpan<Span>
-  for UnionTypeExtension<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> IntoSpan<Span>
+  for UnionTypeExtension<Name, Directives, MemberTypes, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -470,18 +473,18 @@ impl<Name, Directives, MemberTypes> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, MemberTypes> IntoComponents
-  for UnionTypeExtension<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> IntoComponents
+  for UnionTypeExtension<Name, Directives, MemberTypes, Lang>
 {
-  type Components = (Span, Name, UnionTypeExtensionData<Directives, MemberTypes>);
+  type Components = (Span, Name, UnionTypeExtensionData<Directives, MemberTypes>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
+    (self.span, self.name, self.data, self._lang)
   }
 }
 
-impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberTypes> {
+impl<Name, Directives, MemberTypes, Lang> UnionTypeExtension<Name, Directives, MemberTypes, Lang> {
   /// Creates a new `UnionTypeExtension` with the given components.
   #[inline]
   pub const fn new(
@@ -489,7 +492,7 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
     name: Name,
     data: UnionTypeExtensionData<Directives, MemberTypes>,
   ) -> Self {
-    Self { span, name, data }
+    Self { span, name, data, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire union extension.
@@ -594,8 +597,8 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   }
 }
 
-impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionTypeExtension<Name, Directives, MemberTypes>
+impl<'a, Name, Directives, MemberTypes, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for UnionTypeExtension<Name, Directives, MemberTypes, Lang>
 where
   Error:,
   Extend: Parseable<'a, I, T, Error> + Clone,
@@ -625,8 +628,8 @@ where
 ///
 /// This associates the union type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, MemberTypes> AstNode<smear_lexer::graphql::GraphQL>
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for UnionTypeDefinition<Name, Directives, MemberTypes, Lang>
 {
   type Syntax = crate::syntax::graphql::UnionTypeDefinitionSyntax;
 }
@@ -635,8 +638,8 @@ impl<Name, Directives, MemberTypes> AstNode<smear_lexer::graphql::GraphQL>
 ///
 /// This associates the union type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, MemberTypes> AstNode<smear_lexer::graphql::GraphQL>
-  for UnionTypeExtension<Name, Directives, MemberTypes>
+impl<Name, Directives, MemberTypes, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for UnionTypeExtension<Name, Directives, MemberTypes, Lang>
 {
   type Syntax = crate::syntax::graphql::UnionTypeExtensionSyntax;
 }

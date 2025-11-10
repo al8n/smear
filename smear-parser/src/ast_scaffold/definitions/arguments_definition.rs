@@ -74,14 +74,15 @@ use smear_lexer::punctuator::{LParen, RParen};
 ///
 /// Spec: [ArgumentsDefinition](https://spec.graphql.org/draft/#ArgumentsDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct ArgumentsDefinition<InputValueDefinition, Container = Vec<InputValueDefinition>> {
+pub struct ArgumentsDefinition<InputValueDefinition, Container = Vec<InputValueDefinition>, Lang = ()> {
   span: Span,
   values: Container,
   _input_value_definition: PhantomData<InputValueDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<InputValueDefinition, Container> AsSpan<Span>
-  for ArgumentsDefinition<InputValueDefinition, Container>
+impl<InputValueDefinition, Container, Lang> AsSpan<Span>
+  for ArgumentsDefinition<InputValueDefinition, Container, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -89,8 +90,8 @@ impl<InputValueDefinition, Container> AsSpan<Span>
   }
 }
 
-impl<InputValueDefinition, Container> IntoSpan<Span>
-  for ArgumentsDefinition<InputValueDefinition, Container>
+impl<InputValueDefinition, Container, Lang> IntoSpan<Span>
+  for ArgumentsDefinition<InputValueDefinition, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -98,18 +99,18 @@ impl<InputValueDefinition, Container> IntoSpan<Span>
   }
 }
 
-impl<InputValueDefinition, Container> IntoComponents
-  for ArgumentsDefinition<InputValueDefinition, Container>
+impl<InputValueDefinition, Container, Lang> IntoComponents
+  for ArgumentsDefinition<InputValueDefinition, Container, Lang>
 {
-  type Components = (Span, Container);
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.values)
+    (self.span, self.values, self._lang)
   }
 }
 
-impl<InputValueDefinition, Container> ArgumentsDefinition<InputValueDefinition, Container> {
+impl<InputValueDefinition, Container, Lang> ArgumentsDefinition<InputValueDefinition, Container, Lang> {
   /// Returns a reference to the span covering the entire arguments definition.
   ///
   /// The span includes the opening parenthesis, all input value definitions,
@@ -168,12 +169,13 @@ impl<InputValueDefinition, Container> ArgumentsDefinition<InputValueDefinition, 
         span: exa.span(),
         values,
         _input_value_definition: PhantomData,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, InputValueDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ArgumentsDefinition<InputValueDefinition, Container>
+impl<'a, InputValueDefinition, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ArgumentsDefinition<InputValueDefinition, Container, Lang>
 where
   InputValueDefinition: Parseable<'a, I, T, Error>,
   Container: chumsky::container::Container<InputValueDefinition>,

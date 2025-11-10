@@ -1,4 +1,6 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -78,6 +80,7 @@ pub struct NamedOperationDefinition<
   VariablesDefinition,
   Directives,
   SelectionSet,
+  Lang = (),
 > {
   span: Span,
   operation_type: OperationType,
@@ -85,10 +88,11 @@ pub struct NamedOperationDefinition<
   variable_definitions: Option<VariablesDefinition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsSpan<Span>
-  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang> AsSpan<Span>
+  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -96,8 +100,8 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> AsSpan<
   }
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoSpan<Span>
-  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang> IntoSpan<Span>
+  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -105,8 +109,8 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoSpa
   }
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoComponents
-  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang> IntoComponents
+  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 {
   type Components = (
     Span,
@@ -115,6 +119,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoCom
     Option<VariablesDefinition>,
     Option<Directives>,
     SelectionSet,
+    PhantomData<Lang>,
   );
 
   #[inline]
@@ -126,12 +131,13 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoCom
       self.variable_definitions,
       self.directives,
       self.selection_set,
+      self._lang,
     )
   }
 }
 
-impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
-  NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
+  NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 {
   /// Creates a new `NamedOperationDefinition` from its components.
   ///
@@ -158,6 +164,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
       variable_definitions,
       directives,
       selection_set,
+      _lang: PhantomData,
     }
   }
 
@@ -261,7 +268,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
         selection_set_parser,
       ))
       .map_with(
-        |(operation_type, (name, variable_definitions, directives, selection_set)), exa| {
+        |(operation_type, (name, variable_definitions, directives, selection_set, _lang)), exa| {
           Self::new(
             exa.span(),
             operation_type,
@@ -299,6 +306,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
       Option<VariablesDefinition>,
       Option<Directives>,
       SelectionSet,
+    PhantomData<Lang>,
     ),
     E,
   > + Clone
@@ -319,15 +327,15 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
       .then(selection_set_parser)
       .map(
         |(((name, variable_definitions), directives), selection_set)| {
-          (name, variable_definitions, directives, selection_set)
+          (name, variable_definitions, directives, selection_set, PhantomData)
         },
       )
   }
 }
 
-impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, T, Error>
+impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
+  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   OperationType: Parseable<'a, I, T, Error>,

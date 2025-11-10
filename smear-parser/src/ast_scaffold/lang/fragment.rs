@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -36,12 +38,13 @@ use smear_lexer::{keywords::On, punctuator::Spread};
 ///
 /// Spec: [Fragment Name](https://spec.graphql.org/draft/#FragmentName)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentName<S> {
+pub struct FragmentName<S, Lang = ()> {
   span: Span,
   value: S,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S> PartialEq<S> for FragmentName<S>
+impl<S, Lang> PartialEq<S> for FragmentName<S, Lang>
 where
   S: PartialEq,
 {
@@ -51,21 +54,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for FragmentName<S> {
+impl<S, Lang> AsSpan<Span> for FragmentName<S, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for FragmentName<S> {
+impl<S, Lang> IntoSpan<Span> for FragmentName<S, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for FragmentName<S> {
+impl<S, Lang> IntoComponents for FragmentName<S, Lang> {
   type Components = (Span, S);
 
   #[inline]
@@ -74,11 +77,15 @@ impl<S> IntoComponents for FragmentName<S> {
   }
 }
 
-impl<S> FragmentName<S> {
+impl<S, Lang> FragmentName<S, Lang> {
   /// Creates a new fragment name with the given span and source value.
   #[inline]
   pub const fn new(span: Span, value: S) -> Self {
-    Self { span, value }
+    Self {
+      span,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the fragment name.
@@ -103,7 +110,7 @@ impl<S> FragmentName<S> {
   }
 }
 
-impl<S> core::fmt::Display for FragmentName<S>
+impl<S, Lang> core::fmt::Display for FragmentName<S, Lang>
 where
   S: DisplayHuman,
 {
@@ -122,7 +129,7 @@ impl<S> core::ops::Deref for FragmentName<S> {
   }
 }
 
-impl<S> DisplayCompact for FragmentName<S>
+impl<S, Lang> DisplayCompact for FragmentName<S, Lang>
 where
   S: DisplayHuman,
 {
@@ -134,7 +141,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for FragmentName<S>
+impl<S, Lang> DisplayPretty for FragmentName<S, Lang>
 where
   S: DisplayHuman,
 {
@@ -168,16 +175,21 @@ where
 ///
 /// Spec: [Type Conditions](https://spec.graphql.org/draft/#sec-Type-Conditions)
 #[derive(Debug, Clone, Copy)]
-pub struct TypeCondition<Name> {
+pub struct TypeCondition<Name, Lang = ()> {
   span: Span,
   name: Name,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name> TypeCondition<Name> {
+impl<Name, Lang> TypeCondition<Name, Lang> {
   /// Creates a new type condition with the given span and type name.
   #[inline]
   pub const fn new(span: Span, name: Name) -> Self {
-    Self { span, name }
+    Self {
+      span,
+      name,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire type condition.
@@ -216,21 +228,21 @@ impl<Name> TypeCondition<Name> {
   }
 }
 
-impl<Name> AsSpan<Span> for TypeCondition<Name> {
+impl<Name, Lang> AsSpan<Span> for TypeCondition<Name, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name> IntoSpan<Span> for TypeCondition<Name> {
+impl<Name, Lang> IntoSpan<Span> for TypeCondition<Name, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name> IntoComponents for TypeCondition<Name> {
+impl<Name, Lang> IntoComponents for TypeCondition<Name, Lang> {
   type Components = (Span, Name);
 
   #[inline]
@@ -257,7 +269,7 @@ where
   }
 }
 
-impl<Name> core::fmt::Display for TypeCondition<Name>
+impl<Name, Lang> core::fmt::Display for TypeCondition<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -267,7 +279,7 @@ where
   }
 }
 
-impl<Name> DisplayCompact for TypeCondition<Name>
+impl<Name, Lang> DisplayCompact for TypeCondition<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -279,7 +291,7 @@ where
   }
 }
 
-impl<Name> DisplayPretty for TypeCondition<Name>
+impl<Name, Lang> DisplayPretty for TypeCondition<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -291,7 +303,7 @@ where
   }
 }
 
-impl<Name> DisplayHuman for TypeCondition<Name>
+impl<Name, Lang> DisplayHuman for TypeCondition<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -336,27 +348,28 @@ where
 ///
 /// Spec: [Fragment Spreads](https://spec.graphql.org/draft/#sec-Language.Fragments.Fragment-Spreads)
 #[derive(Debug, Clone, Copy)]
-pub struct FragmentSpread<FragmentName, Directives> {
+pub struct FragmentSpread<FragmentName, Directives, Lang = ()> {
   span: Span,
   name: FragmentName,
   directives: Option<Directives>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<FragmentName, Directives> AsSpan<Span> for FragmentSpread<FragmentName, Directives> {
+impl<FragmentName, Directives, Lang> AsSpan<Span> for FragmentSpread<FragmentName, Directives, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<FragmentName, Directives> IntoSpan<Span> for FragmentSpread<FragmentName, Directives> {
+impl<FragmentName, Directives, Lang> IntoSpan<Span> for FragmentSpread<FragmentName, Directives, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, Directives> {
+impl<FragmentName, Directives, Lang> IntoComponents for FragmentSpread<FragmentName, Directives, Lang> {
   type Components = (Span, FragmentName, Option<Directives>);
 
   #[inline]
@@ -365,7 +378,7 @@ impl<FragmentName, Directives> IntoComponents for FragmentSpread<FragmentName, D
   }
 }
 
-impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
+impl<FragmentName, Directives, Lang> FragmentSpread<FragmentName, Directives, Lang> {
   /// Creates a new fragment spread with the given span, fragment name, and optional directives.
   #[inline]
   pub const fn new(span: Span, name: FragmentName, directives: Option<Directives>) -> Self {
@@ -373,6 +386,8 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
       span,
       name,
       directives,
+    
+      _lang: PhantomData,
     }
   }
 
@@ -504,15 +519,15 @@ where
 ///
 /// Spec: [Inline Fragments](https://spec.graphql.org/draft/#sec-Inline-Fragments)
 #[derive(Debug, Clone, Copy)]
-pub struct InlineFragment<TypeCondition, Directives, SelectionSet> {
+pub struct InlineFragment<TypeCondition, Directives, SelectionSet, Lang = ()> {
   span: Span,
   type_condition: Option<TypeCondition>,
   directives: Option<Directives>,
   selection_set: SelectionSet,
+  _lang: PhantomData<Lang>,
 }
 
-impl<TypeCondition, Directives, SelectionSet> AsSpan<Span>
-  for InlineFragment<TypeCondition, Directives, SelectionSet>
+impl<TypeCondition, Directives, SelectionSet, Lang> AsSpan<Span> for InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -520,8 +535,7 @@ impl<TypeCondition, Directives, SelectionSet> AsSpan<Span>
   }
 }
 
-impl<TypeCondition, Directives, SelectionSet> IntoSpan<Span>
-  for InlineFragment<TypeCondition, Directives, SelectionSet>
+impl<TypeCondition, Directives, SelectionSet, Lang> IntoSpan<Span> for InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -529,8 +543,7 @@ impl<TypeCondition, Directives, SelectionSet> IntoSpan<Span>
   }
 }
 
-impl<TypeCondition, Directives, SelectionSet> IntoComponents
-  for InlineFragment<TypeCondition, Directives, SelectionSet>
+impl<TypeCondition, Directives, SelectionSet, Lang> IntoComponents for InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 {
   type Components = (
     Span,
@@ -550,8 +563,7 @@ impl<TypeCondition, Directives, SelectionSet> IntoComponents
   }
 }
 
-impl<TypeCondition, Directives, SelectionSet>
-  InlineFragment<TypeCondition, Directives, SelectionSet>
+impl<TypeCondition, Directives, SelectionSet, Lang> InlineFragment<TypeCondition, Directives, SelectionSet, Lang>
 {
   /// Creates a new inline fragment with the given span, type condition, directives, and selection set.
   #[inline]
@@ -566,6 +578,8 @@ impl<TypeCondition, Directives, SelectionSet>
       type_condition,
       directives,
       selection_set,
+    
+      _lang: PhantomData,
     }
   }
 

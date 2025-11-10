@@ -47,15 +47,15 @@ impl<S, Ty> IntoComponents for NamedOperationDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, op_type, name, var_defs, directives, selection_set) = self.0.into_components();
+    let (span, op_type, name, var_defs, directives, selection_set, _lang) = self.0.into_components();
     let (name, generics) = match name {
       Some(def_name) => {
-        let (_, name, generics) = def_name.into_components();
+        let (_, name, generics, _) = def_name.into_components();
         (Some(name), generics)
       }
       None => (None, None),
     };
-    let (_, where_clause, selection_set) = selection_set.into_components();
+    let (_, where_clause, selection_set, _) = selection_set.into_components();
     (
       span,
       name,
@@ -167,7 +167,7 @@ impl<S, Ty> IntoComponents for RootOperationTypeDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, operation_type, name) = self.0.into_components();
+    let (span, operation_type, name, _lang) = self.0.into_components();
     let (_, path, generics) = name.into_components();
     (span, operation_type, path, generics)
   }

@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -101,14 +103,15 @@ use smear_lexer::keywords::{Extend, Schema};
 ///
 /// Spec: [Schema Definition](https://spec.graphql.org/draft/#sec-Schema)
 #[derive(Debug, Clone, Copy)]
-pub struct SchemaDefinition<Directives, RootOperationTypesDefinition> {
+pub struct SchemaDefinition<Directives, RootOperationTypesDefinition, Lang = ()> {
   span: Span,
   directives: Option<Directives>,
   operation_type_definitions: RootOperationTypesDefinition,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> AsSpan<Span>
+  for SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -116,8 +119,8 @@ impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
   }
 }
 
-impl<Directives, RootOperationTypesDefinition> IntoSpan<Span>
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> IntoSpan<Span>
+  for SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -125,19 +128,19 @@ impl<Directives, RootOperationTypesDefinition> IntoSpan<Span>
   }
 }
 
-impl<Directives, RootOperationTypesDefinition> IntoComponents
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> IntoComponents
+  for SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 {
-  type Components = (Span, Option<Directives>, RootOperationTypesDefinition);
+  type Components = (Span, Option<Directives>, RootOperationTypesDefinition, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.directives, self.operation_type_definitions)
+    (self.span, self.directives, self.operation_type_definitions, self._lang)
   }
 }
 
-impl<Directives, RootOperationTypesDefinition>
-  SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang>
+  SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 {
   /// Creates a new `SchemaDefinition` with the given components.
   #[inline]
@@ -150,6 +153,7 @@ impl<Directives, RootOperationTypesDefinition>
       span,
       directives,
       operation_type_definitions,
+      _lang: PhantomData,
     }
   }
 
@@ -226,8 +230,8 @@ impl<Directives, RootOperationTypesDefinition>
   }
 }
 
-impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<'a, Directives, RootOperationTypesDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 where
   Directives: Parseable<'a, I, T, Error>,
   RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
@@ -543,13 +547,14 @@ impl<Directives, RootOperationTypesDefinition>
 ///
 /// Spec: [Schema Extension](https://spec.graphql.org/draft/#sec-Schema-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct SchemaExtension<Directives, RootOperationTypesDefinition> {
+pub struct SchemaExtension<Directives, RootOperationTypesDefinition, Lang = ()> {
   span: Span,
   content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> AsSpan<Span>
+  for SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -557,8 +562,8 @@ impl<Directives, RootOperationTypesDefinition> AsSpan<Span>
   }
 }
 
-impl<Directives, RootOperationTypesDefinition> IntoSpan<Span>
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> IntoSpan<Span>
+  for SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -566,22 +571,23 @@ impl<Directives, RootOperationTypesDefinition> IntoSpan<Span>
   }
 }
 
-impl<Directives, RootOperationTypesDefinition> IntoComponents
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> IntoComponents
+  for SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 {
   type Components = (
     Span,
     SchemaExtensionData<Directives, RootOperationTypesDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.content)
+    (self.span, self.content, self._lang)
   }
 }
 
-impl<Directives, RootOperationTypesDefinition>
-  SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang>
+  SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 {
   /// Creates a new `SchemaExtension` with the given components.
   #[inline]
@@ -589,7 +595,7 @@ impl<Directives, RootOperationTypesDefinition>
     span: Span,
     content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
   ) -> Self {
-    Self { span, content }
+    Self { span, content, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire schema extension.
@@ -680,8 +686,8 @@ impl<Directives, RootOperationTypesDefinition>
   }
 }
 
-impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<'a, Directives, RootOperationTypesDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 where
   Directives: Parseable<'a, I, T, Error>,
   RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
@@ -709,8 +715,8 @@ where
 ///
 /// This associates the schema definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Directives, RootOperationTypesDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for SchemaDefinition<Directives, RootOperationTypesDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::SchemaDefinitionSyntax;
 }
@@ -719,8 +725,8 @@ impl<Directives, RootOperationTypesDefinition> AstNode<smear_lexer::graphql::Gra
 ///
 /// This associates the schema extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Directives, RootOperationTypesDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
+impl<Directives, RootOperationTypesDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for SchemaExtension<Directives, RootOperationTypesDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::SchemaExtensionSyntax;
 }

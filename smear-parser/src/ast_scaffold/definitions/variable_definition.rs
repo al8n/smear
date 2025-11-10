@@ -154,16 +154,17 @@ use std::vec::Vec;
 ///
 /// Spec: [Variable Definition](https://spec.graphql.org/draft/#sec-Variable-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct VariableDefinition<Variable, Type, DefaultValue, Directives> {
+pub struct VariableDefinition<Variable, Type, DefaultValue, Directives, Lang = ()> {
   span: Span,
   variable: Variable,
   ty: Type,
   directives: Option<Directives>,
   default_value: Option<DefaultValue>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Variable, Type, DefaultValue, Directives> AsSpan<Span>
-  for VariableDefinition<Variable, Type, DefaultValue, Directives>
+impl<Variable, Type, DefaultValue, Directives, Lang> AsSpan<Span>
+  for VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -171,8 +172,8 @@ impl<Variable, Type, DefaultValue, Directives> AsSpan<Span>
   }
 }
 
-impl<Variable, Type, DefaultValue, Directives> IntoSpan<Span>
-  for VariableDefinition<Variable, Type, DefaultValue, Directives>
+impl<Variable, Type, DefaultValue, Directives, Lang> IntoSpan<Span>
+  for VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -180,8 +181,8 @@ impl<Variable, Type, DefaultValue, Directives> IntoSpan<Span>
   }
 }
 
-impl<Variable, Type, DefaultValue, Directives> IntoComponents
-  for VariableDefinition<Variable, Type, DefaultValue, Directives>
+impl<Variable, Type, DefaultValue, Directives, Lang> IntoComponents
+  for VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 {
   type Components = (
     Span,
@@ -189,6 +190,7 @@ impl<Variable, Type, DefaultValue, Directives> IntoComponents
     Type,
     Option<Directives>,
     Option<DefaultValue>,
+    PhantomData<Lang>,
   );
 
   #[inline]
@@ -199,12 +201,13 @@ impl<Variable, Type, DefaultValue, Directives> IntoComponents
       self.ty,
       self.directives,
       self.default_value,
+      self._lang,
     )
   }
 }
 
-impl<Variable, Type, DefaultValue, Directives>
-  VariableDefinition<Variable, Type, DefaultValue, Directives>
+impl<Variable, Type, DefaultValue, Directives, Lang>
+  VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 {
   /// Returns a reference to the span covering the entire variable definition.
   ///
@@ -258,8 +261,8 @@ impl<Variable, Type, DefaultValue, Directives>
   }
 }
 
-impl<'a, Variable, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for VariableDefinition<Variable, Type, DefaultValue, Directives>
+impl<'a, Variable, Type, DefaultValue, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for VariableDefinition<Variable, Type, DefaultValue, Directives, Lang>
 where
   Variable: Parseable<'a, I, T, Error>,
   Type: Parseable<'a, I, T, Error>,
@@ -287,6 +290,7 @@ where
         ty,
         directives,
         default_value,
+        _lang: PhantomData,
       })
   }
 }
@@ -378,14 +382,15 @@ where
 /// Note: Zero or more variable definitions are allowed (the `*` indicates zero-or-more).
 /// Empty variables definitions `()` are valid and represent operations with no parameters.
 #[derive(Debug, Clone, Copy)]
-pub struct VariablesDefinition<VariableDefinition, Container = Vec<VariableDefinition>> {
+pub struct VariablesDefinition<VariableDefinition, Container = Vec<VariableDefinition>, Lang = ()> {
   span: Span,
   variables: Container,
   _v: PhantomData<VariableDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<VariableDefinition, Container> AsSpan<Span>
-  for VariablesDefinition<VariableDefinition, Container>
+impl<VariableDefinition, Container, Lang> AsSpan<Span>
+  for VariablesDefinition<VariableDefinition, Container, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -393,8 +398,8 @@ impl<VariableDefinition, Container> AsSpan<Span>
   }
 }
 
-impl<VariableDefinition, Container> IntoSpan<Span>
-  for VariablesDefinition<VariableDefinition, Container>
+impl<VariableDefinition, Container, Lang> IntoSpan<Span>
+  for VariablesDefinition<VariableDefinition, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -402,18 +407,18 @@ impl<VariableDefinition, Container> IntoSpan<Span>
   }
 }
 
-impl<VariableDefinition, Container> IntoComponents
-  for VariablesDefinition<VariableDefinition, Container>
+impl<VariableDefinition, Container, Lang> IntoComponents
+  for VariablesDefinition<VariableDefinition, Container, Lang>
 {
-  type Components = (Span, Container);
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.variables)
+    (self.span, self.variables, self._lang)
   }
 }
 
-impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Container> {
+impl<VariableDefinition, Container, Lang> VariablesDefinition<VariableDefinition, Container, Lang> {
   /// Returns a reference to the span covering the entire variables definition.
   ///
   /// The span includes the opening parenthesis, all variable definitions,
@@ -463,12 +468,13 @@ impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Cont
         span: exa.span(),
         variables,
         _v: PhantomData,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, VariableDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for VariablesDefinition<VariableDefinition, Container>
+impl<'a, VariableDefinition, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for VariablesDefinition<VariableDefinition, Container, Lang>
 where
   Container: chumsky::container::Container<VariableDefinition>,
   VariableDefinition: Parseable<'a, I, T, Error>,

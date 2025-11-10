@@ -209,8 +209,8 @@ impl<S, Ty> IntoComponents for DirectiveDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name, arguments, repeatable, locations_and_where) = self.0.into_components();
-    let (_, locations, where_clause) = locations_and_where.into_components();
+    let (span, name, arguments, repeatable, locations_and_where, _lang) = self.0.into_components();
+    let (_, locations, where_clause, _) = locations_and_where.into_components();
     (span, name, arguments, repeatable, locations, where_clause)
   }
 }

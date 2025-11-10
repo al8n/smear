@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -37,26 +39,27 @@ mod standard;
 ///
 /// Spec: [Field Alias](https://spec.graphql.org/draft/#sec-Field-Alias)
 #[derive(Debug, Clone, Copy)]
-pub struct Alias<Name> {
+pub struct Alias<Name, Lang = ()> {
   span: Span,
   name: Name,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name> AsSpan<Span> for Alias<Name> {
+impl<Name, Lang> AsSpan<Span> for Alias<Name, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name> IntoSpan<Span> for Alias<Name> {
+impl<Name, Lang> IntoSpan<Span> for Alias<Name, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name> IntoComponents for Alias<Name> {
+impl<Name, Lang> IntoComponents for Alias<Name, Lang> {
   type Components = (Span, Name);
 
   #[inline]
@@ -65,7 +68,7 @@ impl<Name> IntoComponents for Alias<Name> {
   }
 }
 
-impl<Name> Alias<Name> {
+impl<Name, Lang> Alias<Name, Lang> {
   /// Returns a reference to the span covering the entire alias.
   ///
   /// The span includes both the alias name and the colon separator.
@@ -101,11 +104,13 @@ impl<Name> Alias<Name> {
       .map_with(|name, exa| Self {
         span: exa.span(),
         name,
-      })
+      
+      _lang: PhantomData,
+    })
   }
 }
 
-impl<Name> core::fmt::Display for Alias<Name>
+impl<Name, Lang> core::fmt::Display for Alias<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -124,7 +129,7 @@ impl<Name> core::ops::Deref for Alias<Name> {
   }
 }
 
-impl<Name> DisplayHuman for Alias<Name>
+impl<Name, Lang> DisplayHuman for Alias<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -134,7 +139,7 @@ where
   }
 }
 
-impl<Name> DisplayCompact for Alias<Name>
+impl<Name, Lang> DisplayCompact for Alias<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -146,7 +151,7 @@ where
   }
 }
 
-impl<Name> DisplayPretty for Alias<Name>
+impl<Name, Lang> DisplayPretty for Alias<Name, Lang>
 where
   Name: DisplayHuman,
 {
@@ -158,7 +163,7 @@ where
   }
 }
 
-impl<Name> DisplaySyntaxTree for Alias<Name>
+impl<Name, Lang> DisplaySyntaxTree for Alias<Name, Lang>
 where
   Name: DisplaySyntaxTree,
 {
@@ -246,17 +251,17 @@ where
 ///
 /// Spec: [Fields](https://spec.graphql.org/draft/#sec-Language.Fields)
 #[derive(Debug, Clone)]
-pub struct Field<Alias, Name, Arguments, Directives, SelectionSet> {
+pub struct Field<Alias, Name, Arguments, Directives, SelectionSet, Lang = ()> {
   span: Span,
   alias: Option<Alias>,
   name: Name,
   arguments: Option<Arguments>,
   directives: Option<Directives>,
   selection_set: Option<SelectionSet>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet> AsSpan<Span>
-  for Field<Alias, Name, Arguments, Directives, SelectionSet>
+impl<Alias, Name, Arguments, Directives, SelectionSet, Lang> AsSpan<Span> for Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -264,8 +269,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> AsSpan<Span>
   }
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet> IntoSpan<Span>
-  for Field<Alias, Name, Arguments, Directives, SelectionSet>
+impl<Alias, Name, Arguments, Directives, SelectionSet, Lang> IntoSpan<Span> for Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -273,8 +277,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> IntoSpan<Span>
   }
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet> IntoComponents
-  for Field<Alias, Name, Arguments, Directives, SelectionSet>
+impl<Alias, Name, Arguments, Directives, SelectionSet, Lang> IntoComponents for Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 {
   type Components = (
     Span,
@@ -298,8 +301,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> IntoComponents
   }
 }
 
-impl<Alias, Name, Arguments, Directives, SelectionSet>
-  Field<Alias, Name, Arguments, Directives, SelectionSet>
+impl<Alias, Name, Arguments, Directives, SelectionSet, Lang> Field<Alias, Name, Arguments, Directives, SelectionSet, Lang>
 {
   /// Returns a reference to the span covering the entire field.
   ///
@@ -394,7 +396,9 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
           arguments,
           directives,
           selection_set,
-        },
+        
+      _lang: PhantomData,
+    },
       )
   }
 }

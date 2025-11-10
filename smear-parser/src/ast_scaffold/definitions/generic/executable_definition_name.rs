@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
@@ -22,27 +24,28 @@ use std::vec::Vec;
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ExecutableDefinitionName<Ident, Container = Vec<Ident>> {
+pub struct ExecutableDefinitionName<Ident, Container = Vec<Ident>, Lang = ()> {
   span: Span,
   ident: Ident,
   generics: Option<ExecutableDefinitionTypeGenerics<Ident, Container>>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Container> AsSpan<Span> for ExecutableDefinitionName<Ident, Container> {
+impl<Ident, Container, Lang> AsSpan<Span> for ExecutableDefinitionName<Ident, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Container> IntoSpan<Span> for ExecutableDefinitionName<Ident, Container> {
+impl<Ident, Container, Lang> IntoSpan<Span> for ExecutableDefinitionName<Ident, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Container> IntoComponents for ExecutableDefinitionName<Ident, Container> {
+impl<Ident, Container, Lang> IntoComponents for ExecutableDefinitionName<Ident, Container, Lang> {
   type Components = (
     Span,
     Ident,
@@ -55,7 +58,7 @@ impl<Ident, Container> IntoComponents for ExecutableDefinitionName<Ident, Contai
   }
 }
 
-impl<Ident, Container> ExecutableDefinitionName<Ident, Container> {
+impl<Ident, Container, Lang> ExecutableDefinitionName<Ident, Container, Lang> {
   /// Creates a new `ExecutableDefinitionName` with the given identifier and optional generics.
   #[inline]
   const fn new(
@@ -67,6 +70,7 @@ impl<Ident, Container> ExecutableDefinitionName<Ident, Container> {
       span,
       ident,
       generics,
+      _lang: PhantomData,
     }
   }
 
@@ -110,8 +114,8 @@ impl<Ident, Container> ExecutableDefinitionName<Ident, Container> {
   }
 }
 
-impl<'a, Ident, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinitionName<Ident, Container>
+impl<'a, Ident, Container, I, T, Error, Lang> Parseable<'a, I, T, Error>
+  for ExecutableDefinitionName<Ident, Container, Lang>
 where
   Ident: Parseable<'a, I, T, Error> + 'a,
   LAngle: Parseable<'a, I, T, Error> + 'a,

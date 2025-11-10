@@ -24,27 +24,28 @@ use std::vec::Vec;
 ///
 /// Spec: [Argument](https://spec.graphql.org/draft/#Argument)
 #[derive(Debug, Clone, Copy)]
-pub struct Argument<Name, Value> {
+pub struct Argument<Name, Value, Lang = ()> {
   span: Span,
   name: Name,
   value: Value,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Value> AsSpan<Span> for Argument<Name, Value> {
+impl<Name, Value, Lang> AsSpan<Span> for Argument<Name, Value, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Value> IntoSpan<Span> for Argument<Name, Value> {
+impl<Name, Value, Lang> IntoSpan<Span> for Argument<Name, Value, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Value> IntoComponents for Argument<Name, Value> {
+impl<Name, Value, Lang> IntoComponents for Argument<Name, Value, Lang> {
   type Components = (Span, Name, Value);
 
   #[inline]
@@ -53,7 +54,7 @@ impl<Name, Value> IntoComponents for Argument<Name, Value> {
   }
 }
 
-impl<Name, Value> Argument<Name, Value> {
+impl<Name, Value, Lang> Argument<Name, Value, Lang> {
   /// Returns the source span of the entire argument.
   ///
   /// This span covers from the first character of the argument name through
@@ -109,7 +110,12 @@ impl<Name, Value> Argument<Name, Value> {
       .then(value_parser)
       .map_with(|(name, value), exa| {
         let span = exa.span();
-        Self { span, name, value }
+        Self {
+          span,
+          name,
+          value,
+          _lang: PhantomData,
+        }
       })
   }
 }

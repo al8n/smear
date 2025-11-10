@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -49,27 +51,28 @@ use smear_lexer::punctuator::Bang;
 /// NamedType : Name !?
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct NamedType<Name> {
+pub struct NamedType<Name, Lang = ()> {
   span: Span,
   name: Name,
   required: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name> AsSpan<Span> for NamedType<Name> {
+impl<Name, Lang> AsSpan<Span> for NamedType<Name, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name> IntoSpan<Span> for NamedType<Name> {
+impl<Name, Lang> IntoSpan<Span> for NamedType<Name, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name> IntoComponents for NamedType<Name> {
+impl<Name, Lang> IntoComponents for NamedType<Name, Lang> {
   type Components = (Span, Name, bool);
 
   #[inline]
@@ -78,7 +81,7 @@ impl<Name> IntoComponents for NamedType<Name> {
   }
 }
 
-impl<Name> NamedType<Name> {
+impl<Name, Lang> NamedType<Name, Lang> {
   /// Returns a reference to the span covering the entire named type.
   ///
   /// The span includes the type name and optional bang modifier,
@@ -137,6 +140,8 @@ impl<Name> NamedType<Name> {
         span: exa.span(),
         name,
         required: bang.is_some(),
+      
+        _lang: PhantomData,
       })
   }
 }
@@ -166,6 +171,6 @@ where
 ///
 /// This associates the named type AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name> AstNode<smear_lexer::graphql::GraphQL> for NamedType<Name> {
+impl<Name, Lang> AstNode<smear_lexer::graphql::GraphQL> for NamedType<Name, Lang> {
   type Syntax = crate::syntax::graphql::NamedTypeSyntax;
 }

@@ -127,10 +127,10 @@ impl<S, Ty> IntoComponents for FragmentDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name_and_generics, type_condition, directives, constrained_selection_set) =
+    let (span, name_and_generics, type_condition, directives, constrained_selection_set, _lang) =
       self.0.into_components();
-    let (_, generics, name) = name_and_generics.into_components();
-    let (_, where_clause, selection_set) = constrained_selection_set.into_components();
+    let (_, generics, name, _) = name_and_generics.into_components();
+    let (_, where_clause, selection_set, _) = constrained_selection_set.into_components();
     (
       span,
       generics,

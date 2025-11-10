@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -6,13 +8,14 @@ use logosky::{
 
 /// A node with an optional description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Described<T, Description> {
+pub struct Described<T, Description, Lang = ()> {
   span: Span,
   description: Option<Description>,
   node: T,
+  _lang: PhantomData<Lang>,
 }
 
-impl<T, Description> core::ops::Deref for Described<T, Description> {
+impl<T, Description, Lang> core::ops::Deref for Described<T, Description, Lang> {
   type Target = T;
 
   #[inline]
@@ -21,43 +24,44 @@ impl<T, Description> core::ops::Deref for Described<T, Description> {
   }
 }
 
-impl<T, Description> core::ops::DerefMut for Described<T, Description> {
+impl<T, Description, Lang> core::ops::DerefMut for Described<T, Description, Lang> {
   #[inline]
   fn deref_mut(&mut self) -> &mut Self::Target {
     &mut self.node
   }
 }
 
-impl<T, Description> AsSpan<Span> for Described<T, Description> {
+impl<T, Description, Lang> AsSpan<Span> for Described<T, Description, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<T, Description> IntoSpan<Span> for Described<T, Description> {
+impl<T, Description, Lang> IntoSpan<Span> for Described<T, Description, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<T, Description> IntoComponents for Described<T, Description> {
-  type Components = (Span, Option<Description>, T);
+impl<T, Description, Lang> IntoComponents for Described<T, Description, Lang> {
+  type Components = (Span, Option<Description>, T, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.description, self.node)
+    (self.span, self.description, self.node, self._lang)
   }
 }
 
-impl<T, Description> Described<T, Description> {
+impl<T, Description, Lang> Described<T, Description, Lang> {
   /// Creates a new `Described` node with the given description and inner node.
   pub const fn new(span: Span, description: Option<Description>, node: T) -> Self {
     Self {
       span,
       description,
       node,
+      _lang: PhantomData,
     }
   }
 
@@ -80,7 +84,7 @@ impl<T, Description> Described<T, Description> {
   }
 }
 
-impl<'a, Description, Node, I, T, Error> Parseable<'a, I, T, Error> for Described<Node, Description>
+impl<'a, Description, Node, Lang, I, T, Error> Parseable<'a, I, T, Error> for Described<Node, Description, Lang>
 where
   Description: Parseable<'a, I, T, Error>,
   Node: Parseable<'a, I, T, Error>,
@@ -101,6 +105,7 @@ where
         span: exa.span(),
         description,
         node,
+        _lang: PhantomData,
       })
   }
 }

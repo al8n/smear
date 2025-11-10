@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
@@ -23,15 +25,17 @@ pub struct DefinitionTypePath<
   Type,
   PathSegmentContainer = Vec<Ident>,
   TypeContainer = Vec<Type>,
+  Lang = (),
 > {
   span: Span,
   path: Path<Ident, PathSegmentContainer>,
   generics: Option<TypeGenerics<Type, TypeContainer>>,
   required: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
-  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+impl<Ident, Type, PathSegmentContainer, TypeContainer, Lang> AsSpan<Span>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -39,8 +43,8 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> AsSpan<Span>
   }
 }
 
-impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
-  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+impl<Ident, Type, PathSegmentContainer, TypeContainer, Lang> IntoSpan<Span>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -48,24 +52,25 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoSpan<Span>
   }
 }
 
-impl<Ident, Type, PathSegmentContainer, TypeContainer> IntoComponents
-  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+impl<Ident, Type, PathSegmentContainer, TypeContainer, Lang> IntoComponents
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
 {
   type Components = (
     Span,
     bool,
     Path<Ident, PathSegmentContainer>,
     Option<TypeGenerics<Type, TypeContainer>>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.required, self.path, self.generics)
+    (self.span, self.required, self.path, self.generics, self._lang)
   }
 }
 
-impl<Ident, Type, PathSegmentContainer, TypeContainer>
-  DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+impl<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
+  DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
 {
   /// Creates a new path from the given segments.
   #[inline]
@@ -80,6 +85,7 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
       required,
       path,
       generics,
+      _lang: PhantomData,
     }
   }
 
@@ -136,8 +142,8 @@ impl<Ident, Type, PathSegmentContainer, TypeContainer>
   }
 }
 
-impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer>
+impl<'a, Ident, Type, PathSegmentContainer, TypeContainer, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for DefinitionTypePath<Ident, Type, PathSegmentContainer, TypeContainer, Lang>
 where
   PathSegmentContainer: ChumskyContainer<Ident>,
   TypeContainer: ChumskyContainer<Type>,

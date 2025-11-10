@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -59,27 +61,28 @@ use smear_lexer::punctuator::{Bang, LAngle, RAngle};
 /// SetType : < Type > !?
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct SetType<Type> {
+pub struct SetType<Type, Lang = ()> {
   span: Span,
   ty: Type,
   required: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Type> AsSpan<Span> for SetType<Type> {
+impl<Type, Lang> AsSpan<Span> for SetType<Type, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Type> IntoSpan<Span> for SetType<Type> {
+impl<Type, Lang> IntoSpan<Span> for SetType<Type, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Type> IntoComponents for SetType<Type> {
+impl<Type, Lang> IntoComponents for SetType<Type, Lang> {
   type Components = (Span, Type, bool);
 
   #[inline]
@@ -88,11 +91,16 @@ impl<Type> IntoComponents for SetType<Type> {
   }
 }
 
-impl<Type> SetType<Type> {
+impl<Type, Lang> SetType<Type, Lang> {
   /// Creates a new set type instance.
   #[inline]
   pub const fn new(span: Span, ty: Type, required: bool) -> Self {
-    Self { span, ty, required }
+    Self {
+      span,
+      ty,
+      required,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire set type.
@@ -160,6 +168,8 @@ impl<Type> SetType<Type> {
         span: exa.span(),
         ty,
         required: bang.is_some(),
+      
+        _lang: PhantomData,
       })
   }
 }

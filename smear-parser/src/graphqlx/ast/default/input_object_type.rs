@@ -68,8 +68,8 @@ impl<S, Ty> IntoComponents for InputObjectTypeDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name, directives, fields) = self.0.into_components();
-    let (_, name, generics) = name.into_components();
+    let (span, name, directives, fields, _) = self.0.into_components();
+    let (_, name, generics, _) = name.into_components();
     let (where_clause, fields) = match fields {
       Some(fields_def) => {
         let (_, where_clause, fields) = fields_def.into_components();
@@ -183,7 +183,7 @@ impl<S, Ty> IntoComponents for InputObjectTypeExtension<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name, data) = self.0.into_components();
+    let (span, name, data, _) = self.0.into_components();
     let (_, name, generics) = name.into_components();
     match data {
       scaffold::InputObjectTypeExtensionData::Directives(directive) => {

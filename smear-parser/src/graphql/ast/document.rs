@@ -1043,7 +1043,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
           SelectionSet::parser(),
         )) {
           Err(err) => Err(err),
-          Ok((name, variable_definitions, directives, selection_set)) => Ok(Self::Operation(
+          Ok((name, variable_definitions, directives, selection_set, _lang)) => Ok(Self::Operation(
             crate::scaffold::ast::OperationDefinition::Named(NamedOperationDefinition::new(
               inp.span_since(before),
               op_type,
@@ -1065,7 +1065,7 @@ impl<S, Ty> ExecutableDefinition<S, Ty> {
           SelectionSet::parser(),
         )) {
           Err(err) => Err(err),
-          Ok((name, type_condition, directives, selection_set)) => {
+          Ok((name, type_condition, directives, selection_set, _lang)) => {
             Ok(Self::Fragment(FragmentDefinition::new(
               inp.span_since(before),
               name,

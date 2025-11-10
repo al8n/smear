@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, extra::ParserExtra},
@@ -38,12 +40,13 @@ mod set;
 /// DefaultValue ::= '=' Value
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct DefaultInputValue<Value> {
+pub struct DefaultInputValue<Value, Lang = ()> {
   span: Span,
   value: Value,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Value> DefaultInputValue<Value> {
+impl<Value, Lang> DefaultInputValue<Value, Lang> {
   /// Returns the source span of the entire default value assignment.
   ///
   /// This span covers from the `=` token through the last character of the
@@ -86,25 +89,27 @@ impl<Value> DefaultInputValue<Value> {
       .map_with(|value, exa| Self {
         span: exa.span(),
         value,
-      })
+      
+      _lang: PhantomData,
+    })
   }
 }
 
-impl<Value> AsSpan<Span> for DefaultInputValue<Value> {
+impl<Value, Lang> AsSpan<Span> for DefaultInputValue<Value, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Value> IntoSpan<Span> for DefaultInputValue<Value> {
+impl<Value, Lang> IntoSpan<Span> for DefaultInputValue<Value, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Value> IntoComponents for DefaultInputValue<Value> {
+impl<Value, Lang> IntoComponents for DefaultInputValue<Value, Lang> {
   type Components = (Span, Value);
 
   #[inline]

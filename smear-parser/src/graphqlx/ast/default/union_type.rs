@@ -120,8 +120,8 @@ impl<S, Ty> IntoComponents for UnionTypeDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name, directives, types) = self.0.into_components();
-    let (_, name, generics) = name.into_components();
+    let (span, name, directives, types, _) = self.0.into_components();
+    let (_, name, generics, _) = name.into_components();
     let (where_clause, types) = match types {
       Some(types) => {
         let (where_clause, types) = types.into_components();
@@ -229,7 +229,7 @@ impl<S, Ty> IntoComponents for UnionTypeExtension<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, name, data) = self.0.into_components();
+    let (span, name, data, _) = self.0.into_components();
     let (_, path, generics) = name.into_components();
     match data {
       scaffold::UnionTypeExtensionData::Directives(directives) => {

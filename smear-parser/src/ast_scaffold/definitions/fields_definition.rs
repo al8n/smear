@@ -73,16 +73,17 @@ use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 ///
 /// Spec: [Field Definition](https://spec.graphql.org/draft/#sec-Field-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct FieldDefinition<Name, Arguments, Type, Directives> {
+pub struct FieldDefinition<Name, Arguments, Type, Directives, Lang = ()> {
   span: Span,
   name: Name,
   arguments_definition: Option<Arguments>,
   ty: Type,
   directives: Option<Directives>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Arguments, Type, Directives> AsSpan<Span>
-  for FieldDefinition<Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives, Lang> AsSpan<Span>
+  for FieldDefinition<Name, Arguments, Type, Directives, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -90,8 +91,8 @@ impl<Name, Arguments, Type, Directives> AsSpan<Span>
   }
 }
 
-impl<Name, Arguments, Type, Directives> IntoSpan<Span>
-  for FieldDefinition<Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives, Lang> IntoSpan<Span>
+  for FieldDefinition<Name, Arguments, Type, Directives, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -99,10 +100,10 @@ impl<Name, Arguments, Type, Directives> IntoSpan<Span>
   }
 }
 
-impl<Name, Arguments, Type, Directives> IntoComponents
-  for FieldDefinition<Name, Arguments, Type, Directives>
+impl<Name, Arguments, Type, Directives, Lang> IntoComponents
+  for FieldDefinition<Name, Arguments, Type, Directives, Lang>
 {
-  type Components = (Span, Name, Option<Arguments>, Type, Option<Directives>);
+  type Components = (Span, Name, Option<Arguments>, Type, Option<Directives>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -112,11 +113,12 @@ impl<Name, Arguments, Type, Directives> IntoComponents
       self.arguments_definition,
       self.ty,
       self.directives,
+      self._lang,
     )
   }
 }
 
-impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, Directives> {
+impl<Name, Arguments, Type, Directives, Lang> FieldDefinition<Name, Arguments, Type, Directives, Lang> {
   /// Returns a reference to the span covering the entire field definition.
   ///
   /// The span includes the optional description, field name, optional arguments,
@@ -199,13 +201,14 @@ impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, D
           arguments_definition,
           ty,
           directives,
+          _lang: PhantomData,
         },
       )
   }
 }
 
-impl<'a, Name, Arguments, Type, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for FieldDefinition<Name, Arguments, Type, Directives>
+impl<'a, Name, Arguments, Type, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for FieldDefinition<Name, Arguments, Type, Directives, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   Arguments: Parseable<'a, I, T, Error>,
@@ -295,36 +298,37 @@ where
 ///
 /// Spec: [Fields Definition](https://spec.graphql.org/draft/#sec-Fields-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct FieldsDefinition<FieldDefinition, Container = Vec<FieldDefinition>> {
+pub struct FieldsDefinition<FieldDefinition, Container = Vec<FieldDefinition>, Lang = ()> {
   span: Span,
   fields: Container,
   _m: PhantomData<FieldDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<FieldDefinition, Container> AsSpan<Span> for FieldsDefinition<FieldDefinition, Container> {
+impl<FieldDefinition, Container, Lang> AsSpan<Span> for FieldsDefinition<FieldDefinition, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<FieldDefinition, Container> IntoSpan<Span> for FieldsDefinition<FieldDefinition, Container> {
+impl<FieldDefinition, Container, Lang> IntoSpan<Span> for FieldsDefinition<FieldDefinition, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<FieldDefinition, Container> IntoComponents for FieldsDefinition<FieldDefinition, Container> {
-  type Components = (Span, Container);
+impl<FieldDefinition, Container, Lang> IntoComponents for FieldsDefinition<FieldDefinition, Container, Lang> {
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.fields)
+    (self.span, self.fields, self._lang)
   }
 }
 
-impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
+impl<FieldDefinition, Container, Lang> FieldsDefinition<FieldDefinition, Container, Lang> {
   /// Returns a reference to the span covering the entire fields definition.
   ///
   /// The span includes the opening brace, all field definitions, and the closing brace.
@@ -375,12 +379,13 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
         span: exa.span(),
         fields,
         _m: PhantomData,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, FieldDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for FieldsDefinition<FieldDefinition, Container>
+impl<'a, FieldDefinition, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for FieldsDefinition<FieldDefinition, Container, Lang>
 where
   FieldDefinition: Parseable<'a, I, T, Error>,
   LBrace: Parseable<'a, I, T, Error>,

@@ -43,27 +43,28 @@ use std::vec::Vec;
 /// - **Colon separator**: The `:` token with its position
 /// - **Field value**: The value assigned to this field
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectField<Name, InputValue> {
+pub struct ObjectField<Name, InputValue, Lang = ()> {
   span: Span,
   name: Name,
   value: InputValue,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, InputValue> AsSpan<Span> for ObjectField<Name, InputValue> {
+impl<Name, InputValue, Lang> AsSpan<Span> for ObjectField<Name, InputValue, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, InputValue> IntoSpan<Span> for ObjectField<Name, InputValue> {
+impl<Name, InputValue, Lang> IntoSpan<Span> for ObjectField<Name, InputValue, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, InputValue> IntoComponents for ObjectField<Name, InputValue> {
+impl<Name, InputValue, Lang> IntoComponents for ObjectField<Name, InputValue, Lang> {
   type Components = (Span, Name, InputValue);
 
   #[inline]
@@ -72,11 +73,16 @@ impl<Name, InputValue> IntoComponents for ObjectField<Name, InputValue> {
   }
 }
 
-impl<Name, InputValue> ObjectField<Name, InputValue> {
+impl<Name, InputValue, Lang> ObjectField<Name, InputValue, Lang> {
   /// Creates a new object field with the given span, name, and value.
   #[inline]
   pub const fn new(span: Span, name: Name, value: InputValue) -> Self {
-    Self { span, name, value }
+    Self {
+      span,
+      name,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the source span of the entire field.

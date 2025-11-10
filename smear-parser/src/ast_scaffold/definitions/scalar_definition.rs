@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -93,8 +95,9 @@ use smear_lexer::keywords::{Extend, Scalar};
 ///
 /// ## Type Parameters
 ///
+/// * `Name` - The type representing the scalar name identifier
 /// * `Directives` - The type representing directives applied to the scalar definition
-/// * `Span` - The type representing source location information
+/// * `Lang` - The language marker type (GraphQL, GraphQLx, etc.) for type-level language distinction
 ///
 /// ## Grammar
 ///
@@ -104,36 +107,37 @@ use smear_lexer::keywords::{Extend, Scalar};
 ///
 /// Spec: [Scalar Type Definition](https://spec.graphql.org/draft/#sec-Scalar-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarTypeDefinition<Name, Directives> {
+pub struct ScalarTypeDefinition<Name, Directives, Lang = ()> {
   span: Span,
   name: Name,
   directives: Option<Directives>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives> AsSpan<Span> for ScalarTypeDefinition<Name, Directives> {
+impl<Name, Directives, Lang> AsSpan<Span> for ScalarTypeDefinition<Name, Directives, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Directives> IntoSpan<Span> for ScalarTypeDefinition<Name, Directives> {
+impl<Name, Directives, Lang> IntoSpan<Span> for ScalarTypeDefinition<Name, Directives, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Directives> IntoComponents for ScalarTypeDefinition<Name, Directives> {
-  type Components = (Span, Name, Option<Directives>);
+impl<Name, Directives, Lang> IntoComponents for ScalarTypeDefinition<Name, Directives, Lang> {
+  type Components = (Span, Name, Option<Directives>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives)
+    (self.span, self.name, self.directives, self._lang)
   }
 }
 
-impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
+impl<Name, Directives, Lang> ScalarTypeDefinition<Name, Directives, Lang> {
   /// Creates a new `ScalarTypeDefinition` with the given components.
   #[inline]
   pub const fn new(span: Span, name: Name, directives: Option<Directives>) -> Self {
@@ -141,6 +145,7 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
       span,
       name,
       directives,
+      _lang: PhantomData,
     }
   }
 
@@ -211,8 +216,8 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
   }
 }
 
-impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for ScalarTypeDefinition<Name, Directives>
+impl<'a, Name, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ScalarTypeDefinition<Name, Directives, Lang>
 where
   Scalar: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
@@ -302,36 +307,37 @@ where
 ///
 /// Spec: [Scalar Type Extension](https://spec.graphql.org/draft/#sec-Scalar-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct ScalarTypeExtension<Name, Directives> {
+pub struct ScalarTypeExtension<Name, Directives, Lang = ()> {
   span: Span,
   name: Name,
   directives: Directives,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives> AsSpan<Span> for ScalarTypeExtension<Name, Directives> {
+impl<Name, Directives, Lang> AsSpan<Span> for ScalarTypeExtension<Name, Directives, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Directives> IntoSpan<Span> for ScalarTypeExtension<Name, Directives> {
+impl<Name, Directives, Lang> IntoSpan<Span> for ScalarTypeExtension<Name, Directives, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Directives> IntoComponents for ScalarTypeExtension<Name, Directives> {
-  type Components = (Span, Name, Directives);
+impl<Name, Directives, Lang> IntoComponents for ScalarTypeExtension<Name, Directives, Lang> {
+  type Components = (Span, Name, Directives, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives)
+    (self.span, self.name, self.directives, self._lang)
   }
 }
 
-impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
+impl<Name, Directives, Lang> ScalarTypeExtension<Name, Directives, Lang> {
   /// Creates a new `ScalarTypeExtension` with the given components.
   #[inline]
   pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
@@ -339,6 +345,7 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
       span,
       name,
       directives,
+      _lang: PhantomData,
     }
   }
 
@@ -413,8 +420,8 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   }
 }
 
-impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for ScalarTypeExtension<Name, Directives>
+impl<'a, Name, Directives, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ScalarTypeExtension<Name, Directives, Lang>
 where
   Extend: Parseable<'a, I, T, Error>,
   Scalar: Parseable<'a, I, T, Error>,
@@ -442,7 +449,7 @@ where
 ///
 /// This associates the scalar type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeDefinition<Name, Directives> {
+impl<Name, Directives, Lang> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeDefinition<Name, Directives, Lang> {
   type Syntax = crate::syntax::graphql::ScalarTypeDefinitionSyntax;
 }
 
@@ -450,6 +457,6 @@ impl<Name, Directives> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeDefi
 ///
 /// This associates the scalar type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeExtension<Name, Directives> {
+impl<Name, Directives, Lang> AstNode<smear_lexer::graphql::GraphQL> for ScalarTypeExtension<Name, Directives, Lang> {
   type Syntax = crate::syntax::graphql::ScalarTypeExtensionSyntax;
 }

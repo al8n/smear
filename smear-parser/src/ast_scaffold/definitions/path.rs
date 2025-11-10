@@ -12,28 +12,29 @@ use std::vec::Vec;
 
 /// A GraphQLx path, which is a sequence of identifiers separated by `::`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Path<Ident, Container = Vec<Ident>> {
+pub struct Path<Ident, Container = Vec<Ident>, Lang = ()> {
   span: Span,
   segments: Container,
   fqdp: bool, // fully qualified path
   _s: PhantomData<Ident>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Container> AsSpan<Span> for Path<Ident, Container> {
+impl<Ident, Container, Lang> AsSpan<Span> for Path<Ident, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Container> IntoSpan<Span> for Path<Ident, Container> {
+impl<Ident, Container, Lang> IntoSpan<Span> for Path<Ident, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Container> IntoComponents for Path<Ident, Container> {
+impl<Ident, Container, Lang> IntoComponents for Path<Ident, Container, Lang> {
   type Components = (Span, bool, Container);
 
   #[inline]
@@ -42,7 +43,7 @@ impl<Ident, Container> IntoComponents for Path<Ident, Container> {
   }
 }
 
-impl<Ident, Container> Path<Ident, Container> {
+impl<Ident, Container, Lang> Path<Ident, Container, Lang> {
   /// Creates a new path from the given segments.
   #[inline]
   pub const fn new(span: Span, segments: Container, fqdp: bool) -> Self {
@@ -51,6 +52,7 @@ impl<Ident, Container> Path<Ident, Container> {
       segments,
       fqdp,
       _s: PhantomData,
+      _lang: PhantomData,
     }
   }
 
@@ -113,7 +115,7 @@ impl<Ident, Container> Path<Ident, Container> {
   }
 }
 
-impl<'a, Ident, Container, I, T, Error> Parseable<'a, I, T, Error> for Path<Ident, Container>
+impl<'a, Ident, Container, I, T, Error, Lang> Parseable<'a, I, T, Error> for Path<Ident, Container, Lang>
 where
   Container: chumsky::container::Container<Ident>,
   Ident: Parseable<'a, I, T, Error>,
@@ -132,35 +134,35 @@ where
   }
 }
 
-impl<Ident, Container> PartialEq<Path<Ident, Container>> for str
+impl<Ident, Container, Lang> PartialEq<Path<Ident, Container, Lang>> for str
 where
   str: Equivalent<Ident>,
   Container: AsRef<[Ident]>,
 {
   #[inline]
-  fn eq(&self, other: &Path<Ident, Container>) -> bool {
-    <Self as Equivalent<Path<Ident, Container>>>::equivalent(self, other)
+  fn eq(&self, other: &Path<Ident, Container, Lang>) -> bool {
+    <Self as Equivalent<Path<Ident, Container, Lang>>>::equivalent(self, other)
   }
 }
 
-impl<Ident, Container> PartialEq<str> for Path<Ident, Container>
+impl<Ident, Container, Lang> PartialEq<str> for Path<Ident, Container, Lang>
 where
   str: Equivalent<Ident>,
   Container: AsRef<[Ident]>,
 {
   #[inline]
   fn eq(&self, other: &str) -> bool {
-    <str as Equivalent<Path<Ident, Container>>>::equivalent(other, self)
+    <str as Equivalent<Path<Ident, Container, Lang>>>::equivalent(other, self)
   }
 }
 
-impl<Ident, Container> Equivalent<Path<Ident, Container>> for str
+impl<Ident, Container, Lang> Equivalent<Path<Ident, Container, Lang>> for str
 where
   str: Equivalent<Ident>,
   Container: AsRef<[Ident]>,
 {
   #[inline]
-  fn equivalent(&self, other: &Path<Ident, Container>) -> bool {
+  fn equivalent(&self, other: &Path<Ident, Container, Lang>) -> bool {
     // 1) leading `::` must match the path's FQP flag
     let self_fqp = self.starts_with("::");
     if self_fqp != other.is_fully_qualified() {
@@ -190,7 +192,7 @@ where
   }
 }
 
-impl<Ident, Container> core::fmt::Display for Path<Ident, Container>
+impl<Ident, Container, Lang> core::fmt::Display for Path<Ident, Container, Lang>
 where
   Ident: core::fmt::Display,
   Container: AsRef<[Ident]>,

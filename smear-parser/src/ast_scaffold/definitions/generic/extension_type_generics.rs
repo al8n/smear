@@ -14,26 +14,27 @@ use std::vec::Vec;
 
 /// A extension type parameter with an optional default type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct ExtensionTypeParam<Ident> {
+pub struct ExtensionTypeParam<Ident, Lang = ()> {
   span: Span,
   ident: Ident,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident> AsSpan<Span> for ExtensionTypeParam<Ident> {
+impl<Ident, Lang> AsSpan<Span> for ExtensionTypeParam<Ident, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident> IntoSpan<Span> for ExtensionTypeParam<Ident> {
+impl<Ident, Lang> IntoSpan<Span> for ExtensionTypeParam<Ident, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident> IntoComponents for ExtensionTypeParam<Ident> {
+impl<Ident, Lang> IntoComponents for ExtensionTypeParam<Ident, Lang> {
   type Components = (Span, Ident);
 
   #[inline]
@@ -42,11 +43,15 @@ impl<Ident> IntoComponents for ExtensionTypeParam<Ident> {
   }
 }
 
-impl<Ident> ExtensionTypeParam<Ident> {
+impl<Ident, Lang> ExtensionTypeParam<Ident, Lang> {
   /// Creates a new `ExtensionTypeParam` with the given identifier and optional default type.
   #[inline]
   const fn new(span: Span, ident: Ident) -> Self {
-    Self { span, ident }
+    Self {
+      span,
+      ident,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the type parameter.

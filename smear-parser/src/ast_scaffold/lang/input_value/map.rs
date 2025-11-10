@@ -16,27 +16,28 @@ use std::vec::Vec;
 
 /// A single entry in a GraphQLx map literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MapEntry<Key, Value> {
+pub struct MapEntry<Key, Value, Lang = ()> {
   span: Span,
   key: Key,
   value: Value,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Key, Value> AsSpan<Span> for MapEntry<Key, Value> {
+impl<Key, Value, Lang> AsSpan<Span> for MapEntry<Key, Value, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Key, Value> IntoSpan<Span> for MapEntry<Key, Value> {
+impl<Key, Value, Lang> IntoSpan<Span> for MapEntry<Key, Value, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Key, Value> IntoComponents for MapEntry<Key, Value> {
+impl<Key, Value, Lang> IntoComponents for MapEntry<Key, Value, Lang> {
   type Components = (Span, Key, Value);
 
   #[inline]
@@ -45,11 +46,16 @@ impl<Key, Value> IntoComponents for MapEntry<Key, Value> {
   }
 }
 
-impl<Key, Value> MapEntry<Key, Value> {
+impl<Key, Value, Lang> MapEntry<Key, Value, Lang> {
   /// Creates a new map entry with the given key and value.
   #[inline]
   const fn new(span: Span, key: Key, value: Value) -> Self {
-    Self { span, key, value }
+    Self {
+      span,
+      key,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the map entry.

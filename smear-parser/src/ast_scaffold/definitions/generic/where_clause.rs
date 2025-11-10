@@ -26,14 +26,16 @@ pub struct WherePredicate<
   PathSegmentsContainer = Vec<Ident>,
   TypeContainer = Vec<Type>,
   Container = Vec<TypePath<Ident, Type>>,
+  Lang = (),
 > {
   span: Span,
   bounded_type: TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
   bounds: Container,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> AsSpan<Span>
-  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang> AsSpan<Span>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -41,8 +43,8 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> AsSpan<Span>
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> IntoSpan<Span>
-  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang> IntoSpan<Span>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -50,23 +52,24 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> IntoSpan<Span
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container> IntoComponents
-  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang> IntoComponents
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
 {
   type Components = (
     Span,
     TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
     Container,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.bounded_type, self.bounds)
+    (self.span, self.bounded_type, self.bounds, self._lang)
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
-  WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
+  WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
 {
   /// Creates a new `WherePredicate` with the given bounded type and bounds.
   #[inline]
@@ -79,6 +82,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
       span,
       bounded_type,
       bounds,
+      _lang: PhantomData,
     }
   }
 
@@ -144,9 +148,9 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
   }
 }
 
-impl<'a, Ident, Type, PathSegmentsContainer, TypeContainer, Container, I, T, Error>
+impl<'a, Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
+  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container, Lang>
 where
   Container: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
   PathSegmentsContainer: ChumskyContainer<Ident>,
@@ -182,16 +186,18 @@ pub struct WhereClause<
   TypeContainer = Vec<Type>,
   TypePathsContainer = Vec<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
   Container = Vec<WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>>,
+  Lang = (),
 > {
   span: Span,
   predicates: Container,
   _m: PhantomData<
     WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
   >,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container> AsSpan<Span>
-  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang> AsSpan<Span>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -199,9 +205,9 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   IntoSpan<Span>
-  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -209,20 +215,20 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   IntoComponents
-  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
 {
-  type Components = (Span, Container);
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.predicates)
+    (self.span, self.predicates, self._lang)
   }
 }
 
-impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
-  WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
+  WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
 {
   /// Creates a new `WhereClause` with the given predicates.
   #[inline]
@@ -231,6 +237,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
       span,
       predicates,
       _m: PhantomData,
+      _lang: PhantomData,
     }
   }
 
@@ -307,11 +314,12 @@ impl<
   TypeContainer,
   TypePathsContainer,
   Container,
+  Lang,
   I,
   T,
   Error,
 > Parseable<'a, I, T, Error>
-  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
 where
   Container: ChumskyContainer<
     WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
@@ -355,15 +363,17 @@ pub struct Constrained<
   Container = Vec<
     WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
   >,
+  Lang = (),
 > {
   span: Span,
   where_clause: Option<
     WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
   >,
   target: Target,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   AsSpan<Span>
   for Constrained<
     Ident,
@@ -373,6 +383,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
     TypeContainer,
     TypePathsContainer,
     Container,
+    Lang,
   >
 {
   fn as_span(&self) -> &Span {
@@ -380,7 +391,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
   }
 }
 
-impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   IntoSpan<Span>
   for Constrained<
     Ident,
@@ -390,6 +401,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
     TypeContainer,
     TypePathsContainer,
     Container,
+    Lang,
   >
 {
   fn into_span(self) -> Span {
@@ -397,7 +409,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
   }
 }
 
-impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   IntoComponents
   for Constrained<
     Ident,
@@ -407,6 +419,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
     TypeContainer,
     TypePathsContainer,
     Container,
+    Lang,
   >
 {
   type Components = (
@@ -415,14 +428,15 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
       WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
     >,
     Target,
+    PhantomData<Lang>,
   );
 
   fn into_components(self) -> Self::Components {
-    (self.span, self.where_clause, self.target)
+    (self.span, self.where_clause, self.target, self._lang)
   }
 }
 
-impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
+impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container, Lang>
   Constrained<
     Ident,
     Type,
@@ -431,6 +445,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
     TypeContainer,
     TypePathsContainer,
     Container,
+    Lang,
   >
 {
   /// Creates a new `Constrained` with the given target and optional where clause.
@@ -446,6 +461,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
       span,
       where_clause,
       target,
+      _lang: PhantomData,
     }
   }
 
@@ -518,6 +534,7 @@ impl<
   TypeContainer,
   TypePathsContainer,
   Container,
+  Lang,
   I,
   T,
   Error,
@@ -530,6 +547,7 @@ impl<
     TypeContainer,
     TypePathsContainer,
     Container,
+    Lang,
   >
 where
   Ident: Parseable<'a, I, T, Error>,

@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, Parser, extra::ParserExtra},
@@ -7,36 +9,37 @@ use logosky::{
 /// A simple pair structure representing two sequentially parsed elements.
 /// This is useful for parsers that need to return two related values together.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct And<A, B> {
+pub struct And<A, B, Lang = ()> {
   span: Span,
   first: A,
   second: B,
+  _lang: PhantomData<Lang>,
 }
 
-impl<A, B> AsSpan<Span> for And<A, B> {
+impl<A, B, Lang> AsSpan<Span> for And<A, B, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<A, B> IntoSpan<Span> for And<A, B> {
+impl<A, B, Lang> IntoSpan<Span> for And<A, B, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<A, B> IntoComponents for And<A, B> {
-  type Components = (Span, A, B);
+impl<A, B, Lang> IntoComponents for And<A, B, Lang> {
+  type Components = (Span, A, B, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.first, self.second)
+    (self.span, self.first, self.second, self._lang)
   }
 }
 
-impl<A, B> And<A, B> {
+impl<A, B, Lang> And<A, B, Lang> {
   /// Creates a new `And` with the given elements.
   #[inline]
   const fn new(span: Span, first: A, second: B) -> Self {
@@ -44,6 +47,7 @@ impl<A, B> And<A, B> {
       span,
       first,
       second,
+      _lang: PhantomData,
     }
   }
 
@@ -87,7 +91,7 @@ impl<A, B> And<A, B> {
   }
 }
 
-impl<'a, A, B, I, T, Error> Parseable<'a, I, T, Error> for And<A, B>
+impl<'a, A, B, Lang, I, T, Error> Parseable<'a, I, T, Error> for And<A, B, Lang>
 where
   A: Parseable<'a, I, T, Error>,
   B: Parseable<'a, I, T, Error>,

@@ -563,36 +563,37 @@ from_location!(
 
 /// Represents a collection of directive locations where a directive can be applied.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DirectiveLocations<Location, Container = Vec<Location>> {
+pub struct DirectiveLocations<Location, Container = Vec<Location>, Lang = ()> {
   span: Span,
   locations: Container,
   _m: PhantomData<Location>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Location, Container> AsSpan<Span> for DirectiveLocations<Location, Container> {
+impl<Location, Container, Lang> AsSpan<Span> for DirectiveLocations<Location, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Location, Container> IntoSpan<Span> for DirectiveLocations<Location, Container> {
+impl<Location, Container, Lang> IntoSpan<Span> for DirectiveLocations<Location, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Location, Container> IntoComponents for DirectiveLocations<Location, Container> {
-  type Components = (Span, Container);
+impl<Location, Container, Lang> IntoComponents for DirectiveLocations<Location, Container, Lang> {
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.locations)
+    (self.span, self.locations, self._lang)
   }
 }
 
-impl<Location, Container> DirectiveLocations<Location, Container> {
+impl<Location, Container, Lang> DirectiveLocations<Location, Container, Lang> {
   /// Returns a reference to the span covering the entire directive locations.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -615,8 +616,8 @@ impl<Location, Container> DirectiveLocations<Location, Container> {
   }
 }
 
-impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for DirectiveLocations<Location, Container>
+impl<'a, Location, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for DirectiveLocations<Location, Container, Lang>
 where
   Container: chumsky::container::Container<Location> + 'a,
   Pipe: Parseable<'a, I, T, Error>,
@@ -642,12 +643,13 @@ where
           span,
           locations,
           _m: PhantomData,
+          _lang: PhantomData,
         }
       })
   }
 }
 
-impl<Location, Container> DisplayCompact for DirectiveLocations<Location, Container>
+impl<Location, Container, Lang> DisplayCompact for DirectiveLocations<Location, Container, Lang>
 where
   Container: AsRef<[Location]>,
   Location: DisplayCompact,
@@ -665,7 +667,7 @@ where
   }
 }
 
-impl<Location, Container> DisplayPretty for DirectiveLocations<Location, Container>
+impl<Location, Container, Lang> DisplayPretty for DirectiveLocations<Location, Container, Lang>
 where
   Container: AsRef<[Location]>,
   Location: DisplayPretty,
@@ -738,30 +740,31 @@ where
 ///
 /// Spec: [DirectiveDefinition](https://spec.graphql.org/draft/#DirectiveDefinition)
 #[derive(Debug, Clone, Copy)]
-pub struct DirectiveDefinition<Name, Args, Locations> {
+pub struct DirectiveDefinition<Name, Args, Locations, Lang = ()> {
   span: Span,
   name: Name,
   arguments_definition: Option<Args>,
   repeateable: bool,
   directive_locations: Locations,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Args, Locations> AsSpan<Span> for DirectiveDefinition<Name, Args, Locations> {
+impl<Name, Args, Locations, Lang> AsSpan<Span> for DirectiveDefinition<Name, Args, Locations, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Args, Locations> IntoSpan<Span> for DirectiveDefinition<Name, Args, Locations> {
+impl<Name, Args, Locations, Lang> IntoSpan<Span> for DirectiveDefinition<Name, Args, Locations, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, Locations> {
-  type Components = (Span, Name, Option<Args>, bool, Locations);
+impl<Name, Args, Locations, Lang> IntoComponents for DirectiveDefinition<Name, Args, Locations, Lang> {
+  type Components = (Span, Name, Option<Args>, bool, Locations, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -771,11 +774,12 @@ impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, L
       self.arguments_definition,
       self.repeateable,
       self.directive_locations,
+      self._lang,
     )
   }
 }
 
-impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
+impl<Name, Args, Locations, Lang> DirectiveDefinition<Name, Args, Locations, Lang> {
   /// Creates a new `DirectiveDefinition` with the given components.
   #[inline]
   pub const fn new(
@@ -791,6 +795,7 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
       arguments_definition,
       repeateable,
       directive_locations,
+      _lang: PhantomData,
     }
   }
 
@@ -914,8 +919,8 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   }
 }
 
-impl<'a, Name, Args, Locations, I, T, Error> Parseable<'a, I, T, Error>
-  for DirectiveDefinition<Name, Args, Locations>
+impl<'a, Name, Args, Locations, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for DirectiveDefinition<Name, Args, Locations, Lang>
 where
   At: Parseable<'a, I, T, Error>,
   Directive: Parseable<'a, I, T, Error>,

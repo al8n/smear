@@ -19,36 +19,37 @@ use std::vec::Vec;
 /// T # A type parameter `T` without a default type
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct DefinitionTypeParam<Ident, Type> {
+pub struct DefinitionTypeParam<Ident, Type, Lang = ()> {
   span: Span,
   ident: Ident,
   default: Option<Type>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type> AsSpan<Span> for DefinitionTypeParam<Ident, Type> {
+impl<Ident, Type, Lang> AsSpan<Span> for DefinitionTypeParam<Ident, Type, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type> IntoSpan<Span> for DefinitionTypeParam<Ident, Type> {
+impl<Ident, Type, Lang> IntoSpan<Span> for DefinitionTypeParam<Ident, Type, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type> IntoComponents for DefinitionTypeParam<Ident, Type> {
-  type Components = (Span, Ident, Option<Type>);
+impl<Ident, Type, Lang> IntoComponents for DefinitionTypeParam<Ident, Type, Lang> {
+  type Components = (Span, Ident, Option<Type>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ident, self.default)
+    (self.span, self.ident, self.default, self._lang)
   }
 }
 
-impl<Ident, Type> DefinitionTypeParam<Ident, Type> {
+impl<Ident, Type, Lang> DefinitionTypeParam<Ident, Type, Lang> {
   /// Creates a new `DefinitionTypeParam` with the given identifier and optional default type.
   #[inline]
   const fn new(span: Span, ident: Ident, default: Option<Type>) -> Self {
@@ -56,6 +57,7 @@ impl<Ident, Type> DefinitionTypeParam<Ident, Type> {
       span,
       ident,
       default,
+      _lang: PhantomData,
     }
   }
 
@@ -98,7 +100,7 @@ impl<Ident, Type> DefinitionTypeParam<Ident, Type> {
   }
 }
 
-impl<'a, Ident, Type, I, T, Error> Parseable<'a, I, T, Error> for DefinitionTypeParam<Ident, Type>
+impl<'a, Ident, Type, Lang, I, T, Error> Parseable<'a, I, T, Error> for DefinitionTypeParam<Ident, Type, Lang>
 where
   Equal: Parseable<'a, I, T, Error> + 'a,
   Ident: Parseable<'a, I, T, Error> + 'a,
@@ -124,37 +126,38 @@ where
 /// <T, U> # A type generics with two type parameters: `T` and `U`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DefinitionTypeGenerics<Ident, Type, Container = Vec<DefinitionTypeParam<Ident, Type>>> {
+pub struct DefinitionTypeGenerics<Ident, Type, Container = Vec<DefinitionTypeParam<Ident, Type>>, Lang = ()> {
   span: Span,
   params: Container,
   _ident: PhantomData<Ident>,
   _type: PhantomData<Type>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Type, Container> AsSpan<Span> for DefinitionTypeGenerics<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> AsSpan<Span> for DefinitionTypeGenerics<Ident, Type, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Type, Container> IntoSpan<Span> for DefinitionTypeGenerics<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> IntoSpan<Span> for DefinitionTypeGenerics<Ident, Type, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Type, Container> IntoComponents for DefinitionTypeGenerics<Ident, Type, Container> {
-  type Components = (Span, Container);
+impl<Ident, Type, Container, Lang> IntoComponents for DefinitionTypeGenerics<Ident, Type, Container, Lang> {
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.params)
+    (self.span, self.params, self._lang)
   }
 }
 
-impl<Ident, Type, Container> DefinitionTypeGenerics<Ident, Type, Container> {
+impl<Ident, Type, Container, Lang> DefinitionTypeGenerics<Ident, Type, Container, Lang> {
   /// Creates a new `DefinitionTypeGenerics` with the given parameters.
   #[inline]
   const fn new(span: Span, params: Container) -> Self {
@@ -163,6 +166,7 @@ impl<Ident, Type, Container> DefinitionTypeGenerics<Ident, Type, Container> {
       params,
       _ident: PhantomData,
       _type: PhantomData,
+      _lang: PhantomData,
     }
   }
 
@@ -217,8 +221,8 @@ impl<Ident, Type, Container> DefinitionTypeGenerics<Ident, Type, Container> {
   }
 }
 
-impl<'a, Ident, Type, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for DefinitionTypeGenerics<Ident, Type, Container>
+impl<'a, Ident, Type, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for DefinitionTypeGenerics<Ident, Type, Container, Lang>
 where
   Equal: Parseable<'a, I, T, Error> + 'a,
   Ident: Parseable<'a, I, T, Error> + 'a,

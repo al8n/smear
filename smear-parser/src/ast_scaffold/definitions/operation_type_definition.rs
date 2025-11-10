@@ -35,36 +35,37 @@ use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 ///
 /// Spec: [Root Operation Types Definition](https://spec.graphql.org/draft/#sec-Root-Operation-Types)
 #[derive(Debug, Clone, Copy)]
-pub struct RootOperationTypeDefinition<Name, OperationType> {
+pub struct RootOperationTypeDefinition<Name, OperationType, Lang = ()> {
   span: Span,
   operation_type: OperationType,
   name: Name,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, OperationType> AsSpan<Span> for RootOperationTypeDefinition<Name, OperationType> {
+impl<Name, OperationType, Lang> AsSpan<Span> for RootOperationTypeDefinition<Name, OperationType, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, OperationType> IntoSpan<Span> for RootOperationTypeDefinition<Name, OperationType> {
+impl<Name, OperationType, Lang> IntoSpan<Span> for RootOperationTypeDefinition<Name, OperationType, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, OperationType> IntoComponents for RootOperationTypeDefinition<Name, OperationType> {
-  type Components = (Span, OperationType, Name);
+impl<Name, OperationType, Lang> IntoComponents for RootOperationTypeDefinition<Name, OperationType, Lang> {
+  type Components = (Span, OperationType, Name, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.operation_type, self.name)
+    (self.span, self.operation_type, self.name, self._lang)
   }
 }
 
-impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
+impl<Name, OperationType, Lang> RootOperationTypeDefinition<Name, OperationType, Lang> {
   /// Returns a reference to the span covering the entire root operation type definition.
   ///
   /// The span includes the operation type keyword, colon separator, and the target type name.
@@ -115,12 +116,13 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
         span: exa.span(),
         operation_type,
         name,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, Name, OperationType, I, T, Error> Parseable<'a, I, T, Error>
-  for RootOperationTypeDefinition<Name, OperationType>
+impl<'a, Name, OperationType, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for RootOperationTypeDefinition<Name, OperationType, Lang>
 where
   Colon: Parseable<'a, I, T, Error>,
   Name: Parseable<'a, I, T, Error>,
@@ -182,14 +184,16 @@ where
 pub struct RootOperationTypesDefinition<
   RootOperationTypeDefinition,
   Container = Vec<RootOperationTypeDefinition>,
+  Lang = (),
 > {
   span: Span,
   root_operation_types: Container,
   _m: PhantomData<RootOperationTypeDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<RootOperationTypeDefinition, Container> AsSpan<Span>
-  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+impl<RootOperationTypeDefinition, Container, Lang> AsSpan<Span>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -197,8 +201,8 @@ impl<RootOperationTypeDefinition, Container> AsSpan<Span>
   }
 }
 
-impl<RootOperationTypeDefinition, Container> IntoSpan<Span>
-  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+impl<RootOperationTypeDefinition, Container, Lang> IntoSpan<Span>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -206,19 +210,19 @@ impl<RootOperationTypeDefinition, Container> IntoSpan<Span>
   }
 }
 
-impl<RootOperationTypeDefinition, Container> IntoComponents
-  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+impl<RootOperationTypeDefinition, Container, Lang> IntoComponents
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container, Lang>
 {
-  type Components = (Span, Container);
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.root_operation_types)
+    (self.span, self.root_operation_types, self._lang)
   }
 }
 
-impl<RootOperationTypeDefinition, Container>
-  RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+impl<RootOperationTypeDefinition, Container, Lang>
+  RootOperationTypesDefinition<RootOperationTypeDefinition, Container, Lang>
 {
   /// Returns a reference to the span covering the entire root operation types definition.
   ///
@@ -268,12 +272,13 @@ impl<RootOperationTypeDefinition, Container>
         span: exa.span(),
         root_operation_types,
         _m: PhantomData,
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, RootOperationTypeDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
+impl<'a, RootOperationTypeDefinition, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container, Lang>
 where
   LBrace: Parseable<'a, I, T, Error>,
   RBrace: Parseable<'a, I, T, Error>,

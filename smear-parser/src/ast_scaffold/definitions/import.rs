@@ -26,40 +26,41 @@ use super::Path;
 ///     : identifier ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NamedSpecifier<Ident, Container = Vec<Ident>> {
+pub struct NamedSpecifier<Ident, Container = Vec<Ident>, Lang = ()> {
   span: Span,
   name: Ident,
   alias: Option<Path<Ident, Container>>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Container> AsSpan<Span> for NamedSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> AsSpan<Span> for NamedSpecifier<Ident, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Container> IntoSpan<Span> for NamedSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> IntoSpan<Span> for NamedSpecifier<Ident, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Container> IntoComponents for NamedSpecifier<Ident, Container> {
-  type Components = (Span, Ident, Option<Path<Ident, Container>>);
+impl<Ident, Container, Lang> IntoComponents for NamedSpecifier<Ident, Container, Lang> {
+  type Components = (Span, Ident, Option<Path<Ident, Container>>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.alias)
+    (self.span, self.name, self.alias, self._lang)
   }
 }
 
-impl<Ident, Container> NamedSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> NamedSpecifier<Ident, Container, Lang> {
   /// Creates a new named item with the given span, name, and optional alias.
   #[inline]
   const fn new(span: Span, name: Ident, alias: Option<Path<Ident, Container>>) -> Self {
-    Self { span, name, alias }
+    Self { span, name, alias, _lang: PhantomData }
   }
 
   /// Returns the span of the entire named item.
@@ -115,39 +116,40 @@ impl<Ident, Container> NamedSpecifier<Ident, Container> {
 ///     : "*" ("as" path)?
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WildcardSpecifier<Ident, Container = Vec<Ident>> {
+pub struct WildcardSpecifier<Ident, Container = Vec<Ident>, Lang = ()> {
   span: Span,
   alias: Option<Path<Ident, Container>>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, Container> AsSpan<Span> for WildcardSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> AsSpan<Span> for WildcardSpecifier<Ident, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, Container> IntoSpan<Span> for WildcardSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> IntoSpan<Span> for WildcardSpecifier<Ident, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Ident, Container> IntoComponents for WildcardSpecifier<Ident, Container> {
-  type Components = (Span, Option<Path<Ident, Container>>);
+impl<Ident, Container, Lang> IntoComponents for WildcardSpecifier<Ident, Container, Lang> {
+  type Components = (Span, Option<Path<Ident, Container>>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.alias)
+    (self.span, self.alias, self._lang)
   }
 }
 
-impl<Ident, Container> WildcardSpecifier<Ident, Container> {
+impl<Ident, Container, Lang> WildcardSpecifier<Ident, Container, Lang> {
   /// Creates a new wildcard item with the given span and optional alias.
   #[inline]
   const fn new(span: Span, alias: Option<Path<Ident, Container>>) -> Self {
-    Self { span, alias }
+    Self { span, alias, _lang: PhantomData }
   }
 
   /// Returns the span of the entire wildcard item.
@@ -277,15 +279,17 @@ pub struct ImportList<
   Ident,
   PathContainer = Vec<Ident>,
   Container = Vec<ImportMember<Ident, PathContainer>>,
+  Lang = (),
 > {
   span: Span,
   items: Container,
   _m: PhantomData<Ident>,
   _p: PhantomData<PathContainer>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, PathContainer, Container> core::ops::Deref
-  for ImportList<Ident, PathContainer, Container>
+impl<Ident, PathContainer, Container, Lang> core::ops::Deref
+  for ImportList<Ident, PathContainer, Container, Lang>
 {
   type Target = Container;
 
@@ -295,15 +299,15 @@ impl<Ident, PathContainer, Container> core::ops::Deref
   }
 }
 
-impl<Ident, PathContainer, Container> AsSpan<Span> for ImportList<Ident, PathContainer, Container> {
+impl<Ident, PathContainer, Container, Lang> AsSpan<Span> for ImportList<Ident, PathContainer, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Ident, PathContainer, Container> IntoSpan<Span>
-  for ImportList<Ident, PathContainer, Container>
+impl<Ident, PathContainer, Container, Lang> IntoSpan<Span>
+  for ImportList<Ident, PathContainer, Container, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -311,18 +315,18 @@ impl<Ident, PathContainer, Container> IntoSpan<Span>
   }
 }
 
-impl<Ident, PathContainer, Container> IntoComponents
-  for ImportList<Ident, PathContainer, Container>
+impl<Ident, PathContainer, Container, Lang> IntoComponents
+  for ImportList<Ident, PathContainer, Container, Lang>
 {
-  type Components = (Span, Container);
+  type Components = (Span, Container, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.items)
+    (self.span, self.items, self._lang)
   }
 }
 
-impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container> {
+impl<Ident, PathContainer, Container, Lang> ImportList<Ident, PathContainer, Container, Lang> {
   /// Creates a new brace items with the given span and items.
   #[inline]
   const fn new(span: Span, items: Container) -> Self {
@@ -331,6 +335,7 @@ impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container
       items,
       _m: PhantomData,
       _p: PhantomData,
+      _lang: PhantomData,
     }
   }
 
@@ -381,8 +386,8 @@ impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container
   }
 }
 
-impl<'a, Ident, PathContainer, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportList<Ident, PathContainer, Container>
+impl<'a, Ident, PathContainer, Container, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ImportList<Ident, PathContainer, Container, Lang>
 where
   Ident: Parseable<'a, I, T, Error> + 'a,
   LBrace: Parseable<'a, I, T, Error> + 'a,
@@ -523,14 +528,16 @@ pub struct ImportDefinition<
   FilePath,
   PathContainer = Vec<Ident>,
   ItemContainer = Vec<ImportMember<Ident, PathContainer>>,
+  Lang = (),
 > {
   span: Span,
   file: FilePath,
   clause: ImportClause<Ident, PathContainer, ItemContainer>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Ident, FilePath, PathContainer, ItemContainer> AsSpan<Span>
-  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
+impl<Ident, FilePath, PathContainer, ItemContainer, Lang> AsSpan<Span>
+  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -538,8 +545,8 @@ impl<Ident, FilePath, PathContainer, ItemContainer> AsSpan<Span>
   }
 }
 
-impl<Ident, FilePath, PathContainer, ItemContainer> IntoSpan<Span>
-  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
+impl<Ident, FilePath, PathContainer, ItemContainer, Lang> IntoSpan<Span>
+  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -547,23 +554,24 @@ impl<Ident, FilePath, PathContainer, ItemContainer> IntoSpan<Span>
   }
 }
 
-impl<Ident, FilePath, PathContainer, ItemContainer> IntoComponents
-  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
+impl<Ident, FilePath, PathContainer, ItemContainer, Lang> IntoComponents
+  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer, Lang>
 {
   type Components = (
     Span,
     FilePath,
     ImportClause<Ident, PathContainer, ItemContainer>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.file, self.clause)
+    (self.span, self.file, self.clause, self._lang)
   }
 }
 
-impl<Ident, FilePath, PathContainer, ItemContainer>
-  ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
+impl<Ident, FilePath, PathContainer, ItemContainer, Lang>
+  ImportDefinition<Ident, FilePath, PathContainer, ItemContainer, Lang>
 {
   /// Creates a new import definition with the given span, file path, and clause.
   #[inline]
@@ -572,7 +580,7 @@ impl<Ident, FilePath, PathContainer, ItemContainer>
     file: FilePath,
     clause: ImportClause<Ident, PathContainer, ItemContainer>,
   ) -> Self {
-    Self { span, file, clause }
+    Self { span, file, clause, _lang: PhantomData }
   }
 
   /// Returns the span of the entire import definition.
@@ -626,8 +634,8 @@ impl<Ident, FilePath, PathContainer, ItemContainer>
   }
 }
 
-impl<'a, Ident, FilePath, PathContainer, ItemContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
+impl<'a, Ident, FilePath, PathContainer, ItemContainer, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer, Lang>
 where
   FilePath: Parseable<'a, I, T, Error> + 'a,
   ImportClause<Ident, PathContainer, ItemContainer>: Parseable<'a, I, T, Error> + 'a,

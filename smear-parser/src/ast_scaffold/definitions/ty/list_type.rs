@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   Logos, Source, Token,
   chumsky::{LogoStream, Parseable, extra::ParserExtra, prelude::*},
@@ -59,27 +61,28 @@ use smear_lexer::punctuator::{Bang, LBracket, RBracket};
 /// ListType : [ Type ] !?
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub struct ListType<Type> {
+pub struct ListType<Type, Lang = ()> {
   span: Span,
   ty: Type,
   required: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Type> AsSpan<Span> for ListType<Type> {
+impl<Type, Lang> AsSpan<Span> for ListType<Type, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Type> IntoSpan<Span> for ListType<Type> {
+impl<Type, Lang> IntoSpan<Span> for ListType<Type, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Type> IntoComponents for ListType<Type> {
+impl<Type, Lang> IntoComponents for ListType<Type, Lang> {
   type Components = (Span, Type, bool);
 
   #[inline]
@@ -88,7 +91,7 @@ impl<Type> IntoComponents for ListType<Type> {
   }
 }
 
-impl<Type> ListType<Type> {
+impl<Type, Lang> ListType<Type, Lang> {
   /// Returns a reference to the span covering the entire list type.
   ///
   /// The span includes the brackets, element type, and optional bang modifier.
@@ -154,11 +157,12 @@ impl<Type> ListType<Type> {
         span: exa.span(),
         ty,
         required: bang.is_some(),
+        _lang: PhantomData,
       })
   }
 }
 
-impl<'a, Type, I, T, Error> Parseable<'a, I, T, Error> for ListType<Type>
+impl<'a, Type, I, T, Error, Lang> Parseable<'a, I, T, Error> for ListType<Type, Lang>
 where
   Type: Parseable<'a, I, T, Error>,
   LBracket: Parseable<'a, I, T, Error> + 'a,
@@ -185,6 +189,6 @@ where
 ///
 /// This associates the list type AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Type> AstNode<smear_lexer::graphql::GraphQL> for ListType<Type> {
+impl<Type, Lang> AstNode<smear_lexer::graphql::GraphQL> for ListType<Type, Lang> {
   type Syntax = crate::syntax::graphql::ListTypeSyntax;
 }

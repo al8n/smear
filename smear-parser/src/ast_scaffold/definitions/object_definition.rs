@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use logosky::{
   LogoStream, Logos, Source, Token,
   chumsky::{Parseable, extra::ParserExtra, prelude::*},
@@ -64,16 +66,17 @@ use smear_lexer::keywords::{Extend, Implements, Type};
 ///
 /// Spec: [Object Type Definition](https://spec.graphql.org/draft/#sec-Object-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition> {
+pub struct ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   implements: Option<ImplementInterfaces>,
   directives: Option<Directives>,
   fields_definition: Option<FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -81,8 +84,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -90,8 +93,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> IntoComponents
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Components = (
     Span,
@@ -99,6 +102,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
     Option<ImplementInterfaces>,
     Option<Directives>,
     Option<FieldsDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
@@ -109,12 +113,13 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
       self.implements,
       self.directives,
       self.fields_definition,
+      self._lang,
     )
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
-  ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
+  ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `ObjectTypeDefinition` with the given components.
   #[inline]
@@ -131,6 +136,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
       implements,
       directives,
       fields_definition,
+      _lang: PhantomData,
     }
   }
 
@@ -257,9 +263,9 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   ImplementInterfaces: Parseable<'a, I, T, Error>,
@@ -435,14 +441,15 @@ impl<ImplementInterfaces, Directives, FieldsDefinition>
 ///
 /// Spec: [Object Type Extension](https://spec.graphql.org/draft/#sec-Object-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition> {
+pub struct ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang = ()> {
   span: Span,
   name: Name,
   data: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> AsSpan<Span>
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -450,8 +457,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> IntoSpan<Span>
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -459,23 +466,24 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> IntoComponents
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Components = (
     Span,
     Name,
     ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
+    (self.span, self.name, self.data, self._lang)
   }
 }
 
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
-  ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
+  ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   /// Creates a new `ObjectTypeExtension` with the given components.
   #[inline]
@@ -484,7 +492,7 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     name: Name,
     data: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
   ) -> Self {
-    Self { span, name, data }
+    Self { span, name, data, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire object extension.
@@ -630,9 +638,9 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   }
 }
 
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
+impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, Lang, I, T, Error>
   Parseable<'a, I, T, Error>
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 where
   // From bounds will be added when/if error construction is needed
   Type: Parseable<'a, I, T, Error>,
@@ -668,8 +676,8 @@ where
 ///
 /// This associates the object type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::ObjectTypeDefinitionSyntax;
 }
@@ -678,8 +686,8 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AstNode<smear_lexe
 ///
 /// This associates the object type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, ImplementInterfaces, Directives, FieldsDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
+impl<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::ObjectTypeExtensionSyntax;
 }

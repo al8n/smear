@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use logosky::{
-  LogoStream, Logos, Source, Token, chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*}, utils::{
+  LogoStream, Logos, Source, Token, chumsky::{Parseable, Parser, extra::ParserExtra, prelude::*}, error::IncompleteSyntax, utils::{
     AsSpan, IntoComponents, IntoSpan, Span,
     human_display::DisplayHuman,
     sdl_display::{DisplayCompact, DisplayPretty},

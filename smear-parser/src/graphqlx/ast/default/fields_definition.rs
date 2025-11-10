@@ -35,7 +35,7 @@ impl<S, Ty> IntoComponents for FieldsDefinition<S, Ty> {
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    let (span, where_clause, fields) = self.0.into_components();
+    let (span, where_clause, fields, _) = self.0.into_components();
     (span, where_clause, fields)
   }
 }

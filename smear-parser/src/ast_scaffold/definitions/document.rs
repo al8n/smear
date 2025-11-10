@@ -33,27 +33,28 @@ use std::vec::Vec;
 /// type FullDocument<S> = Document<DefinitionOrExtension<S>>;
 /// ```
 #[derive(Debug, Clone)]
-pub struct Document<Definition, Container = Vec<Definition>> {
+pub struct Document<Definition, Container = Vec<Definition>, Lang = ()> {
   span: Span,
   definitions: Container,
   _m: PhantomData<Definition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Definition, Container> AsSpan<Span> for Document<Definition, Container> {
+impl<Definition, Container, Lang> AsSpan<Span> for Document<Definition, Container, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Definition, Container> IntoSpan<Span> for Document<Definition, Container> {
+impl<Definition, Container, Lang> IntoSpan<Span> for Document<Definition, Container, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Definition, Container> IntoComponents for Document<Definition, Container> {
+impl<Definition, Container, Lang> IntoComponents for Document<Definition, Container, Lang> {
   type Components = (Span, Container);
 
   #[inline]
@@ -62,7 +63,7 @@ impl<Definition, Container> IntoComponents for Document<Definition, Container> {
   }
 }
 
-impl<Definition, Container> Document<Definition, Container> {
+impl<Definition, Container, Lang> Document<Definition, Container, Lang> {
   /// Returns a reference to the span covering the entire document.
   ///
   /// The span represents the source location from the first character of the first definition
@@ -94,8 +95,8 @@ impl<Definition, Container> Document<Definition, Container> {
   }
 }
 
-impl<'a, Definition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for Document<Definition, Container>
+impl<'a, Definition, Container, I, T, Error, Lang> Parseable<'a, I, T, Error>
+  for Document<Definition, Container, Lang>
 where
   Container: chumsky::container::Container<Definition>,
   Definition: Parseable<'a, I, T, Error>,
@@ -117,6 +118,7 @@ where
         span: exa.span(),
         definitions,
         _m: PhantomData,
+        _lang: PhantomData,
       })
   }
 }

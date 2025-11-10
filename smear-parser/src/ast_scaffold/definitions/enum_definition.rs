@@ -375,15 +375,16 @@ where
 ///
 /// Spec: [Enum Type Definition](https://spec.graphql.org/draft/#sec-Enum-Type-Definition)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumTypeDefinition<Name, Directives, EnumValuesDefinition> {
+pub struct EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang = ()> {
   span: Span,
   name: Name,
   directives: Option<Directives>,
   enum_values: Option<EnumValuesDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
-  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> AsSpan<Span>
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -391,8 +392,8 @@ impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
-  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> IntoSpan<Span>
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -400,19 +401,19 @@ impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition> IntoComponents
-  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> IntoComponents
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 {
-  type Components = (Span, Name, Option<Directives>, Option<EnumValuesDefinition>);
+  type Components = (Span, Name, Option<Directives>, Option<EnumValuesDefinition>, PhantomData<Lang>);
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives, self.enum_values)
+    (self.span, self.name, self.directives, self.enum_values, self._lang)
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition>
-  EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang>
+  EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 {
   /// Creates a new `EnumTypeDefinition` with the given components.
   #[inline]
@@ -427,6 +428,7 @@ impl<Name, Directives, EnumValuesDefinition>
       name,
       directives,
       enum_values,
+      _lang: PhantomData,
     }
   }
 
@@ -517,8 +519,8 @@ impl<Name, Directives, EnumValuesDefinition>
   }
 }
 
-impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<'a, Name, Directives, EnumValuesDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 where
   Name: Parseable<'a, I, T, Error>,
   Directives: Parseable<'a, I, T, Error>,
@@ -716,14 +718,15 @@ where
 ///
 /// Spec: [Enum Type Extension](https://spec.graphql.org/draft/#sec-Enum-Type-Extension)
 #[derive(Debug, Clone, Copy)]
-pub struct EnumTypeExtension<Name, Directives, EnumValuesDefinition> {
+pub struct EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang = ()> {
   span: Span,
   name: Name,
   data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
-  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> AsSpan<Span>
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -731,8 +734,8 @@ impl<Name, Directives, EnumValuesDefinition> AsSpan<Span>
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
-  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> IntoSpan<Span>
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 {
   #[inline]
   fn into_span(self) -> Span {
@@ -740,23 +743,24 @@ impl<Name, Directives, EnumValuesDefinition> IntoSpan<Span>
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition> IntoComponents
-  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> IntoComponents
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 {
   type Components = (
     Span,
     Name,
     EnumTypeExtensionData<Directives, EnumValuesDefinition>,
+    PhantomData<Lang>,
   );
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.data)
+    (self.span, self.name, self.data, self._lang)
   }
 }
 
-impl<Name, Directives, EnumValuesDefinition>
-  EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang>
+  EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 {
   /// Creates a new `EnumTypeExtension` with the given components.
   #[inline]
@@ -765,7 +769,7 @@ impl<Name, Directives, EnumValuesDefinition>
     name: Name,
     data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
   ) -> Self {
-    Self { span, name, data }
+    Self { span, name, data, _lang: PhantomData }
   }
 
   /// Returns a reference to the span covering the entire enum extension.
@@ -876,8 +880,8 @@ impl<Name, Directives, EnumValuesDefinition>
   }
 }
 
-impl<'a, Name, Directives, EnumValuesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<'a, Name, Directives, EnumValuesDefinition, Lang, I, T, Error> Parseable<'a, I, T, Error>
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 where
   Error: 'a,
   Name: Parseable<'a, I, T, Error>,
@@ -910,8 +914,8 @@ where
 ///
 /// This associates the enum type definition AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, EnumValuesDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for EnumTypeDefinition<Name, Directives, EnumValuesDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::EnumTypeDefinitionSyntax;
 }
@@ -920,8 +924,8 @@ impl<Name, Directives, EnumValuesDefinition> AstNode<smear_lexer::graphql::Graph
 ///
 /// This associates the enum type extension AST node with its corresponding syntax type,
 /// enabling type-safe error handling and generic parser implementation.
-impl<Name, Directives, EnumValuesDefinition> AstNode<smear_lexer::graphql::GraphQL>
-  for EnumTypeExtension<Name, Directives, EnumValuesDefinition>
+impl<Name, Directives, EnumValuesDefinition, Lang> AstNode<smear_lexer::graphql::GraphQL>
+  for EnumTypeExtension<Name, Directives, EnumValuesDefinition, Lang>
 {
   type Syntax = crate::syntax::graphql::EnumTypeExtensionSyntax;
 }
