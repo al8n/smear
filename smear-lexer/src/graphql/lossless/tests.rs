@@ -202,6 +202,8 @@ fn test_recursion_limit() {
     match result {
       Lexed::Token(_) => {}
       Lexed::Error(mut errors) => {
+        use logosky::error::ErrorContainer;
+
         let err = errors.pop().unwrap().unwrap_state();
         assert_eq!(err.unwrap_recursion_ref().depth(), depth);
         assert_eq!(err.unwrap_recursion_ref().limitation(), depth - 1);
@@ -233,6 +235,8 @@ fn test_token_limit() {
     match result {
       Lexed::Token(_) => {}
       Lexed::Error(mut errors) => {
+        use logosky::error::ErrorContainer;
+
         let err = errors.pop().unwrap().unwrap_state();
         assert_eq!(err.unwrap_token_ref().limitation(), limit - 1);
         return;

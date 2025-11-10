@@ -1,6 +1,6 @@
 use logosky::{
   Token,
-  error::UnpairedSurrogateHint,
+  error::{ErrorContainer, UnpairedSurrogateHint},
   logos::{Lexer, Logos, Source},
   utils::{Span, knowledge::LineTerminator},
 };

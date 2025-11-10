@@ -9,7 +9,7 @@ use logosky::{
     util::{Maybe, MaybeRef},
   },
   error::{
-    DefaultContainer, Invalid, InvalidBooleanLiteral, InvalidEnumValueLiteral, InvalidNullLiteral,
+    DefaultContainer, ErrorContainer, Invalid, InvalidBooleanLiteral, InvalidEnumValueLiteral, InvalidNullLiteral,
     Unclosed, UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen,
     UnexpectedEot, UnexpectedKeyword, UnexpectedToken, UnknownLexeme, IncompleteSyntax,
   },
@@ -364,7 +364,7 @@ impl<S, T, Char, SyntaxKind, StateError> IntoIterator
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn into_iter(self) -> Self::IntoIter {
-    self.0.into_iter()
+    IntoIterator::into_iter(self.0)
   }
 }
 

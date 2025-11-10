@@ -1,7 +1,7 @@
 
 use derive_more::Display;
 use logosky::utils::{
-  FrozenGenericVec, GenericVec,
+  GenericArrayDeque,
   human_display::DisplayHuman,
   syntax::Syntax,
   typenum::{U1, U2, U3, U4, U5, U6, U7, U8},
@@ -790,18 +790,24 @@ impl Syntax for NamedTypeSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedTypeComponent::Name);
-    vec.push(NamedTypeComponent::TypeGenerics);
-    vec.push(NamedTypeComponent::Bang);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<NamedTypeComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedTypeComponent::Name);
+      deque.push_back(NamedTypeComponent::TypeGenerics);
+      deque.push_back(NamedTypeComponent::Bang);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedTypeComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<NamedTypeComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedTypeComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -823,21 +829,27 @@ impl Syntax for ListTypeSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ListTypeComponent::LBracket);
-    vec.push(ListTypeComponent::ElementType);
-    vec.push(ListTypeComponent::RBracket);
-    vec.push(ListTypeComponent::Bang);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ListTypeComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ListTypeComponent::LBracket);
+      deque.push_back(ListTypeComponent::ElementType);
+      deque.push_back(ListTypeComponent::RBracket);
+      deque.push_back(ListTypeComponent::Bang);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ListTypeComponent::LBracket);
-    vec.push(ListTypeComponent::ElementType);
-    vec.push(ListTypeComponent::RBracket);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ListTypeComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ListTypeComponent::LBracket);
+      deque.push_back(ListTypeComponent::ElementType);
+      deque.push_back(ListTypeComponent::RBracket);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -871,21 +883,27 @@ impl Syntax for SetTypeSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(SetTypeComponent::LAngle);
-    vec.push(SetTypeComponent::ElementType);
-    vec.push(SetTypeComponent::RAngle);
-    vec.push(SetTypeComponent::Bang);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<SetTypeComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(SetTypeComponent::LAngle);
+      deque.push_back(SetTypeComponent::ElementType);
+      deque.push_back(SetTypeComponent::RAngle);
+      deque.push_back(SetTypeComponent::Bang);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(SetTypeComponent::LAngle);
-    vec.push(SetTypeComponent::ElementType);
-    vec.push(SetTypeComponent::RAngle);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<SetTypeComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(SetTypeComponent::LAngle);
+      deque.push_back(SetTypeComponent::ElementType);
+      deque.push_back(SetTypeComponent::RAngle);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -907,25 +925,31 @@ impl Syntax for MapTypeSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U5;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(MapTypeComponent::LAngle);
-    vec.push(MapTypeComponent::KeyType);
-    vec.push(MapTypeComponent::FatArrow);
-    vec.push(MapTypeComponent::ValueType);
-    vec.push(MapTypeComponent::RAngle);
-    vec.push(MapTypeComponent::Bang);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<MapTypeComponent, U6> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(MapTypeComponent::LAngle);
+      deque.push_back(MapTypeComponent::KeyType);
+      deque.push_back(MapTypeComponent::FatArrow);
+      deque.push_back(MapTypeComponent::ValueType);
+      deque.push_back(MapTypeComponent::RAngle);
+      deque.push_back(MapTypeComponent::Bang);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(MapTypeComponent::LAngle);
-    vec.push(MapTypeComponent::KeyType);
-    vec.push(MapTypeComponent::FatArrow);
-    vec.push(MapTypeComponent::ValueType);
-    vec.push(MapTypeComponent::RAngle);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<MapTypeComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(MapTypeComponent::LAngle);
+      deque.push_back(MapTypeComponent::KeyType);
+      deque.push_back(MapTypeComponent::FatArrow);
+      deque.push_back(MapTypeComponent::ValueType);
+      deque.push_back(MapTypeComponent::RAngle);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -951,17 +975,23 @@ impl Syntax for PathSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(PathComponent::PathSeparator);
-    vec.push(PathComponent::Segments);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<PathComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(PathComponent::PathSeparator);
+      deque.push_back(PathComponent::Segments);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(PathComponent::Segments);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<PathComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(PathComponent::Segments);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -983,17 +1013,23 @@ impl Syntax for TypePathSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(TypePathComponent::Path);
-    vec.push(TypePathComponent::TypeGenerics);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<TypePathComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypePathComponent::Path);
+      deque.push_back(TypePathComponent::TypeGenerics);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(TypePathComponent::Path);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<TypePathComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypePathComponent::Path);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1015,17 +1051,23 @@ impl Syntax for DefinitionTypePathSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(DefinitionTypePathComponent::Path);
-    vec.push(DefinitionTypePathComponent::DefinitionTypeGenerics);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<DefinitionTypePathComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(DefinitionTypePathComponent::Path);
+      deque.push_back(DefinitionTypePathComponent::DefinitionTypeGenerics);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(DefinitionTypePathComponent::Path);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<DefinitionTypePathComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(DefinitionTypePathComponent::Path);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1047,16 +1089,22 @@ impl Syntax for PathSegmentSyntax {
   type COMPONENTS = U1;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(PathSegmentComponent::Identifier);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<PathSegmentComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(PathSegmentComponent::Identifier);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(PathSegmentComponent::Identifier);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<PathSegmentComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(PathSegmentComponent::Identifier);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1082,18 +1130,24 @@ impl Syntax for TypeParameterSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeParameterComponent::Name);
-    vec.push(TypeParameterComponent::TypeConstraint);
-    vec.push(TypeParameterComponent::DefaultType);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<TypeParameterComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeParameterComponent::Name);
+      deque.push_back(TypeParameterComponent::TypeConstraint);
+      deque.push_back(TypeParameterComponent::DefaultType);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeParameterComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<TypeParameterComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeParameterComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1127,20 +1181,26 @@ impl Syntax for TypeGenericsSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeGenericsComponent::LAngle);
-    vec.push(TypeGenericsComponent::TypeArguments);
-    vec.push(TypeGenericsComponent::RAngle);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<TypeGenericsComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeGenericsComponent::LAngle);
+      deque.push_back(TypeGenericsComponent::TypeArguments);
+      deque.push_back(TypeGenericsComponent::RAngle);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeGenericsComponent::LAngle);
-    vec.push(TypeGenericsComponent::TypeArguments);
-    vec.push(TypeGenericsComponent::RAngle);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<TypeGenericsComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeGenericsComponent::LAngle);
+      deque.push_back(TypeGenericsComponent::TypeArguments);
+      deque.push_back(TypeGenericsComponent::RAngle);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1198,18 +1258,24 @@ impl Syntax for WhereClauseSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(WhereClauseComponent::WhereKeyword);
-    vec.push(WhereClauseComponent::WherePredicates);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<WhereClauseComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(WhereClauseComponent::WhereKeyword);
+      deque.push_back(WhereClauseComponent::WherePredicates);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(WhereClauseComponent::WhereKeyword);
-    vec.push(WhereClauseComponent::WherePredicates);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<WhereClauseComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(WhereClauseComponent::WhereKeyword);
+      deque.push_back(WhereClauseComponent::WherePredicates);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1231,20 +1297,26 @@ impl Syntax for WherePredicateSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(WherePredicateComponent::TypeParameter);
-    vec.push(WherePredicateComponent::Colon);
-    vec.push(WherePredicateComponent::TypeBounds);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<WherePredicateComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(WherePredicateComponent::TypeParameter);
+      deque.push_back(WherePredicateComponent::Colon);
+      deque.push_back(WherePredicateComponent::TypeBounds);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(WherePredicateComponent::TypeParameter);
-    vec.push(WherePredicateComponent::Colon);
-    vec.push(WherePredicateComponent::TypeBounds);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<WherePredicateComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(WherePredicateComponent::TypeParameter);
+      deque.push_back(WherePredicateComponent::Colon);
+      deque.push_back(WherePredicateComponent::TypeBounds);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1306,22 +1378,28 @@ impl Syntax for ImportDefinitionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U4;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ImportDefinitionComponent::ImportKeyword);
-    vec.push(ImportDefinitionComponent::ImportClause);
-    vec.push(ImportDefinitionComponent::FromKeyword);
-    vec.push(ImportDefinitionComponent::ModulePath);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ImportDefinitionComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ImportDefinitionComponent::ImportKeyword);
+      deque.push_back(ImportDefinitionComponent::ImportClause);
+      deque.push_back(ImportDefinitionComponent::FromKeyword);
+      deque.push_back(ImportDefinitionComponent::ModulePath);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ImportDefinitionComponent::ImportKeyword);
-    vec.push(ImportDefinitionComponent::ImportClause);
-    vec.push(ImportDefinitionComponent::FromKeyword);
-    vec.push(ImportDefinitionComponent::ModulePath);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ImportDefinitionComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ImportDefinitionComponent::ImportKeyword);
+      deque.push_back(ImportDefinitionComponent::ImportClause);
+      deque.push_back(ImportDefinitionComponent::FromKeyword);
+      deque.push_back(ImportDefinitionComponent::ModulePath);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1343,17 +1421,23 @@ impl Syntax for ImportClauseSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ImportClauseComponent::ImportList);
-    vec.push(ImportClauseComponent::WildcardSpecifier);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ImportClauseComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ImportClauseComponent::ImportList);
+      deque.push_back(ImportClauseComponent::WildcardSpecifier);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ImportClauseComponent::ImportList);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ImportClauseComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ImportClauseComponent::ImportList);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1399,18 +1483,24 @@ impl Syntax for NamedSpecifierSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedSpecifierComponent::ImportedName);
-    vec.push(NamedSpecifierComponent::AsKeyword);
-    vec.push(NamedSpecifierComponent::LocalName);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<NamedSpecifierComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedSpecifierComponent::ImportedName);
+      deque.push_back(NamedSpecifierComponent::AsKeyword);
+      deque.push_back(NamedSpecifierComponent::LocalName);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedSpecifierComponent::ImportedName);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<NamedSpecifierComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedSpecifierComponent::ImportedName);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1551,23 +1641,29 @@ impl Syntax for ScalarTypeExtensionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ScalarTypeExtensionComponent::ExtendKeyword);
-    vec.push(ScalarTypeExtensionComponent::ScalarKeyword);
-    vec.push(ScalarTypeExtensionComponent::Name);
-    vec.push(ScalarTypeExtensionComponent::TypeParameters);
-    vec.push(ScalarTypeExtensionComponent::WhereClause);
-    vec.push(ScalarTypeExtensionComponent::Directives);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ScalarTypeExtensionComponent, U6> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ScalarTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(ScalarTypeExtensionComponent::ScalarKeyword);
+      deque.push_back(ScalarTypeExtensionComponent::Name);
+      deque.push_back(ScalarTypeExtensionComponent::TypeParameters);
+      deque.push_back(ScalarTypeExtensionComponent::WhereClause);
+      deque.push_back(ScalarTypeExtensionComponent::Directives);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ScalarTypeExtensionComponent::ExtendKeyword);
-    vec.push(ScalarTypeExtensionComponent::ScalarKeyword);
-    vec.push(ScalarTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ScalarTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ScalarTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(ScalarTypeExtensionComponent::ScalarKeyword);
+      deque.push_back(ScalarTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1589,25 +1685,31 @@ impl Syntax for ObjectTypeExtensionSyntax {
   type COMPONENTS = U8;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ObjectTypeExtensionComponent::ExtendKeyword);
-    vec.push(ObjectTypeExtensionComponent::TypeKeyword);
-    vec.push(ObjectTypeExtensionComponent::Name);
-    vec.push(ObjectTypeExtensionComponent::TypeParameters);
-    vec.push(ObjectTypeExtensionComponent::ImplementsInterfaces);
-    vec.push(ObjectTypeExtensionComponent::WhereClause);
-    vec.push(ObjectTypeExtensionComponent::Directives);
-    vec.push(ObjectTypeExtensionComponent::FieldsDefinition);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ObjectTypeExtensionComponent, U8> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ObjectTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(ObjectTypeExtensionComponent::TypeKeyword);
+      deque.push_back(ObjectTypeExtensionComponent::Name);
+      deque.push_back(ObjectTypeExtensionComponent::TypeParameters);
+      deque.push_back(ObjectTypeExtensionComponent::ImplementsInterfaces);
+      deque.push_back(ObjectTypeExtensionComponent::WhereClause);
+      deque.push_back(ObjectTypeExtensionComponent::Directives);
+      deque.push_back(ObjectTypeExtensionComponent::FieldsDefinition);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ObjectTypeExtensionComponent::ExtendKeyword);
-    vec.push(ObjectTypeExtensionComponent::TypeKeyword);
-    vec.push(ObjectTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ObjectTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ObjectTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(ObjectTypeExtensionComponent::TypeKeyword);
+      deque.push_back(ObjectTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1629,25 +1731,31 @@ impl Syntax for InterfaceTypeExtensionSyntax {
   type COMPONENTS = U8;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(InterfaceTypeExtensionComponent::ExtendKeyword);
-    vec.push(InterfaceTypeExtensionComponent::InterfaceKeyword);
-    vec.push(InterfaceTypeExtensionComponent::Name);
-    vec.push(InterfaceTypeExtensionComponent::TypeParameters);
-    vec.push(InterfaceTypeExtensionComponent::ImplementsInterfaces);
-    vec.push(InterfaceTypeExtensionComponent::WhereClause);
-    vec.push(InterfaceTypeExtensionComponent::Directives);
-    vec.push(InterfaceTypeExtensionComponent::FieldsDefinition);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<InterfaceTypeExtensionComponent, U8> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InterfaceTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(InterfaceTypeExtensionComponent::InterfaceKeyword);
+      deque.push_back(InterfaceTypeExtensionComponent::Name);
+      deque.push_back(InterfaceTypeExtensionComponent::TypeParameters);
+      deque.push_back(InterfaceTypeExtensionComponent::ImplementsInterfaces);
+      deque.push_back(InterfaceTypeExtensionComponent::WhereClause);
+      deque.push_back(InterfaceTypeExtensionComponent::Directives);
+      deque.push_back(InterfaceTypeExtensionComponent::FieldsDefinition);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(InterfaceTypeExtensionComponent::ExtendKeyword);
-    vec.push(InterfaceTypeExtensionComponent::InterfaceKeyword);
-    vec.push(InterfaceTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<InterfaceTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InterfaceTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(InterfaceTypeExtensionComponent::InterfaceKeyword);
+      deque.push_back(InterfaceTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1669,24 +1777,30 @@ impl Syntax for UnionTypeExtensionSyntax {
   type COMPONENTS = U7;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(UnionTypeExtensionComponent::ExtendKeyword);
-    vec.push(UnionTypeExtensionComponent::UnionKeyword);
-    vec.push(UnionTypeExtensionComponent::Name);
-    vec.push(UnionTypeExtensionComponent::TypeParameters);
-    vec.push(UnionTypeExtensionComponent::WhereClause);
-    vec.push(UnionTypeExtensionComponent::Directives);
-    vec.push(UnionTypeExtensionComponent::UnionMembers);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<UnionTypeExtensionComponent, U7> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(UnionTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(UnionTypeExtensionComponent::UnionKeyword);
+      deque.push_back(UnionTypeExtensionComponent::Name);
+      deque.push_back(UnionTypeExtensionComponent::TypeParameters);
+      deque.push_back(UnionTypeExtensionComponent::WhereClause);
+      deque.push_back(UnionTypeExtensionComponent::Directives);
+      deque.push_back(UnionTypeExtensionComponent::UnionMembers);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(UnionTypeExtensionComponent::ExtendKeyword);
-    vec.push(UnionTypeExtensionComponent::UnionKeyword);
-    vec.push(UnionTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<UnionTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(UnionTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(UnionTypeExtensionComponent::UnionKeyword);
+      deque.push_back(UnionTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1708,22 +1822,28 @@ impl Syntax for EnumTypeExtensionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(EnumTypeExtensionComponent::ExtendKeyword);
-    vec.push(EnumTypeExtensionComponent::EnumKeyword);
-    vec.push(EnumTypeExtensionComponent::Name);
-    vec.push(EnumTypeExtensionComponent::Directives);
-    vec.push(EnumTypeExtensionComponent::EnumValuesDefinition);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<EnumTypeExtensionComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(EnumTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(EnumTypeExtensionComponent::EnumKeyword);
+      deque.push_back(EnumTypeExtensionComponent::Name);
+      deque.push_back(EnumTypeExtensionComponent::Directives);
+      deque.push_back(EnumTypeExtensionComponent::EnumValuesDefinition);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(EnumTypeExtensionComponent::ExtendKeyword);
-    vec.push(EnumTypeExtensionComponent::EnumKeyword);
-    vec.push(EnumTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<EnumTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(EnumTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(EnumTypeExtensionComponent::EnumKeyword);
+      deque.push_back(EnumTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1745,24 +1865,30 @@ impl Syntax for InputObjectTypeExtensionSyntax {
   type COMPONENTS = U7;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(InputObjectTypeExtensionComponent::ExtendKeyword);
-    vec.push(InputObjectTypeExtensionComponent::InputKeyword);
-    vec.push(InputObjectTypeExtensionComponent::Name);
-    vec.push(InputObjectTypeExtensionComponent::TypeParameters);
-    vec.push(InputObjectTypeExtensionComponent::WhereClause);
-    vec.push(InputObjectTypeExtensionComponent::Directives);
-    vec.push(InputObjectTypeExtensionComponent::InputFieldsDefinition);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<InputObjectTypeExtensionComponent, U7> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InputObjectTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(InputObjectTypeExtensionComponent::InputKeyword);
+      deque.push_back(InputObjectTypeExtensionComponent::Name);
+      deque.push_back(InputObjectTypeExtensionComponent::TypeParameters);
+      deque.push_back(InputObjectTypeExtensionComponent::WhereClause);
+      deque.push_back(InputObjectTypeExtensionComponent::Directives);
+      deque.push_back(InputObjectTypeExtensionComponent::InputFieldsDefinition);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(InputObjectTypeExtensionComponent::ExtendKeyword);
-    vec.push(InputObjectTypeExtensionComponent::InputKeyword);
-    vec.push(InputObjectTypeExtensionComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<InputObjectTypeExtensionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InputObjectTypeExtensionComponent::ExtendKeyword);
+      deque.push_back(InputObjectTypeExtensionComponent::InputKeyword);
+      deque.push_back(InputObjectTypeExtensionComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1800,22 +1926,28 @@ impl Syntax for FieldDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(FieldDefinitionComponent::Name);
-    vec.push(FieldDefinitionComponent::ArgumentsDefinition);
-    vec.push(FieldDefinitionComponent::Colon);
-    vec.push(FieldDefinitionComponent::Type);
-    vec.push(FieldDefinitionComponent::Directives);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<FieldDefinitionComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FieldDefinitionComponent::Name);
+      deque.push_back(FieldDefinitionComponent::ArgumentsDefinition);
+      deque.push_back(FieldDefinitionComponent::Colon);
+      deque.push_back(FieldDefinitionComponent::Type);
+      deque.push_back(FieldDefinitionComponent::Directives);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(FieldDefinitionComponent::Name);
-    vec.push(FieldDefinitionComponent::Colon);
-    vec.push(FieldDefinitionComponent::Type);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<FieldDefinitionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FieldDefinitionComponent::Name);
+      deque.push_back(FieldDefinitionComponent::Colon);
+      deque.push_back(FieldDefinitionComponent::Type);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1849,22 +1981,28 @@ impl Syntax for InputValueDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(InputValueDefinitionComponent::Name);
-    vec.push(InputValueDefinitionComponent::Colon);
-    vec.push(InputValueDefinitionComponent::Type);
-    vec.push(InputValueDefinitionComponent::DefaultValue);
-    vec.push(InputValueDefinitionComponent::Directives);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<InputValueDefinitionComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InputValueDefinitionComponent::Name);
+      deque.push_back(InputValueDefinitionComponent::Colon);
+      deque.push_back(InputValueDefinitionComponent::Type);
+      deque.push_back(InputValueDefinitionComponent::DefaultValue);
+      deque.push_back(InputValueDefinitionComponent::Directives);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(InputValueDefinitionComponent::Name);
-    vec.push(InputValueDefinitionComponent::Colon);
-    vec.push(InputValueDefinitionComponent::Type);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<InputValueDefinitionComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InputValueDefinitionComponent::Name);
+      deque.push_back(InputValueDefinitionComponent::Colon);
+      deque.push_back(InputValueDefinitionComponent::Type);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -1926,19 +2064,25 @@ impl Syntax for DirectiveSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(DirectiveComponent::At);
-    vec.push(DirectiveComponent::Name);
-    vec.push(DirectiveComponent::Arguments);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<DirectiveComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(DirectiveComponent::At);
+      deque.push_back(DirectiveComponent::Name);
+      deque.push_back(DirectiveComponent::Arguments);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(DirectiveComponent::At);
-    vec.push(DirectiveComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<DirectiveComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(DirectiveComponent::At);
+      deque.push_back(DirectiveComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2012,20 +2156,26 @@ impl Syntax for SchemaExtensionSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(SchemaExtensionComponent::ExtendKeyword);
-    vec.push(SchemaExtensionComponent::SchemaKeyword);
-    vec.push(SchemaExtensionComponent::Directives);
-    vec.push(SchemaExtensionComponent::RootOperationTypesDefinition);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<SchemaExtensionComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(SchemaExtensionComponent::ExtendKeyword);
+      deque.push_back(SchemaExtensionComponent::SchemaKeyword);
+      deque.push_back(SchemaExtensionComponent::Directives);
+      deque.push_back(SchemaExtensionComponent::RootOperationTypesDefinition);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(SchemaExtensionComponent::ExtendKeyword);
-    vec.push(SchemaExtensionComponent::SchemaKeyword);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<SchemaExtensionComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(SchemaExtensionComponent::ExtendKeyword);
+      deque.push_back(SchemaExtensionComponent::SchemaKeyword);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2159,22 +2309,28 @@ impl Syntax for NamedOperationDefinitionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedOperationDefinitionComponent::OperationType);
-    vec.push(NamedOperationDefinitionComponent::Name);
-    vec.push(NamedOperationDefinitionComponent::TypeParameters);
-    vec.push(NamedOperationDefinitionComponent::VariablesDefinition);
-    vec.push(NamedOperationDefinitionComponent::Directives);
-    vec.push(NamedOperationDefinitionComponent::SelectionSet);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<NamedOperationDefinitionComponent, U6> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedOperationDefinitionComponent::OperationType);
+      deque.push_back(NamedOperationDefinitionComponent::Name);
+      deque.push_back(NamedOperationDefinitionComponent::TypeParameters);
+      deque.push_back(NamedOperationDefinitionComponent::VariablesDefinition);
+      deque.push_back(NamedOperationDefinitionComponent::Directives);
+      deque.push_back(NamedOperationDefinitionComponent::SelectionSet);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(NamedOperationDefinitionComponent::OperationType);
-    vec.push(NamedOperationDefinitionComponent::SelectionSet);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<NamedOperationDefinitionComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(NamedOperationDefinitionComponent::OperationType);
+      deque.push_back(NamedOperationDefinitionComponent::SelectionSet);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2196,23 +2352,29 @@ impl Syntax for FragmentDefinitionSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U4;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(FragmentDefinitionComponent::FragmentKeyword);
-    vec.push(FragmentDefinitionComponent::FragmentTypePath);
-    vec.push(FragmentDefinitionComponent::TypeCondition);
-    vec.push(FragmentDefinitionComponent::Directives);
-    vec.push(FragmentDefinitionComponent::SelectionSet);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<FragmentDefinitionComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FragmentDefinitionComponent::FragmentKeyword);
+      deque.push_back(FragmentDefinitionComponent::FragmentTypePath);
+      deque.push_back(FragmentDefinitionComponent::TypeCondition);
+      deque.push_back(FragmentDefinitionComponent::Directives);
+      deque.push_back(FragmentDefinitionComponent::SelectionSet);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(FragmentDefinitionComponent::FragmentKeyword);
-    vec.push(FragmentDefinitionComponent::FragmentTypePath);
-    vec.push(FragmentDefinitionComponent::TypeCondition);
-    vec.push(FragmentDefinitionComponent::SelectionSet);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<FragmentDefinitionComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FragmentDefinitionComponent::FragmentKeyword);
+      deque.push_back(FragmentDefinitionComponent::FragmentTypePath);
+      deque.push_back(FragmentDefinitionComponent::TypeCondition);
+      deque.push_back(FragmentDefinitionComponent::SelectionSet);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2234,19 +2396,25 @@ impl Syntax for FragmentSpreadSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(FragmentSpreadComponent::Spread);
-    vec.push(FragmentSpreadComponent::FragmentTypePath);
-    vec.push(FragmentSpreadComponent::Directives);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<FragmentSpreadComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FragmentSpreadComponent::Spread);
+      deque.push_back(FragmentSpreadComponent::FragmentTypePath);
+      deque.push_back(FragmentSpreadComponent::Directives);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(FragmentSpreadComponent::Spread);
-    vec.push(FragmentSpreadComponent::FragmentTypePath);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<FragmentSpreadComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FragmentSpreadComponent::Spread);
+      deque.push_back(FragmentSpreadComponent::FragmentTypePath);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2268,20 +2436,26 @@ impl Syntax for InlineFragmentSyntax {
   type COMPONENTS = U4;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(InlineFragmentComponent::Spread);
-    vec.push(InlineFragmentComponent::TypeCondition);
-    vec.push(InlineFragmentComponent::Directives);
-    vec.push(InlineFragmentComponent::SelectionSet);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<InlineFragmentComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InlineFragmentComponent::Spread);
+      deque.push_back(InlineFragmentComponent::TypeCondition);
+      deque.push_back(InlineFragmentComponent::Directives);
+      deque.push_back(InlineFragmentComponent::SelectionSet);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(InlineFragmentComponent::Spread);
-    vec.push(InlineFragmentComponent::SelectionSet);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<InlineFragmentComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(InlineFragmentComponent::Spread);
+      deque.push_back(InlineFragmentComponent::SelectionSet);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2307,20 +2481,26 @@ impl Syntax for FieldSyntax {
   type COMPONENTS = U5;
   type REQUIRED = U1;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(FieldComponent::Alias);
-    vec.push(FieldComponent::Name);
-    vec.push(FieldComponent::Arguments);
-    vec.push(FieldComponent::Directives);
-    vec.push(FieldComponent::SelectionSet);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<FieldComponent, U5> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FieldComponent::Alias);
+      deque.push_back(FieldComponent::Name);
+      deque.push_back(FieldComponent::Arguments);
+      deque.push_back(FieldComponent::Directives);
+      deque.push_back(FieldComponent::SelectionSet);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(FieldComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<FieldComponent, U1> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(FieldComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2370,24 +2550,30 @@ impl Syntax for VariableDefinitionSyntax {
   type COMPONENTS = U6;
   type REQUIRED = U4;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(VariableDefinitionComponent::Dollar);
-    vec.push(VariableDefinitionComponent::Variable);
-    vec.push(VariableDefinitionComponent::Colon);
-    vec.push(VariableDefinitionComponent::Type);
-    vec.push(VariableDefinitionComponent::DefaultValue);
-    vec.push(VariableDefinitionComponent::Directives);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<VariableDefinitionComponent, U6> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(VariableDefinitionComponent::Dollar);
+      deque.push_back(VariableDefinitionComponent::Variable);
+      deque.push_back(VariableDefinitionComponent::Colon);
+      deque.push_back(VariableDefinitionComponent::Type);
+      deque.push_back(VariableDefinitionComponent::DefaultValue);
+      deque.push_back(VariableDefinitionComponent::Directives);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(VariableDefinitionComponent::Dollar);
-    vec.push(VariableDefinitionComponent::Variable);
-    vec.push(VariableDefinitionComponent::Colon);
-    vec.push(VariableDefinitionComponent::Type);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<VariableDefinitionComponent, U4> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(VariableDefinitionComponent::Dollar);
+      deque.push_back(VariableDefinitionComponent::Variable);
+      deque.push_back(VariableDefinitionComponent::Colon);
+      deque.push_back(VariableDefinitionComponent::Type);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2421,18 +2607,24 @@ impl Syntax for VariableValueSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(VariableValueComponent::Dollar);
-    vec.push(VariableValueComponent::Name);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<VariableValueComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(VariableValueComponent::Dollar);
+      deque.push_back(VariableValueComponent::Name);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(VariableValueComponent::Dollar);
-    vec.push(VariableValueComponent::Name);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<VariableValueComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(VariableValueComponent::Dollar);
+      deque.push_back(VariableValueComponent::Name);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2458,20 +2650,26 @@ impl Syntax for ArgumentSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ArgumentComponent::Name);
-    vec.push(ArgumentComponent::Colon);
-    vec.push(ArgumentComponent::Value);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ArgumentComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ArgumentComponent::Name);
+      deque.push_back(ArgumentComponent::Colon);
+      deque.push_back(ArgumentComponent::Value);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ArgumentComponent::Name);
-    vec.push(ArgumentComponent::Colon);
-    vec.push(ArgumentComponent::Value);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ArgumentComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ArgumentComponent::Name);
+      deque.push_back(ArgumentComponent::Colon);
+      deque.push_back(ArgumentComponent::Value);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2605,20 +2803,26 @@ impl Syntax for MapEntrySyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(MapEntryComponent::Key);
-    vec.push(MapEntryComponent::FatArrow);
-    vec.push(MapEntryComponent::Value);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<MapEntryComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(MapEntryComponent::Key);
+      deque.push_back(MapEntryComponent::FatArrow);
+      deque.push_back(MapEntryComponent::Value);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(MapEntryComponent::Key);
-    vec.push(MapEntryComponent::FatArrow);
-    vec.push(MapEntryComponent::Value);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<MapEntryComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(MapEntryComponent::Key);
+      deque.push_back(MapEntryComponent::FatArrow);
+      deque.push_back(MapEntryComponent::Value);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2652,20 +2856,26 @@ impl Syntax for ObjectFieldSyntax {
   type COMPONENTS = U3;
   type REQUIRED = U3;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(ObjectFieldComponent::Name);
-    vec.push(ObjectFieldComponent::Colon);
-    vec.push(ObjectFieldComponent::Value);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<ObjectFieldComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ObjectFieldComponent::Name);
+      deque.push_back(ObjectFieldComponent::Colon);
+      deque.push_back(ObjectFieldComponent::Value);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(ObjectFieldComponent::Name);
-    vec.push(ObjectFieldComponent::Colon);
-    vec.push(ObjectFieldComponent::Value);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<ObjectFieldComponent, U3> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(ObjectFieldComponent::Name);
+      deque.push_back(ObjectFieldComponent::Colon);
+      deque.push_back(ObjectFieldComponent::Value);
+      deque
+    };
+    &REQUIRED
   }
 }
 
@@ -2691,18 +2901,24 @@ impl Syntax for TypeConditionSyntax {
   type COMPONENTS = U2;
   type REQUIRED = U2;
 
-  fn possible_components() -> FrozenGenericVec<Self::Component, Self::COMPONENTS> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeConditionComponent::OnKeyword);
-    vec.push(TypeConditionComponent::NamedType);
-    vec.freeze()
+  fn possible_components() -> &'static GenericArrayDeque<Self::Component, Self::COMPONENTS> {
+    static COMPONENTS: GenericArrayDeque<TypeConditionComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeConditionComponent::OnKeyword);
+      deque.push_back(TypeConditionComponent::NamedType);
+      deque
+    };
+    &COMPONENTS
   }
 
-  fn required_components() -> FrozenGenericVec<Self::Component, Self::REQUIRED> {
-    let mut vec = GenericVec::new();
-    vec.push(TypeConditionComponent::OnKeyword);
-    vec.push(TypeConditionComponent::NamedType);
-    vec.freeze()
+  fn required_components() -> &'static GenericArrayDeque<Self::Component, Self::REQUIRED> {
+    static REQUIRED: GenericArrayDeque<TypeConditionComponent, U2> = {
+      let mut deque = GenericArrayDeque::new();
+      deque.push_back(TypeConditionComponent::OnKeyword);
+      deque.push_back(TypeConditionComponent::NamedType);
+      deque
+    };
+    &REQUIRED
   }
 }
 
