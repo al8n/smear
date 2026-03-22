@@ -19,15 +19,15 @@ graphql = []
 graphqlx = ["unstable"]
 smallvec = ["dep:smallvec"]
 
-bytes = ["dep:bytes", "logosky/bytes"]
-bstr = ["dep:bstr", "logosky/bstr"]
-hipstr = ["dep:hipstr", "logosky/hipstr"]
+bytes = ["dep:bytes", "tokit/bytes_1"]
+bstr = ["dep:bstr", "tokit/bstr_1"]
+hipstr = ["dep:hipstr", "tokit/hipstr_0_8"]
 
 [dependencies]
 derive_more.workspace = true
 paste = "1"
 thiserror.workspace = true
-logosky.workspace = true
+tokit.workspace = true
 
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
