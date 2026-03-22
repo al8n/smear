@@ -28,7 +28,7 @@ derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
 thiserror.workspace = true
-tokit = { workspace = true, features = ["either"] }
+tokit.workspace = true
 smear-lexer.workspace = true
 smear-scaffold.workspace = true
 smear-parser.workspace = true
