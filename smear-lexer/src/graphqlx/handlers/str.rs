@@ -1,8 +1,9 @@
 use super::error;
-use logosky::{
-  Source,
-  logos::{Lexer, Logos},
-  utils::{Lexeme, UnexpectedEnd, tracker::Tracker},
+use tokit::{
+  logos::{Lexer, Logos, Source},
+  error::UnexpectedEnd,
+  utils::Lexeme,
+  state::tracker::Limiter,
 };
 
 use crate::{
@@ -35,7 +36,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
@@ -289,7 +290,7 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::binary(
       lexer.span().into(),
-      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name("binary".into(), BinaryHint::Digit)),
+      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name(0, "binary".into(), BinaryHint::Digit)),
     ));
     return Err(errs);
   }
@@ -340,7 +341,7 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::octal(
       lexer.span().into(),
-      OctalError::UnexpectedEnd(UnexpectedEnd::with_name("octal".into(), OctalHint::Digit)),
+      OctalError::UnexpectedEnd(UnexpectedEnd::with_name(0, "octal".into(), OctalHint::Digit)),
     ));
     return Err(errs);
   }
@@ -391,7 +392,7 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::hex(
       lexer.span().into(),
-      HexError::UnexpectedEnd(UnexpectedEnd::with_name("hex".into(), HexHint::Digit)),
+      HexError::UnexpectedEnd(UnexpectedEnd::with_name(0, "hex".into(), HexHint::Digit)),
     ));
     return Err(errs);
   }

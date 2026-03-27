@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{Token, utils::tracker::LimitExceeded};
+use tokit::state::tracker::LimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -15,20 +15,18 @@ mod token;
 #[cfg(test)]
 mod tests;
 
-/// The lossless lexer for GraphQL.
-pub type Lexer<'a, S = &'a str> = logosky::TokenStream<'a, LosslessToken<S>>;
+// TODO: Lexer type alias needs migration - LogosLexer requires FromLogos trait
+// pub type Lexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
 
-/// The char type used for the lossless token.
-pub type LosslessTokenChar<'a, S> = <LosslessToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on lossless [`Token`].
-pub type LosslessLexerErrorData<'a, S> =
-  error::LexerErrorData<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// The error type for lexing based on lossless [`Token`].
-pub type LosslessLexerError<'a, S> =
-  error::LexerError<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
-/// A collection of errors for lossless [`Token`].
-pub type LosslessLexerErrors<'a, S> =
-  error::LexerErrors<<LosslessToken<S> as Token<'a>>::Char, LimitExceeded>;
+/// The error data type for lexing based on lossless token with `char` source.
+pub type LosslessLexerErrorData =
+  error::LexerErrorData<char, LimitExceeded>;
+/// The error type for lexing based on lossless token with `char` source.
+pub type LosslessLexerError =
+  error::LexerError<char, LimitExceeded>;
+/// A collection of errors for lossless token with `char` source.
+pub type LosslessLexerErrors =
+  error::LexerErrors<char, LimitExceeded>;
 
 /// A lossless token for GraphQL lexing that preserves all source information including trivia.
 ///
@@ -67,7 +65,7 @@ pub type LosslessLexerErrors<'a, S> =
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::lossless::LosslessToken;
-/// use logosky::TokenStream;
+/// use tokit::lexer::LogosLexer;
 ///
 /// let source = "query { # comment\n  user { id }\n}";
 /// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
@@ -152,6 +150,22 @@ pub enum LosslessToken<S> {
 }
 
 impl<S> LosslessToken<S> {
+  /// Returns `true` if this token is trivia (whitespace, comments, commas, BOM).
+  #[inline]
+  pub const fn is_trivia(&self) -> bool {
+    matches!(
+      self,
+      Self::Space
+        | Self::Tab
+        | Self::Newline
+        | Self::CarriageReturn
+        | Self::CarriageReturnAndNewline
+        | Self::Comment(_)
+        | Self::Comma
+        | Self::Bom(_)
+    )
+  }
+
   /// Returns the kind of the token.
   #[inline]
   pub const fn kind(&self) -> LosslessTokenKind {
@@ -266,4 +280,39 @@ pub enum LosslessTokenKind {
   BlockString,
   /// Comment token
   Comment,
+}
+
+impl core::fmt::Display for LosslessTokenKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Ampersand => f.write_str("&"),
+      Self::At => f.write_str("@"),
+      Self::Bom => f.write_str("BOM"),
+      Self::RBrace => f.write_str("}"),
+      Self::LBrace => f.write_str("{"),
+      Self::RBracket => f.write_str("]"),
+      Self::LBracket => f.write_str("["),
+      Self::RParen => f.write_str(")"),
+      Self::LParen => f.write_str("("),
+      Self::Bang => f.write_str("!"),
+      Self::Colon => f.write_str(":"),
+      Self::Dollar => f.write_str("$"),
+      Self::Equal => f.write_str("="),
+      Self::Space => f.write_str("space"),
+      Self::Tab => f.write_str("tab"),
+      Self::CarriageReturn => f.write_str("\\r"),
+      Self::Newline => f.write_str("\\n"),
+      Self::CarriageReturnAndNewline => f.write_str("\\r\\n"),
+      Self::Comma => f.write_str(","),
+      Self::Pipe => f.write_str("|"),
+      Self::Spread => f.write_str("..."),
+      Self::Float => f.write_str("float"),
+      Self::Boolean => f.write_str("boolean"),
+      Self::Identifier => f.write_str("identifier"),
+      Self::Int => f.write_str("int"),
+      Self::InlineString => f.write_str("string"),
+      Self::BlockString => f.write_str("block string"),
+      Self::Comment => f.write_str("comment"),
+    }
+  }
 }

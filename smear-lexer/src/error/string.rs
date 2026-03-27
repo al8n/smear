@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use tokit::{SimpleSpan, error::{UnexpectedEnd, UnexpectedLexeme}, utils::{Lexeme, PositionedChar, CowStr}};
+
+type Span = SimpleSpan;
 
 use crate::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
 
@@ -30,26 +32,26 @@ impl<Char> InvalidUnicodeHexDigitsRepr<Char> {
   }
 
   #[inline(always)]
-  const fn bump(&mut self, n: usize) -> &mut Self {
+  fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Zero => {}
       Self::One(a) => {
-        a.bump_position(n);
+        a.bump_position(&n);
       }
       Self::Two([a, b]) => {
-        a.bump_position(n);
-        b.bump_position(n);
+        a.bump_position(&n);
+        b.bump_position(&n);
       }
       Self::Three([a, b, c]) => {
-        a.bump_position(n);
-        b.bump_position(n);
-        c.bump_position(n);
+        a.bump_position(&n);
+        b.bump_position(&n);
+        c.bump_position(&n);
       }
       Self::Four([a, b, c, d]) => {
-        a.bump_position(n);
-        b.bump_position(n);
-        c.bump_position(n);
-        d.bump_position(n);
+        a.bump_position(&n);
+        b.bump_position(&n);
+        c.bump_position(&n);
+        d.bump_position(&n);
       }
     }
     self
@@ -127,7 +129,7 @@ impl<Char> InvalidUnicodeHexDigits<Char> {
 
   /// Bumps the position of all characters by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
     self.0.bump(n);
     self
   }
@@ -198,7 +200,7 @@ impl<Char> InvalidUnicodeSequence<Char> {
 
   /// Returns `true` if the sequence also incomplete.
   #[inline(always)]
-  pub const fn is_incomplete(&self) -> bool {
+  pub fn is_incomplete(&self) -> bool {
     self.span.len() < 6 // \u[0-9a-fA-F]{4} is 6 characters long
   }
 
@@ -243,8 +245,8 @@ impl<Char> InvalidUnicodeSequence<Char> {
 
   /// Bumps the span of the invalid unicode sequence by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
-    self.span.bump_span(n);
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump(&n);
     self.digits_mut().bump(n);
     self
   }
@@ -300,8 +302,8 @@ impl InvalidUnicodeScalarValue {
 
   /// Bumps the span of the invalid unicode scalar value by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
-    self.span.bump_span(n);
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump(&n);
     self
   }
 
@@ -377,19 +379,19 @@ impl BracedUnicodeEscapeError {
 
   /// Bumps the span of the error by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Unclosed(span) => {
-        span.bump_span(n);
+        span.bump(&n);
       }
       Self::Empty(span) => {
-        span.bump_span(n);
+        span.bump(&n);
       }
       Self::TooManyDigits { span, .. } => {
-        span.bump_span(n);
+        span.bump(&n);
       }
       Self::InvalidSequence(span) => {
-        span.bump_span(n);
+        span.bump(&n);
       }
       Self::InvalidScalar(err) => {
         err.bump(n);
@@ -428,16 +430,16 @@ impl<Char> FixedUnicodeEscapeError<Char> {
 
   /// Bumps the span or position of the error by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Incomplete(lexeme) => {
-        lexeme.bump(n);
+        lexeme.bump(&n);
       }
       Self::InvalidSequence(seq) => {
         seq.bump(n);
       }
       Self::UnpairedSurrogate(lexeme) => {
-        lexeme.bump(n);
+        lexeme.bump(&n);
       }
     }
     self
@@ -523,7 +525,7 @@ impl<Char> UnicodeError<Char> {
 
   /// Bumps the span or position of the error by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Fixed(err) => {
         err.bump(n);
@@ -597,9 +599,9 @@ impl<Char> EscapedCharacter<Char> {
 
   /// Bumps the span and the position of the character by `n`.
   #[inline]
-  pub(crate) const fn bump(&mut self, n: usize) -> &mut Self {
-    self.span.bump_span(n);
-    self.char.bump_position(n);
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump(&n);
+    self.char.bump_position(&n);
     self
   }
 }
@@ -637,8 +639,8 @@ impl<Char> StringError<Char> {
   /// Creates an unterminated string error.
   #[inline]
   pub const fn unterminated_inline_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(
-      Cow::Borrowed("string value"),
+    Self::Unterminated(UnexpectedEnd::with_name(0,
+      CowStr::from_static("string value"),
       LitStrDelimiterHint::Quote,
     ))
   }
@@ -646,8 +648,8 @@ impl<Char> StringError<Char> {
   /// Creates an unterminated block string error.
   #[inline]
   pub const fn unterminated_block_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(
-      Cow::Borrowed("string value"),
+    Self::Unterminated(UnexpectedEnd::with_name(0,
+      CowStr::from_static("string value"),
       LitStrDelimiterHint::TripleQuote,
     ))
   }
@@ -655,7 +657,7 @@ impl<Char> StringError<Char> {
   /// Creates an expected open delimiter error.
   #[inline]
   pub const fn unopened_string(ch: Option<Char>, position: usize) -> Self {
-    Self::Unopened(UnexpectedLexeme::from_char(
+    Self::Unopened(UnexpectedLexeme::from_positioned_char(
       PositionedChar::with_position(ch, position),
       LitStrDelimiterHint::QuoteOrTripleQuote,
     ))
@@ -664,7 +666,7 @@ impl<Char> StringError<Char> {
   /// Creates an unexpected new line error.
   #[inline]
   pub const fn unexpected_new_line(ch: Char, position: usize) -> Self {
-    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
       PositionedChar::with_position(ch, position),
       LineTerminatorHint::NewLine,
     ))
@@ -673,7 +675,7 @@ impl<Char> StringError<Char> {
   /// Creates an unexpected carriage return error.
   #[inline]
   pub const fn unexpected_carriage_return(ch: Char, position: usize) -> Self {
-    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_char(
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
       PositionedChar::with_position(ch, position),
       LineTerminatorHint::CarriageReturn,
     ))
@@ -682,7 +684,7 @@ impl<Char> StringError<Char> {
   /// Creates an unexpected carriage return + new line error.
   #[inline]
   pub const fn unexpected_carriage_return_new_line(span: Span) -> Self {
-    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_span_const(
+    Self::UnexpectedLineTerminator(UnexpectedLexeme::from_range_const(
       span,
       LineTerminatorHint::CarriageReturnNewLine,
     ))
@@ -702,16 +704,16 @@ impl<Char> StringError<Char> {
   pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
     match self {
       Self::Unopened(lexeme) => {
-        lexeme.bump(n);
+        lexeme.bump(&n);
       }
       Self::UnexpectedLineTerminator(lexeme) => {
-        lexeme.bump(n);
+        lexeme.bump(&n);
       }
       Self::UnexpectedEscapedCharacter(esc_char) => {
         esc_char.bump(n);
       }
       Self::UnsupportedCharacter(ch) => {
-        ch.bump(n);
+        ch.bump(&n);
       }
       Self::Unicode(unicode) => {
         unicode.bump(n);

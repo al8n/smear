@@ -1,4 +1,4 @@
-use logosky::{Lexed, TokenStream, utils::recursion_tracker::RecursionLimiter};
+use tokit::{Lexed, TokenStream, utils::recursion_tracker::RecursionLimiter};
 
 use super::*;
 

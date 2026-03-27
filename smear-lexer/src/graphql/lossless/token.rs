@@ -1,8 +1,8 @@
 macro_rules! token {
-  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
+  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $utf8:tt $(,)?)) => {
     mod $mod {
-      use logosky::{
-        Logos, Lexable, utils::tracker::{LimitExceeded, Tracker},
+      use tokit::{
+        logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
       };
       use crate::{
         error::StringErrors,
@@ -23,14 +23,18 @@ macro_rules! token {
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for LosslessToken<$slice> {
+      impl<'b $(: $lt)?, $($lt: 'b)?> tokit::Token<'b> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
-        type Char = $char;
-        type Logos = Token $(<$lt>)?;
+        type Error = TokenErrors;
 
         #[inline(always)]
         fn kind(&self) -> Self::Kind {
           self.kind()
+        }
+
+        #[inline(always)]
+        fn is_trivia(&self) -> bool {
+          self.is_trivia()
         }
       }
 
@@ -38,9 +42,9 @@ macro_rules! token {
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
       #[logos(
-        crate = logosky::logos,
-        extras = Tracker,
-        source = $source,
+        crate = tokit::logos,
+        extras = Limiter,
+        utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]
       #[logos(subpattern digit = r"[0-9]")]
@@ -115,7 +119,7 @@ macro_rules! token {
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
-        #[regex("#[^\n\r]*", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
+        #[regex("#[^\n\r]*?", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Comment($slice),
 
         #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
@@ -146,13 +150,13 @@ macro_rules! token {
         Int($slice),
         #[token("\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitInlineStr(LitInlineStr<$slice>),
         #[token("\"\"\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitBlockStr(LitBlockStr<$slice>),

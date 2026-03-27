@@ -1,8 +1,11 @@
-use logosky::{
-  Lexable,
+use tokit::{
+  SimpleSpan,
+  lexer::Lexable,
   logos::{Lexer, Logos, Source},
-  utils::{Lexeme, PositionedChar, Span},
+  utils::{Lexeme, PositionedChar},
 };
+
+type Span = SimpleSpan;
 
 use crate::{
   error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError},
@@ -12,7 +15,7 @@ use crate::{
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainStr};
 
 #[derive(Logos, Debug)]
-#[logos(crate = logosky::logos, extras = usize, error(StringError))]
+#[logos(crate = tokit::logos, extras = usize, error(StringError))]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -94,12 +97,12 @@ fn handle_fixed_width_escape_unicode<'a>(
     }
 
     // Unpaired high surrogate
-    return Err(UnicodeError::unpaired_high_surrogate(Lexeme::Span(lexer.span().into())).into());
+    return Err(UnicodeError::unpaired_high_surrogate(Lexeme::Range(lexer.span().into())).into());
   }
 
   if is_low_surrogate(code_point) {
     // Low surrogate without preceding high surrogate is always invalid
-    return Err(UnicodeError::unpaired_low_surrogate(Lexeme::Span(lexer.span().into())).into());
+    return Err(UnicodeError::unpaired_low_surrogate(Lexeme::Range(lexer.span().into())).into());
   }
 
   // Single BMP scalar
@@ -127,9 +130,8 @@ fn handle_invalid_escaped_unicode<'a>(
     let span = lexer.span();
     lexer.bump(idx);
     return Err(
-      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(Span::from(
-        span.start..span.end + idx,
-      )))
+      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
+        span.start, span.end + idx,)))
       .into(),
     );
   }
@@ -178,7 +180,7 @@ fn handle_invalid_escaped_unicode<'a>(
       }
 
       if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
       } else {
         UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
       }
@@ -197,7 +199,7 @@ fn handle_invalid_escaped_unicode<'a>(
       }
 
       if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
       } else {
         UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
       }
@@ -207,7 +209,7 @@ fn handle_invalid_escaped_unicode<'a>(
       lexer.bump(1);
 
       if a.is_ascii_hexdigit() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into()))
+        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
       } else {
         UnicodeError::invalid_fixed_unicode_escape_sequence(
           PositionedChar::with_position(*a, span.end).into(),
@@ -215,14 +217,14 @@ fn handle_invalid_escaped_unicode<'a>(
         )
       }
     }
-    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Span(lexer.span().into())),
+    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())),
     _ => unreachable!("impossible array length"),
   }))
 }
 
 #[inline(always)]
 fn handle_braced_escape_unicode<'a>(
-  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
   // Slice looks like r#"\u{...}"#, guaranteed by the regex.
   let s = lexer.slice();
@@ -250,7 +252,7 @@ fn handle_braced_escape_unicode<'a>(
 
 #[inline(always)]
 fn handle_semi_braced_escape_unicode<'a>(
-  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
   let remainder = lexer.remainder();
 
@@ -265,7 +267,7 @@ fn handle_semi_braced_escape_unicode<'a>(
 
 #[inline(always)]
 fn empty_braced_unicode_escape<'a>(
-  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::empty_braced_unicode_escape(lexer.span().into()),
@@ -274,7 +276,7 @@ fn empty_braced_unicode_escape<'a>(
 
 #[inline(always)]
 fn too_many_hex_digits_in_braced_unicode_escape<'a>(
-  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
   let counts = slice.len() - 4; // subtract \u{}
@@ -285,7 +287,7 @@ fn too_many_hex_digits_in_braced_unicode_escape<'a>(
 
 #[inline(always)]
 fn unclosed_brace_in_braced_unicode_escape<'a>(
-  lexer: &mut logosky::logos::Lexer<'a, StringToken>,
+  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),

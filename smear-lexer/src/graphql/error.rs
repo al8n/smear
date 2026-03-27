@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme};
+use tokit::{SimpleSpan, error::{UnexpectedEnd, UnexpectedLexeme}, utils::{Lexeme, PositionedChar}};
+
+type Span = SimpleSpan;
 
 use crate::{error::*, hints::*};
 
@@ -131,7 +133,7 @@ pub struct LexerError<Char = char, StateError = ()> {
 impl<Char, StateError> Default for LexerError<Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
-    Self::unexpected_eoi(Span::from(0..0))
+    Self::unexpected_eoi(Span::new(0, 0))
   }
 }
 

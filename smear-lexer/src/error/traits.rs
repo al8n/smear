@@ -1,4 +1,6 @@
-use logosky::utils::Span;
+use tokit::SimpleSpan;
+
+type Span = SimpleSpan;
 
 /// An error about unterminated spread operator.
 pub trait UnterminatedSpreadOperatorError {
