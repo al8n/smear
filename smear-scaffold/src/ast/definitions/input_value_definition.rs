@@ -1,10 +1,8 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
-
-use smear_lexer::punctuator::Colon;
 
 /// Represents a GraphQL input value definition.
 ///
@@ -198,70 +196,5 @@ impl<Name, Type, DefaultValue, Directives>
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
-  }
-
-  /// Creates a parser that can parse a complete input value definition.
-  ///
-  /// This parser handles the full input value definition syntax including all
-  /// optional and required components. The parsing of type, default value, and
-  /// directives is delegated to the provided parsers, allowing for flexibility
-  /// in handling different contexts and validation requirements.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, NP, TP, VP, DP>(
-    name_parser: NP,
-    type_parser: TP,
-    default_const_value_parser: VP,
-    const_directives_parser: DP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Colon: Parseable<'a, I, T, Error> + 'a,
-    NP: Parser<'a, I, Name, E> + Clone,
-    TP: Parser<'a, I, Type, E> + Clone,
-    DP: Parser<'a, I, Directives, E> + Clone,
-    VP: Parser<'a, I, DefaultValue, E> + Clone,
-  {
-    name_parser
-      .then_ignore(Colon::parser())
-      .then(type_parser)
-      .then(default_const_value_parser.or_not())
-      .then(const_directives_parser.or_not())
-      .map_with(|(((name, ty), default_value), directives), exa| Self {
-        span: exa.span(),
-        name,
-        ty,
-        default_value,
-        directives,
-      })
-  }
-}
-
-impl<'a, Name, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for InputValueDefinition<Name, Type, DefaultValue, Directives>
-where
-  Name: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  DefaultValue: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      Type::parser(),
-      DefaultValue::parser(),
-      Directives::parser(),
-    )
   }
 }

@@ -1,12 +1,10 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser as _, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use crate::error::UnclosedBraceError;
 
-use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -107,55 +105,6 @@ impl<Name, InputValue> ObjectField<Name, InputValue> {
   #[inline]
   pub const fn value(&self) -> &InputValue {
     &self.value
-  }
-
-  /// Creates a parser for GraphQL list literals with customizable value parsing.
-  ///
-  /// This parser handles the complete list syntax including brackets and
-  /// enforces proper structure. It uses the provided `value_parser` to parse
-  /// each individual element within the list.
-  ///
-  /// ## Error Handling
-  ///
-  /// If the closing bracket is missing, the parser invokes the provided
-  /// `on_missing_rbracket` function to generate a custom error message.
-  /// This allows for context-specific error reporting.
-  pub fn parser_with<'src, I, T, Error, NP, VP, E>(
-    name_parser: NP,
-    value_parser: VP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    VP: Parser<'src, I, InputValue, E> + Clone + 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    Colon: Parseable<'src, I, T, Error>,
-  {
-    name_parser
-      .then_ignore(Colon::parser())
-      .then(value_parser)
-      .map_with(|(name, value), exa| Self::new(exa.span(), name, value))
-  }
-}
-
-impl<'a, Name, InputValue, I, T, Error> Parseable<'a, I, T, Error> for ObjectField<Name, InputValue>
-where
-  Name: Parseable<'a, I, T, Error>,
-  InputValue: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), InputValue::parser())
   }
 }
 
@@ -311,69 +260,5 @@ impl<Name, InputValue, Container> Object<Name, InputValue, Container> {
   #[inline]
   pub const fn fields(&self) -> &Container {
     &self.fields
-  }
-
-  /// Creates a parser for GraphQL object literals with customizable field parsing.
-  ///
-  /// This parser handles the complete object syntax including braces and
-  /// enforces proper structure. It uses the provided `field_parser` to parse
-  /// each individual field within the object.
-  ///
-  /// ## Error Handling
-  ///
-  /// If the closing brace is missing, the parser invokes the provided
-  /// `on_missing_rbrace` function to generate a custom error message.
-  /// This allows for context-specific error reporting.
-  pub fn parser_with<'src, I, T, Error, NP, VP, E>(
-    name_parser: NP,
-    value_parser: VP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnclosedBraceError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    VP: Parser<'src, I, InputValue, E> + Clone + 'src,
-    Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
-    Colon: Parseable<'src, I, T, Error>,
-    LBrace: Parseable<'src, I, T, Error>,
-    RBrace: Parseable<'src, I, T, Error>,
-  {
-    LBrace::parser()
-      .ignore_then(
-        ObjectField::parser_with(name_parser, value_parser)
-          .repeated()
-          .collect(),
-      )
-      .then(RBrace::parser().or_not())
-      .try_map(move |(values, r), span| match r {
-        Some(_) => Ok(Self::new(span, values)),
-        None => Err(Error::unclosed_brace(span)),
-      })
-  }
-}
-
-impl<'a, Name, InputValue, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for Object<Name, InputValue, Container>
-where
-  Name: Parseable<'a, I, T, Error>,
-  InputValue: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<ObjectField<Name, InputValue>>,
-  Error: UnclosedBraceError,
-  Colon: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), InputValue::parser())
   }
 }

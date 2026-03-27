@@ -1,20 +1,12 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
+};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
-};
-use smear_lexer::{
-  keywords::{Extend, Union},
-  punctuator::{Equal, Pipe},
-};
 
-use crate::{error::UnexpectedEndOfUnionExtensionError, hints::UnionTypeExtensionHint};
 
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,38 +59,6 @@ impl<Name, Container> UnionMemberTypes<Name, Container> {
     Container: AsRef<[Name]>,
   {
     self.members().as_ref()
-  }
-}
-
-impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionMemberTypes<Name, Container>
-where
-  Container: chumsky::container::Container<Name>,
-  Name: Parseable<'a, I, T, Error>,
-  Pipe: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Name::parser()
-      .separated_by(Pipe::parser())
-      .allow_leading()
-      .at_least(1)
-      .collect()
-      .map_with(|members, exa| {
-        let span = exa.span();
-        Self {
-          span,
-          members,
-          _m: PhantomData,
-        }
-      })
   }
 }
 
@@ -273,60 +233,6 @@ impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, Member
   pub const fn member_types(&self) -> Option<&MemberTypes> {
     self.members.as_ref()
   }
-
-  /// Creates a parser for union type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL union types, including
-  /// optional descriptions, directives, and member type definitions.
-  pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
-    name_parser: NP,
-    directives_parser: DP,
-    member_types: MP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Union: Parseable<'src, I, T, Error> + Clone,
-    Equal: Parseable<'src, I, T, Error> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    MP: Parser<'src, I, MemberTypes, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
-  {
-    Union::parser()
-      .ignore_then(name_parser)
-      .then(directives_parser.or_not())
-      .then(Equal::parser().ignore_then(member_types).or_not())
-      .map_with(|((name, directives), members), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        members,
-      })
-  }
-}
-
-impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionTypeDefinition<Name, Directives, MemberTypes>
-where
-  Union: Parseable<'a, I, T, Error> + Clone,
-  Equal: Parseable<'a, I, T, Error> + Clone,
-  Directives: Parseable<'a, I, T, Error>,
-  MemberTypes: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
-  }
 }
 
 /// Represents the content portion of a union type extension.
@@ -485,79 +391,5 @@ impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberT
   #[inline]
   pub const fn data(&self) -> &UnionTypeExtensionData<Directives, MemberTypes> {
     &self.data
-  }
-
-  /// Creates a parser for union type extensions with comprehensive syntax support.
-  ///
-  /// This parser handles the complete `extend union` syntax, managing keyword
-  /// recognition, name validation, and content parsing through a structured
-  /// approach that ensures robust error handling and proper whitespace management.
-  pub fn parser_with<'src, I, T, Error, E, NP, DP, MP>(
-    name_parser: NP,
-    directives_parser: DP,
-    member_types_parser: MP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnexpectedEndOfUnionExtensionError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Extend: Parseable<'src, I, T, Error> + Clone,
-    Union: Parseable<'src, I, T, Error> + Clone,
-    Equal: Parseable<'src, I, T, Error> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    MP: Parser<'src, I, MemberTypes, E> + Clone,
-  {
-    Extend::parser()
-      .then(Union::parser())
-      .ignore_then(name_parser)
-      .then(directives_parser.or_not())
-      .then(Equal::parser().ignore_then(member_types_parser).or_not())
-      .try_map_with(|((name, directives), members), exa| {
-        let data = match (directives, members) {
-          (directives, Some(members)) => UnionTypeExtensionData::Members {
-            directives,
-            members,
-          },
-          (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
-          (None, None) => {
-            return Err(Error::unexpected_end_of_union_extension(
-              exa.span(),
-              UnionTypeExtensionHint::DirectivesOrUnionMemberTypes,
-            ));
-          }
-        };
-
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
-      })
-  }
-}
-
-impl<'a, Name, Directives, MemberTypes, I, T, Error> Parseable<'a, I, T, Error>
-  for UnionTypeExtension<Name, Directives, MemberTypes>
-where
-  Error: UnexpectedEndOfUnionExtensionError,
-  Extend: Parseable<'a, I, T, Error> + Clone,
-  Union: Parseable<'a, I, T, Error> + Clone,
-  Equal: Parseable<'a, I, T, Error> + Clone,
-  Directives: Parseable<'a, I, T, Error>,
-  MemberTypes: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Directives::parser(), MemberTypes::parser())
   }
 }

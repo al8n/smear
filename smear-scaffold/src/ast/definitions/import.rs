@@ -1,17 +1,13 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
 
-use smear_lexer::{
-  keywords,
-  punctuator::{Asterisk, LBrace, PathSeparator, RBrace},
-};
 
 use super::Path;
 
@@ -56,7 +52,7 @@ impl<Ident, Container> IntoComponents for NamedSpecifier<Ident, Container> {
 impl<Ident, Container> NamedSpecifier<Ident, Container> {
   /// Creates a new named item with the given span, name, and optional alias.
   #[inline]
-  const fn new(span: Span, name: Ident, alias: Option<Path<Ident, Container>>) -> Self {
+  pub const fn new(span: Span, name: Ident, alias: Option<Path<Ident, Container>>) -> Self {
     Self { span, name, alias }
   }
 
@@ -76,31 +72,6 @@ impl<Ident, Container> NamedSpecifier<Ident, Container> {
   #[inline]
   pub const fn alias(&self) -> Option<&Path<Ident, Container>> {
     self.alias.as_ref()
-  }
-
-  /// Creates a parser for named import item.
-  #[inline]
-  pub fn parser_with<'a, I, T, E, Error, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    Container: ChumskyContainer<Ident>,
-  {
-    ident_parser
-      .clone()
-      .then(
-        keywords::As::parser()
-          .ignore_then(Path::parser_with(ident_parser))
-          .or_not(),
-      )
-      .map_with(|(name, alias), exa| Self::new(exa.span(), name, alias))
   }
 }
 
@@ -144,7 +115,7 @@ impl<Ident, Container> IntoComponents for WildcardSpecifier<Ident, Container> {
 impl<Ident, Container> WildcardSpecifier<Ident, Container> {
   /// Creates a new wildcard item with the given span and optional alias.
   #[inline]
-  const fn new(span: Span, alias: Option<Path<Ident, Container>>) -> Self {
+  pub const fn new(span: Span, alias: Option<Path<Ident, Container>>) -> Self {
     Self { span, alias }
   }
 
@@ -158,31 +129,6 @@ impl<Ident, Container> WildcardSpecifier<Ident, Container> {
   #[inline]
   pub const fn alias(&self) -> Option<&Path<Ident, Container>> {
     self.alias.as_ref()
-  }
-
-  /// Creates a parser for wildcard import item.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Asterisk: Parseable<'a, I, T, Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    Container: ChumskyContainer<Ident>,
-  {
-    Asterisk::parser()
-      .ignore_then(
-        keywords::As::parser()
-          .ignore_then(Path::parser_with(ident_parser))
-          .or_not(),
-      )
-      .map_with(|alias, exa| Self::new(exa.span(), alias))
   }
 }
 
@@ -238,27 +184,6 @@ impl<Ident, Container> ImportMember<Ident, Container> {
       Self::Named(item) => item.alias(),
       Self::Wildcard(item) => item.alias(),
     }
-  }
-
-  /// Creates a parser for imported items.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    Asterisk: Parseable<'a, I, T, Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    Container: ChumskyContainer<Ident>,
-  {
-    NamedSpecifier::parser_with(ident_parser.clone())
-      .map(ImportMember::Named)
-      .or(WildcardSpecifier::parser_with(ident_parser).map(ImportMember::Wildcard))
   }
 }
 
@@ -323,7 +248,7 @@ impl<Ident, PathContainer, Container> IntoComponents
 impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container> {
   /// Creates a new brace items with the given span and items.
   #[inline]
-  const fn new(span: Span, items: Container) -> Self {
+  pub const fn new(span: Span, items: Container) -> Self {
     Self {
       span,
       items,
@@ -351,56 +276,6 @@ impl<Ident, PathContainer, Container> ImportList<Ident, PathContainer, Container
     Container: AsRef<[ImportMember<Ident>]>,
   {
     self.items().as_ref()
-  }
-
-  /// Creates a parser for brace import statements.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    LBrace: Parseable<'a, I, T, Error> + 'a,
-    RBrace: Parseable<'a, I, T, Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    Asterisk: Parseable<'a, I, T, Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    PathContainer: ChumskyContainer<Ident>,
-    Container: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-  {
-    LBrace::parser()
-      .ignore_then(ImportMember::parser_with(ident_parser).repeated().collect())
-      .then_ignore(RBrace::parser())
-      .map_with(|items, exa| Self::new(exa.span(), items))
-  }
-}
-
-impl<'a, Ident, PathContainer, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportList<Ident, PathContainer, Container>
-where
-  Ident: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  Asterisk: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::As: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  PathContainer: ChumskyContainer<Ident>,
-  Container: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(Ident::parser())
   }
 }
 
@@ -455,55 +330,6 @@ impl<Ident, PathContainer, ItemContainer> ImportClause<Ident, PathContainer, Ite
       Self::List(b) => b.span(),
       Self::Wildcard(w) => w.span(),
     }
-  }
-
-  /// Creates a parser for import clauses.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    LBrace: Parseable<'a, I, T, Error> + 'a,
-    RBrace: Parseable<'a, I, T, Error> + 'a,
-    Asterisk: Parseable<'a, I, T, Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    PathContainer: ChumskyContainer<Ident> + 'a,
-    ItemContainer: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-  {
-    ImportList::parser_with(ident_parser.clone())
-      .map(ImportClause::List)
-      .or(WildcardSpecifier::parser_with(ident_parser).map(ImportClause::Wildcard))
-  }
-}
-
-impl<'a, Ident, PathContainer, ItemContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportClause<Ident, PathContainer, ItemContainer>
-where
-  Ident: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  Asterisk: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::As: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  PathContainer: ChumskyContainer<Ident> + 'a,
-  ItemContainer: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(Ident::parser())
   }
 }
 
@@ -565,7 +391,7 @@ impl<Ident, FilePath, PathContainer, ItemContainer>
 {
   /// Creates a new import definition with the given span, file path, and clause.
   #[inline]
-  const fn new(
+  pub const fn new(
     span: Span,
     file: FilePath,
     clause: ImportClause<Ident, PathContainer, ItemContainer>,
@@ -589,66 +415,5 @@ impl<Ident, FilePath, PathContainer, ItemContainer>
   #[inline]
   pub const fn clause(&self) -> &ImportClause<Ident, PathContainer, ItemContainer> {
     &self.clause
-  }
-
-  /// Creates a parser for import definitions.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, FP, IP>(
-    file_path_parser: FP,
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    LBrace: Parseable<'a, I, T, Error> + 'a,
-    RBrace: Parseable<'a, I, T, Error> + 'a,
-    Asterisk: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    keywords::As: Parseable<'a, I, T, Error> + 'a,
-    keywords::Import: Parseable<'a, I, T, Error> + 'a,
-    keywords::From: Parseable<'a, I, T, Error> + 'a,
-    FP: Parser<'a, I, FilePath, E> + Clone,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    PathContainer: ChumskyContainer<Ident> + 'a,
-    ItemContainer: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-  {
-    keywords::Import::parser()
-      .ignore_then(
-        ImportClause::parser_with(ident_parser)
-          .then_ignore(keywords::From::parser())
-          .then(file_path_parser),
-      )
-      .map_with(|(specifier, path), exa| Self::new(exa.span(), path, specifier))
-  }
-}
-
-impl<'a, Ident, FilePath, PathContainer, ItemContainer, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportDefinition<Ident, FilePath, PathContainer, ItemContainer>
-where
-  FilePath: Parseable<'a, I, T, Error> + 'a,
-  ImportClause<Ident, PathContainer, ItemContainer>: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  Asterisk: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::As: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::Import: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::From: Parseable<'a, I, T, Error> + 'a,
-  Ident: Parseable<'a, I, T, Error> + 'a,
-  PathContainer: ChumskyContainer<Ident> + 'a,
-  ItemContainer: ChumskyContainer<ImportMember<Ident, PathContainer>> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(FilePath::parser(), Ident::parser())
   }
 }

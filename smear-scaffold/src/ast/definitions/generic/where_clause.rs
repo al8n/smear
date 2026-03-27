@@ -1,15 +1,10 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 use core::marker::PhantomData;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-
-use smear_lexer::{
-  keywords::Where,
-  punctuator::{Ampersand, Colon, LAngle, PathSeparator, RAngle},
-};
 
 use super::TypePath;
 
@@ -67,7 +62,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
 {
   /// Creates a new `WherePredicate` with the given bounded type and bounds.
   #[inline]
-  const fn new(
+  pub const fn new(
     span: Span,
     bounded_type: TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>,
     bounds: Container,
@@ -104,69 +99,6 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
     Container: AsRef<[TypePath<Ident, Type>]>,
   {
     self.bounds().as_ref()
-  }
-
-  /// Returns a parser for the where predicate.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP>(
-    ident_parser: IP,
-    type_parser: TP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    Container: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
-    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
-    TypeContainer: ChumskyContainer<Type> + 'a,
-    Colon: Parseable<'a, I, T, Error> + 'a,
-    Ampersand: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-  {
-    TypePath::parser_with(ident_parser.clone(), type_parser.clone())
-      .then_ignore(Colon::parser())
-      .then(
-        TypePath::parser_with(ident_parser, type_parser)
-          .separated_by(Ampersand::parser())
-          .allow_leading()
-          .at_least(1)
-          .collect(),
-      )
-      .map_with(|(bounded_type, bounds), exa| Self::new(exa.span(), bounded_type, bounds))
-  }
-}
-
-impl<'a, Ident, Type, PathSegmentsContainer, TypeContainer, Container, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, Container>
-where
-  Container: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
-  PathSegmentsContainer: ChumskyContainer<Ident>,
-  TypeContainer: ChumskyContainer<Type>,
-  TypePath<Ident, Type>: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error> + 'a,
-  Ampersand: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Ident: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Self::parser_with(Ident::parser(), Type::parser())
   }
 }
 
@@ -223,7 +155,7 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
 {
   /// Creates a new `WhereClause` with the given predicates.
   #[inline]
-  const fn new(span: Span, predicates: Container) -> Self {
+  pub const fn new(span: Span, predicates: Container) -> Self {
     Self {
       span,
       predicates,
@@ -254,89 +186,6 @@ impl<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Cont
     >,
   {
     self.predicates.as_ref()
-  }
-
-  /// Returns a parser for the where clause.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP>(
-    ident_parser: IP,
-    type_parser: TP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    Ident: 'a,
-    Type: 'a,
-    Container: ChumskyContainer<
-        WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
-      > + 'a,
-    TypePathsContainer:
-      ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
-    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
-    TypeContainer: ChumskyContainer<Type> + 'a,
-    Colon: Parseable<'a, I, T, Error> + 'a,
-    Ampersand: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    Where: Parseable<'a, I, T, Error> + 'a,
-  {
-    Where::parser()
-      .ignore_then(
-        WherePredicate::parser_with(ident_parser, type_parser)
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
-      .map_with(|predicates, exa| Self::new(exa.span(), predicates))
-  }
-}
-
-impl<
-  'a,
-  Ident,
-  Type,
-  PathSegmentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  Container,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>
-where
-  Container: ChumskyContainer<
-    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
-  >,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
-  PathSegmentsContainer: ChumskyContainer<Ident>,
-  TypeContainer: ChumskyContainer<Type>,
-  WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer>: Parseable<'a, I, T, Error>,
-  Where: Parseable<'a, I, T, Error>,
-  Ident: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error> + 'a,
-  Ampersand: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Where: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Self::parser_with(Ident::parser(), Type::parser())
   }
 }
 
@@ -432,7 +281,7 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
 {
   /// Creates a new `Constrained` with the given target and optional where clause.
   #[inline]
-  const fn new(
+  pub const fn new(
     span: Span,
     where_clause: Option<
       WhereClause<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer, Container>,
@@ -466,95 +315,5 @@ impl<Ident, Type, Target, PathSegmentsContainer, TypeContainer, TypePathsContain
   #[inline]
   pub const fn target(&self) -> &Target {
     &self.target
-  }
-
-  /// Creates a parser for the constrained type.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP, TP, P>(
-    ident_parser: IP,
-    type_parser: TP,
-    target_parser: P,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    P: Parser<'a, I, Target, E> + Clone + 'a,
-    Ident: 'a,
-    Type: 'a,
-    Container: ChumskyContainer<
-        WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
-      > + 'a,
-    TypePathsContainer:
-      ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>> + 'a,
-    PathSegmentsContainer: ChumskyContainer<Ident> + 'a,
-    TypeContainer: ChumskyContainer<Type> + 'a,
-    Colon: Parseable<'a, I, T, Error> + 'a,
-    Ampersand: Parseable<'a, I, T, Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    Where: Parseable<'a, I, T, Error> + 'a,
-  {
-    WhereClause::parser_with(ident_parser, type_parser)
-      .or_not()
-      .then(target_parser)
-      .map_with(|(where_clause, target), exa| Self::new(exa.span(), where_clause, target))
-  }
-}
-
-impl<
-  'a,
-  Ident,
-  Type,
-  Target,
-  PathSegmentsContainer,
-  TypeContainer,
-  TypePathsContainer,
-  Container,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for Constrained<
-    Ident,
-    Type,
-    Target,
-    PathSegmentsContainer,
-    TypeContainer,
-    TypePathsContainer,
-    Container,
-  >
-where
-  Ident: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  Target: Parseable<'a, I, T, Error>,
-  PathSegmentsContainer: ChumskyContainer<Ident>,
-  TypeContainer: ChumskyContainer<Type>,
-  TypePathsContainer: ChumskyContainer<TypePath<Ident, Type, PathSegmentsContainer, TypeContainer>>,
-  Container: ChumskyContainer<
-    WherePredicate<Ident, Type, PathSegmentsContainer, TypeContainer, TypePathsContainer>,
-  >,
-  WherePredicate<Ident, Type>: Parseable<'a, I, T, Error>,
-  Where: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error> + 'a,
-  Ampersand: Parseable<'a, I, T, Error> + 'a,
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Self::parser_with(Ident::parser(), Type::parser(), Target::parser())
   }
 }

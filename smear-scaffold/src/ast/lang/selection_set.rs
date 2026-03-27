@@ -1,10 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use smear_lexer::punctuator::{LBrace, RBrace};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -149,50 +148,5 @@ impl<Selection, Container> SelectionSet<Selection, Container> {
   #[inline]
   pub fn into_selections(self) -> Container {
     self.selections
-  }
-
-  /// Creates a parser that can parse a selection set with a custom selection parser.
-  ///
-  /// This parser handles the complete selection set syntax including the braces
-  /// and ensures at least one selection is present. The parsing of individual
-  /// selections is delegated to the provided selection parser.
-  pub fn parser_with<'a, I, T, Error, E, P>(
-    selection_parser: P,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    LBrace: Parseable<'a, I, T, Error>,
-    RBrace: Parseable<'a, I, T, Error>,
-    P: Parser<'a, I, Selection, E> + Clone,
-    Container: chumsky::container::Container<Selection> + 'a,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    LBrace::parser()
-      .ignore_then(selection_parser.repeated().at_least(1).collect())
-      .then_ignore(RBrace::parser())
-      .map_with(|selections, exa| Self::new(exa.span(), selections))
-  }
-}
-
-impl<'a, Selection, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for SelectionSet<Selection, Container>
-where
-  Selection: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<Selection>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Selection::parser())
   }
 }

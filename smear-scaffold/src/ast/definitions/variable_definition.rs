@@ -1,12 +1,10 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 use core::marker::PhantomData;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-
-use smear_lexer::punctuator::{Colon, LParen, RParen};
 
 use std::vec::Vec;
 
@@ -258,39 +256,6 @@ impl<Variable, Type, DefaultValue, Directives>
   }
 }
 
-impl<'a, Variable, Type, DefaultValue, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for VariableDefinition<Variable, Type, DefaultValue, Directives>
-where
-  Variable: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  DefaultValue: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Variable::parser()
-      .then_ignore(Colon::parser())
-      .then(Type::parser())
-      .then(DefaultValue::parser().or_not())
-      .then(Directives::parser().or_not())
-      .map_with(|(((variable, ty), default_value), directives), exa| Self {
-        span: exa.span(),
-        variable,
-        ty,
-        directives,
-        default_value,
-      })
-  }
-}
-
 /// Represents a collection of variable definitions for a GraphQL operation.
 ///
 /// A variables definition is a parenthesized collection of zero or more variable
@@ -436,54 +401,5 @@ impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Cont
   #[inline]
   pub fn into_variable_definitions(self) -> Container {
     self.variables
-  }
-
-  /// Creates a parser that can parse a variables definition with custom variable parsing.
-  ///
-  /// This parser handles the complete variables definition syntax including the
-  /// parentheses and supports zero or more variable definitions. The parsing of
-  /// individual variable definitions is delegated to the provided parser.
-  pub fn parser_with<'src, I, T, Error, E, P>(
-    variable_definition_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    LParen: Parseable<'src, I, T, Error>,
-    RParen: Parseable<'src, I, T, Error>,
-    Container: chumsky::container::Container<VariableDefinition>,
-    P: Parser<'src, I, VariableDefinition, E> + Clone,
-  {
-    LParen::parser()
-      .ignore_then(variable_definition_parser.repeated().at_least(1).collect())
-      .then_ignore(RParen::parser())
-      .map_with(|variables, exa| Self {
-        span: exa.span(),
-        variables,
-        _v: PhantomData,
-      })
-  }
-}
-
-impl<'a, VariableDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for VariablesDefinition<VariableDefinition, Container>
-where
-  Container: chumsky::container::Container<VariableDefinition>,
-  VariableDefinition: Parseable<'a, I, T, Error>,
-  LParen: Parseable<'a, I, T, Error>,
-  RParen: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(VariableDefinition::parser())
   }
 }

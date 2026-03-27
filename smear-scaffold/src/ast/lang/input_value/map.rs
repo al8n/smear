@@ -1,15 +1,10 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser as _, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use crate::error::UnclosedBraceError;
 
-use smear_lexer::{
-  keywords,
-  punctuator::{FatArrow, LBrace, RBrace},
-};
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -48,7 +43,7 @@ impl<Key, Value> IntoComponents for MapEntry<Key, Value> {
 impl<Key, Value> MapEntry<Key, Value> {
   /// Creates a new map entry with the given key and value.
   #[inline]
-  const fn new(span: Span, key: Key, value: Value) -> Self {
+  pub const fn new(span: Span, key: Key, value: Value) -> Self {
     Self { span, key, value }
   }
 
@@ -68,46 +63,6 @@ impl<Key, Value> MapEntry<Key, Value> {
   #[inline]
   pub const fn value(&self) -> &Value {
     &self.value
-  }
-
-  /// Creates a parser for a single map entry using the provided key and value parsers.
-  pub fn parser_with<'src, I, T, Error, KP, VP, E>(
-    key_parser: KP,
-    value_parser: VP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnclosedBraceError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    FatArrow: Parseable<'src, I, T, Error> + 'src,
-    KP: Parser<'src, I, Key, E> + Clone + 'src,
-    VP: Parser<'src, I, Value, E> + Clone + 'src,
-  {
-    key_parser
-      .then_ignore(FatArrow::parser())
-      .then(value_parser)
-      .map_with(|(key, value), exa| Self::new(exa.span(), key, value))
-  }
-}
-
-impl<'a, Key, Value, I, T, Error> Parseable<'a, I, T, Error> for MapEntry<Key, Value>
-where
-  Key: Parseable<'a, I, T, Error> + 'a,
-  Value: Parseable<'a, I, T, Error> + 'a,
-  FatArrow: Parseable<'a, I, T, Error> + 'a,
-  Error: UnclosedBraceError,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Key::parser(), Value::parser())
   }
 }
 
@@ -145,7 +100,7 @@ where
 ///
 /// The `Container` parameter allows using different collection types:
 /// - `Vec<MapEntry<Key, Value>>` (default): Standard dynamic array
-/// - Any type implementing `chumsky::container::Container<MapEntry<Key, Value>>`
+/// - Any type implementing `tokit::container::Container<MapEntry<Key, Value>>`
 ///
 /// ## Component Structure
 ///
@@ -198,48 +153,6 @@ impl<Key, Value, Container> Map<Key, Value, Container> {
   {
     self.entries().as_ref()
   }
-
-  /// Creates a parser for GraphQLx map literals with customizable value parsing.
-  ///
-  /// This parser handles the complete map syntax including brackets and
-  /// enforces proper structure. It uses the provided `value_parser` to parse
-  /// each individual element within the map.
-  ///
-  /// ## Error Handling
-  ///
-  /// If the closing bracket is missing, the parser invokes the provided
-  /// `on_missing_rbracket` function to generate a custom error message.
-  /// This allows for context-specific error reporting.
-  pub fn parser_with<'src, I, T, Error, KP, VP, E>(
-    key_parser: KP,
-    value_parser: VP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnclosedBraceError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    KP: Parser<'src, I, Key, E> + Clone + 'src,
-    VP: Parser<'src, I, Value, E> + Clone + 'src,
-    Container: chumsky::container::Container<MapEntry<Key, Value>>,
-    FatArrow: Parseable<'src, I, T, Error>,
-    keywords::Map: Parseable<'src, I, T, Error>,
-    LBrace: Parseable<'src, I, T, Error>,
-    RBrace: Parseable<'src, I, T, Error>,
-  {
-    keywords::Map::parser()
-      .then(LBrace::parser())
-      .ignore_then(
-        MapEntry::parser_with(key_parser, value_parser)
-          .repeated()
-          .collect(),
-      )
-      .then(RBrace::parser().or_not())
-      .try_map(move |(entries, r), span| match r {
-        Some(_) => Ok(Map::new(span, entries)),
-        None => Err(Error::unclosed_brace(span)),
-      })
-  }
 }
 
 impl<Key, Value, Container> AsSpan<Span> for Map<Key, Value, Container> {
@@ -262,30 +175,5 @@ impl<Key, Value, Container> IntoComponents for Map<Key, Value, Container> {
   #[inline]
   fn into_components(self) -> Self::Components {
     (self.span, self.entries)
-  }
-}
-
-impl<'a, Key, Value, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for Map<Key, Value, Container>
-where
-  Error: UnclosedBraceError + 'a,
-  Key: Parseable<'a, I, T, Error> + 'a,
-  Value: Parseable<'a, I, T, Error> + 'a,
-  Container: chumsky::container::Container<MapEntry<Key, Value>> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  FatArrow: Parseable<'a, I, T, Error> + 'a,
-  smear_lexer::keywords::Map: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Key::parser(), Value::parser())
   }
 }

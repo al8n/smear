@@ -1,10 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use smear_lexer::punctuator::Equal;
 
 pub use list::List;
 pub use map::{Map, MapEntry};
@@ -62,32 +61,6 @@ impl<Value> DefaultInputValue<Value> {
   pub const fn value(&self) -> &Value {
     &self.value
   }
-
-  /// Creates a parser for default value assignments with constant validation.
-  ///
-  /// This parser handles the complete default value syntax including the equals
-  /// token, optional whitespace, and the default value expression. It enforces
-  /// GraphQL's requirement that default values must be constant expressions
-  /// through compile-time type constraints.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, VP>(
-    value_parser: VP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Error: 'a,
-    Equal: Parseable<'a, I, T, Error> + 'a,
-    VP: Parser<'a, I, Value, E> + Clone,
-  {
-    Equal::parser()
-      .ignore_then(value_parser)
-      .map_with(|value, exa| Self {
-        span: exa.span(),
-        value,
-      })
-  }
 }
 
 impl<Value> AsSpan<Span> for DefaultInputValue<Value> {
@@ -110,23 +83,5 @@ impl<Value> IntoComponents for DefaultInputValue<Value> {
   #[inline]
   fn into_components(self) -> Self::Components {
     (self.span, self.value)
-  }
-}
-
-impl<'a, Value, I, T, Error> Parseable<'a, I, T, Error> for DefaultInputValue<Value>
-where
-  Value: Parseable<'a, I, T, Error>,
-  Equal: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Value::parser())
   }
 }

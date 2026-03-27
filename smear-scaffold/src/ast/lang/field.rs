@@ -1,15 +1,8 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-    syntax_tree_display::DisplaySyntaxTree,
-  },
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}, syntax_tree_display::DisplaySyntaxTree},
 };
-
-use smear_lexer::punctuator::Colon;
 
 pub use standard::*;
 
@@ -81,28 +74,6 @@ impl<Name> Alias<Name> {
   pub const fn name(&self) -> &Name {
     &self.name
   }
-
-  /// Creates a parser for an alias using the provided name parser.
-  ///
-  /// The parser recognizes a name followed by a colon, constructing an `Alias`
-  /// instance with the
-  /// parsed name and the span covering the entire alias.
-  pub fn parser_with<'a, I, T, Error, E, P>(name_parser: P) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    P: Parser<'a, I, Name, E> + Clone,
-    Colon: Parseable<'a, I, T, Error>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    name_parser
-      .then_ignore(Colon::parser())
-      .map_with(|name, exa| Self {
-        span: exa.span(),
-        name,
-      })
-  }
 }
 
 impl<Name> core::fmt::Display for Alias<Name>
@@ -173,24 +144,6 @@ where
     write!(f, "{:indent$}", "", indent = padding)?;
     writeln!(f, "- ALIAS@{}..{}", self.span.start(), self.span.end())?;
     self.name.fmt(level + 1, indent, f)
-  }
-}
-
-impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for Alias<Name>
-where
-  Name: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser())
   }
 }
 
@@ -358,92 +311,4 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
   pub const fn selection_set(&self) -> Option<&SelectionSet> {
     self.selection_set.as_ref()
   }
-
-  /// Creates a parser that can parse a complete field with custom component parsers.
-  ///
-  /// This parser handles the complete field syntax including optional alias, required name,
-  /// and optional arguments, directives, and selection set. The parsing of each component
-  /// is delegated to the provided parsers.
-  pub fn parser_with<'a, I, T, Error, E, AP, DP, SP>(
-    args: AP,
-    directives: DP,
-    selection_set: SP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Error: 'a,
-    Name: Parseable<'a, I, T, Error> + 'a,
-    Alias: Parseable<'a, I, T, Error> + 'a,
-    AP: Parser<'a, I, Arguments, E> + Clone,
-    DP: Parser<'a, I, Directives, E> + Clone,
-    SP: Parser<'a, I, SelectionSet, E> + Clone,
-  {
-    Alias::parser()
-      .or_not()
-      .then(Name::parser())
-      .then(args.or_not())
-      .then(directives.or_not())
-      .then(selection_set.or_not())
-      .map_with(
-        |((((alias, name), arguments), directives), selection_set), exa| Self {
-          span: exa.span(),
-          alias,
-          name,
-          arguments,
-          directives,
-          selection_set,
-        },
-      )
-  }
 }
-
-// impl<'a, Alias: 'a, Name: 'a, FragmentName: 'a, TypeCondition: 'a, Arguments: 'a, Directives: 'a, Container, I, T, Error> Parseable<I, T, Error> for Field<Alias, Name, Arguments, Directives, SelectionSet>
-// where
-//   T: Token<'a>,
-//   I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-//   On: Parseable<I, T, Error>,
-//   Spread: Parseable<I, T, Error>,
-//   LBrace: Parseable<I, T, Error>,
-//   RBrace: Parseable<I, T, Error>,
-//   TypeCondition: Parseable<I, T, Error>,
-//   Alias: Parseable<I, T, Error>,
-//   Name: Parseable<I, T, Error>,
-//   FragmentName: Parseable<I, T, Error>,
-//   Arguments: Parseable<I, T, Error>,
-//   Directives: Parseable<I, T, Error>,
-//   Error: 'a,
-//   Container: chumsky::container::Container<Selection<Alias, Name, Arguments, Directives, SelectionSet>> + 'a,
-// {
-//   #[inline]
-//   fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-//   where
-//     Self: Sized,
-//     E: ParserExtra<'a, I, Error = Error> + 'a
-//   {
-//     recursive(|field_parser| {
-//       // Inner fixpoint: build a `Selection` parser by using the recursive `field_parser`.
-//       let selection = recursive(|selection| {
-//         // SelectionSet needs a `Selection` parser
-//         let selection_set =
-//           SelectionSet::parser_with(selection.clone());
-
-//         let spread = FragmentSpread::parser()
-//           .map(|fs| Selection::FragmentSpread(fs));
-
-//         let inline = InlineFragment::parser_with(
-//           TypeCondition::parser(),
-//           Directives::parser(),
-//           selection_set,
-//         )
-//           .map(|f| Selection::InlineFragment(f));
-
-//         choice((field_parser.map(Selection::Field), spread, inline))
-//       });
-
-//       // Pass the selection parser to the selection set
-//       Self::parser_with(Arguments::parser(), Directives::parser(), SelectionSet::parser_with(selection))
-//     })
-//   }
-// }

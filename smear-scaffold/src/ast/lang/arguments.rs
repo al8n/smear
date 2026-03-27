@@ -1,12 +1,12 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
 use core::marker::PhantomData;
 
-use smear_lexer::punctuator::{Colon, LParen, RParen};
+use smear_lexer::punctuator::{LParen, RParen};
 
 use std::vec::Vec;
 
@@ -83,54 +83,6 @@ impl<Name, Value> Argument<Name, Value> {
   pub const fn value(&self) -> &Value {
     &self.value
   }
-
-  /// Creates a parser for arguments with custom name and value parsers.
-  ///
-  /// This parser handles the complete argument syntax including the name,
-  /// colon, and value. It allows for flexible parsing of both the name and
-  /// value components by accepting custom parsers for each. This enables
-  /// integration with different name and value parsing strategies as needed.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, N, V>(
-    name_parser: N,
-    value_parser: V,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Colon: Parseable<'a, I, T, Error>,
-    N: Parser<'a, I, Name, E> + Clone,
-    V: Parser<'a, I, Value, E> + Clone,
-  {
-    name_parser
-      .then_ignore(Colon::parser())
-      .then(value_parser)
-      .map_with(|(name, value), exa| {
-        let span = exa.span();
-        Self { span, name, value }
-      })
-  }
-}
-
-impl<'a, Name, Value, I, T, Error> Parseable<'a, I, T, Error> for Argument<Name, Value>
-where
-  Name: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-  Value: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Value::parser())
-  }
 }
 
 /// A collection of arguments enclosed in parentheses.
@@ -166,7 +118,7 @@ where
 ///
 /// The `Container` parameter allows using different collection types:
 /// - `Vec<Argument<Value, Span>>` (default): Standard dynamic array
-/// - Any type implementing `chumsky::container::Container<Arg>`
+/// - Any type implementing `tokit::container::Container<Arg>`
 ///
 /// ## Component Structure
 ///
@@ -247,34 +199,5 @@ impl<Arg, Container> Arguments<Arg, Container> {
   #[inline]
   pub const fn arguments(&self) -> &Container {
     &self.arguments
-  }
-}
-
-impl<'a, Arg, Container, I, T, Error> Parseable<'a, I, T, Error> for Arguments<Arg, Container>
-where
-  Arg: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<Arg>,
-  LParen: Parseable<'a, I, T, Error>,
-  RParen: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    LParen::parser()
-      .then(Arg::parser().repeated().at_least(1).collect())
-      .then(RParen::parser())
-      .map_with(|((l_paren, arguments), r_paren), exa| Self {
-        span: exa.span(),
-        l_paren,
-        arguments,
-        r_paren,
-        _arg: PhantomData,
-      })
   }
 }

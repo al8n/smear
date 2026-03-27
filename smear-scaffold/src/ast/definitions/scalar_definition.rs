@@ -1,11 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
-use smear_lexer::keywords::{Extend, Scalar};
 
-use crate::error::UnexpectedEndOfSchemaExtensionError;
 
 /// Represents a GraphQL scalar type definition that defines custom data types with specific serialization behavior.
 ///
@@ -162,55 +160,6 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
-
-  /// Creates a parser for scalar definitions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type definitions,
-  /// supporting optional descriptions and directives while ensuring proper whitespace
-  /// and comment handling throughout the definition.
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP>(
-    name_parser: NP,
-    directives_parser: DP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    Scalar: Parseable<'src, I, T, Error>,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    Scalar::parser()
-      .ignore_then(name_parser.then(directives_parser.or_not()))
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
-  }
-}
-
-impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for ScalarTypeDefinition<Name, Directives>
-where
-  Scalar: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  Error: UnexpectedEndOfSchemaExtensionError,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Directives::parser())
-  }
 }
 
 /// Represents a GraphQL scalar type extension that adds new directives to an existing scalar.
@@ -342,58 +291,5 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   #[inline]
   pub const fn directives(&self) -> &Directives {
     &self.directives
-  }
-
-  /// Creates a parser for scalar extensions using the provided directives parser.
-  ///
-  /// This parser handles the complete syntax for GraphQL scalar type extensions,
-  /// which must include directives (unlike definitions where they are optional).
-  /// The parser ensures proper keyword recognition, name validation, and directive
-  /// processing while maintaining comprehensive error reporting capabilities.
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP>(
-    name_parser: NP,
-    directives_parser: DP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Extend: Parseable<'src, I, T, Error>,
-    Scalar: Parseable<'src, I, T, Error>,
-    NP: Parser<'src, I, Name, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-  {
-    Extend::parser()
-      .then(Scalar::parser())
-      .ignore_then(name_parser)
-      .then(directives_parser)
-      .map_with(|(name, directives), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-      })
-  }
-}
-
-impl<'a, Name, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for ScalarTypeExtension<Name, Directives>
-where
-  Extend: Parseable<'a, I, T, Error>,
-  Scalar: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Directives::parser())
   }
 }

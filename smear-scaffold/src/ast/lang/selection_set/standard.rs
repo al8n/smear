@@ -1,15 +1,10 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoSpan, Span},
-};
-use smear_lexer::{
-  keywords::On,
-  punctuator::{LBrace, RBrace, Spread},
-};
 
-use crate::ast::{Field, FragmentSpread, InlineFragment, SelectionSet, StandardField};
+use crate::ast::{FragmentSpread, InlineFragment, SelectionSet, StandardField};
 
 /// A standard selection set in GraphQL.
 pub type StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> =
@@ -54,64 +49,6 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives> IntoSpan<S
       Self::FragmentSpread(fs) => fs.into_span(),
       Self::InlineFragment(ifr) => ifr.into_span(),
     }
-  }
-}
-
-impl<
-  'a,
-  Alias: 'a,
-  Name: 'a,
-  FragmentName: 'a,
-  TypeCondition: 'a,
-  Arguments: 'a,
-  Directives: 'a,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for StandardSelection<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
-where
-  On: Parseable<'a, I, T, Error>,
-  Spread: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  TypeCondition: Parseable<'a, I, T, Error>,
-  Alias: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  FragmentName: Parseable<'a, I, T, Error>,
-  Arguments: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
-    T: Token<'a>,
-    Error: 'a,
-  {
-    recursive(|selection| {
-      let selsetion_set = SelectionSet::<Self>::parser_with(selection.clone());
-
-      let field_p = Field::parser_with(
-        Arguments::parser(),
-        Directives::parser(),
-        selsetion_set.clone(),
-      )
-      .map(StandardField::from);
-
-      let inline_p = InlineFragment::parser_with(
-        TypeCondition::parser(),
-        Directives::parser(),
-        selsetion_set.clone(),
-      )
-      .map(Self::InlineFragment);
-
-      let spread_p = FragmentSpread::parser().map(Self::FragmentSpread);
-
-      choice((field_p.map(Self::Field), spread_p, inline_p))
-    })
   }
 }
 

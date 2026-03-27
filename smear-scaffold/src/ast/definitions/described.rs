@@ -1,7 +1,7 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
 /// A node with an optional description.
@@ -68,30 +68,5 @@ impl<T, Description> Described<T, Description> {
   #[inline]
   pub const fn node(&self) -> &T {
     &self.node
-  }
-}
-
-impl<'a, Description, Node, I, T, Error> Parseable<'a, I, T, Error> for Described<Node, Description>
-where
-  Description: Parseable<'a, I, T, Error>,
-  Node: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Description::parser()
-      .or_not()
-      .then(Node::parser())
-      .map_with(|(description, node), exa| Self {
-        span: exa.span(),
-        description,
-        node,
-      })
   }
 }

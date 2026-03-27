@@ -1,20 +1,12 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}, syntax_tree_display::DisplaySyntaxTree},
+};
 use core::marker::PhantomData;
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-    syntax_tree_display::DisplaySyntaxTree,
-  },
-};
 
-use smear_lexer::{
-  keywords::*,
-  punctuator::{At, Pipe},
-};
+use smear_lexer::keywords::*;
 
 use std::vec::Vec;
 
@@ -615,38 +607,6 @@ impl<Location, Container> DirectiveLocations<Location, Container> {
   }
 }
 
-impl<'a, Location, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for DirectiveLocations<Location, Container>
-where
-  Container: chumsky::container::Container<Location> + 'a,
-  Pipe: Parseable<'a, I, T, Error>,
-  Location: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-  {
-    Location::parser()
-      .separated_by(Pipe::parser())
-      .allow_leading()
-      .at_least(1)
-      .collect()
-      .map_with(|locations, exa| {
-        let span = exa.span();
-        Self {
-          span,
-          locations,
-          _m: PhantomData,
-        }
-      })
-  }
-}
-
 impl<Location, Container> DisplayCompact for DirectiveLocations<Location, Container>
 where
   Container: AsRef<[Location]>,
@@ -819,70 +779,5 @@ impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   #[inline]
   pub const fn locations(&self) -> &Locations {
     &self.directive_locations
-  }
-
-  /// Creates a parser that can parse a complete directive definition.
-  ///
-  /// This parser handles the full directive definition syntax including all
-  /// optional components. The parsing of arguments and locations is delegated
-  /// to the provided parsers.
-  pub fn parser_with<'src, I, T, Error, E, NP, AP, LP>(
-    name_parser: NP,
-    args_parser: AP,
-    directive_locations_parser: LP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    At: Parseable<'src, I, T, Error> + 'src,
-    Directive: Parseable<'src, I, T, Error> + 'src,
-    On: Parseable<'src, I, T, Error> + 'src,
-    Repeatable: Parseable<'src, I, T, Error> + 'src,
-    AP: Parser<'src, I, Args, E> + Clone,
-    LP: Parser<'src, I, Locations, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
-  {
-    Directive::parser()
-      .then(At::parser())
-      .ignore_then(name_parser)
-      .then(args_parser.or_not())
-      .then(Repeatable::parser().or_not())
-      .then_ignore(On::parser())
-      .then(directive_locations_parser)
-      .map_with(
-        |(((name, arguments_definition), repeateable), directive_locations), exa| Self {
-          span: exa.span(),
-          name,
-          arguments_definition,
-          repeateable: repeateable.is_some(),
-          directive_locations,
-        },
-      )
-  }
-}
-
-impl<'a, Name, Args, Locations, I, T, Error> Parseable<'a, I, T, Error>
-  for DirectiveDefinition<Name, Args, Locations>
-where
-  At: Parseable<'a, I, T, Error>,
-  Directive: Parseable<'a, I, T, Error>,
-  On: Parseable<'a, I, T, Error>,
-  Repeatable: Parseable<'a, I, T, Error>,
-  Args: Parseable<'a, I, T, Error>,
-  Locations: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Args::parser(), Locations::parser())
   }
 }

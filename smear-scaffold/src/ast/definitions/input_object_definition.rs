@@ -1,12 +1,10 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use crate::{error::UnexpectedEndOfInputObjectExtensionError, hints::InputObjectTypeExtensionHint};
 
-use smear_lexer::keywords::{Extend, Input};
 
 /// Represents a complete input object type definition in GraphQL schema.
 ///
@@ -222,64 +220,6 @@ impl<Name, Directives, FieldsDefinition>
   #[inline]
   pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
     self.fields.as_ref()
-  }
-
-  /// Creates a parser that can parse a complete input object definition.
-  ///
-  /// This parser handles the full input object definition syntax including all
-  /// optional components. The parsing of fields definition and directives is
-  /// delegated to the provided parser functions.
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, DP, FP>(
-    name_parser: NP,
-    directives_parser: DP,
-    input_fields_definition_parser: FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Input: Parseable<'src, I, T, Error> + 'src,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    NP: Parser<'src, I, Name, E> + Clone,
-  {
-    Input::parser()
-      .ignore_then(name_parser)
-      .then(directives_parser.or_not())
-      .then(input_fields_definition_parser.or_not())
-      .map_with(|((name, directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields,
-      })
-  }
-}
-
-impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
-where
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-  Input: Parseable<'a, I, T, Error>,
-{
-  #[inline(always)]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      <Name as Parseable<I, T, Error>>::parser(),
-      <Directives as Parseable<I, T, Error>>::parser(),
-      <FieldsDefinition as Parseable<I, T, Error>>::parser(),
-    )
   }
 }
 
@@ -498,77 +438,5 @@ impl<Name, Directives, FieldsDefinition>
   #[inline]
   pub const fn data(&self) -> &InputObjectTypeExtensionData<Directives, FieldsDefinition> {
     &self.data
-  }
-
-  /// Creates a parser that can parse a complete input object extension.
-  ///
-  /// This parser handles the full input object extension syntax including the extend
-  /// and input keywords, target input object name, and extension data.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, NP, DP, FP>(
-    name_parser: NP,
-    directives_parser: DP,
-    input_fields_definition_parser: FP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: UnexpectedEndOfInputObjectExtensionError + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Extend: Parseable<'a, I, T, Error> + 'a,
-    Input: Parseable<'a, I, T, Error> + 'a,
-    NP: Parser<'a, I, Name, E> + Clone,
-    FP: Parser<'a, I, FieldsDefinition, E> + Clone,
-    DP: Parser<'a, I, Directives, E> + Clone,
-  {
-    Extend::parser()
-      .then(Input::parser())
-      .ignore_then(name_parser)
-      .then(directives_parser.or_not())
-      .then(input_fields_definition_parser.or_not())
-      .try_map_with(|((name, directives), fields), exa| {
-        let data = match (directives, fields) {
-          (directives, Some(fields)) => InputObjectTypeExtensionData::Fields { directives, fields },
-          (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
-          (None, None) => {
-            return Err(Error::unexpected_end_of_input_object_extension(
-              exa.span(),
-              InputObjectTypeExtensionHint::DirectivesOrInputFieldsDefinition,
-            ));
-          }
-        };
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
-      })
-  }
-}
-
-impl<'a, Name, Directives, FieldsDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for InputObjectTypeExtension<Name, Directives, FieldsDefinition>
-where
-  Error: UnexpectedEndOfInputObjectExtensionError,
-  Name: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-  Extend: Parseable<'a, I, T, Error>,
-  Input: Parseable<'a, I, T, Error>,
-{
-  #[inline(always)]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: UnexpectedEndOfInputObjectExtensionError + 'a,
-  {
-    Self::parser_with(
-      <Name as Parseable<I, T, Error>>::parser(),
-      <Directives as Parseable<I, T, Error>>::parser(),
-      <FieldsDefinition as Parseable<I, T, Error>>::parser(),
-    )
   }
 }

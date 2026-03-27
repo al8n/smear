@@ -1,9 +1,9 @@
-use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
 ///
@@ -193,76 +193,6 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   #[inline]
   pub const fn selection_set(&self) -> &SelectionSet {
     &self.selection_set
-  }
-
-  /// Creates a parser for named operation definitions.
-  ///
-  /// This parser handles the complete syntax for named operations, including all
-  /// optional components. It delegates parsing of specific components to the
-  /// provided sub-parsers for maximum flexibility.
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, OP, VP, DP, SP>(
-    name_parser: NP,
-    operation_type_parser: OP,
-    variable_definitions_parser: VP,
-    directives_parser: DP,
-    selection_set_parser: SP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, Name, E> + Clone,
-    OP: Parser<'src, I, OperationType, E> + Clone,
-    VP: Parser<'src, I, VariablesDefinition, E> + Clone,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    SP: Parser<'src, I, SelectionSet, E> + Clone,
-  {
-    operation_type_parser
-      .then(name_parser.or_not())
-      .then(variable_definitions_parser.or_not())
-      .then(directives_parser.or_not())
-      .then(selection_set_parser)
-      .map_with(
-        |((((operation_type, name), variable_definitions), directives), selection_set), exa| Self {
-          span: exa.span(),
-          operation_type,
-          name,
-          variable_definitions,
-          directives,
-          selection_set,
-        },
-      )
-  }
-}
-
-impl<'a, Name, OperationType, VariablesDefinition, Directives, SelectionSet, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
-where
-  Name: Parseable<'a, I, T, Error>,
-  OperationType: Parseable<'a, I, T, Error>,
-  VariablesDefinition: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  SelectionSet: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      OperationType::parser(),
-      VariablesDefinition::parser(),
-      Directives::parser(),
-      SelectionSet::parser(),
-    )
   }
 }
 
@@ -460,46 +390,4 @@ where
 impl<NamedOperationTypeDefinition, SelectionSet>
   OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
 {
-  /// Creates a parser for operation definitions.
-  ///
-  /// Handles both named and shorthand operation forms with proper precedence.
-  #[inline]
-  pub fn parser_with<'src, I, T, Error, E, NP, SP>(
-    named_operation_type_parser: NP,
-    selection_set_parser: SP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    NP: Parser<'src, I, NamedOperationTypeDefinition, E> + Clone,
-    SP: Parser<'src, I, SelectionSet, E> + Clone,
-  {
-    named_operation_type_parser
-      .map(Self::Named)
-      .or(selection_set_parser.map(Self::Shorthand))
-  }
-}
-
-impl<'a, NamedOperationTypeDefinition, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
-  for OperationDefinition<NamedOperationTypeDefinition, SelectionSet>
-where
-  NamedOperationTypeDefinition: Parseable<'a, I, T, Error>,
-  SelectionSet: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      NamedOperationTypeDefinition::parser(),
-      SelectionSet::parser(),
-    )
-  }
 }

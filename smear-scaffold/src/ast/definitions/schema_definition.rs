@@ -1,11 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
-use smear_lexer::keywords::{Extend, Schema};
 
-use crate::{error::UnexpectedEndOfSchemaExtensionError, hints::SchemaExtensionHint};
 
 /// Represents a GraphQL schema definition that describes the structure and capabilities of a GraphQL service.
 ///
@@ -167,55 +165,6 @@ impl<Directives, RootOperationTypesDefinition>
   #[inline]
   pub const fn root_operation_types_definition(&self) -> &RootOperationTypesDefinition {
     &self.operation_type_definitions
-  }
-
-  /// Creates a parser for schema definitions using the provided sub-parsers.
-  ///
-  /// This parser handles the complete syntax for a GraphQL schema definition,
-  /// including all optional and required components. The parsing of directives
-  /// and root operation type definitions is delegated to the provided parsers,
-  /// allowing for context-specific validation and processing.
-  pub fn parser_with<'src, I, T, Error, E, DP, RP>(
-    directives_parser: DP,
-    root_operation_types_definition_parser: RP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Schema: Parseable<'src, I, T, Error> + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone,
-    RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone,
-  {
-    Schema::parser()
-      .ignore_then(directives_parser.or_not())
-      .then(root_operation_types_definition_parser)
-      .map_with(|(directives, operation_type_definitions), exa| Self {
-        span: exa.span(),
-        directives,
-        operation_type_definitions,
-      })
-  }
-}
-
-impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for SchemaDefinition<Directives, RootOperationTypesDefinition>
-where
-  Directives: Parseable<'a, I, T, Error>,
-  RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
-  Schema: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Directives::parser(), RootOperationTypesDefinition::parser())
   }
 }
 
@@ -584,73 +533,5 @@ impl<Directives, RootOperationTypesDefinition>
   #[inline]
   pub const fn data(&self) -> &SchemaExtensionData<Directives, RootOperationTypesDefinition> {
     &self.content
-  }
-
-  /// Creates a parser for schema extensions using the provided sub-parsers.
-  ///
-  /// This parser handles the complete syntax for GraphQL schema extensions,
-  /// supporting both directive-only and operational extensions. The parser
-  /// is designed to be composable and integrate seamlessly with larger
-  /// GraphQL document parsers.
-  pub fn parser_with<'src, I, T, Error, E, DP, RP>(
-    directives_parser: DP,
-    root_operation_types_definition_parser: RP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnexpectedEndOfSchemaExtensionError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Extend: Parseable<'src, I, T, Error> + 'src,
-    Schema: Parseable<'src, I, T, Error> + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone + 'src,
-    RP: Parser<'src, I, RootOperationTypesDefinition, E> + Clone + 'src,
-  {
-    Extend::parser()
-      .then(Schema::parser())
-      .ignore_then(directives_parser.or_not())
-      .then(root_operation_types_definition_parser.or_not())
-      .try_map_with(|(directives, root_operation_types_definition), exa| {
-        let content = match (directives, root_operation_types_definition) {
-          (directives, Some(definitions)) => SchemaExtensionData::Operations {
-            directives,
-            definitions,
-          },
-          (Some(directives), None) => SchemaExtensionData::Directives(directives),
-          (None, None) => {
-            return Err(Error::unexpected_end_of_schema_extension(
-              exa.span(),
-              SchemaExtensionHint::DirectivesOrRootOperationTypesDefinition,
-            ));
-          }
-        };
-
-        Ok(Self {
-          span: exa.span(),
-          content,
-        })
-      })
-  }
-}
-
-impl<'a, Directives, RootOperationTypesDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for SchemaExtension<Directives, RootOperationTypesDefinition>
-where
-  Directives: Parseable<'a, I, T, Error>,
-  RootOperationTypesDefinition: Parseable<'a, I, T, Error>,
-  Extend: Parseable<'a, I, T, Error>,
-  Schema: Parseable<'a, I, T, Error>,
-  Error: UnexpectedEndOfSchemaExtensionError,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Directives::parser(), RootOperationTypesDefinition::parser())
   }
 }

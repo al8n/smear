@@ -1,10 +1,8 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
-
-use smear_lexer::punctuator::At;
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -81,52 +79,6 @@ impl<Name, Args> Directive<Name, Args> {
   pub fn into_arguments(self) -> Option<Args> {
     self.arguments
   }
-
-  /// Creates a parser for a directive using the provided name and arguments parsers.
-  ///
-  /// The `name_parser` is used to parse the directive's name, while the `args_parser`
-  /// is used to parse the optional arguments.
-  ///
-  /// The resulting parser will recognize the `@` symbol, followed by the name and optional arguments,
-  /// constructing a `Directive` instance with the parsed components.
-  pub fn parser_with<'a, I, T, Error, E, NP, AP>(
-    name_parser: NP,
-    args_parser: AP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Args: Parseable<'a, I, T, Error>,
-    At: Parseable<'a, I, T, Error>,
-    NP: Parser<'a, I, Name, E> + Clone,
-    AP: Parser<'a, I, Args, E> + Clone,
-  {
-    At::parser()
-      .ignore_then(name_parser)
-      .then(args_parser.or_not())
-      .map_with(|(name, arguments), exa| Self::new(exa.span(), name, arguments))
-  }
-}
-
-impl<'a, Name, Args, I, T, Error> Parseable<'a, I, T, Error> for Directive<Name, Args>
-where
-  Args: Parseable<'a, I, T, Error>,
-  At: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), Args::parser())
-  }
 }
 
 /// Represents a collection of one or more directives.
@@ -195,28 +147,5 @@ impl<Directive, Container> Directives<Directive, Container> {
   #[inline]
   pub fn into_directives(self) -> Container {
     self.directives
-  }
-}
-
-impl<'a, Directive, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for Directives<Directive, Container>
-where
-  Directive: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<Directive>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Directive::parser()
-      .repeated()
-      .at_least(1)
-      .collect()
-      .map_with(|directives, exa| Self::new(exa.span(), directives))
   }
 }

@@ -1,14 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}},
 };
 
-use smear_lexer::{keywords::On, punctuator::Spread};
 
 /// Represents a fragment name with the special restriction that it cannot be "on".
 ///
@@ -195,25 +190,6 @@ impl<Name> TypeCondition<Name> {
   pub const fn name(&self) -> &Name {
     &self.name
   }
-
-  /// Creates a parser that can parse a type condition with a custom name parser.
-  ///
-  /// This allows for greater flexibility in how type conditions are defined and parsed.
-  /// The parser handles the complete type condition syntax including the `on` keyword
-  /// and the type name.
-  pub fn parser_with<'a, I, T, Error, E, P>(name_parser: P) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    On: Parseable<'a, I, T, Error>,
-    P: Parser<'a, I, Name, E> + Clone,
-  {
-    On::parser()
-      .ignore_then(name_parser)
-      .map_with(|name, exa| Self::new(exa.span(), name))
-  }
 }
 
 impl<Name> AsSpan<Span> for TypeCondition<Name> {
@@ -236,24 +212,6 @@ impl<Name> IntoComponents for TypeCondition<Name> {
   #[inline]
   fn into_components(self) -> Self::Components {
     (self.span, self.name)
-  }
-}
-
-impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for TypeCondition<Name>
-where
-  Name: Parseable<'a, I, T, Error>,
-  On: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser())
   }
 }
 
@@ -397,50 +355,6 @@ impl<FragmentName, Directives> FragmentSpread<FragmentName, Directives> {
   /// provide metadata, or trigger custom processing behaviors.
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
-  }
-
-  /// Creates a parser that can parse a fragment spread with custom directive parsing.
-  ///
-  /// The parser handles the complete fragment spread syntax including the ellipsis,
-  /// fragment name, and optional directives.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, FP, DP>(
-    fragment_name_parser: FP,
-    directives_parser: DP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Error: 'a,
-    Spread: Parseable<'a, I, T, Error> + 'a,
-    DP: Parser<'a, I, Directives, E> + Clone,
-    FP: Parser<'a, I, FragmentName, E> + Clone,
-  {
-    Spread::parser()
-      .ignore_then(fragment_name_parser)
-      .then(directives_parser.or_not())
-      .map_with(|(name, directives), exa| Self::new(exa.span(), name, directives))
-  }
-}
-
-impl<'a, FragmentName, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for FragmentSpread<FragmentName, Directives>
-where
-  FragmentName: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  Spread: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(FragmentName::parser(), Directives::parser())
   }
 }
 
@@ -604,59 +518,5 @@ impl<TypeCondition, Directives, SelectionSet>
   #[inline]
   pub const fn selection_set(&self) -> &SelectionSet {
     &self.selection_set
-  }
-
-  /// Creates a parser that can parse an inline fragment with custom component parsers.
-  ///
-  /// The parser handles the complete inline fragment syntax including the ellipsis,
-  /// optional type condition, optional directives, and required selection set.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, TP, DP, SP>(
-    type_condition_parser: TP,
-    directives_parser: DP,
-    selection_set_parser: SP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Error: 'a,
-    Spread: Parseable<'a, I, T, Error> + 'a,
-    SP: Parser<'a, I, SelectionSet, E> + Clone,
-    DP: Parser<'a, I, Directives, E> + Clone,
-    TP: Parser<'a, I, TypeCondition, E> + Clone,
-  {
-    Spread::parser()
-      .ignore_then(type_condition_parser.or_not())
-      .then(directives_parser.or_not())
-      .then(selection_set_parser)
-      .map_with(|((type_condition, directives), selection_set), exa| {
-        Self::new(exa.span(), type_condition, directives, selection_set)
-      })
-  }
-}
-
-impl<'a, TypeCondition, Directives, SelectionSet, I, T, Error> Parseable<'a, I, T, Error>
-  for InlineFragment<TypeCondition, Directives, SelectionSet>
-where
-  TypeCondition: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  SelectionSet: Parseable<'a, I, T, Error>,
-  Spread: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      TypeCondition::parser(),
-      Directives::parser(),
-      SelectionSet::parser(),
-    )
   }
 }

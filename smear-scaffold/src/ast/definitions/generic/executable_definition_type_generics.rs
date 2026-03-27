@@ -1,12 +1,10 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 use core::marker::PhantomData;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{IterParser, Parser, container::Container as ChumskyContainer, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-
-use smear_lexer::punctuator::{LAngle, RAngle};
 
 use std::vec::Vec;
 
@@ -48,7 +46,7 @@ impl<Ident, Container> IntoComponents for ExecutableDefinitionTypeGenerics<Ident
 impl<Ident, Container> ExecutableDefinitionTypeGenerics<Ident, Container> {
   /// Creates a new `ExecutableDefinitionTypeGenerics` with the given parameters.
   #[inline]
-  const fn new(span: Span, params: Container) -> Self {
+  pub const fn new(span: Span, params: Container) -> Self {
     Self {
       span,
       params,
@@ -75,47 +73,5 @@ impl<Ident, Container> ExecutableDefinitionTypeGenerics<Ident, Container> {
     Container: AsRef<[Ident]>,
   {
     self.params.as_ref()
-  }
-
-  /// Returns a parser for the definition type generics.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    Container: ChumskyContainer<Ident>,
-  {
-    LAngle::parser()
-      .ignore_then(ident_parser.repeated().at_least(1).collect())
-      .then_ignore(RAngle::parser())
-      .map_with(|params, exa| Self::new(exa.span(), params))
-  }
-}
-
-impl<'a, Ident, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinitionTypeGenerics<Ident, Container>
-where
-  Ident: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Container: ChumskyContainer<Ident> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Ident::parser())
   }
 }

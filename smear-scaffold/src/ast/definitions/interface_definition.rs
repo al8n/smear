@@ -1,20 +1,12 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
+};
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
-};
-use smear_lexer::{
-  keywords::{Extend, Implements, Interface},
-  punctuator::Ampersand,
-};
 
-use crate::{error::UnexpectedEndOfInterfaceExtensionError, hints::InterfaceTypeExtensionHint};
 
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -44,38 +36,6 @@ impl<Name, Container> ImplementInterfaces<Name, Container> {
     Container: AsRef<[Name]>,
   {
     self.interfaces().as_ref()
-  }
-}
-
-impl<'a, Name, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ImplementInterfaces<Name, Container>
-where
-  Container: chumsky::container::Container<Name>,
-  Name: Parseable<'a, I, T, Error>,
-  Ampersand: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Name::parser()
-      .separated_by(Ampersand::parser())
-      .allow_leading()
-      .at_least(1)
-      .collect()
-      .map_with(|names, exa| {
-        let span = exa.span();
-        Self {
-          span,
-          interfaces: names,
-          _m: PhantomData,
-        }
-      })
   }
 }
 
@@ -258,79 +218,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   #[inline]
   pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
     self.fields_definition.as_ref()
-  }
-
-  /// Creates a parser for interface type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL interfaces, including
-  /// interface inheritance through the implements clause.
-  pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
-    name_parser: NP,
-    implement_interfaces_parser: IP,
-    directives_parser: DP,
-    fields_definition_parser: FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Interface: Parseable<'src, I, T, Error>,
-    Implements: Parseable<'src, I, T, Error>,
-    Name: 'src,
-    Directives: 'src,
-    ImplementInterfaces: 'src,
-    FieldsDefinition: 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone + 'src,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
-  {
-    Interface::parser()
-      .ignore_then(name_parser)
-      .then(
-        Implements::parser()
-          .ignore_then(implement_interfaces_parser)
-          .or_not(),
-      )
-      .then(directives_parser.or_not())
-      .then(fields_definition_parser.or_not())
-      .map_with(|(((name, implements), directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields_definition: fields,
-        implements,
-      })
-  }
-}
-
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
-where
-  Interface: Parseable<'a, I, T, Error>,
-  Implements: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      ImplementInterfaces::parser(),
-      Directives::parser(),
-      FieldsDefinition::parser(),
-    )
   }
 }
 
@@ -570,101 +457,5 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     &self,
   ) -> &InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.data
-  }
-
-  /// Creates a parser for interface type extensions.
-  ///
-  /// This parser handles the complete `extend interface` syntax, parsing the keywords,
-  /// interface name, and delegating content parsing to the extension content parser.
-  pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
-    name_parser: NP,
-    implement_interfaces_parser: IP,
-    directives_parser: DP,
-    fields_definition_parser: FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnexpectedEndOfInterfaceExtensionError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Extend: Parseable<'src, I, T, Error>,
-    Interface: Parseable<'src, I, T, Error>,
-    Implements: Parseable<'src, I, T, Error>,
-    Name: 'src,
-    Directives: 'src,
-    ImplementInterfaces: 'src,
-    FieldsDefinition: 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone + 'src,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
-  {
-    Extend::parser()
-      .then(Interface::parser())
-      .ignore_then(name_parser)
-      .then(
-        Implements::parser()
-          .ignore_then(implement_interfaces_parser)
-          .or_not(),
-      )
-      .then(directives_parser.or_not())
-      .then(fields_definition_parser.or_not())
-      .try_map_with(|(((name, implements), directives), fields), exa| {
-        let data = match (implements, directives, fields) {
-          (implements, directives, Some(fields)) => InterfaceTypeExtensionData::Fields {
-            implements,
-            directives,
-            fields,
-          },
-          (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
-            implements,
-            directives,
-          },
-          (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
-          (None, None, None) => {
-            return Err(Error::unexpected_end_of_interface_extension(
-              exa.span(),
-              InterfaceTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition,
-            ));
-          }
-        };
-
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
-      })
-  }
-}
-
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
-where
-  Error: UnexpectedEndOfInterfaceExtensionError,
-  Extend: Parseable<'a, I, T, Error>,
-  Interface: Parseable<'a, I, T, Error>,
-  Implements: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      ImplementInterfaces::parser(),
-      Directives::parser(),
-      FieldsDefinition::parser(),
-    )
   }
 }
