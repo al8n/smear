@@ -11,7 +11,7 @@ extern crate std;
 
 pub use string_lexer::*;
 
-pub use logosky;
+pub use tokit;
 
 /// The error module contains error types and traits for lexer errors.
 pub mod error;
@@ -139,5 +139,5 @@ mod handlers;
 
 #[doc(hidden)]
 pub mod __private {
-  pub use logosky;
+  pub use tokit;
 }

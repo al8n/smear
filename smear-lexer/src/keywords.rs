@@ -23,7 +23,7 @@ macro_rules! keyword {
         $(#[$meta])*
         #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
         pub struct $name {
-          span: $crate::__private::logosky::utils::Span,
+          span: $crate::__private::tokit::SimpleSpan,
         }
 
         impl ::core::convert::AsRef<::core::primitive::str> for $name {
@@ -44,7 +44,7 @@ macro_rules! keyword {
           /// Creates a new keyword.
           #[doc = "Creates a new `" $kw "` keyword."]
           #[inline(always)]
-          pub const fn new(span: $crate::__private::logosky::utils::Span) -> Self {
+          pub const fn new(span: $crate::__private::tokit::SimpleSpan) -> Self {
             Self { span }
           }
 
@@ -56,31 +56,31 @@ macro_rules! keyword {
 
           #[doc = "Returns the span of the `" $kw "` keyword."]
           #[inline]
-          pub const fn span(&self) -> &$crate::__private::logosky::utils::Span {
+          pub const fn span(&self) -> &$crate::__private::tokit::SimpleSpan {
             &self.span
           }
         }
 
-        impl $crate::__private::logosky::utils::AsSpan<$crate::__private::logosky::utils::Span> for $name {
+        impl $crate::__private::tokit::span::AsSpan<$crate::__private::tokit::SimpleSpan> for $name {
           #[inline]
-          fn as_span(&self) -> &$crate::__private::logosky::utils::Span {
+          fn as_span(&self) -> &$crate::__private::tokit::SimpleSpan {
             self.span()
           }
         }
 
-       impl $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span> for $name {
+       impl $crate::__private::tokit::span::IntoSpan<$crate::__private::tokit::SimpleSpan> for $name {
           #[inline]
-          fn into_span(self) -> $crate::__private::logosky::utils::Span {
+          fn into_span(self) -> $crate::__private::tokit::SimpleSpan {
             self.span
           }
         }
 
-        impl $crate::__private::logosky::utils::IntoComponents for $name {
-          type Components = $crate::__private::logosky::utils::Span;
+        impl $crate::__private::tokit::utils::IntoComponents for $name {
+          type Components = $crate::__private::tokit::SimpleSpan;
 
           #[inline]
           fn into_components(self) -> Self::Components {
-            <Self as $crate::__private::logosky::utils::IntoSpan<$crate::__private::logosky::utils::Span>>::into_span(self)
+            <Self as $crate::__private::tokit::span::IntoSpan<$crate::__private::tokit::SimpleSpan>>::into_span(self)
           }
         }
 
@@ -91,14 +91,14 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::logosky::utils::human_display::DisplayHuman for $name {
+        impl $crate::__private::tokit::utils::human_display::DisplayHuman for $name {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayCompact for $name {
+        impl $crate::__private::tokit::utils::sdl_display::DisplayCompact for $name {
           type Options = ();
 
           #[inline]
@@ -107,7 +107,7 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::logosky::utils::sdl_display::DisplayPretty for $name {
+        impl $crate::__private::tokit::utils::sdl_display::DisplayPretty for $name {
           type Options = ();
 
           #[inline]
@@ -116,7 +116,7 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::logosky::utils::syntax_tree_display::DisplaySyntaxTree for $name {
+        impl $crate::__private::tokit::utils::syntax_tree_display::DisplaySyntaxTree for $name {
           #[inline]
           fn fmt(
             &self,

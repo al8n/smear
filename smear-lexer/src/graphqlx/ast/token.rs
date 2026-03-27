@@ -1,8 +1,8 @@
 macro_rules! token {
-  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $source:ty $(,)?)) => {
+  ($mod:ident $(<$lt:lifetime>)?($slice: ty, $char: ty, $handlers:ident, $utf8:tt $(,)?)) => {
     mod $mod {
-      use logosky::{
-        Logos, Lexable, utils::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+      use tokit::{
+        logos::Logos, lexer::Lexable, state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
       use crate::{
         error::StringErrors,
@@ -19,14 +19,18 @@ macro_rules! token {
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b $(: $lt)?, $($lt: 'b)?> logosky::Token<'b> for SyntacticToken<$slice> {
+      impl<'b $(: $lt)?, $($lt: 'b)?> tokit::Token<'b> for SyntacticToken<$slice> {
         type Kind = SyntacticTokenKind;
-        type Char = $char;
-        type Logos = Token $(<$lt>)?;
+        type Error = TokenErrors;
 
         #[inline(always)]
         fn kind(&self) -> Self::Kind {
           self.kind()
+        }
+
+        #[inline(always)]
+        fn is_trivia(&self) -> bool {
+          false
         }
       }
 
@@ -34,10 +38,10 @@ macro_rules! token {
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
       #[logos(
-        crate = logosky::logos,
+        crate = tokit::logos,
         extras = RecursionLimiter,
-        skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*",
-        source = $source,
+        skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*?",
+        utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::default_error)
       )]
       #[logos(subpattern ident = "[a-zA-Z_][a-zA-Z0-9_]*")]
@@ -166,12 +170,12 @@ macro_rules! token {
         Hex($slice),
 
         #[token("\"", |lexer| {
-          <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+          <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
         })]
         LitInlineStr(LitInlineStr<$slice>),
 
         #[token("\"\"\"", |lexer| {
-          <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<logosky::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+          <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
         })]
         LitBlockStr(LitBlockStr<$slice>),
       }

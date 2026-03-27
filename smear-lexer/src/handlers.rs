@@ -1,19 +1,24 @@
-use logosky::{
-  Logos, Source,
-  logos::Lexer,
+use tokit::{
+  SimpleSpan,
+  logos::{Logos, Lexer, Source},
+  error::{UnexpectedEnd, UnexpectedLexeme},
   utils::{
-    CharSize, Lexeme, PositionedChar, Span, UnexpectedEnd, UnexpectedLexeme,
+    CharLen, Lexeme, PositionedChar,
+  },
+  state::{
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-    tracker::{LimitExceeded, Tracker},
+    tracker::{LimitExceeded, Limiter},
   },
 };
+
+type Span = SimpleSpan;
 
 use crate::error::{BadStateError, UnterminatedSpreadOperatorError};
 
 #[inline(always)]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   lexer.extras.increase_token();
 }
@@ -37,7 +42,7 @@ pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer.extras.increase_recursion();
@@ -54,7 +59,7 @@ pub(super) fn tt_hook_and_then<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -76,7 +81,7 @@ pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -97,7 +102,7 @@ pub(super) fn tt_hook_map<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -114,7 +119,7 @@ where
 #[inline(always)]
 pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
@@ -139,7 +144,7 @@ where
 #[inline(always)]
 pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = Tracker>,
+  T: Logos<'a, Extras = Limiter>,
 {
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
@@ -192,7 +197,7 @@ where
           let pc = PositionedChar::with_position(item, span.end);
           Lexeme::Char(pc)
         } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
+          Lexeme::Range(Span::new(span.end, span.end + curr))
         };
         return Err(unexpected_suffix(l));
       }
@@ -205,7 +210,7 @@ where
         let pc = PositionedChar::with_position(item, span.end);
         Lexeme::Char(pc)
       } else {
-        Lexeme::Span(Span::from(span.end..(span.end + remainder_len)))
+        Lexeme::Range(Span::new(span.end, span.end + remainder_len))
       };
 
       // return the range of the invalid sequence
@@ -232,8 +237,8 @@ where
   E: From<UnexpectedEnd<H>> + From<UnexpectedLexeme<Char, H>>,
 {
   match remainder.next() {
-    None => UnexpectedEnd::with_name(name.into(), hint()).into(),
-    Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name(name.into(), hint()).into(),
+    None => UnexpectedEnd::with_name(0, name.into(), hint()).into(),
+    Some(ch) if is_ignored_char(&ch) => UnexpectedEnd::with_name(0, name.into(), hint()).into(),
     Some(ch) if ch.is_first_invalid_char() => {
       // The first char is already consumed.
       let mut curr = 1;
@@ -252,7 +257,7 @@ where
           let pc = PositionedChar::with_position(ch, span.end);
           Lexeme::Char(pc)
         } else {
-          Lexeme::Span(Span::from(span.end..(span.end + curr)))
+          Lexeme::Range(Span::new(span.end, span.end + curr))
         };
 
         return UnexpectedLexeme::new(l, hint()).into();
@@ -265,14 +270,14 @@ where
         let pc = PositionedChar::with_position(ch, span.end);
         Lexeme::Char(pc)
       } else {
-        Lexeme::Span(Span::from(span.end..(span.end + remainder_len)))
+        Lexeme::Range(Span::new(span.end, span.end + remainder_len))
       };
 
       UnexpectedLexeme::new(l, hint()).into()
     }
     Some(ch) => {
       let span = lexer.span();
-      lexer.bump(ch.char_size());
+      lexer.bump(ch.char_len());
 
       let l = Lexeme::Char(PositionedChar::with_position(ch, span.end));
       UnexpectedLexeme::new(l, hint()).into()
@@ -297,7 +302,7 @@ pub(super) const fn is_ignored_byte(slice: &[u8], b: &u8) -> bool {
   }
 }
 
-pub(super) trait ValidateNumberChar<Language>: CharSize {
+pub(super) trait ValidateNumberChar<Language>: CharLen {
   fn is_first_invalid_char(&self) -> bool;
   fn is_following_invalid_char(&self) -> bool;
 }

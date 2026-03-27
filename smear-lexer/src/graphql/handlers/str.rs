@@ -1,9 +1,12 @@
 use super::error::{self, FloatError};
-use logosky::{
-  Source,
-  logos::{Lexer, Logos},
-  utils::{Lexeme, PositionedChar, Span, tracker::Tracker},
+use tokit::{
+  SimpleSpan,
+  logos::{Lexer, Logos, Source},
+  utils::{Lexeme, PositionedChar},
+  state::tracker::Limiter,
 };
+
+type Span = SimpleSpan;
 
 use crate::{
   handlers::{self, is_ignored_char},
@@ -35,7 +38,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
 where
-  T: Logos<'a, Source = S, Extras = Tracker>,
+  T: Logos<'a, Source = S, Extras = Limiter>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
@@ -114,7 +117,7 @@ where
     let pc = PositionedChar::with_position('0', zero_start_at);
     Lexeme::Char(pc)
   } else {
-    Lexeme::Span(Span::from(zero_start_at..(zero_start_at + zeros)))
+    Lexeme::Range(Span::new(zero_start_at, zero_start_at + zeros))
   };
 
   LexerError::new(lexer.span(), leading_zeros(l).into())

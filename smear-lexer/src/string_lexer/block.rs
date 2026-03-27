@@ -1,7 +1,7 @@
 use std::{borrow::Cow, string::String};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::human_display::DisplayHuman;
+use tokit::utils::human_display::DisplayHuman;
 
 pub(crate) use self::{
   str::{BlockStringToken, lex_block_str_from_str},
@@ -112,7 +112,7 @@ impl<S> LitBlockStr<S> {
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitBlockStr<T>
   where
-    S: logosky::utils::ToEquivalent<T>,
+    S: tokit::utils::ToEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitBlockStr::Plain(s.to_equivalent()),
@@ -124,7 +124,7 @@ impl<S> LitBlockStr<S> {
   #[inline(always)]
   pub fn into_equivalent<T>(self) -> LitBlockStr<T>
   where
-    S: logosky::utils::IntoEquivalent<T>,
+    S: tokit::utils::IntoEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitBlockStr::Plain(s.into_equivalent()),

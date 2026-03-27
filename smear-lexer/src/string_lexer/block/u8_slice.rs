@@ -1,6 +1,5 @@
-use logosky::{
-  Lexable, Source,
-  logos::{Lexer, Logos},
+use tokit::{
+  lexer::Lexable, logos::{Lexer, Logos, Source},
 };
 
 use crate::error::{StringError, StringErrors};
@@ -8,7 +7,7 @@ use crate::error::{StringError, StringErrors};
 use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = logosky::logos, source = [u8], error(StringError<u8>))]
+#[logos(crate = tokit::logos, utf8 = false, error(StringError<u8>))]
 pub(crate) enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
@@ -118,11 +117,11 @@ where
 
 // ---- sub-lexer over inner block-string content ----
 #[derive(Logos, Debug)]
-#[logos(crate = logosky::logos, source = [u8], extras = BlockLineExtras)]
+#[logos(crate = tokit::logos, utf8 = false, extras = BlockLineExtras)]
 enum BlockLineTok {
   /// Body of a line (one or more bytes, never includes a terminator).
   /// We process the whole line in the callback.
-  #[regex(r#"[^\r\n]+"#, on_line_body)]
+  #[regex(r#"[^\r\n]+"#, on_line_body, allow_greedy = true)]
   LineBody,
 
   /// One line terminator: \r\n | \r | \n

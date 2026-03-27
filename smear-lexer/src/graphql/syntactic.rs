@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{Token, utils::recursion_tracker::RecursionLimitExceeded};
+use tokit::state::recursion_tracker::RecursionLimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -16,20 +16,18 @@ mod tests;
 mod slice;
 mod str;
 
-/// The syntactic lexer for GraphQL.
-pub type Lexer<'a, S = &'a str> = logosky::TokenStream<'a, SyntacticToken<S>>;
+// TODO: Lexer type alias needs migration - LogosLexer requires FromLogos trait
+// pub type Lexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
 
-/// The char type used for the syntactic token.
-pub type SyntacticTokenChar<'a, S> = <SyntacticToken<S> as Token<'a>>::Char;
-/// The error data type for lexing based on syntactic [`Token`].
-pub type SyntacticLexerErrorData<'a, S> =
-  error::LexerErrorData<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// The error type for lexing based on syntactic [`Token`].
-pub type SyntacticLexerError<'a, S> =
-  error::LexerError<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
-/// A collection of errors for syntactic [`Token`].
-pub type SyntacticLexerErrors<'a, S> =
-  error::LexerErrors<<SyntacticToken<S> as Token<'a>>::Char, RecursionLimitExceeded>;
+/// The error data type for lexing based on syntactic token with `char` source.
+pub type SyntacticLexerErrorData =
+  error::LexerErrorData<char, RecursionLimitExceeded>;
+/// The error type for lexing based on syntactic token with `char` source.
+pub type SyntacticLexerError =
+  error::LexerError<char, RecursionLimitExceeded>;
+/// A collection of errors for syntactic token with `char` source.
+pub type SyntacticLexerErrors =
+  error::LexerErrors<char, RecursionLimitExceeded>;
 
 /// A syntactic token for GraphQL lexing that only includes syntactically significant tokens.
 ///
@@ -68,7 +66,7 @@ pub type SyntacticLexerErrors<'a, S> =
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::syntactic::SyntacticToken;
-/// use logosky::TokenStream;
+/// use tokit::lexer::LogosLexer;
 ///
 /// let source = "query { user { id } }";
 /// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
@@ -220,4 +218,30 @@ pub enum SyntacticTokenKind {
   Bang,
   /// Ampersand `&` token
   Ampersand,
+}
+
+impl core::fmt::Display for SyntacticTokenKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Identifier => f.write_str("identifier"),
+      Self::Int => f.write_str("int"),
+      Self::Float => f.write_str("float"),
+      Self::InlineString => f.write_str("string"),
+      Self::BlockString => f.write_str("block string"),
+      Self::Dollar => f.write_str("$"),
+      Self::LParen => f.write_str("("),
+      Self::RParen => f.write_str(")"),
+      Self::Spread => f.write_str("..."),
+      Self::Colon => f.write_str(":"),
+      Self::Equal => f.write_str("="),
+      Self::At => f.write_str("@"),
+      Self::LBracket => f.write_str("["),
+      Self::RBracket => f.write_str("]"),
+      Self::LBrace => f.write_str("{"),
+      Self::RBrace => f.write_str("}"),
+      Self::Pipe => f.write_str("|"),
+      Self::Bang => f.write_str("!"),
+      Self::Ampersand => f.write_str("&"),
+    }
+  }
 }

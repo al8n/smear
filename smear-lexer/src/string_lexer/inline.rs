@@ -1,5 +1,5 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{
+use tokit::utils::{
   human_display::DisplayHuman,
   sdl_display::{DisplayCompact, DisplayPretty},
 };
@@ -152,7 +152,7 @@ impl<S> LitInlineStr<S> {
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitInlineStr<T>
   where
-    S: logosky::utils::ToEquivalent<T>,
+    S: tokit::utils::ToEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitInlineStr::Plain(s.to_equivalent()),
@@ -164,7 +164,7 @@ impl<S> LitInlineStr<S> {
   #[inline(always)]
   pub fn into_equivalent<T>(self) -> LitInlineStr<T>
   where
-    S: logosky::utils::IntoEquivalent<T>,
+    S: tokit::utils::IntoEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitInlineStr::Plain(s.into_equivalent()),
