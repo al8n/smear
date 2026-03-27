@@ -1,10 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use smear_lexer::punctuator::{Bang, LBracket, RBracket};
 
 /// Represents a GraphQL list type with optional non-null modifier.
 ///
@@ -111,68 +110,5 @@ impl<Type> ListType<Type> {
   #[inline]
   pub const fn required(&self) -> bool {
     self.required
-  }
-
-  /// Creates a parser for list types using the provided element type parser.
-  ///
-  /// This parser handles the complete list type syntax including brackets,
-  /// element type parsing, and optional bang modifier. The element type
-  /// parsing is delegated to the provided parser for flexibility.
-  ///
-  /// ## Parameters
-  /// - `parser`: Parser for the element type within the list
-  ///
-  /// ## Grammar Handled
-  /// ```text
-  /// ListType : [ Type ] !?
-  /// ```
-  ///
-  /// ## Example Parsed Input
-  /// ```text
-  /// [String]        # Nullable list of nullable strings
-  /// [String!]!      # Non-null list of non-null strings
-  /// [[User]]        # Nested list type
-  /// [ID!]           # Nullable list of non-null IDs
-  /// ```
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, P>(parser: P) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    LBracket: Parseable<'a, I, T, Error> + 'a,
-    RBracket: Parseable<'a, I, T, Error> + 'a,
-    Bang: Parseable<'a, I, T, Error> + 'a,
-    P: Parser<'a, I, Type, E> + Clone,
-  {
-    LBracket::parser()
-      .ignore_then(parser)
-      .then_ignore(RBracket::parser())
-      .then(Bang::parser().or_not())
-      .map_with(|(ty, bang), exa| Self {
-        span: exa.span(),
-        ty,
-        required: bang.is_some(),
-      })
-  }
-}
-
-impl<'a, Type, I, T, Error> Parseable<'a, I, T, Error> for ListType<Type>
-where
-  Type: Parseable<'a, I, T, Error>,
-  LBracket: Parseable<'a, I, T, Error> + 'a,
-  RBracket: Parseable<'a, I, T, Error> + 'a,
-  Bang: Parseable<'a, I, T, Error> + 'a,
-{
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(Type::parser())
   }
 }

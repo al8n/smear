@@ -1,12 +1,10 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use crate::{error::UnexpectedEndOfObjectExtensionError, hints::ObjectTypeExtensionHint};
 
-use smear_lexer::keywords::{Extend, Implements, Type};
 
 /// Represents a GraphQL Object type definition that defines a concrete type with fields.
 ///
@@ -158,80 +156,6 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   #[inline]
   pub const fn fields_definition(&self) -> Option<&FieldsDefinition> {
     self.fields_definition.as_ref()
-  }
-
-  /// Creates a parser for object type definitions.
-  ///
-  /// This parser handles the complete syntax for GraphQL object types, including
-  /// all optional components like descriptions, interface implementations,
-  /// directives, and field definitions.
-  pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
-    name_parser: NP,
-    implement_interfaces_parser: IP,
-    directives_parser: DP,
-    fields_definition_parser: FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Type: Parseable<'src, I, T, Error>,
-    Implements: Parseable<'src, I, T, Error>,
-    Name: 'src,
-    Directives: 'src,
-    ImplementInterfaces: 'src,
-    FieldsDefinition: 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone + 'src,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
-  {
-    Type::parser()
-      .ignore_then(name_parser)
-      .then(
-        Implements::parser()
-          .ignore_then(implement_interfaces_parser)
-          .or_not(),
-      )
-      .then(directives_parser.or_not())
-      .then(fields_definition_parser.or_not())
-      .map_with(|(((name, implements), directives), fields), exa| Self {
-        span: exa.span(),
-        name,
-        directives,
-        fields_definition: fields,
-        implements,
-      })
-  }
-}
-
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
-where
-  Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  Implements: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      ImplementInterfaces::parser(),
-      Directives::parser(),
-      FieldsDefinition::parser(),
-    )
   }
 }
 
@@ -471,102 +395,5 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
     &self,
   ) -> &ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition> {
     &self.data
-  }
-
-  /// Creates a parser for object type extensions.
-  ///
-  /// This parser handles the `extend type` syntax followed by the object name
-  /// and extension data. The content parsing is delegated to the
-  /// `ObjectTypeExtensionData` parser for modularity.
-  pub fn parser_with<'src, I, T, Error, E, NP, IP, DP, FP>(
-    name_parser: NP,
-    implement_interfaces_parser: IP,
-    directives_parser: DP,
-    fields_definition_parser: FP,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: UnexpectedEndOfObjectExtensionError + 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Extend: Parseable<'src, I, T, Error>,
-    Type: Parseable<'src, I, T, Error>,
-    Implements: Parseable<'src, I, T, Error>,
-    Name: 'src,
-    ImplementInterfaces: 'src,
-    Directives: 'src,
-    FieldsDefinition: 'src,
-    NP: Parser<'src, I, Name, E> + Clone + 'src,
-    DP: Parser<'src, I, Directives, E> + Clone + 'src,
-    FP: Parser<'src, I, FieldsDefinition, E> + Clone + 'src,
-    IP: Parser<'src, I, ImplementInterfaces, E> + Clone + 'src,
-  {
-    Extend::parser()
-      .then(Type::parser())
-      .ignore_then(name_parser)
-      .then(
-        Implements::parser()
-          .ignore_then(implement_interfaces_parser)
-          .or_not(),
-      )
-      .then(directives_parser.or_not())
-      .then(fields_definition_parser.or_not())
-      .try_map_with(|(((name, implements), directives), fields), exa| {
-        let data = match (implements, directives, fields) {
-          (implements, directives, Some(fields)) => ObjectTypeExtensionData::Fields {
-            implements,
-            directives,
-            fields,
-          },
-          (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
-            implements,
-            directives,
-          },
-          (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
-          (None, None, None) => {
-            return Err(Error::unexpected_end_of_object_extension(
-              exa.span(),
-              ObjectTypeExtensionHint::ImplementsOrDirectivesOrFieldsDefinition,
-            ));
-          }
-        };
-
-        Ok(Self {
-          span: exa.span(),
-          name,
-          data,
-        })
-      })
-  }
-}
-
-impl<'a, Name, ImplementInterfaces, Directives, FieldsDefinition, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
-where
-  Error: UnexpectedEndOfObjectExtensionError,
-  Type: Parseable<'a, I, T, Error>,
-  Extend: Parseable<'a, I, T, Error>,
-  Implements: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  ImplementInterfaces: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  FieldsDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      ImplementInterfaces::parser(),
-      Directives::parser(),
-      FieldsDefinition::parser(),
-    )
   }
 }

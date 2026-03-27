@@ -1,13 +1,12 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 
 /// Represents a single root operation type definition that maps an operation type to a GraphQL Object type.
 ///
@@ -89,53 +88,6 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
   #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
-  }
-
-  /// Creates a parser for root operation type definitions.
-  ///
-  /// This parser handles the syntax `OperationType : Name` where the operation type
-  /// is parsed by the provided parser and the name must be a valid GraphQL name.
-  pub fn parser_with<'src, I, T, Error, E, NP, P>(
-    name_parser: NP,
-    operation_type_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    Colon: Parseable<'src, I, T, Error>,
-    NP: Parser<'src, I, Name, E> + Clone,
-    P: Parser<'src, I, OperationType, E> + Clone,
-  {
-    operation_type_parser
-      .then_ignore(Colon::parser())
-      .then(name_parser)
-      .map_with(|(operation_type, name), exa| Self {
-        span: exa.span(),
-        operation_type,
-        name,
-      })
-  }
-}
-
-impl<'a, Name, OperationType, I, T, Error> Parseable<'a, I, T, Error>
-  for RootOperationTypeDefinition<Name, OperationType>
-where
-  Colon: Parseable<'a, I, T, Error>,
-  Name: Parseable<'a, I, T, Error>,
-  OperationType: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Name::parser(), OperationType::parser())
   }
 }
 
@@ -241,54 +193,5 @@ impl<RootOperationTypeDefinition, Container>
   #[inline]
   pub fn into_root_operation_type_definitions(self) -> Container {
     self.root_operation_types
-  }
-
-  /// Creates a parser for root operation types definitions.
-  ///
-  /// This parser handles the braced block syntax containing one or more root operation
-  /// type definitions. The parser ensures at least one definition is present and
-  /// properly handles whitespace and comments within the block.
-  pub fn parser_with<'src, I, T, Error, E, P>(
-    root_operation_type_parser: P,
-  ) -> impl Parser<'src, I, Self, E> + Clone
-  where
-    T: Token<'src>,
-    I: Tokenizer<'src, T, Slice = <<T::Logos as Logos<'src>>::Source as Source>::Slice<'src>>,
-    Error: 'src,
-    E: ParserExtra<'src, I, Error = Error> + 'src,
-    LBrace: Parseable<'src, I, T, Error>,
-    RBrace: Parseable<'src, I, T, Error>,
-    P: Parser<'src, I, RootOperationTypeDefinition, E> + Clone,
-    Container: chumsky::container::Container<RootOperationTypeDefinition>,
-  {
-    LBrace::parser()
-      .ignore_then(root_operation_type_parser.repeated().at_least(1).collect())
-      .then_ignore(RBrace::parser())
-      .map_with(|root_operation_types, exa| Self {
-        span: exa.span(),
-        root_operation_types,
-        _m: PhantomData,
-      })
-  }
-}
-
-impl<'a, RootOperationTypeDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
-where
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  RootOperationTypeDefinition: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<RootOperationTypeDefinition>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(RootOperationTypeDefinition::parser())
   }
 }

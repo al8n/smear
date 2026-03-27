@@ -1,10 +1,8 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
-
-use smear_lexer::punctuator::Bang;
 
 /// Represents a named GraphQL type with optional non-null modifier.
 ///
@@ -102,58 +100,5 @@ impl<Name> NamedType<Name> {
   #[inline]
   pub const fn required(&self) -> bool {
     self.required
-  }
-
-  /// Creates a parser for named types.
-  ///
-  /// This parser recognizes a type name followed by an optional bang (`!`) modifier.
-  /// It handles whitespace between the name and bang appropriately.
-  ///
-  /// ## Grammar Handled
-  /// ```text
-  /// NamedType : Name !?
-  /// ```
-  ///
-  /// ## Example Parsed Input
-  /// ```text
-  /// String      # Nullable string type
-  /// String!     # Non-null string type
-  /// User        # Nullable User object type
-  /// ID!         # Non-null ID scalar type
-  /// ```
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, NP>(name_parser: NP) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Bang: Parseable<'a, I, T, Error> + 'a,
-    NP: Parser<'a, I, Name, E> + Clone,
-  {
-    name_parser
-      .then(Bang::parser().or_not())
-      .map_with(|(name, bang), exa| Self {
-        span: exa.span(),
-        name,
-        required: bang.is_some(),
-      })
-  }
-}
-
-impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for NamedType<Name>
-where
-  Name: Parseable<'a, I, T, Error> + 'a,
-  Bang: Parseable<'a, I, T, Error> + 'a,
-{
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    Self::parser_with(Name::parser())
   }
 }

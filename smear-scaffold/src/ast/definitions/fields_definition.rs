@@ -1,13 +1,12 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use smear_lexer::punctuator::{Colon, LBrace, RBrace};
 
 /// Represents a single field definition in a GraphQL object, interface, or input type.
 ///
@@ -163,72 +162,6 @@ impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, D
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
   }
-
-  /// Creates a parser that can parse a complete field definition.
-  ///
-  /// This parser handles the full field definition syntax including all optional
-  /// components. The parsing of arguments, type, and directives is delegated to
-  /// the provided parser functions.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, NP, AP, TP, DP>(
-    name_parser: NP,
-    args_definition_parser: AP,
-    type_parser: TP,
-    directives_parser: DP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    Colon: Parseable<'a, I, T, Error> + 'a,
-    NP: Parser<'a, I, Name, E> + Clone,
-    AP: Parser<'a, I, Arguments, E> + Clone,
-    TP: Parser<'a, I, Type, E> + Clone,
-    DP: Parser<'a, I, Directives, E> + Clone,
-  {
-    name_parser
-      .then(args_definition_parser.or_not())
-      .then_ignore(Colon::parser())
-      .then(type_parser)
-      .then(directives_parser.or_not())
-      .map_with(
-        |(((name, arguments_definition), ty), directives), exa| Self {
-          span: exa.span(),
-          name,
-          arguments_definition,
-          ty,
-          directives,
-        },
-      )
-  }
-}
-
-impl<'a, Name, Arguments, Type, Directives, I, T, Error> Parseable<'a, I, T, Error>
-  for FieldDefinition<Name, Arguments, Type, Directives>
-where
-  Name: Parseable<'a, I, T, Error>,
-  Arguments: Parseable<'a, I, T, Error>,
-  Type: Parseable<'a, I, T, Error>,
-  Directives: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error> + 'static,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(
-      Name::parser(),
-      Arguments::parser(),
-      Type::parser(),
-      Directives::parser(),
-    )
-  }
 }
 
 /// Represents a collection of field definitions in a GraphQL type definition.
@@ -349,53 +282,5 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
   #[inline]
   pub fn into_field_definitions(self) -> Container {
     self.fields
-  }
-
-  /// Creates a parser that can parse a fields definition with custom field parsing.
-  ///
-  /// This parser handles the complete fields definition syntax including the braces
-  /// and ensures at least one field definition is present.
-  pub fn parser_with<'a, I, T, Error, E, P>(
-    field_definition_parser: P,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    P: Parser<'a, I, FieldDefinition, E> + Clone,
-    LBrace: Parseable<'a, I, T, Error> + 'a,
-    RBrace: Parseable<'a, I, T, Error> + 'a,
-    Container: chumsky::container::Container<FieldDefinition>,
-  {
-    LBrace::parser()
-      .ignore_then(field_definition_parser.repeated().at_least(1).collect())
-      .then_ignore(RBrace::parser())
-      .map_with(|fields, exa| Self {
-        span: exa.span(),
-        fields,
-        _m: PhantomData,
-      })
-  }
-}
-
-impl<'a, FieldDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for FieldsDefinition<FieldDefinition, Container>
-where
-  FieldDefinition: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<FieldDefinition>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(FieldDefinition::parser())
   }
 }

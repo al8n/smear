@@ -1,12 +1,9 @@
-use core::marker::PhantomData;
-
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, cmp::Equivalent},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, cmp::Equivalent},
 };
-
-use smear_lexer::punctuator::PathSeparator;
+use core::marker::PhantomData;
 
 use std::vec::Vec;
 
@@ -85,50 +82,6 @@ impl<Ident, Container> Path<Ident, Container> {
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
-  }
-
-  /// Creates a parser for the path.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    PathSeparator: Parseable<'a, I, T, Error>,
-    IP: Parser<'a, I, Ident, E> + Clone,
-    Container: chumsky::container::Container<Ident>,
-  {
-    PathSeparator::parser()
-      .or_not()
-      .then(
-        ident_parser
-          .separated_by(PathSeparator::parser())
-          .at_least(1)
-          .collect(),
-      )
-      .map_with(|(leading, segments), exa| Self::new(exa.span(), segments, leading.is_some()))
-  }
-}
-
-impl<'a, Ident, Container, I, T, Error> Parseable<'a, I, T, Error> for Path<Ident, Container>
-where
-  Container: chumsky::container::Container<Ident>,
-  Ident: Parseable<'a, I, T, Error>,
-  PathSeparator: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    T: Token<'a>,
-  {
-    Self::parser_with(Ident::parser())
   }
 }
 

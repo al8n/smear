@@ -1,10 +1,9 @@
-use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
-use logosky::utils::{
-  AsSpan, IntoSpan, Span,
-  human_display::DisplayHuman,
-  sdl_display::{DisplayCompact, DisplayPretty},
-  syntax_tree_display::DisplaySyntaxTree,
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}, syntax_tree_display::DisplaySyntaxTree},
 };
+use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
 
 use smear_lexer::keywords::{Mutation, Query, Subscription};
 

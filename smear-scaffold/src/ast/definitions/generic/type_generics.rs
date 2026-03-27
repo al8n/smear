@@ -1,12 +1,10 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 use core::marker::PhantomData;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, IterParser, Parser, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-
-use smear_lexer::punctuator::{LAngle, RAngle};
 
 use std::vec::Vec;
 
@@ -60,7 +58,7 @@ impl<Type, Container> IntoComponents for TypeGenerics<Type, Container> {
 impl<Type, Container> TypeGenerics<Type, Container> {
   /// Creates a new `TypeGenerics` with the given parameters.
   #[inline]
-  const fn new(span: Span, params: Container) -> Self {
+  pub const fn new(span: Span, params: Container) -> Self {
     Self {
       span,
       params,
@@ -87,44 +85,5 @@ impl<Type, Container> TypeGenerics<Type, Container> {
     Container: AsRef<[Type]>,
   {
     self.params().as_ref()
-  }
-
-  /// Returns a parser for the type generics.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, TP>(type_parser: TP) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    TP: Parser<'a, I, Type, E> + Clone + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    Container: chumsky::container::Container<Type>,
-  {
-    LAngle::parser()
-      .ignore_then(type_parser.repeated().at_least(1).collect())
-      .then_ignore(RAngle::parser())
-      .map_with(|params, exa| Self::new(exa.span(), params))
-  }
-}
-
-impl<'a, Type, Container, I, T, Error> Parseable<'a, I, T, Error> for TypeGenerics<Type, Container>
-where
-  Type: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Container: chumsky::container::Container<Type> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Type::parser())
   }
 }

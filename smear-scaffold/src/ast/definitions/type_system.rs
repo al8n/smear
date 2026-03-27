@@ -1,9 +1,8 @@
-use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::choice},
-  utils::{AsSpan, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
 };
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 /// Type definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
@@ -103,55 +102,6 @@ where
       Self::Union(u) => u.into_span(),
       Self::Enum(e) => e.into_span(),
     }
-  }
-}
-
-impl<
-  'a,
-  ScalarTypeDefinition,
-  ObjectTypeDefinition,
-  InterfaceTypeDefinition,
-  UnionTypeDefinition,
-  EnumTypeDefinition,
-  InputObjectTypeDefinition,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeDefinition<
-    ScalarTypeDefinition,
-    ObjectTypeDefinition,
-    InterfaceTypeDefinition,
-    UnionTypeDefinition,
-    EnumTypeDefinition,
-    InputObjectTypeDefinition,
-  >
-where
-  ScalarTypeDefinition: Parseable<'a, I, T, Error>,
-  ObjectTypeDefinition: Parseable<'a, I, T, Error>,
-  InterfaceTypeDefinition: Parseable<'a, I, T, Error>,
-  UnionTypeDefinition: Parseable<'a, I, T, Error>,
-  EnumTypeDefinition: Parseable<'a, I, T, Error>,
-  InputObjectTypeDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
-      ObjectTypeDefinition::parser::<E>().map(Self::Object),
-      InterfaceTypeDefinition::parser::<E>().map(Self::Interface),
-      UnionTypeDefinition::parser::<E>().map(Self::Union),
-      EnumTypeDefinition::parser::<E>().map(Self::Enum),
-      InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
-    ))
-    .boxed()
   }
 }
 
@@ -256,55 +206,6 @@ where
   }
 }
 
-impl<
-  'a,
-  ScalarTypeExtension,
-  ObjectTypeExtension,
-  InterfaceTypeExtension,
-  UnionTypeExtension,
-  EnumTypeExtension,
-  InputObjectTypeExtension,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for TypeExtension<
-    ScalarTypeExtension,
-    ObjectTypeExtension,
-    InterfaceTypeExtension,
-    UnionTypeExtension,
-    EnumTypeExtension,
-    InputObjectTypeExtension,
-  >
-where
-  ScalarTypeExtension: Parseable<'a, I, T, Error>,
-  ObjectTypeExtension: Parseable<'a, I, T, Error>,
-  InterfaceTypeExtension: Parseable<'a, I, T, Error>,
-  UnionTypeExtension: Parseable<'a, I, T, Error>,
-  EnumTypeExtension: Parseable<'a, I, T, Error>,
-  InputObjectTypeExtension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      ScalarTypeExtension::parser::<E>().map(Self::Scalar),
-      ObjectTypeExtension::parser::<E>().map(Self::Object),
-      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
-      UnionTypeExtension::parser::<E>().map(Self::Union),
-      EnumTypeExtension::parser::<E>().map(Self::Enum),
-      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
-    ))
-    .boxed()
-  }
-}
-
 /// Type system definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -353,31 +254,6 @@ where
   }
 }
 
-impl<'a, TypeDefinition, DirectiveDefinition, SchemaDefinition, I, T, Error>
-  Parseable<'a, I, T, Error>
-  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
-where
-  TypeDefinition: Parseable<'a, I, T, Error>,
-  DirectiveDefinition: Parseable<'a, I, T, Error>,
-  SchemaDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      TypeDefinition::parser::<E>().map(Self::Type),
-      DirectiveDefinition::parser::<E>().map(Self::Directive),
-      SchemaDefinition::parser::<E>().map(Self::Schema),
-    ))
-  }
-}
-
 /// Type system extension for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -419,27 +295,6 @@ where
   }
 }
 
-impl<'a, TypeExtension, SchemaExtension, I, T, Error> Parseable<'a, I, T, Error>
-  for TypeSystemExtension<TypeExtension, SchemaExtension>
-where
-  TypeExtension: Parseable<'a, I, T, Error>,
-  SchemaExtension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    TypeExtension::parser::<E>()
-      .map(Self::Type)
-      .or(SchemaExtension::parser::<E>().map(Self::Schema))
-  }
-}
-
 /// Type system definition or extension for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -477,27 +332,6 @@ where
       Self::Definition(d) => d.into_span(),
       Self::Extension(e) => e.into_span(),
     }
-  }
-}
-
-impl<'a, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
-  for TypeSystemDefinitionOrExtension<Definition, Extension>
-where
-  Definition: Parseable<'a, I, T, Error>,
-  Extension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Definition::parser::<E>()
-      .map(Self::Definition)
-      .or(Extension::parser::<E>().map(Self::Extension))
   }
 }
 
@@ -542,27 +376,6 @@ where
   }
 }
 
-impl<'a, OperationDefinition, FragmentDefinition, I, T, Error> Parseable<'a, I, T, Error>
-  for ExecutableDefinition<OperationDefinition, FragmentDefinition>
-where
-  OperationDefinition: Parseable<'a, I, T, Error>,
-  FragmentDefinition: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    OperationDefinition::parser::<E>()
-      .map(Self::Operation)
-      .or(FragmentDefinition::parser::<E>().map(Self::Fragment))
-  }
-}
-
 /// A definition of a GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -603,27 +416,6 @@ where
   }
 }
 
-impl<'a, TypeSystem, Executable, I, T, Error> Parseable<'a, I, T, Error>
-  for Definition<TypeSystem, Executable>
-where
-  TypeSystem: Parseable<'a, I, T, Error>,
-  Executable: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    TypeSystem::parser::<E>()
-      .map(Self::TypeSystem)
-      .or(Executable::parser::<E>().map(Self::Executable))
-  }
-}
-
 /// A definition or extension of a GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -660,27 +452,6 @@ where
       Self::Definition(d) => d.into_span(),
       Self::Extension(e) => e.into_span(),
     }
-  }
-}
-
-impl<'a, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
-  for DefinitionOrExtension<Definition, Extension>
-where
-  Definition: Parseable<'a, I, T, Error>,
-  Extension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Definition::parser::<E>()
-      .map(Self::Definition)
-      .or(Extension::parser::<E>().map(Self::Extension))
   }
 }
 
@@ -731,30 +502,6 @@ where
   }
 }
 
-impl<'a, Import, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportOrTypeSystemDefinitionOrExtension<Import, Definition, Extension>
-where
-  Import: Parseable<'a, I, T, Error>,
-  Definition: Parseable<'a, I, T, Error>,
-  Extension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      Import::parser::<E>().map(Self::Import),
-      Definition::parser::<E>().map(Self::Definition),
-      Extension::parser::<E>().map(Self::Extension),
-    ))
-  }
-}
-
 /// Executable definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -791,27 +538,6 @@ where
       Self::Import(i) => i.into_span(),
       Self::Executable(e) => e.into_span(),
     }
-  }
-}
-
-impl<'a, Import, Executable, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportOrExecutableDefinition<Import, Executable>
-where
-  Import: Parseable<'a, I, T, Error>,
-  Executable: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Import::parser::<E>()
-      .map(Self::Import)
-      .or(Executable::parser::<E>().map(Self::Executable))
   }
 }
 
@@ -859,29 +585,5 @@ where
       Self::Definition(d) => d.into_span(),
       Self::Extension(e) => e.into_span(),
     }
-  }
-}
-
-impl<'a, Import, Definition, Extension, I, T, Error> Parseable<'a, I, T, Error>
-  for ImportOrDefinitionOrExtension<Import, Definition, Extension>
-where
-  Import: Parseable<'a, I, T, Error>,
-  Definition: Parseable<'a, I, T, Error>,
-  Extension: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    choice((
-      Import::parser::<E>().map(Self::Import),
-      Definition::parser::<E>().map(Self::Definition),
-      Extension::parser::<E>().map(Self::Extension),
-    ))
   }
 }

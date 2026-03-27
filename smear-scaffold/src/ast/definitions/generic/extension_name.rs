@@ -1,10 +1,9 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, container::Container as ChumskyContainer, extra::ParserExtra},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
-use smear_lexer::punctuator::{LAngle, PathSeparator, RAngle};
 
 use super::{super::Path, ExtensionTypeGenerics, ExtensionTypeParam};
 
@@ -84,7 +83,7 @@ impl<Ident, PathSegmentContainer, Container> IntoComponents
 impl<Ident, PathSegmentContainer, Container> ExtensionName<Ident, PathSegmentContainer, Container> {
   /// Creates a new `ExtensionName` with the given identifier and optional generics.
   #[inline]
-  const fn new(
+  pub const fn new(
     span: Span,
     path: Path<Ident, PathSegmentContainer>,
     generics: Option<ExtensionTypeGenerics<Ident, Container>>,
@@ -112,50 +111,5 @@ impl<Ident, PathSegmentContainer, Container> ExtensionName<Ident, PathSegmentCon
   #[inline]
   pub const fn generics(&self) -> Option<&ExtensionTypeGenerics<Ident, Container>> {
     self.generics.as_ref()
-  }
-
-  /// Returns a parser for the extension name.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, IP>(
-    ident_parser: IP,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    IP: Parser<'a, I, Ident, E> + Clone + 'a,
-    PathSeparator: Parseable<'a, I, T, Error> + 'a,
-    LAngle: Parseable<'a, I, T, Error> + 'a,
-    RAngle: Parseable<'a, I, T, Error> + 'a,
-    Container: ChumskyContainer<ExtensionTypeParam<Ident>>,
-    PathSegmentContainer: ChumskyContainer<Ident>,
-  {
-    Path::parser_with(ident_parser.clone())
-      .then(ExtensionTypeGenerics::parser_with(ident_parser).or_not())
-      .map_with(|(path, generics), exa| Self::new(exa.span(), path, generics))
-  }
-}
-
-impl<'a, Ident, PathSegmentContainer, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for ExtensionName<Ident, PathSegmentContainer, Container>
-where
-  PathSeparator: Parseable<'a, I, T, Error> + 'a,
-  Ident: Parseable<'a, I, T, Error> + 'a,
-  LAngle: Parseable<'a, I, T, Error> + 'a,
-  RAngle: Parseable<'a, I, T, Error> + 'a,
-  Container: ChumskyContainer<ExtensionTypeParam<Ident>> + 'a,
-  PathSegmentContainer: ChumskyContainer<Ident>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(Ident::parser())
   }
 }

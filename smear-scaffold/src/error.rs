@@ -1,4 +1,4 @@
-use logosky::utils::Span;
+use smear_lexer::tokit::{SimpleSpan as Span};
 
 use crate::hints::*;
 

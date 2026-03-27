@@ -1,13 +1,12 @@
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{self, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
 
-use smear_lexer::punctuator::{LBrace, RBrace};
 
 /// Represents a collection of input field definitions in a GraphQL input object type.
 ///
@@ -180,61 +179,5 @@ impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition
   /// Consumes and returns the input value definitions
   pub fn into_input_value_definitions(self) -> Container {
     self.values
-  }
-
-  /// Creates a parser that can parse an input values definition with custom input value definition parsing.
-  ///
-  /// This parser handles the complete input values definition syntax including the braces
-  /// and ensures at least one input field definition is present. The parsing of individual
-  /// input value definitions is delegated to the provided parser.
-  #[inline]
-  pub fn parser_with<'a, I, T, Error, E, P>(
-    input_value_definition_parser: P,
-  ) -> impl Parser<'a, I, Self, E> + Clone
-  where
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    LBrace: Parseable<'a, I, T, Error> + 'a,
-    RBrace: Parseable<'a, I, T, Error> + 'a,
-    InputValueDefinition: 'a,
-    P: Parser<'a, I, InputValueDefinition, E> + Clone + 'a,
-    Container: chumsky::container::Container<InputValueDefinition> + 'a,
-  {
-    LBrace::parser()
-      .ignore_then(
-        input_value_definition_parser
-          .repeated()
-          .at_least(1)
-          .collect(),
-      )
-      .then_ignore(RBrace::parser())
-      .map_with(|values, exa| Self {
-        span: exa.span(),
-        values,
-        _input_value_definition: PhantomData,
-      })
-  }
-}
-
-impl<'a, InputValueDefinition, Container, I, T, Error> Parseable<'a, I, T, Error>
-  for InputFieldsDefinition<InputValueDefinition, Container>
-where
-  InputValueDefinition: Parseable<'a, I, T, Error>,
-  LBrace: Parseable<'a, I, T, Error>,
-  RBrace: Parseable<'a, I, T, Error>,
-  Container: chumsky::container::Container<InputValueDefinition>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Self::parser_with(InputValueDefinition::parser())
   }
 }

@@ -1,23 +1,19 @@
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents},
+};
 // use crate::{
 //   smear_lexer::keywords::On,
 //   smear_lexer::punctuator::{LBrace, RBrace, Spread},
 //   scaffold::{self, FragmentSpread},
 // };
 use derive_more::{From, Into};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
 
-use smear_lexer::{
-  keywords::On,
-  punctuator::{LBrace, RBrace, Spread},
-};
 
-use crate::ast::{self, FragmentSpread};
+use crate::ast::{self};
 
-use super::super::{StandardSelection, StandardSelectionSet};
+use super::super::StandardSelectionSet;
 
 /// Represents a field in a GraphQL selection set.
 ///
@@ -180,65 +176,5 @@ impl<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
   ) -> Option<&StandardSelectionSet<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>>
   {
     self.0.selection_set()
-  }
-}
-
-impl<
-  'a,
-  Alias: 'a,
-  Name: 'a,
-  FragmentName: 'a,
-  TypeCondition: 'a,
-  Arguments: 'a,
-  Directives: 'a,
-  I,
-  T,
-  Error,
-> Parseable<'a, I, T, Error>
-  for StandardField<Alias, Name, FragmentName, TypeCondition, Arguments, Directives>
-where
-  On: Parseable<'a, I, T, Error> + 'a,
-  Spread: Parseable<'a, I, T, Error> + 'a,
-  LBrace: Parseable<'a, I, T, Error> + 'a,
-  RBrace: Parseable<'a, I, T, Error> + 'a,
-  TypeCondition: Parseable<'a, I, T, Error> + 'a,
-  Alias: Parseable<'a, I, T, Error> + 'a,
-  Name: Parseable<'a, I, T, Error> + 'a,
-  FragmentName: Parseable<'a, I, T, Error> + 'a,
-  Arguments: Parseable<'a, I, T, Error> + 'a,
-  Directives: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>> + 'a,
-    T: Token<'a>,
-    Error: 'a,
-  {
-    recursive(|field_parser| {
-      // Inner fixpoint: build a `StandardSelection<Span>` parser by using the recursive `field_parser`.
-      let selection = recursive(|selection| {
-        // StandardSelectionSet needs a `StandardSelection` parser
-        let selection_set = ast::StandardSelectionSet::parser_with(selection.clone());
-
-        let spread = FragmentSpread::parser().map(|fs| StandardSelection::FragmentSpread(fs));
-
-        let inline = ast::InlineFragment::parser_with(
-          TypeCondition::parser(),
-          Directives::parser(),
-          selection_set.clone(),
-        )
-        .map(|f| StandardSelection::InlineFragment(f));
-
-        choice((field_parser.map(StandardSelection::Field), spread, inline))
-      });
-
-      // Pass the selection parser to the selection set
-      let selection_set = ast::StandardSelectionSet::parser_with(selection);
-
-      ast::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set).map(Self)
-    })
   }
 }
