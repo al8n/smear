@@ -1,97 +1,89 @@
-use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::Span,
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+  utils::cmp::Equivalent,
 };
+use smear_lexer::keywords::{self, *};
 
-use smear_lexer::{
-  graphqlx::syntactic::SyntacticLexerErrors,
-  keywords::{self, *},
+use super::{
+  Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token,
 };
+use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 
-use super::*;
+/// Generic keyword parser helper.
+fn parse_keyword<'inp, S, Ctx, Lang, T>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+  kw: &'static str,
+  make: impl FnOnce(Span) -> T,
+) -> Result<T, SyntacticTokenErrors<S>>
+where
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
+{
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    SyntacticToken::Identifier(name) => {
+      if kw.equivalent(&name) {
+        Ok(make(span))
+      } else {
+        Err(SyntacticTokenError::unexpected_keyword(name, kw, span).into())
+      }
+    }
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::Keyword(kw), span).into()),
+  }
+}
 
-macro_rules! keyword_parser {
-  ($($name:ty:$kw:literal),+$(,)?) => {
+macro_rules! keyword_parser_fn {
+  ($($fn_name:ident -> $name:ty : $kw:literal),+$(,)?) => {
     $(
-      impl<'a, S> Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> for $name
-      where
-        SyntacticToken<S>: Token<'a>,
-        <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-        <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-        str: logosky::utils::cmp::Equivalent<S>,
-      {
-        #[inline]
-        fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
+      paste::paste! {
+        /// Parses the keyword from the input.
+        pub fn $fn_name<'inp, S, Ctx, Lang>(
+          input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+        ) -> Result<$name, SyntacticTokenErrors<S>>
         where
-          Self: Sized,
-          E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
+          S: Clone,
+          SyntacticToken<S>: FromLogos<'inp>,
+          SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+          Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+          Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+          str: Equivalent<S>,
+          Lang: ?Sized,
         {
-          use logosky::utils::cmp::Equivalent;
-
-          any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
-            Lexed::Token(tok) => {
-              let (span, tok) = tok.into_components();
-              match tok {
-                SyntacticToken::Identifier(name) => if $kw.equivalent(&name) {
-                  Ok(<$name>::new(span))
-                } else {
-                  Err(Error::unexpected_keyword(name, $kw, span).into())
-                },
-                tok => Err(Error::unexpected_token(tok, Expectation::Keyword($kw), span).into()),
-              }
-            },
-            Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-          })
+          parse_keyword(input, $kw, <$name>::new)
         }
       }
     )*
   };
 }
 
-keyword_parser! {
-  On:"on",
-  Fragment:"fragment",
-  Query:"query",
-  Mutation:"mutation",
-  Subscription:"subscription",
-  keywords::Type:"type",
-  Interface:"interface",
-  Union:"union",
-  Enum:"enum",
-  keywords::Input:"input",
-  Implements:"implements",
-  Extend:"extend",
-  keywords::Directive:"directive",
-  Schema:"schema",
-  Scalar:"scalar",
-  Repeatable:"repeatable",
-  Import:"import",
-  From:"from",
-  As:"as",
-  Where:"where",
-  keywords::Set:"set",
-  keywords::Map:"map",
-}
-
-keyword_parser! {
-  keywords::QueryLocation:"QUERY",
-  keywords::MutationLocation:"MUTATION",
-  keywords::SubscriptionLocation:"SUBSCRIPTION",
-  keywords::FieldLocation:"FIELD",
-  keywords::FragmentDefinitionLocation:"FRAGMENT_DEFINITION",
-  keywords::FragmentSpreadLocation:"FRAGMENT_SPREAD",
-  keywords::InlineFragmentLocation:"INLINE_FRAGMENT",
-  keywords::VariableDefinitionLocation:"VARIABLE_DEFINITION",
-  keywords::SchemaLocation:"SCHEMA",
-  keywords::ScalarLocation:"SCALAR",
-  keywords::ObjectLocation:"OBJECT",
-  keywords::FieldDefinitionLocation:"FIELD_DEFINITION",
-  keywords::ArgumentDefinitionLocation:"ARGUMENT_DEFINITION",
-  keywords::InterfaceLocation:"INTERFACE",
-  keywords::UnionLocation:"UNION",
-  keywords::EnumLocation:"ENUM",
-  keywords::EnumValueLocation:"ENUM_VALUE",
-  keywords::InputObjectLocation:"INPUT_OBJECT",
-  keywords::InputFieldDefinitionLocation:"INPUT_FIELD_DEFINITION",
+keyword_parser_fn! {
+  parse_on -> On : "on",
+  parse_fragment_kw -> Fragment : "fragment",
+  parse_query_kw -> Query : "query",
+  parse_mutation_kw -> Mutation : "mutation",
+  parse_subscription_kw -> Subscription : "subscription",
+  parse_type_kw -> keywords::Type : "type",
+  parse_interface -> Interface : "interface",
+  parse_union -> Union : "union",
+  parse_enum -> keywords::Enum : "enum",
+  parse_input_kw -> keywords::Input : "input",
+  parse_implements -> Implements : "implements",
+  parse_extend -> Extend : "extend",
+  parse_directive_kw -> keywords::Directive : "directive",
+  parse_schema -> Schema : "schema",
+  parse_scalar -> Scalar : "scalar",
+  parse_repeatable -> Repeatable : "repeatable",
+  parse_import_kw -> Import : "import",
+  parse_from_kw -> From : "from",
+  parse_as_kw -> As : "as",
+  parse_where_kw -> Where : "where",
+  parse_set_kw -> keywords::Set : "set",
+  parse_map_kw -> keywords::Map : "map",
 }

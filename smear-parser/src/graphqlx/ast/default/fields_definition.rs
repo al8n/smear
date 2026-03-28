@@ -1,9 +1,9 @@
 use super::*;
 use derive_more::{From, Into};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::extra::ParserExtra,
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
 pub(super) type FieldsDefinitionAlias<S, Ty = Type<S>> =
@@ -51,22 +51,5 @@ impl<S, Ty> FieldsDefinition<S, Ty> {
   #[inline]
   pub(super) const fn fields(&self) -> &scaffold::FieldsDefinition<FieldDefinition<S, Ty>> {
     self.0.target()
-  }
-}
-
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FieldsDefinition<S, Ty>
-where
-  FieldsDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    FieldsDefinitionAlias::parser::<E>().map(Self)
   }
 }

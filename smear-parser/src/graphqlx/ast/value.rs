@@ -1,24 +1,23 @@
 use crate::{
-  hints::VariableValueHint, ident::Ident, lexer::graphqlx::syntactic::SyntacticLexerErrors,
+  hints::VariableValueHint, ident::Ident,
 };
 
 use super::{
-  DefaultVec, Expectation, SyntacticToken, SyntacticTokenError, SyntacticTokenErrors,
-  SyntacticTokenStream,
+  DefaultVec, Expectation, SyntacticTokenError, SyntacticTokenErrors,
+  next_token,
 };
+use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexed, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
-  logos::Logos,
-  utils::{AsSpan, IntoSpan, Span, Spanned, cmp::Equivalent},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::{AsSpan, IntoSpan, Spanned},
+  utils::cmp::Equivalent,
 };
-use smear_lexer::punctuator::{LBrace, PathSeparator, RBrace, RBracket};
-use smear_scaffold::{
-  ast::{self as scaffold, Path},
-  error::{UnclosedBraceError, UnclosedBracketError},
-};
+use std::vec::Vec;
+use smear_scaffold::ast::{self as scaffold, Path};
+use smear_scaffold::error::{UnclosedBraceError, UnclosedBracketError};
 
 pub use boolean_value::*;
 pub use enum_value::*;
@@ -136,203 +135,178 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for InputValue<S>
+/// Parses an InputValue from the input (recursive, supports variables).
+pub fn parse_input_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<InputValue<S>, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBracket:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  PathSeparator:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
-        'a,
-        SyntacticToken<S>,
-        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
-          'a,
-        >,
-      >,
-    SyntacticTokenErrors<'a, S>: 'a,
-  {
-    recursive(|parser| {
-      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
-        let before = inp.cursor();
+  use super::ident::parse_name;
 
-        match inp.next() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
-          Some(tok) => match tok {
-            Lexed::Error(err) => {
-              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
-            }
-            Lexed::Token(Spanned { span, data: token }) => {
-              let output = match token {
-                SyntacticToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
-                SyntacticToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
-                SyntacticToken::LitInlineStr(raw) => {
-                  Self::String(StringValue::new(span, raw.into()))
-                }
-                SyntacticToken::LitBlockStr(raw) => {
-                  Self::String(StringValue::new(span, raw.into()))
-                }
-                SyntacticToken::PathSeparator => {
-                  let segments = inp.parse(
-                    Ident::<S>::parser()
-                      .separated_by(PathSeparator::parser())
-                      .at_least(1)
-                      .collect(),
-                  )?;
+  let Spanned { span, data: token } = next_token(input)?;
 
-                  Self::Enum(EnumValue::new(Path::new(
-                    inp.span_since(&before),
-                    segments,
-                    true,
-                  )))
-                }
-                SyntacticToken::Identifier(name) => match () {
-                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
-                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
-                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-                  () if "set".equivalent(&name) => match inp.peek() {
-                    None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                    Some(Lexed::Token(Spanned {
-                      data: SyntacticToken::LBrace,
-                      ..
-                    })) => {
-                      let (values, r) = inp.parse(
-                        LBrace::parser()
-                          .ignore_then(parser.clone().repeated().collect())
-                          .then(RBrace::parser().or_not()),
-                      )?;
-
-                      match r {
-                        Some(_) => Self::Set(Set::new(inp.span_since(&before), values)),
-                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
-                      }
-                    }
-                    _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                  },
-                  () if "map".equivalent(&name) => match inp.peek() {
-                    None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                    Some(Lexed::Token(Spanned {
-                      data: SyntacticToken::LBrace,
-                      ..
-                    })) => {
-                      let (values, r) = inp.parse(
-                        LBrace::parser()
-                          .ignore_then(
-                            MapEntry::parser_with(parser.clone(), parser.clone())
-                              .repeated()
-                              .collect(),
-                          )
-                          .then(RBrace::parser().or_not()),
-                      )?;
-
-                      match r {
-                        Some(_) => Self::Map(Map::new(inp.span_since(&before), values)),
-                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
-                      }
-                    }
-                    _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                  },
-                  _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                },
-                SyntacticToken::Dollar => {
-                  let current_cursor = inp.cursor();
-                  let name = match inp.next() {
-                    Some(Lexed::Token(Spanned {
-                      span,
-                      data: SyntacticToken::Identifier(name),
-                    })) => Ident::new(span, name),
-                    Some(Lexed::Token(Spanned { span, data })) => {
-                      return Err(
-                        SyntacticTokenError::unexpected_token(data, Expectation::Identifier, span)
-                          .into(),
-                      );
-                    }
-                    Some(Lexed::Error(err)) => {
-                      return Err(
-                        SyntacticTokenError::from_lexer_errors(
-                          err,
-                          inp.span_since(&current_cursor),
-                        )
-                        .into(),
-                      );
-                    }
-                    None => {
-                      return Err(
-                        SyntacticTokenError::unexpected_end_of_variable_value(
-                          VariableValueHint::Name,
-                          inp.span_since(&before),
-                        )
-                        .into(),
-                      );
-                    }
-                  };
-                  Self::Variable(VariableValue::new(inp.span_since(&before), name))
-                }
-                SyntacticToken::LBrace => {
-                  let (fields, rbrace) = inp.parse(
-                    ObjectField::<S>::parser_with(Ident::<S>::parser(), parser.clone())
-                      .repeated()
-                      .collect()
-                      .then(RBrace::parser().or_not()),
-                  )?;
-                  return match rbrace {
-                    Some(_) => Ok(Self::Object(scaffold::Object::new(
-                      inp.span_since(&before),
-                      fields,
-                    ))),
-                    None => Err(SyntacticTokenErrors::unclosed_brace(
-                      inp.span_since(&before),
-                    )),
-                  };
-                }
-                SyntacticToken::LBracket => {
-                  let (elements, rbracket) = inp.parse(
-                    parser
-                      .clone()
-                      .repeated()
-                      .collect()
-                      .then(RBracket::parser().or_not()),
-                  )?;
-
-                  return match rbracket {
-                    Some(_) => Ok(Self::List(scaffold::List::new(
-                      inp.span_since(&before),
-                      elements,
-                    ))),
-                    None => Err(SyntacticTokenErrors::unclosed_bracket(
-                      inp.span_since(&before),
-                    )),
-                  };
-                }
-                tok => {
-                  return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
-                      .into(),
-                  );
-                }
-              };
-
-              Ok(output)
-            }
-          },
+  match token {
+    SyntacticToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))),
+    SyntacticToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))),
+    SyntacticToken::LitInlineStr(raw) => {
+      Ok(InputValue::String(StringValue::new(span, raw.into())))
+    }
+    SyntacticToken::LitBlockStr(raw) => {
+      Ok(InputValue::String(StringValue::new(span, raw.into())))
+    }
+    SyntacticToken::PathSeparator => {
+      // Parse path segments after ::
+      let mut segments = Vec::new();
+      segments.push(parse_name(input)?);
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::PathSeparator, .. }) => {
+            segments.push(parse_name(input)?);
+          }
+          _ => {
+            input.restore(saved);
+            break;
+          }
         }
-      })
-    })
+      }
+      let full_span = Span::new(span.start(), input.span_since(&input.cursor()).end());
+      Ok(InputValue::Enum(EnumValue::new(Path::new(full_span, segments, true))))
+    }
+    SyntacticToken::Identifier(name) => match () {
+      () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
+      () if "false".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, false))),
+      () if "null".equivalent(&name) => Ok(InputValue::Null(NullValue::new(span, name))),
+      () if "set".equivalent(&name) => {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+            let mut values = Vec::new();
+            loop {
+              let saved2 = input.save();
+              match next_token(input) {
+                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                  let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
+                  return Ok(InputValue::Set(Set::new(full_span, values)));
+                }
+                Ok(_) => {
+                  input.restore(saved2);
+                  values.push(parse_input_value(input)?);
+                }
+                Err(_) => {
+                  return Err(SyntacticTokenError::unclosed_brace(span).into());
+                }
+              }
+            }
+          }
+          _ => {
+            input.restore(saved);
+            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+          }
+        }
+      },
+      () if "map".equivalent(&name) => {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+            let mut entries = Vec::new();
+            loop {
+              let saved2 = input.save();
+              match next_token(input) {
+                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                  let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
+                  return Ok(InputValue::Map(Map::new(full_span, entries)));
+                }
+                Ok(_) => {
+                  input.restore(saved2);
+                  let key = parse_input_value(input)?;
+                  // expect fat arrow
+                  let _fat_arrow = next_token(input)?;
+                  let value = parse_input_value(input)?;
+                  let entry_span = Span::new(key.as_span().start(), value.as_span().end());
+                  entries.push(scaffold::MapEntry::new(entry_span, key, value));
+                }
+                Err(_) => {
+                  return Err(SyntacticTokenError::unclosed_brace(span).into());
+                }
+              }
+            }
+          }
+          _ => {
+            input.restore(saved);
+            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+          }
+        }
+      },
+      _ => Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name))))),
+    },
+    SyntacticToken::Dollar => {
+      let name = parse_name(input)?;
+      let full_span = Span::new(span.start(), name.span().end());
+      Ok(InputValue::Variable(VariableValue::new(full_span, name)))
+    }
+    SyntacticToken::LBrace => {
+      // Parse object fields
+      let mut fields = Vec::new();
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            return Ok(InputValue::Object(scaffold::Object::new(
+              Span::new(span.start(), full_span.end()),
+              fields,
+            )));
+          }
+          Ok(_) => {
+            input.restore(saved);
+            let field_name = parse_name(input)?;
+            let _colon = next_token(input)?;
+            let value = parse_input_value(input)?;
+            let field_span = Span::new(field_name.span().start(), value.as_span().end());
+            fields.push(scaffold::ObjectField::new(field_span, field_name, value));
+          }
+          Err(_) => {
+            return Err(SyntacticTokenErrors::unclosed_brace(
+              Span::new(span.start(), input.span_since(&input.cursor()).end()),
+            ));
+          }
+        }
+      }
+    }
+    SyntacticToken::LBracket => {
+      // Parse list elements
+      let mut elements = Vec::new();
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
+            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            return Ok(InputValue::List(scaffold::List::new(
+              Span::new(span.start(), full_span.end()),
+              elements,
+            )));
+          }
+          Ok(_) => {
+            input.restore(saved);
+            elements.push(parse_input_value(input)?);
+          }
+          Err(_) => {
+            return Err(SyntacticTokenErrors::unclosed_bracket(
+              Span::new(span.start(), input.span_since(&input.cursor()).end()),
+            ));
+          }
+        }
+      }
+    }
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span).into()),
   }
 }
 
@@ -399,168 +373,168 @@ impl<S> IntoSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for ConstInputValue<S>
+/// Parses a ConstInputValue from the input (recursive, no variables).
+pub fn parse_const_input_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<ConstInputValue<S>, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  LBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  RBracket:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
-  PathSeparator:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
-        'a,
-        SyntacticToken<S>,
-        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
-          'a,
-        >,
-      >,
-    SyntacticTokenErrors<'a, S>: 'a,
-  {
-    recursive(|parser| {
-      custom::<_, SyntacticTokenStream<'_, S>, Self, E>(move |inp| {
-        let before = inp.cursor();
+  use super::ident::parse_name;
 
-        match inp.next() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
-          Some(tok) => match tok {
-            Lexed::Error(err) => {
-              Err(SyntacticTokenError::from_lexer_errors(err, inp.span_since(&before)).into())
-            }
-            Lexed::Token(Spanned { span, data: token }) => {
-              let output = match token {
-                SyntacticToken::LitFloat(raw) => Self::Float(FloatValue::new(span, raw)),
-                SyntacticToken::LitInt(raw) => Self::Int(IntValue::new(span, raw)),
-                SyntacticToken::LitInlineStr(raw) => {
-                  Self::String(StringValue::new(span, raw.into()))
-                }
-                SyntacticToken::LitBlockStr(raw) => {
-                  Self::String(StringValue::new(span, raw.into()))
-                }
-                SyntacticToken::PathSeparator => {
-                  let segments = inp.parse(
-                    Ident::<S>::parser()
-                      .separated_by(PathSeparator::parser())
-                      .at_least(1)
-                      .collect(),
-                  )?;
+  let Spanned { span, data: token } = next_token(input)?;
 
-                  Self::Enum(EnumValue::new(Path::new(
-                    inp.span_since(&before),
-                    segments,
-                    true,
-                  )))
-                }
-                SyntacticToken::Identifier(name) => match () {
-                  () if "true".equivalent(&name) => Self::Boolean(BooleanValue::new(span, true)),
-                  () if "false".equivalent(&name) => Self::Boolean(BooleanValue::new(span, false)),
-                  () if "null".equivalent(&name) => Self::Null(NullValue::new(span, name)),
-                  () if "set".equivalent(&name) => match inp.peek() {
-                    None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                    Some(Lexed::Token(Spanned {
-                      data: SyntacticToken::LBrace,
-                      ..
-                    })) => {
-                      let (values, r) = inp.parse(
-                        LBrace::parser()
-                          .ignore_then(parser.clone().repeated().collect())
-                          .then(RBrace::parser().or_not()),
-                      )?;
-
-                      match r {
-                        Some(_) => Self::Set(ConstSet::new(inp.span_since(&before), values)),
-                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
-                      }
-                    }
-                    _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                  },
-                  () if "map".equivalent(&name) => match inp.peek() {
-                    None => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                    Some(Lexed::Token(Spanned {
-                      data: SyntacticToken::LBrace,
-                      ..
-                    })) => {
-                      let (values, r) = inp.parse(
-                        LBrace::parser()
-                          .ignore_then(
-                            ConstMapEntry::parser_with(parser.clone(), parser.clone())
-                              .repeated()
-                              .collect(),
-                          )
-                          .then(RBrace::parser().or_not()),
-                      )?;
-
-                      match r {
-                        Some(_) => Self::Map(ConstMap::new(inp.span_since(&before), values)),
-                        None => return Err(SyntacticTokenError::unclosed_brace(span).into()),
-                      }
-                    }
-                    _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                  },
-                  _ => Self::Enum(EnumValue::new(Path::from(Ident::new(span, name)))),
-                },
-                SyntacticToken::LBrace => {
-                  let (fields, rbrace) = inp.parse(
-                    ConstObjectField::<S>::parser_with(Ident::<S>::parser(), parser.clone())
-                      .repeated()
-                      .collect()
-                      .then(RBrace::parser().or_not()),
-                  )?;
-                  return match rbrace {
-                    Some(_) => Ok(Self::Object(scaffold::Object::new(
-                      inp.span_since(&before),
-                      fields,
-                    ))),
-                    None => Err(SyntacticTokenErrors::unclosed_brace(
-                      inp.span_since(&before),
-                    )),
-                  };
-                }
-                SyntacticToken::LBracket => {
-                  let (elements, rbracket) = inp.parse(
-                    parser
-                      .clone()
-                      .repeated()
-                      .collect()
-                      .then(RBracket::parser().or_not()),
-                  )?;
-
-                  return match rbracket {
-                    Some(_) => Ok(Self::List(scaffold::List::new(
-                      inp.span_since(&before),
-                      elements,
-                    ))),
-                    None => Err(SyntacticTokenErrors::unclosed_bracket(
-                      inp.span_since(&before),
-                    )),
-                  };
-                }
-                tok => {
-                  return Err(
-                    SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span)
-                      .into(),
-                  );
-                }
-              };
-
-              Ok(output)
-            }
-          },
+  match token {
+    SyntacticToken::LitFloat(raw) => Ok(ConstInputValue::Float(FloatValue::new(span, raw))),
+    SyntacticToken::LitInt(raw) => Ok(ConstInputValue::Int(IntValue::new(span, raw))),
+    SyntacticToken::LitInlineStr(raw) => {
+      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
+    }
+    SyntacticToken::LitBlockStr(raw) => {
+      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
+    }
+    SyntacticToken::PathSeparator => {
+      let mut segments = Vec::new();
+      segments.push(parse_name(input)?);
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::PathSeparator, .. }) => {
+            segments.push(parse_name(input)?);
+          }
+          _ => {
+            input.restore(saved);
+            break;
+          }
         }
-      })
-    })
+      }
+      let full_span = Span::new(span.start(), input.span_since(&input.cursor()).end());
+      Ok(ConstInputValue::Enum(EnumValue::new(Path::new(full_span, segments, true))))
+    }
+    SyntacticToken::Identifier(name) => match () {
+      () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
+      () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
+      () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
+      () if "set".equivalent(&name) => {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+            let mut values = Vec::new();
+            loop {
+              let saved2 = input.save();
+              match next_token(input) {
+                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                  let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
+                  return Ok(ConstInputValue::Set(ConstSet::new(full_span, values)));
+                }
+                Ok(_) => {
+                  input.restore(saved2);
+                  values.push(parse_const_input_value(input)?);
+                }
+                Err(_) => {
+                  return Err(SyntacticTokenError::unclosed_brace(span).into());
+                }
+              }
+            }
+          }
+          _ => {
+            input.restore(saved);
+            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+          }
+        }
+      },
+      () if "map".equivalent(&name) => {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+            let mut entries = Vec::new();
+            loop {
+              let saved2 = input.save();
+              match next_token(input) {
+                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                  let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
+                  return Ok(ConstInputValue::Map(ConstMap::new(full_span, entries)));
+                }
+                Ok(_) => {
+                  input.restore(saved2);
+                  let key = parse_const_input_value(input)?;
+                  let _fat_arrow = next_token(input)?;
+                  let value = parse_const_input_value(input)?;
+                  let entry_span = Span::new(key.as_span().start(), value.as_span().end());
+                  entries.push(scaffold::MapEntry::new(entry_span, key, value));
+                }
+                Err(_) => {
+                  return Err(SyntacticTokenError::unclosed_brace(span).into());
+                }
+              }
+            }
+          }
+          _ => {
+            input.restore(saved);
+            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+          }
+        }
+      },
+      _ => Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name))))),
+    },
+    SyntacticToken::LBrace => {
+      let mut fields = Vec::new();
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            return Ok(ConstInputValue::Object(scaffold::Object::new(
+              Span::new(span.start(), full_span.end()),
+              fields,
+            )));
+          }
+          Ok(_) => {
+            input.restore(saved);
+            let field_name = parse_name(input)?;
+            let _colon = next_token(input)?;
+            let value = parse_const_input_value(input)?;
+            let field_span = Span::new(field_name.span().start(), value.as_span().end());
+            fields.push(scaffold::ObjectField::new(field_span, field_name, value));
+          }
+          Err(_) => {
+            return Err(SyntacticTokenErrors::unclosed_brace(
+              Span::new(span.start(), input.span_since(&input.cursor()).end()),
+            ));
+          }
+        }
+      }
+    }
+    SyntacticToken::LBracket => {
+      let mut elements = Vec::new();
+      loop {
+        let saved = input.save();
+        match next_token(input) {
+          Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
+            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            return Ok(ConstInputValue::List(scaffold::List::new(
+              Span::new(span.start(), full_span.end()),
+              elements,
+            )));
+          }
+          Ok(_) => {
+            input.restore(saved);
+            elements.push(parse_const_input_value(input)?);
+          }
+          Err(_) => {
+            return Err(SyntacticTokenErrors::unclosed_bracket(
+              Span::new(span.start(), input.span_since(&input.cursor()).end()),
+            ));
+          }
+        }
+      }
+    }
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into()),
   }
 }

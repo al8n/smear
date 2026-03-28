@@ -1,11 +1,12 @@
 use derive_more::{From, Into};
-use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::{AsSpan, IntoSpan, Spanned},
+  utils::IntoComponents,
 };
 
-use smear_lexer::graphqlx::{LitInt, syntactic::SyntacticLexerErrors};
+use smear_lexer::graphqlx::{LitInt, syntactic::SyntacticLexer};
 
 use super::super::*;
 
@@ -66,29 +67,21 @@ impl<S> IntValue<S> {
   }
 }
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for IntValue<S>
+/// Parses an integer value from the input.
+pub fn parse_int_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<IntValue<S>, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-  {
-    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          SyntacticToken::LitInt(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, Expectation::IntValue, span).into()),
-        }
-      }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    SyntacticToken::LitInt(val) => Ok(IntValue::new(span, val)),
+    tok => Err(Error::unexpected_token(tok, Expectation::IntValue, span).into()),
   }
 }
