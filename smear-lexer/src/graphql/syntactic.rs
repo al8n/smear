@@ -16,8 +16,8 @@ mod tests;
 mod slice;
 mod str;
 
-// TODO: Lexer type alias needs migration - LogosLexer requires FromLogos trait
-// pub type Lexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
+/// The lexer type for syntactic GraphQL tokens.
+pub type SyntacticLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
 
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData =

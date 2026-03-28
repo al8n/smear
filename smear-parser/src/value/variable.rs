@@ -1,15 +1,14 @@
 use core::fmt::Display;
 
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{Parser, extra::ParserExtra},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
   utils::{
-    AsSpan, IntoComponents, IntoSpan, Span,
+    IntoComponents,
     human_display::DisplayHuman,
     sdl_display::{DisplayCompact, DisplayPretty},
   },
 };
-use smear_lexer::punctuator::Dollar;
 
 use crate::{error::ParseVariableValueError, hints::VariableValueHint};
 
@@ -103,41 +102,5 @@ where
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
     core::fmt::Display::fmt(self, f)
-  }
-}
-
-impl<'a, Name, I, T, Error> Parseable<'a, I, T, Error> for VariableValue<Name>
-where
-  Error: ParseVariableValueError<Name>,
-  Name: Parseable<'a, I, T, Error>,
-  Dollar: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    Dollar::parser()
-      .or_not()
-      .then(Name::parser().or_not())
-      .try_map_with(|(dollar, name), exa| {
-        let span = exa.span();
-        match (dollar, name) {
-          (None, None) => Err(Error::unexpected_end_of_variable_value(
-            VariableValueHint::Dollar,
-            span,
-          )),
-          (Some(_), None) => Err(Error::unexpected_end_of_variable_value(
-            VariableValueHint::Name,
-            span,
-          )),
-          (None, Some(name)) => Err(Error::missing_dollar_token(name, span)),
-          (Some(_), Some(name)) => Ok(VariableValue::new(span, name)),
-        }
-      })
   }
 }

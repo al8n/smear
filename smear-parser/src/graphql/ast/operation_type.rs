@@ -1,45 +1,39 @@
-use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::*},
-  utils::{Span, cmp::Equivalent},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext,
+  span::Spanned,
+  utils::cmp::Equivalent,
 };
-use smear_lexer::{
-  graphql::syntactic::SyntacticLexerErrors,
-  keywords::{Mutation, Query, Subscription},
-};
+use smear_lexer::keywords::{Mutation, Query, Subscription};
 use smear_scaffold::ast::OperationType;
 
-use super::*;
+use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for OperationType
+/// Parses an operation type from the input.
+pub fn parse_operation_type<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<OperationType, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-  {
-    any().try_map(|res: Lexed<'_, SyntacticToken<S>>, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          SyntacticToken::Identifier(name) => Ok(match () {
-            () if "query".equivalent(&name) => Self::Query(Query::new(span)),
-            () if "mutation".equivalent(&name) => Self::Mutation(Mutation::new(span)),
-            () if "subscription".equivalent(&name) => Self::Subscription(Subscription::new(span)),
-            _ => return Err(Error::unknown_operation_type(name, span).into()),
-          }),
-          tok => Err(Error::unexpected_token(tok, Expectation::OperationName, span).into()),
-        }
-      }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    SyntacticToken::Identifier(name) => {
+      let op = match () {
+        () if "query".equivalent(&name) => OperationType::Query(Query::new(span)),
+        () if "mutation".equivalent(&name) => OperationType::Mutation(Mutation::new(span)),
+        () if "subscription".equivalent(&name) => OperationType::Subscription(Subscription::new(span)),
+        _ => return Err(SyntacticTokenError::unknown_operation_type(name, span).into()),
+      };
+      Ok(op)
+    }
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::OperationName, span).into()),
   }
 }

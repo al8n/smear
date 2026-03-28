@@ -1,7 +1,8 @@
 use core::fmt::Display;
-use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span,
-  sdl_display::{DisplayCompact, DisplayPretty},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
 };
 
 /// A boolean value literal.

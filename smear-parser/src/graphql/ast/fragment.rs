@@ -1,47 +1,41 @@
-use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::{IntoComponents, Span, cmp::Equivalent},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+  utils::{IntoComponents, cmp::Equivalent},
 };
 use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
 use smear_scaffold::ast::{self as scaffold, FragmentName};
 
-use super::*;
+use super::{Expectation, Name, SyntacticTokenError, SyntacticTokenErrors, next_token};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 /// A type condition for a fragment, specifying the type it applies to.
 pub type TypeCondition<S> = scaffold::TypeCondition<Name<S>>;
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for FragmentName<S>
+/// Parses a fragment name from the input.
+pub fn parse_fragment_name<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<FragmentName<S>, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  str: logosky::utils::cmp::Equivalent<S>,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-  {
-    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          SyntacticToken::Identifier(name) => {
-            if "on".equivalent(&name) {
-              Err(Error::invalid_fragment_name(name, span).into())
-            } else {
-              Ok(FragmentName::new(span, name))
-            }
-          }
-          tok => Err(Error::unexpected_token(tok, Expectation::FragmentName, span).into()),
-        }
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    SyntacticToken::Identifier(name) => {
+      if "on".equivalent(&name) {
+        Err(SyntacticTokenError::invalid_fragment_name(name, span).into())
+      } else {
+        Ok(FragmentName::new(span, name))
       }
-      Lexed::Error(err) => Err(SyntacticTokenError::from_lexer_errors(err, span).into()),
-    })
+    }
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::FragmentName, span).into()),
   }
 }
 

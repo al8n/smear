@@ -1,38 +1,29 @@
-use logosky::{
-  Lexed, Logos, Parseable, Token,
-  chumsky::{Parser, extra::ParserExtra, prelude::any},
-  utils::Span,
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext,
+  span::Spanned,
 };
 
-use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
-
-use super::super::*;
+use super::super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 pub use crate::value::FloatValue;
 
-impl<'a, S>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for FloatValue<S>
+/// Parses a float value from the input.
+pub fn parse_float_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<FloatValue<S>, SyntacticTokenErrors<S>>
 where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-  {
-    any().try_map(|res: Lexed<'_, SyntacticToken<_>>, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          SyntacticToken::LitFloat(val) => Ok(Self::new(span, val)),
-          tok => Err(Error::unexpected_token(tok, Expectation::FloatValue, span).into()),
-        }
-      }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    SyntacticToken::LitFloat(val) => Ok(FloatValue::new(span, val)),
+    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::FloatValue, span).into()),
   }
 }

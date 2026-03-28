@@ -1,15 +1,5 @@
-use std::borrow::Cow;
-
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexed, Logos, Token, TokenStream,
-  chumsky::{
-    self, DefaultExpected,
-    error::{self, LabelError},
-    util::{Maybe, MaybeRef},
-  },
-  utils::{Span, UnexpectedEnd},
-};
+use smear_lexer::tokit::{SimpleSpan as Span, utils::CowStr};
 
 use super::Expectation as Exp;
 
@@ -24,10 +14,6 @@ pub use crate::{
 };
 
 pub use core::num::{IntErrorKind, ParseFloatError, ParseIntError};
-
-/// An extra alias
-pub type Extra<S, T, Char = char, Expectation = Exp, StateError = ()> =
-  logosky::chumsky::extra::Err<Errors<S, T, Char, Expectation, StateError>>;
 
 /// Represents an unclosed delimiter in GraphQL source.
 #[derive(Debug, Copy, Clone, IsVariant)]
@@ -70,9 +56,9 @@ pub enum ErrorData<S, T, Char = char, Expectation = Exp, StateError = ()> {
   /// An unexpected keyword was found.
   UnexpectedKeyword(UnexpectedKeyword<S>),
   /// An unexpected end was found in a variable value.
-  UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
+  UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
-  UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
+  UnexpectedEndOfObjectFieldValue(smear_lexer::tokit::error::UnexpectedEnd<ObjectFieldValueHint>),
   /// An unknown directive location was found.
   #[from(skip)]
   UnknownDirectiveLocation(S),
@@ -80,21 +66,21 @@ pub enum ErrorData<S, T, Char = char, Expectation = Exp, StateError = ()> {
   #[from(skip)]
   UnknownOperationType(S),
   /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
+  UnexpectedEndOfObjectExtension(smear_lexer::tokit::error::UnexpectedEnd<ObjectTypeExtensionHint>),
   /// An unexpected end was found in an interface type extension.
-  UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
+  UnexpectedEndOfInterfaceExtension(smear_lexer::tokit::error::UnexpectedEnd<InterfaceTypeExtensionHint>),
   /// An unexpected end was found in an enum type extension.
-  UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
+  UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd<EnumTypeExtensionHint>),
   /// An unexpected end was found in an input object type extension.
-  UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
+  UnexpectedEndOfInputObjectExtension(smear_lexer::tokit::error::UnexpectedEnd<InputObjectTypeExtensionHint>),
   /// An unexpected end was found in a union type extension.
-  UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
+  UnexpectedEndOfUnionExtension(smear_lexer::tokit::error::UnexpectedEnd<UnionTypeExtensionHint>),
   /// An unexpected end was found in a schema extension.
-  UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
+  UnexpectedEndOfSchemaExtension(smear_lexer::tokit::error::UnexpectedEnd<SchemaExtensionHint>),
   /// An end of input was found.
   EndOfInput,
   /// Some other error.
-  Other(Cow<'static, str>),
+  Other(std::borrow::Cow<'static, str>),
 }
 
 /// A parser error.
@@ -125,8 +111,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
-        Cow::Borrowed("variable value"),
+      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("variable value"),
         hint,
       )),
     )
@@ -149,8 +135,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
-        Cow::Borrowed("object field value"),
+      ErrorData::UnexpectedEndOfObjectFieldValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("object field value"),
         hint,
       )),
     )
@@ -164,8 +150,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfObjectExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("object type extension"),
+      ErrorData::UnexpectedEndOfObjectExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("object type extension"),
         hint,
       )),
     )
@@ -179,8 +165,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("interface type extension"),
+      ErrorData::UnexpectedEndOfInterfaceExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("interface type extension"),
         hint,
       )),
     )
@@ -191,8 +177,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfEnumExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("enum type extension"),
+      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("enum type extension"),
         hint,
       )),
     )
@@ -206,8 +192,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfInputObjectExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("input object type extension"),
+      ErrorData::UnexpectedEndOfInputObjectExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("input object type extension"),
         hint,
       )),
     )
@@ -218,8 +204,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfUnionExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("union type extension"),
+      ErrorData::UnexpectedEndOfUnionExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("union type extension"),
         hint,
       )),
     )
@@ -230,8 +216,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfSchemaExtension(UnexpectedEnd::with_name(
-        Cow::Borrowed("schema extension"),
+      ErrorData::UnexpectedEndOfSchemaExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0, 
+        CowStr::from_static("schema extension"),
         hint,
       )),
     )
@@ -383,99 +369,4 @@ impl<S, T, Char, Expectation, StateError> Extend<Error<S, T, Char, Expectation, 
   ) {
     self.0.extend(iter);
   }
-}
-
-impl<'a, S, T, Expectation, Char, StateError>
-  LabelError<'a, TokenStream<'a, T>, DefaultExpected<'a, Lexed<'a, T>>>
-  for Errors<S, T, Char, Expectation, StateError>
-where
-  T: Token<'a>,
-  Expectation: From<<T as Token<'a>>::Kind>,
-  T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
-  <T::Logos as Logos<'a>>::Extras: Copy,
-  Char: Clone,
-  StateError: Clone,
-{
-  fn expected_found<E: IntoIterator<Item = DefaultExpected<'a, Lexed<'a, T>>>>(
-    expected: E,
-    found: Option<MaybeRef<'a, Lexed<'a, T>>>,
-    span: logosky::utils::Span,
-  ) -> Self {
-    let mut errs = Self::default();
-
-    // Helper to extract Lexed from found option
-    let found_lexed = found.as_ref().map(|f| match f {
-      MaybeRef::Ref(lexed) => *lexed,
-      MaybeRef::Val(lexed) => lexed,
-    });
-
-    for exp in expected {
-      let ed = match exp {
-        DefaultExpected::Token(maybe) => {
-          // Extract Lexed from Maybe wrapper
-          let expected_lexed = match maybe {
-            Maybe::Ref(lexed) => lexed,
-            Maybe::Val(ref lexed) => lexed,
-          };
-
-          match expected_lexed {
-            Lexed::Token(expected_tok) => {
-              let expected_tok = expected_tok.as_ref().into_data();
-              match found_lexed {
-                None => {
-                  ErrorData::UnexpectedToken(UnexpectedToken::new(expected_tok.kind().into()))
-                }
-                Some(Lexed::Token(found_tok)) => {
-                  let found_tok = found_tok.as_ref().into_data();
-                  ErrorData::UnexpectedToken(UnexpectedToken::with_found(
-                    found_tok.clone(),
-                    expected_tok.kind().into(),
-                  ))
-                }
-                Some(Lexed::Error(err)) => ErrorData::Lexer(err.clone()),
-              }
-            }
-            Lexed::Error(err) => ErrorData::Lexer(err.clone()),
-          }
-        }
-        DefaultExpected::Any => ErrorData::Other("DefaultExpected::Any".into()),
-        DefaultExpected::SomethingElse => ErrorData::Other("DefaultExpected::SomethingElse".into()),
-        DefaultExpected::EndOfInput => ErrorData::EndOfInput,
-        _ => ErrorData::Other("unknown expected".into()),
-      };
-
-      errs.push(Error::new(span, ed));
-    }
-
-    errs
-  }
-
-  fn merge_expected_found<E: IntoIterator<Item = DefaultExpected<'a, Lexed<'a, T>>>>(
-    mut self,
-    expected: E,
-    found: Option<MaybeRef<'a, Lexed<'a, T>>>,
-    span: logosky::utils::Span,
-  ) -> Self
-  where
-    Self: error::Error<'a, TokenStream<'a, T>>,
-  {
-    // Create new errors from the expected/found combination
-    let new_errors = Self::expected_found(expected, found, span);
-
-    // Merge the new errors into self
-    self.extend(new_errors);
-    self
-  }
-}
-
-impl<'a, S, T, Char, Expectation, StateError> chumsky::error::Error<'a, TokenStream<'a, T>>
-  for Errors<S, T, Char, Expectation, StateError>
-where
-  T: Token<'a>,
-  Expectation: From<<T as Token<'a>>::Kind>,
-  T::Logos: Logos<'a, Error = LexerErrors<Char, StateError>>,
-  <T::Logos as Logos<'a>>::Extras: Copy,
-  Char: Clone,
-  StateError: Clone,
-{
 }

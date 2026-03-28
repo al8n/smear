@@ -1,8 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
 };
 
 use super::*;
@@ -62,35 +61,6 @@ impl<S, Ty> TypeDefinition<S, Ty> {
   }
 }
 
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for TypeDefinition<S, Ty>
-where
-  ScalarTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  ObjectTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
-  InterfaceTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
-  UnionTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  EnumTypeDefinition<S>: Parseable<'a, I, T, Error>,
-  InputObjectTypeDefinition<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    choice((
-      ScalarTypeDefinition::parser::<E>().map(Self::Scalar),
-      ObjectTypeDefinition::parser::<E>().map(Self::Object),
-      InterfaceTypeDefinition::parser::<E>().map(Self::Interface),
-      UnionTypeDefinition::parser::<E>().map(Self::Union),
-      EnumTypeDefinition::parser::<E>().map(Self::Enum),
-      InputObjectTypeDefinition::parser::<E>().map(Self::InputObject),
-    ))
-  }
-}
-
 /// A GraphQL type extension.
 #[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -143,34 +113,5 @@ impl<S, Ty> TypeExtension<S, Ty> {
       Self::Enum(v) => v.span(),
       Self::InputObject(v) => v.span(),
     }
-  }
-}
-
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for TypeExtension<S, Ty>
-where
-  ScalarTypeExtension<S>: Parseable<'a, I, T, Error>,
-  ObjectTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
-  InterfaceTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
-  UnionTypeExtension<S>: Parseable<'a, I, T, Error>,
-  EnumTypeExtension<S>: Parseable<'a, I, T, Error>,
-  InputObjectTypeExtension<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    choice((
-      ScalarTypeExtension::parser::<E>().map(Self::Scalar),
-      ObjectTypeExtension::parser::<E>().map(Self::Object),
-      InterfaceTypeExtension::parser::<E>().map(Self::Interface),
-      UnionTypeExtension::parser::<E>().map(Self::Union),
-      EnumTypeExtension::parser::<E>().map(Self::Enum),
-      InputObjectTypeExtension::parser::<E>().map(Self::InputObject),
-    ))
   }
 }
