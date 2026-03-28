@@ -1,12 +1,8 @@
 use derive_more::{From, Into};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
-};
-use smear_lexer::{
-  keywords,
-  punctuator::{Ampersand, Bang, Colon, LAngle, PathSeparator, RAngle},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 use smear_scaffold::ast::{self as scaffold, And, generic::Constrained};
 
@@ -66,26 +62,6 @@ impl<S, Type> TypeCondition<S, Type> {
   #[inline]
   pub const fn type_generics(&self) -> Option<&scaffold::generic::TypeGenerics<Type>> {
     self.0.name().type_generics()
-  }
-}
-
-impl<'a, S, Type, I, T, Error> Parseable<'a, I, T, Error> for TypeCondition<S, Type>
-where
-  TypeConditionAlias<S, Type>: Parseable<'a, I, T, Error>,
-  T: Token<'a>,
-  I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-  Error: 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    scaffold::TypeCondition::parser().map(Self)
   }
 }
 
@@ -190,36 +166,5 @@ impl<S, Ty> FragmentDefinition<S, Ty> {
   #[inline]
   pub const fn where_clause(&self) -> Option<&WhereClause<S, Ty>> {
     self.0.selection_set().where_clause()
-  }
-}
-
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FragmentDefinition<S, Ty>
-where
-  keywords::Fragment: Parseable<'a, I, T, Error>,
-  keywords::On: Parseable<'a, I, T, Error>,
-  keywords::Where: Parseable<'a, I, T, Error>,
-  PathSeparator: Parseable<'a, I, T, Error>,
-  Ampersand: Parseable<'a, I, T, Error>,
-  LAngle: Parseable<'a, I, T, Error>,
-  RAngle: Parseable<'a, I, T, Error>,
-  Bang: Parseable<'a, I, T, Error>,
-  Colon: Parseable<'a, I, T, Error>,
-  Ident<S>: Parseable<'a, I, T, Error> + 'a,
-  Ty: Parseable<'a, I, T, Error> + 'a,
-  ExecutableDefinitionName<S>: Parseable<'a, I, T, Error> + 'a,
-  ExecutableDefinitionTypeGenerics<S>: Parseable<'a, I, T, Error> + 'a,
-  Directives<S, Ty>: Parseable<'a, I, T, Error> + 'a,
-  SelectionSet<S, Ty>: Parseable<'a, I, T, Error> + 'a,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-    T: Token<'a>,
-    I: Tokenizer<'a, T, Slice = <<T::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    Error: 'a,
-  {
-    scaffold::FragmentDefinition::parser().map(Self)
   }
 }

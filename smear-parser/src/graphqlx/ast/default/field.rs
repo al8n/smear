@@ -1,12 +1,8 @@
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
-use logosky::{
-  Lexed, Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::{extra::ParserExtra, prelude::*},
-  utils::{AsSpan, IntoComponents, IntoSpan, Span, Spanned, cmp::Equivalent},
-};
-use smear_lexer::{
-  graphqlx::syntactic::SyntacticLexerErrors,
-  punctuator::{At, RBrace},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
 use super::{ty::Path, *};
@@ -80,23 +76,6 @@ impl<S, Ty> FragmentSpread<S, Ty> {
   #[inline]
   pub const fn directives(&self) -> Option<&Directives<S, Ty>> {
     self.0.directives()
-  }
-}
-
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for FragmentSpread<S, Ty>
-where
-  FragmentSpreadAlias<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    FragmentSpreadAlias::parser::<E>().map(Self)
   }
 }
 
@@ -176,23 +155,6 @@ impl<S, Ty> InlineFragment<S, Ty> {
   }
 }
 
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InlineFragment<S, Ty>
-where
-  InlineFragmentAlias<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    InlineFragmentAlias::parser::<E>().map(Self)
-  }
-}
-
 /// A selection set containing fields, fragment spreads, and inline fragments.
 pub type SelectionSet<S, Ty = Type<S>> = scaffold::SelectionSet<Selection<S, Ty>>;
 
@@ -225,47 +187,6 @@ impl<S, Ty> IntoSpan<Span> for Selection<S, Ty> {
       Self::FragmentSpread(fs) => fs.into_span(),
       Self::InlineFragment(ifr) => ifr.into_span(),
     }
-  }
-}
-
-impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for Selection<S, Ty>
-where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S, Ty>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  str: Equivalent<S>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
-        'a,
-        SyntacticToken<S>,
-        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
-          'a,
-        >,
-      >,
-    SyntacticTokenErrors<'a, S>: 'a,
-  {
-    recursive(|selection| {
-      let selection_set = scaffold::SelectionSet::<Self>::parser_with(selection.clone());
-
-      let field_p =
-        scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
-          .map(Field::from);
-
-      field_p.map(Self::Field).or(fragment_parser(selection))
-    })
   }
 }
 
@@ -354,215 +275,4 @@ impl<S, Ty> Field<S, Ty> {
   pub const fn selection_set(&self) -> Option<&SelectionSet<S, Ty>> {
     self.0.selection_set()
   }
-}
-
-impl<'a, S: 'a, Ty: 'a>
-  Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>>
-  for Field<S, Ty>
-where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S, Ty>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  str: Equivalent<S>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, SyntacticTokenStream<'a, S>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-    SyntacticTokenStream<'a, S>: Tokenizer<
-        'a,
-        SyntacticToken<S>,
-        Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<
-          'a,
-        >,
-      >,
-    SyntacticTokenErrors<'a, S>: 'a,
-  {
-    recursive(|field_parser| {
-      let selection = recursive(|selection| {
-        field_parser
-          .map(Selection::Field)
-          .or(fragment_parser(selection))
-      });
-
-      // Pass the selection parser to the selection set
-      let selection_set = SelectionSet::parser_with(selection);
-
-      scaffold::Field::parser_with(Arguments::parser(), Directives::parser(), selection_set)
-        .map(Self)
-    })
-  }
-}
-
-fn fragment_parser<'a, S, Ty, E>(
-  selection_parser: impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S, Ty>, E> + Clone + 'a,
-) -> impl Parser<'a, SyntacticTokenStream<'a, S>, Selection<S, Ty>, E> + Clone
-where
-  SyntacticToken<S>: Token<'a>,
-  <SyntacticToken<S> as Token<'a>>::Logos: Logos<'a, Error = SyntacticLexerErrors<'a, S>>,
-  <<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Extras: Copy + 'a,
-  Arguments<S>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directive<S, Ty>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  Directives<S, Ty>:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  RBrace:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  At:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  str: Equivalent<S>,
-  S: 'a,
-  Ty:
-    Parseable<'a, SyntacticTokenStream<'a, S>, SyntacticToken<S>, SyntacticTokenErrors<'a, S>> + 'a,
-  E: ParserExtra<'a, SyntacticTokenStream<'a, S>, Error = SyntacticTokenErrors<'a, S>> + 'a,
-  SyntacticTokenStream<'a, S>: Tokenizer<
-      'a,
-      SyntacticToken<S>,
-      Slice = <<<SyntacticToken<S> as Token<'a>>::Logos as Logos<'a>>::Source as Source>::Slice<'a>,
-    >,
-  SyntacticTokenErrors<'a, S>: 'a,
-{
-  let selection_set = SelectionSet::parser_with(selection_parser.clone());
-  custom(move |inp| {
-    let before = inp.cursor();
-
-    match inp.next() {
-      None => Err(SyntacticTokenError::unexpected_end_of_input(inp.span_since(&before)).into()),
-      Some(Lexed::Error(errs)) => {
-        Err(SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&before)).into())
-      }
-      Some(Lexed::Token(Spanned { span, data: token })) => {
-        match token {
-          SyntacticToken::Spread => {
-            let current_cursor = inp.cursor();
-            let cp = inp.save();
-            match inp.next() {
-              None => Err(
-                SyntacticTokenError::unexpected_end_of_input(inp.span_since(&current_cursor))
-                  .into(),
-              ),
-              Some(Lexed::Error(errs)) => Err(
-                SyntacticTokenError::from_lexer_errors(errs, inp.span_since(&current_cursor))
-                  .into(),
-              ),
-              Some(Lexed::Token(Spanned {
-                span: fragment_span,
-                data: fragment_token,
-              })) => {
-                match fragment_token {
-                  SyntacticToken::Identifier(name) => {
-                    // if we do not have on, then it's a fragment spread
-                    if !"on".equivalent(&name) {
-                      inp.rewind(cp);
-                      let (p, directives) = inp
-                        .parse(FragmentTypePath::parser().then(Directives::parser().or_not()))?;
-
-                      return Ok(Selection::FragmentSpread(FragmentSpread::new(
-                        inp.span_since(&before),
-                        p,
-                        directives,
-                      )));
-                    }
-
-                    // otherwise, it's an inline fragment with type condition
-                    let ((name, directives), selection_set) = inp.parse(
-                      TypePath::<S, Ty>::parser()
-                        .then(Directives::parser().or_not())
-                        .then(selection_set.clone()),
-                    )?;
-                    let tc =
-                      TypeCondition::new((fragment_span.start()..name.span().end()).into(), name);
-                    Ok(Selection::InlineFragment(InlineFragment::new(
-                      inp.span_since(&before),
-                      Some(tc),
-                      directives,
-                      selection_set,
-                    )))
-                  }
-                  // Fragment spread
-                  SyntacticToken::PathSeparator => {
-                    let (mut tp, directives) =
-                      inp.parse(TypePath::<S, Ty>::parser().then(Directives::parser().or_not()))?;
-                    tp.path_mut().set_fqdp(true);
-
-                    let (tp_span, path, generics) = tp.into_components();
-                    Ok(Selection::FragmentSpread(FragmentSpread::new(
-                      inp.span_since(&before),
-                      FragmentTypePath::new(
-                        (fragment_span.start()..tp_span.end()).into(),
-                        path,
-                        generics,
-                      ),
-                      directives,
-                    )))
-                  }
-                  SyntacticToken::LBrace => {
-                    let (selection, rbrace) = inp.parse(
-                      selection_parser
-                        .clone()
-                        .repeated()
-                        .at_least(1)
-                        .collect()
-                        .then(RBrace::parser().or_not()),
-                    )?;
-
-                    match rbrace {
-                      None => {
-                        Err(SyntacticTokenError::unclosed_brace(inp.span_since(&before)).into())
-                      }
-                      Some(_) => {
-                        let span = inp.span_since(&before);
-                        Ok(Selection::InlineFragment(InlineFragment::new(
-                          span,
-                          None,
-                          None,
-                          SelectionSet::new(span, selection),
-                        )))
-                      }
-                    }
-                  }
-                  SyntacticToken::At => {
-                    let (directives, selection_set) = inp.parse(
-                      TypePath::<S, Ty>::parser::<E>()
-                        .then(Arguments::parser().or_not())
-                        .map_with(|(name, args), exa| Directive::new(exa.span(), name, args))
-                        .separated_by(At::parser())
-                        .collect()
-                        .map_with(|directives, exa| Directives::new(exa.span(), directives))
-                        .then(selection_set.clone()),
-                    )?;
-                    Ok(Selection::InlineFragment(InlineFragment::new(
-                      inp.span_since(&before),
-                      None,
-                      Some(directives),
-                      selection_set,
-                    )))
-                  }
-                  token => Err(
-                    SyntacticTokenError::unexpected_token(
-                      token,
-                      Expectation::FragmentSpreadOrInlineFragment,
-                      fragment_span,
-                    )
-                    .into(),
-                  ),
-                }
-              }
-            }
-          }
-          token => {
-            Err(SyntacticTokenError::unexpected_token(token, Expectation::Spread, span).into())
-          }
-        }
-      }
-    }
-  })
 }

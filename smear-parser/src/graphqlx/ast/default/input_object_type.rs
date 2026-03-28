@@ -1,9 +1,9 @@
 use super::{input_fields_definition::InputFieldsDefinition, ty::Path, *};
 use derive_more::{From, Into};
-use logosky::{
-  Logos, Parseable, Source, Token, Tokenizer,
-  chumsky::extra::ParserExtra,
-  utils::{AsSpan, IntoComponents, IntoSpan, Span},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::IntoComponents,
 };
 
 type InputObjectTypeDefinitionAlias<S, Ty = Type<S>> = scaffold::InputObjectTypeDefinition<
@@ -19,26 +19,10 @@ type InputObjectTypeExtensionAlias<S, Ty = Type<S>> = scaffold::InputObjectTypeE
 >;
 
 /// An input object type definition with an optional description.
-///
-/// ## Grammar
-///
-/// ```text
-/// DescribedInputObjectTypeDefinition : Description? InputObjectTypeDefinition
-/// ```
 pub type DescribedInputObjectTypeDefinition<S, Ty = Type<S>> =
   Described<InputObjectTypeDefinition<S, Ty>, S>;
 
 /// A GraphQLx input object type definition.
-///
-/// Represents an input object type used for complex input values in mutations
-/// and queries. Supports generic type parameters and where clauses.
-///
-/// ## Grammar
-///
-/// ```text
-/// InputObjectTypeDefinition :
-///   input Name TypeGenerics? Directives? WhereClause? InputFieldsDefinition?
-/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InputObjectTypeDefinition<S, Ty = Type<S>>(InputObjectTypeDefinitionAlias<S, Ty>);
 
@@ -125,35 +109,7 @@ impl<S, Ty> InputObjectTypeDefinition<S, Ty> {
   }
 }
 
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeDefinition<S, Ty>
-where
-  InputObjectTypeDefinitionAlias<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    InputObjectTypeDefinitionAlias::parser().map(Self)
-  }
-}
-
 /// A GraphQLx input object type extension.
-///
-/// Extends an existing input object type by adding directives or additional
-/// input fields. Supports generic type parameters.
-///
-/// ## Grammar
-///
-/// ```text
-/// InputObjectTypeExtension :
-///   extend input Path TypeGenerics? Directives
-///   extend input Path TypeGenerics? WhereClause? InputFieldsDefinition
-/// ```
 #[derive(Debug, Clone, From, Into)]
 pub struct InputObjectTypeExtension<S, Ty = Type<S>>(InputObjectTypeExtensionAlias<S, Ty>);
 
@@ -238,22 +194,5 @@ impl<S, Ty> InputObjectTypeExtension<S, Ty> {
       Some(fields_def) => Some(fields_def.fields()),
       None => None,
     }
-  }
-}
-
-impl<'a, S, Ty, I, T, Error> Parseable<'a, I, T, Error> for InputObjectTypeExtension<S, Ty>
-where
-  InputObjectTypeExtensionAlias<S, Ty>: Parseable<'a, I, T, Error>,
-{
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, I, Self, E> + Clone
-  where
-    Self: Sized + 'a,
-    I: Tokenizer<'a, T, Slice = <<<T>::Logos as Logos<'a>>::Source as Source>::Slice<'a>>,
-    T: Token<'a>,
-    Error: 'a,
-    E: ParserExtra<'a, I, Error = Error> + 'a,
-  {
-    InputObjectTypeExtensionAlias::parser().map(Self)
   }
 }
