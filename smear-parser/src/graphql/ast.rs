@@ -2,17 +2,17 @@
 
 use std::vec::Vec;
 
-use logosky::{
-  Parseable,
-  chumsky::{ParseResult, Parser},
-  utils::{Span, recursion_tracker::RecursionLimitExceeded},
+use smear_lexer::tokit::{
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+  lexer::FromLogos,
 };
 
-use super::{
-  Expectation,
-  error::{Error, Errors, Extra},
+use super::Expectation;
+use super::error::{Error, Errors};
+use crate::lexer::graphql::syntactic::{
+  SyntacticLexer, SyntacticToken, SyntacticTokenKind,
 };
-use crate::lexer::graphql::syntactic::{SyntacticToken, SyntacticTokenChar, SyntacticTokenKind};
 
 pub use default::*;
 pub use fragment::*;
@@ -61,127 +61,45 @@ impl From<SyntacticTokenKind> for Expectation {
   }
 }
 
-/// The token stream type used for the AST parser implementation.
-pub type SyntacticTokenStream<'a, S> = logosky::TokenStream<'a, SyntacticToken<S>>;
-/// The parser extra type used for the AST parser implementation.
-pub type AstParserExtra<'a, S> =
-  Extra<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
 /// The error type used for the AST parser implementation.
-pub type SyntacticTokenError<'a, S> =
-  Error<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+pub type SyntacticTokenError<S> =
+  Error<S, SyntacticToken<S>, char, Expectation>;
 /// The errors type used for the AST parser implementation.
-pub type SyntacticTokenErrors<'a, S> =
-  Errors<S, SyntacticToken<S>, SyntacticTokenChar<'a, S>, Expectation, RecursionLimitExceeded>;
+pub type SyntacticTokenErrors<S> =
+  Errors<S, SyntacticToken<S>, char, Expectation>;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
 
-/// Parse a value of type `T` from a string slice using the AST token.
-pub trait ParseStr<'a> {
-  /// Parses a value of this type from the given string slice.
-  fn parse_str<S>(input: &'a S) -> ParseResult<Self, SyntacticTokenErrors<'a, &'a str>>
-  where
-    Self: Sized + 'a,
-    S: ?Sized + AsRef<str>;
-}
-
-impl<'b, T> ParseStr<'b> for T
+/// Helper to consume a token from an InputRef and produce a span.
+///
+/// Returns `Ok((span, token))` on success, or an appropriate error.
+#[inline]
+fn next_token<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<Spanned<SyntacticToken<S>>, SyntacticTokenErrors<S>>
 where
-  T: Parseable<
-      'b,
-      SyntacticTokenStream<'b, &'b str>,
-      SyntacticToken<&'b str>,
-      SyntacticTokenErrors<'b, &'b str>,
-    >,
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parse_str<S>(input: &'b S) -> ParseResult<Self, SyntacticTokenErrors<'b, &'b str>>
-  where
-    Self: Sized + 'b,
-    S: ?Sized + AsRef<str>,
-  {
-    <T as Parseable<
-      'b,
-      SyntacticTokenStream<'b, &'b str>,
-      SyntacticToken<&'b str>,
-      SyntacticTokenErrors<'b, &'b str>,
-    >>::parser::<AstParserExtra<&str>>()
-    .parse(SyntacticTokenStream::new(input.as_ref()))
-  }
-}
-
-/// Parse a value of type `T` from a bytes slice using the AST token.
-pub trait ParseBytesSlice<'a> {
-  /// Parses a value of this type from the given bytes slice.
-  fn parse_bytes_slice<S>(input: &'a S) -> ParseResult<Self, SyntacticTokenErrors<'a, &'a [u8]>>
-  where
-    Self: Sized + 'a,
-    S: ?Sized + AsRef<[u8]>;
-}
-
-impl<'b, T> ParseBytesSlice<'b> for T
-where
-  T: Parseable<
-      'b,
-      SyntacticTokenStream<'b, &'b [u8]>,
-      SyntacticToken<&'b [u8]>,
-      SyntacticTokenErrors<'b, &'b [u8]>,
-    >,
-{
-  #[inline]
-  fn parse_bytes_slice<S>(input: &'b S) -> ParseResult<Self, SyntacticTokenErrors<'b, &'b [u8]>>
-  where
-    Self: Sized + 'b,
-    S: ?Sized + AsRef<[u8]>,
-  {
-    <T as Parseable<
-      'b,
-      SyntacticTokenStream<'b, &'b [u8]>,
-      SyntacticToken<&'b [u8]>,
-      SyntacticTokenErrors<'b, &'b [u8]>,
-    >>::parser::<AstParserExtra<&[u8]>>()
-    .parse(SyntacticTokenStream::new(input.as_ref()))
-  }
-}
-
-/// Parse a value of type `T` from a bytes using the AST token.
-#[cfg(feature = "bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
-pub trait ParseBytes<'a> {
-  /// Parses a value of this type from the given bytes slice.
-  fn parse_bytes(
-    input: &'a bytes::Bytes,
-  ) -> ParseResult<Self, SyntacticTokenErrors<'a, bytes::Bytes>>
-  where
-    Self: Sized + 'a;
-}
-
-#[cfg(feature = "bytes")]
-const _: () = {
-  use bytes::Bytes;
-  use logosky::source::CustomSource;
-
-  impl<'a, T> ParseBytes<'a> for T
-  where
-    T: Parseable<
-        'a,
-        SyntacticTokenStream<'a, Bytes>,
-        SyntacticToken<Bytes>,
-        SyntacticTokenErrors<'a, Bytes>,
-      >,
-  {
-    #[inline]
-    fn parse_bytes(input: &'a Bytes) -> ParseResult<Self, SyntacticTokenErrors<'a, Bytes>>
-    where
-      Self: Sized + 'a,
-    {
-      <T as Parseable<
-        'a,
-        SyntacticTokenStream<'a, Bytes>,
-        SyntacticToken<Bytes>,
-        SyntacticTokenErrors<'a, Bytes>,
-      >>::parser::<AstParserExtra<Bytes>>()
-      .parse(SyntacticTokenStream::new(CustomSource::from_ref(input)))
+  let cursor = input.cursor().clone();
+  match input.next()? {
+    Some(spanned) => Ok(spanned),
+    None => {
+      let span = input.span_since(&cursor);
+      Err(SyntacticTokenError::unexpected_end_of_input(span).into())
     }
   }
-};
+}
+
+/// Parse a value of type `T` from a string slice using the AST token.
+pub trait ParseStr {
+  /// Parses a value of this type from the given string slice.
+  fn parse_str(input: &str) -> Result<Self, SyntacticTokenErrors<&str>>
+  where
+    Self: Sized;
+}

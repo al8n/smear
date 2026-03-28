@@ -1,10 +1,14 @@
 use core::fmt::Display;
 
-use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span,
-  cmp::Equivalent,
-  human_display::DisplayHuman,
-  sdl_display::{DisplayCompact, DisplayPretty},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{
+    IntoComponents,
+    cmp::Equivalent,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
 
 /// An identifier.

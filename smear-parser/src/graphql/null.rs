@@ -1,8 +1,8 @@
 use core::fmt::Display;
 
-use logosky::utils::{
-  Span, human_display::DisplayHuman, sdl_display::DisplaySDL,
-  syntax_tree_display::DisplaySyntaxTree,
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  utils::{human_display::DisplayHuman, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

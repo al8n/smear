@@ -1,7 +1,7 @@
-use logosky::utils::{
-  AsSpan, IntoComponents, IntoSpan, Span,
-  human_display::DisplayHuman,
-  sdl_display::{DisplayCompact, DisplayPretty},
+use smear_lexer::tokit::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
+  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}},
 };
 
 use core::fmt::Display;

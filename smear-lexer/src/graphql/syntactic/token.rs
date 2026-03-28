@@ -156,6 +156,15 @@ macro_rules! token {
           }
         }
       }
+
+      impl<'b $(: $lt)?, $($lt: 'b)?> tokit::lexer::FromLogos<'b> for SyntacticToken<$slice> {
+        type Logos = Token $(<$lt>)?;
+
+        #[inline(always)]
+        fn from_logos(logos_token: Self::Logos) -> Self {
+          Self::from(logos_token)
+        }
+      }
     }
   };
 }
