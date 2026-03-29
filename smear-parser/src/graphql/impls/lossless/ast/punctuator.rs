@@ -1,32 +1,36 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable};
-use smear_parser::lang::punctuator::*;
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+};
+use smear_lexer::punctuator::*;
 
-use crate::error::Error;
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::Expectation;
 
-use super::*;
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 
 macro_rules! punctuator_parser {
   ($($name:ident),+$(,)?) => {
     $(
-      impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> for $name {
-
-        #[inline]
-        fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
+      paste::paste! {
+        /// Parses the punctuator token from the lossless input.
+        pub fn [<parse_ $name:snake>]<'inp, S, Ctx, Lang>(
+          input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+        ) -> Result<$name, LosslessTokenErrors<S>>
         where
-          Self: Sized,
-          E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
+          S: Clone,
+          LosslessToken<S>: FromLogos<'inp>,
+          LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = Span>,
+          Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+          Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+          Lang: ?Sized,
         {
-          any().try_map(|res, span: Span| match res {
-            Lexed::Token(tok) => {
-              let (span, tok) = tok.into_components();
-              match tok {
-                Token::$name => Ok($name::new(span)),
-                tok => Err(Error::unexpected_token(tok, TokenKind::$name, span).into()),
-              }
-            },
-            Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-          })
+          let Spanned { span, data: token } = next_token(input)?;
+          match token {
+            LosslessToken::$name => Ok($name::new(span)),
+            tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::$name, span).into()),
+          }
         }
       }
     )*
@@ -38,7 +42,6 @@ punctuator_parser! {
   Ampersand,
   Bang,
   Colon,
-  Comma,
   Dollar,
   LBrace,
   RBrace,
@@ -46,4 +49,7 @@ punctuator_parser! {
   RBracket,
   LParen,
   RParen,
+  Spread,
+  Pipe,
+  Equal,
 }

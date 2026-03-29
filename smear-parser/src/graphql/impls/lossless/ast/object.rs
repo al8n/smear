@@ -1,48 +1,39 @@
-use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::Parseable;
-use smear_parser::source::{IntoComponents, IntoSpan};
-
-use crate::{
-  error::Error,
-  parser::{
-    ast::{Colon, LBrace, Name, Object, RBrace},
-    lossless::LosslessTokenErrors,
-  },
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::{AsSpan, IntoSpan, Spanned},
+  utils::IntoComponents,
 };
 
-use super::{padded::Padded, *};
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::ast::Name;
+use crate::graphql::Expectation;
+use smear_lexer::punctuator::Colon;
+use smear_scaffold::ast as scaffold;
 
-/// A single field within a GraphQL input object literal.
+use super::{
+  LosslessTokenError, LosslessTokenErrors, next_token,
+  name::parse_name,
+  padded::{Padded, PaddedLeft, PaddedRight, parse_padded, parse_padded_left, parse_padded_right},
+  punctuator::parse_colon,
+};
+
+/// Object value in GraphQL CST (preserves trivia).
 ///
-/// Represents a name-value pair within an object literal, following the
-/// GraphQL specification for input object fields. Each field consists of
-/// a field name, a colon separator, and a value, with optional whitespace
-/// and comments allowed around each component.
+/// Uses a custom container type to store `Padded<ObjectField<V, S>, S>` elements
+/// rather than the default `scaffold::ObjectField`.
+pub type CstObject<V, S> = scaffold::Object<Name<S>, V, std::vec::Vec<Padded<ObjectField<V, S>, S>>>;
+
+/// A single field within a GraphQL input object literal (CST variant with trivia).
+///
+/// Represents a name-value pair within an object literal, preserving all whitespace,
+/// comments, and formatting around the components.
 ///
 /// ## Grammar
 ///
 /// ```text
 /// ObjectField ::= Name ':' Value
 /// ```
-///
-/// ## Examples
-///
-/// ```text
-/// name: "John"              // String field
-/// age: 25                   // Integer field  
-/// active: true              // Boolean field
-/// tags: ["user", "admin"]   // List field
-/// profile: { bio: "..." }   // Nested object field
-/// settings: null            // Null field
-/// ```
-///
-/// ## Component Structure
-///
-/// Each field contains:
-/// - **Overall span**: Covers from field name through the value
-/// - **Field name**: A GraphQL name identifier
-/// - **Colon separator**: The `:` token with its position
-/// - **Field value**: The value assigned to this field
 #[derive(Debug, Clone)]
 pub struct ObjectField<InputValue, S> {
   span: Span,
@@ -96,186 +87,92 @@ impl<InputValue, S> ObjectField<InputValue, S> {
   }
 
   /// Returns the source span of the entire field.
-  ///
-  /// This span covers from the first character of the field name through
-  /// the last character of the field value, providing the complete source
-  /// location for error reporting and source mapping.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the colon separator token.
-  ///
-  /// This provides access to the `:` character that separates the field
-  /// name from its value, including its exact source position. Useful
-  /// for syntax highlighting and precise error reporting.
   #[inline]
   pub const fn colon(&self) -> &Colon {
     &self.colon
   }
 
   /// Returns the field name.
-  ///
-  /// This provides access to the GraphQL name that identifies this field
-  /// within the object. The name follows standard GraphQL identifier rules
-  /// and cannot be a reserved keyword.
   #[inline]
   pub const fn name(&self) -> &PaddedRight<Name<S>, S> {
     &self.name
   }
 
   /// Returns the field value.
-  ///
-  /// This provides access to the value assigned to this field. The value
-  /// can be any valid GraphQL input value type including scalars, enums,
-  /// lists, nested objects, or null.
   #[inline]
   pub const fn value(&self) -> &PaddedLeft<InputValue, S> {
     &self.value
   }
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for ObjectField<V, &'a str>
+/// Parses a single object field from the lossless input.
+pub fn parse_object_field<'inp, S, Ctx, Lang, V>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  parse_value: impl FnOnce(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<V, LosslessTokenErrors<S>>,
+) -> Result<ObjectField<V, S>, LosslessTokenErrors<S>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    <PaddedRight<Name<&'a str>, &'a str> as Parseable<
-      'a,
-      LosslessTokenStream<'a>,
-      Token<'a>,
-      LosslessTokenErrors<'a, &'a str>,
-    >>::parser()
-    .then(<Colon as Parseable<
-      'a,
-      LosslessTokenStream<'a>,
-      Token<'a>,
-      LosslessTokenErrors<'a, &'a str>,
-    >>::parser())
-    .then(padded_left_parser(V::parser()))
-    .map_with(|((name, colon), value), exa| Self::new(exa.span(), name, colon, value))
-  }
+  let cursor = input.cursor().clone();
+  let name = parse_padded_right(input, parse_name)?;
+  let colon = parse_colon(input)?;
+  let value = parse_padded_left(input, parse_value)?;
+  let span = input.span_since(&cursor);
+  Ok(ObjectField::new(span, name, colon, value))
 }
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for Object<Padded<ObjectField<V, &'a str>, &'a str>>
+/// Parses an object value from the lossless input.
+///
+/// Uses the provided `parse_value` function to parse each field's value,
+/// with trivia preserved around each field.
+pub fn parse_object<'inp, S, Ctx, Lang, V>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  parse_value: impl Fn(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<V, LosslessTokenErrors<S>>,
+) -> Result<CstObject<V, S>, LosslessTokenErrors<S>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    object_parser(V::parser())
-  }
-}
-
-pub fn object_field_parser<'a, V, VP, E>(
-  value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, ObjectField<V, &'a str>, E> + Clone
-where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
-  V: 'a,
-{
-  <PaddedRight<Name<&'a str>, &'a str> as Parseable<
-    'a,
-    LosslessTokenStream<'a>,
-    Token<'a>,
-    LosslessTokenErrors<'a, &'a str>,
-  >>::parser()
-  .then(<Colon as Parseable<
-    'a,
-    LosslessTokenStream<'a>,
-    Token<'a>,
-    LosslessTokenErrors<'a, &'a str>,
-  >>::parser())
-  .then(padded_left_parser(value_parser))
-  .map_with(|((name, colon), value), exa| ObjectField::new(exa.span(), name, colon, value))
-}
-
-pub fn object_parser<'a, V, VP, E>(
-  value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, Object<Padded<ObjectField<V, &'a str>, &'a str>>, E> + Clone
-where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
-  V: 'a,
-{
-  <LBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser()
-    .then(
-      padded::padded_parser(object_field_parser::<V, VP, E>(value_parser))
-        .repeated()
-        .collect(),
-    )
-    .then(<RBrace as Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>>::parser().or_not())
-    .try_map(|((l, values), r), span| match r {
-      Some(r) => Ok(Object::new(span, l, values, r)),
-      None => Err(Error::unclosed_object(span).into()),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::{
-    error::{ErrorData, Unclosed},
-    parser::{ast::StringValue, lossless::LosslessParserExtra},
-  };
-
-  use super::*;
-
-  #[test]
-  fn test_object_field_parser() {
-    let parser = ObjectField::<StringValue<&str>, &str>::parser::<LosslessParserExtra<&str>>();
-    let input = r#"name: "Jane""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.name().source(), "name");
-    assert_eq!(*parsed.value().content(), "Jane");
+  // Parse opening brace
+  let Spanned { span: open_span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::LBrace => {}
+    tok => return Err(LosslessTokenError::unexpected_token(tok, Expectation::LBrace, open_span).into()),
   }
 
-  #[test]
-  fn test_object_parser() {
-    let parser = Object::<Padded<ObjectField<StringValue<&str>, &str>, &str>>::parser::<
-      LosslessParserExtra<&str>,
-    >();
-    let input = r#"{
-      # A comment
-      a: "a",
-      # Another comment
-      b: "b",
-      c: "c", # Trailing comment
-    }"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.fields().len(), 3);
-    assert_eq!(*parsed.fields()[0].value().value().content(), "a");
-    assert_eq!(*parsed.fields()[1].value().value().content(), "b");
-    assert_eq!(*parsed.fields()[2].value().value().content(), "c");
-  }
+  let mut fields = std::vec::Vec::new();
 
-  #[test]
-  fn test_unclosed_object_parser() {
-    let parser = Object::<Padded<ObjectField<StringValue<&str>, &str>, &str>>::parser::<
-      LosslessParserExtra<&str>,
-    >();
-    let input = r#"{a: "a", b: "b", c: "c""#;
-    let mut parsed = parser
-      .parse(LosslessTokenStream::new(input))
-      .into_result()
-      .unwrap_err();
-    assert_eq!(parsed.len(), 1);
-    let mut err = parsed.pop().unwrap();
-    assert_eq!(err.len(), 1);
-    let err = err.pop().unwrap();
-    let data = err.data();
-    assert!(matches!(data, ErrorData::Unclosed(Unclosed::Object)));
+  loop {
+    // Check for closing brace
+    let saved = input.save();
+    match next_token(input) {
+      Ok(Spanned { data: LosslessToken::RBrace, .. }) => {
+        let full_span = Span::new(open_span.start(), input.span_since(&saved.cursor()).end());
+        return Ok(scaffold::Object::new(full_span, fields));
+      }
+      Ok(_) => {
+        input.restore(saved);
+        let padded = parse_padded(input, |inp| parse_object_field(inp, &parse_value))?;
+        fields.push(padded);
+      }
+      Err(_) => {
+        return Err(LosslessTokenError::unclosed_object(open_span).into());
+      }
+    }
   }
 }

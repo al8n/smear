@@ -1,8 +1,12 @@
-use logosky::utils::Span;
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+};
 
-use crate::lexer::token::lossless::{Token, TokenKind};
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind};
 
-use super::{LosslessTokenErrors, LosslessTokenStream};
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 
 pub use list::*;
 pub use object::*;

@@ -1,92 +1,62 @@
-use chumsky::{IterParser as _, Parser, extra::ParserExtra};
-use logosky::Parseable;
-
-use crate::{
-  error::Error,
-  parser::ast::{LBracket, List, RBracket},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
 };
 
-use super::{padded::Padded, *};
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use smear_scaffold::ast as scaffold;
+use crate::graphql::Expectation;
 
-impl<'a, V> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for List<Padded<V, &'a str>>
+use super::{
+  LosslessTokenError, LosslessTokenErrors, next_token,
+  padded::{Padded, parse_padded},
+};
+
+/// List value in GraphQL CST (preserves trivia).
+pub type List<V, S> = scaffold::List<Padded<V, S>>;
+
+/// Parses a list value from the lossless input.
+///
+/// Uses the provided `parse_value` function to parse each element,
+/// with trivia (whitespace, comments, commas) preserved around each element.
+pub fn parse_list<'inp, S, Ctx, Lang, V>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  parse_value: impl Fn(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<V, LosslessTokenErrors<S>>,
+) -> Result<scaffold::List<Padded<V, S>>, LosslessTokenErrors<S>>
 where
-  V: Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>> + 'a,
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    list_parser(V::parser())
-  }
-}
-
-pub fn list_parser<'a, V, VP, E>(
-  value_parser: VP,
-) -> impl Parser<'a, LosslessTokenStream<'a>, List<Padded<V, &'a str>>, E> + Clone
-where
-  E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  VP: Parser<'a, LosslessTokenStream<'a>, V, E> + Clone + 'a,
-  V: 'a,
-{
-  <LBracket as Parseable<
-    'a,
-    LosslessTokenStream<'a>,
-    Token<'a>,
-    LosslessTokenErrors<'a, &'a str>,
-  >>::parser()
-  .then(padded::padded_parser(value_parser).repeated().collect())
-  .then(
-    <RBracket as Parseable<
-      'a,
-      LosslessTokenStream<'a>,
-      Token<'a>,
-      LosslessTokenErrors<'a, &'a str>,
-    >>::parser()
-    .or_not(),
-  )
-  .try_map(|((l, values), r), span| match r {
-    Some(r) => Ok(List::new(span, l, r, values)),
-    None => Err(Error::unclosed_list(span).into()),
-  })
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::{
-    error::{ErrorData, Unclosed},
-    parser::{ast::StringValue, lossless::LosslessParserExtra},
-  };
-
-  use super::*;
-
-  #[test]
-  fn test_list_parser() {
-    let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra<&str>>();
-    let input = r#"["a", "b", "c"]"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(parsed.values().len(), 3);
-    assert_eq!(*parsed.values()[0].value().content(), "a");
-    assert_eq!(*parsed.values()[1].value().content(), "b");
-    assert_eq!(*parsed.values()[2].value().content(), "c");
-    assert_eq!(parsed.span(), &Span::new(0, 15));
+  // Parse opening bracket
+  let Spanned { span: open_span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::LBracket => {}
+    tok => return Err(LosslessTokenError::unexpected_token(tok, Expectation::LBracket, open_span).into()),
   }
 
-  #[test]
-  fn test_unclosed_list_parser() {
-    let parser = List::<Padded<StringValue<&str>, &str>>::parser::<LosslessParserExtra<&str>>();
-    let input = r#"["a", "b", "c""#;
-    let mut parsed = parser
-      .parse(LosslessTokenStream::new(input))
-      .into_result()
-      .unwrap_err();
-    assert_eq!(parsed.len(), 1);
-    let mut err = parsed.pop().unwrap();
-    assert_eq!(err.len(), 1);
-    let err = err.pop().unwrap();
-    let data = err.data();
-    assert!(matches!(data, ErrorData::Unclosed(Unclosed::List)));
+  let mut elements = std::vec::Vec::new();
+
+  loop {
+    // Check for closing bracket
+    let saved = input.save();
+    match next_token(input) {
+      Ok(Spanned { data: LosslessToken::RBracket, .. }) => {
+        let full_span = Span::new(open_span.start(), input.span_since(&saved.cursor()).end());
+        return Ok(scaffold::List::new(full_span, elements));
+      }
+      Ok(_) => {
+        input.restore(saved);
+        let padded = parse_padded(input, &parse_value)?;
+        elements.push(padded);
+      }
+      Err(_) => {
+        return Err(LosslessTokenError::unclosed_list(open_span).into());
+      }
+    }
   }
 }

@@ -1,106 +1,167 @@
-use crate::parser::ast::{
-  BooleanValue, EnumValue, FloatValue, IntValue, List, NullValue, Object, StringValue, Variable,
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+  utils::cmp::Equivalent,
 };
 
-use chumsky::{Parser, extra::ParserExtra, prelude::*};
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use logosky::Parseable;
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::ast::Name;
+use crate::graphql::Expectation;
+use crate::value::{
+  BooleanValue, EnumValue, FloatValue, IntValue, NullValue, StringValue, VariableValue,
+};
+use smear_scaffold::ast as scaffold;
+use super::{
+  LosslessTokenError, LosslessTokenErrors, next_token,
+  list::parse_list,
+  name::parse_name,
+  object::{self, ObjectField, parse_object},
+  padded::Padded,
+};
 
-use super::*;
-
+/// GraphQL input value for CST (preserves trivia, supports variables).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum InputValue<S> {
-  Variable(Variable<S>),
-  Boolean(BooleanValue<S>),
+  /// Variable reference (e.g., `$userId`).
+  Variable(VariableValue<Name<S>>),
+  /// Boolean value (`true` or `false`).
+  Boolean(BooleanValue),
+  /// String value (inline or block string).
   String(StringValue<S>),
+  /// Floating-point number.
   Float(FloatValue<S>),
+  /// Integer number.
   Int(IntValue<S>),
+  /// Enum value name.
   Enum(EnumValue<S>),
+  /// The `null` literal.
   Null(NullValue<S>),
-  List(List<Padded<InputValue<S>, S>>),
-  Object(Object<Padded<ObjectField<InputValue<S>, S>, S>>),
+  /// List of values.
+  List(scaffold::List<Padded<InputValue<S>, S>>),
+  /// Object value with named fields.
+  Object(object::CstObject<InputValue<S>, S>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for InputValue<&'a str>
+/// Parses an InputValue from the lossless input (recursive, supports variables).
+pub fn parse_input_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<InputValue<S>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    recursive(|parser| {
-      let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);
-      let null_value_parser = NullValue::parser::<E>().map(Self::Null);
-      let int_value_parser = IntValue::parser::<E>().map(Self::Int);
-      let float_value_parser = FloatValue::parser::<E>().map(Self::Float);
-      let string_value_parser = StringValue::parser::<E>().map(Self::String);
-      let enum_value_parser = EnumValue::parser::<E>().map(Self::Enum);
-      let variable_value_parser = Variable::parser::<E>().map(Self::Variable);
-      let object_value_parser = object_parser(parser.clone()).map(Self::Object);
-      let list_value_parser = list_parser(parser).map(Self::List);
+  let saved = input.save();
+  let Spanned { span, data: token } = next_token(input)?;
 
-      choice((
-        boolean_value_parser,
-        null_value_parser,
-        enum_value_parser,
-        variable_value_parser,
-        string_value_parser,
-        float_value_parser,
-        int_value_parser,
-        list_value_parser,
-        object_value_parser,
-      ))
-    })
+  match token {
+    LosslessToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))),
+    LosslessToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))),
+    LosslessToken::LitInlineStr(raw) => {
+      Ok(InputValue::String(StringValue::new(span, raw.into())))
+    }
+    LosslessToken::LitBlockStr(raw) => {
+      Ok(InputValue::String(StringValue::new(span, raw.into())))
+    }
+    LosslessToken::Identifier(name) => match () {
+      () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
+      () if "false".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, false))),
+      () if "null".equivalent(&name) => Ok(InputValue::Null(NullValue::new(span, name))),
+      _ => Ok(InputValue::Enum(EnumValue::new(span, name))),
+    },
+    LosslessToken::Dollar => {
+      let name = parse_name(input)?;
+      let full_span = Span::new(span.start(), name.span().end());
+      Ok(InputValue::Variable(VariableValue::new(full_span, name)))
+    }
+    LosslessToken::LBracket => {
+      // Restore and re-parse as list (parse_list expects the bracket)
+      input.restore(saved);
+      let list = parse_list(input, parse_input_value)?;
+      Ok(InputValue::List(list))
+    }
+    LosslessToken::LBrace => {
+      // Restore and re-parse as object (parse_object expects the brace)
+      input.restore(saved);
+      let obj = parse_object(input, parse_input_value)?;
+      Ok(InputValue::Object(obj))
+    }
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::InputValue, span).into()),
   }
 }
 
+/// GraphQL constant input value for CST (preserves trivia, no variables).
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
-  Boolean(BooleanValue<S>),
+  /// Boolean value (`true` or `false`).
+  Boolean(BooleanValue),
+  /// String value (inline or block string).
   String(StringValue<S>),
+  /// Floating-point number.
   Float(FloatValue<S>),
+  /// Integer number.
   Int(IntValue<S>),
+  /// Enum value name.
   Enum(EnumValue<S>),
+  /// The `null` literal.
   Null(NullValue<S>),
-  List(List<Padded<ConstInputValue<S>, S>>),
-  Object(Object<Padded<ObjectField<ConstInputValue<S>, S>, S>>),
+  /// List of constant values.
+  List(scaffold::List<Padded<ConstInputValue<S>, S>>),
+  /// Object value with named fields (all values must be constant).
+  Object(object::CstObject<ConstInputValue<S>, S>),
 }
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for ConstInputValue<&'a str>
+/// Parses a ConstInputValue from the lossless input (recursive, no variables).
+pub fn parse_const_input_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<ConstInputValue<S>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    recursive(|parser| {
-      let boolean_value_parser = BooleanValue::parser::<E>().map(Self::Boolean);
-      let null_value_parser = NullValue::parser::<E>().map(Self::Null);
-      let int_value_parser = IntValue::parser::<E>().map(Self::Int);
-      let float_value_parser = FloatValue::parser::<E>().map(Self::Float);
-      let string_value_parser = StringValue::parser::<E>().map(Self::String);
-      let enum_value_parser = EnumValue::parser::<E>().map(Self::Enum);
-      let object_value_parser = object_parser(parser.clone()).map(Self::Object);
-      let list_value_parser = list_parser(parser).map(Self::List);
+  let saved = input.save();
+  let Spanned { span, data: token } = next_token(input)?;
 
-      choice((
-        boolean_value_parser,
-        null_value_parser,
-        enum_value_parser,
-        string_value_parser,
-        float_value_parser,
-        int_value_parser,
-        list_value_parser,
-        object_value_parser,
-      ))
-    })
+  match token {
+    LosslessToken::LitFloat(raw) => Ok(ConstInputValue::Float(FloatValue::new(span, raw))),
+    LosslessToken::LitInt(raw) => Ok(ConstInputValue::Int(IntValue::new(span, raw))),
+    LosslessToken::LitInlineStr(raw) => {
+      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
+    }
+    LosslessToken::LitBlockStr(raw) => {
+      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
+    }
+    LosslessToken::Identifier(name) => match () {
+      () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
+      () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
+      () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
+      _ => Ok(ConstInputValue::Enum(EnumValue::new(span, name))),
+    },
+    LosslessToken::LBracket => {
+      input.restore(saved);
+      let list = parse_list(input, parse_const_input_value)?;
+      Ok(ConstInputValue::List(list))
+    }
+    LosslessToken::LBrace => {
+      input.restore(saved);
+      let obj = parse_object(input, parse_const_input_value)?;
+      Ok(ConstInputValue::Object(obj))
+    }
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into()),
   }
 }

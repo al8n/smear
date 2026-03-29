@@ -1,70 +1,36 @@
-use chumsky::{Parser, extra::ParserExtra};
-use logosky::Parseable;
-
-use crate::{
-  error::{Error, VariableValueHint},
-  parser::ast::{Dollar, Name, Variable},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
 };
 
-use super::*;
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::ast::Name;
+use crate::graphql::Expectation;
+use crate::value::VariableValue;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for Variable<&'a str>
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
+use super::name::parse_name;
+
+/// Parses a GraphQL variable reference from the lossless input.
+pub fn parse_variable<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<VariableValue<Name<S>>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    <Dollar as Parseable<
-      'a,
-      LosslessTokenStream<'a>,
-      Token<'a>,
-      LosslessTokenErrors<'a, &'a str>,
-    >>::parser()
-    .or_not()
-    .then(
-      <Name<&'a str> as Parseable<
-        'a,
-        LosslessTokenStream<'a>,
-        Token<'a>,
-        LosslessTokenErrors<'a, &'a str>,
-      >>::parser()
-      .or_not(),
-    )
-    .try_map_with(|(dollar, name), exa| {
-      let span = exa.span();
-      let slice = exa.slice();
-      match (dollar, name) {
-        (None, None) => {
-          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Dollar, span).into())
-        }
-        (Some(_), None) => {
-          Err(Error::unexpected_end_of_variable_value(VariableValueHint::Name, span).into())
-        }
-        (None, Some(name)) => Err(
-          Error::unexpected_token(Token::Identifier(name.source()), TokenKind::Dollar, span).into(),
-        ),
-        (Some(dollar), Some(name)) => Ok(Variable::new(span, slice, dollar, name)),
-      }
-    })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::lossless::LosslessParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_variable_parser() {
-    let parser = Variable::parser::<LosslessParserExtra<&str>>();
-    let input = r#"$foo"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.slice(), "$foo");
-    assert_eq!(*parsed.name().source(), "foo");
-    assert_eq!(parsed.span(), Span::new(0, 4));
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::Dollar => {
+      let name = parse_name(input)?;
+      let full_span = Span::new(span.start(), name.span().end());
+      Ok(VariableValue::new(full_span, name))
+    }
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::Dollar, span).into()),
   }
 }

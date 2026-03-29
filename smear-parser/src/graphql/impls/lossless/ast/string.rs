@@ -1,70 +1,31 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable};
-
-use crate::{
-  error::Error,
-  parser::string::{Kind, StringValue},
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext,
+  span::Spanned,
 };
 
-use super::*;
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::Expectation;
+use crate::value::StringValue;
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for StringValue<&'a str>
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
+
+/// Parses a GraphQL string value from the lossless input.
+pub fn parse_string_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<StringValue<S>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        Ok(match tok {
-          Token::StringLiteral(raw) => {
-            StringValue::new(span, raw, raw.trim_matches('"'), Kind::Inline)
-          }
-          Token::LitBlockStrLiteral(raw) => {
-            StringValue::new(span, raw, raw.trim_matches('"'), Kind::Block)
-          }
-          tok => return Err(Error::unexpected_token(tok, TokenKind::String, span).into()),
-        })
-      }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::lossless::LosslessParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_string_value_parser() {
-    let parser = StringValue::parser::<LosslessParserExtra<&str>>();
-    let input = r#""Hello, World!""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.content(), "Hello, World!");
-    assert_eq!(parsed.kind, Kind::Inline);
-    assert_eq!(parsed.span(), Span::new(0, 15));
-    assert_eq!(*parsed.raw(), r#""Hello, World!""#);
-  }
-
-  #[test]
-  fn test_block_string_value_parser() {
-    let parser = StringValue::parser::<LosslessParserExtra<&str>>();
-    let input = r#""""Hello,
-World!""""#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.content(), "Hello,\nWorld!");
-    assert_eq!(parsed.kind, Kind::Block);
-    assert_eq!(parsed.span(), Span::new(0, 19));
-    assert_eq!(
-      *parsed.raw(),
-      r#""""Hello,
-World!""""#
-    );
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::LitInlineStr(raw) => Ok(StringValue::new(span, raw.into())),
+    LosslessToken::LitBlockStr(raw) => Ok(StringValue::new(span, raw.into())),
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::StringValue, span).into()),
   }
 }
