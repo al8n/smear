@@ -101,9 +101,7 @@ where
 }
 
 /// Parse a value of type `T` from a string slice using the AST token.
-pub trait ParseStr {
+pub trait ParseStr<'a>: Sized {
   /// Parses a value of this type from the given string slice.
-  fn parse_str(input: &str) -> Result<Self, SyntacticTokenErrors<&str>>
-  where
-    Self: Sized;
+  fn parse_str(input: &'a str) -> Result<Self, SyntacticTokenErrors<&'a str>>;
 }

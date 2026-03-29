@@ -185,6 +185,12 @@ impl<Name, Directives, FieldsDefinition> IntoComponents
 impl<Name, Directives, FieldsDefinition>
   InputObjectTypeDefinition<Name, Directives, FieldsDefinition>
 {
+  /// Creates a new input object type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Option<Directives>, fields: Option<FieldsDefinition>) -> Self {
+    Self { span, name, directives, fields }
+  }
+
   /// Returns a reference to the span covering the entire input object definition.
   ///
   /// The span includes the optional description, input keyword, name, optional
@@ -401,6 +407,12 @@ impl<Name, Directives, FieldsDefinition> IntoComponents
 impl<Name, Directives, FieldsDefinition>
   InputObjectTypeExtension<Name, Directives, FieldsDefinition>
 {
+  /// Creates a new input object type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, data: InputObjectTypeExtensionData<Directives, FieldsDefinition>) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire input object extension.
   ///
   /// The span includes the extend keyword, input keyword, name, and all

@@ -64,6 +64,12 @@ impl<Name, OperationType> IntoComponents for RootOperationTypeDefinition<Name, O
 }
 
 impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
+  /// Creates a new root operation type definition.
+  #[inline]
+  pub const fn new(span: Span, operation_type: OperationType, name: Name) -> Self {
+    Self { span, operation_type, name }
+  }
+
   /// Returns a reference to the span covering the entire root operation type definition.
   ///
   /// The span includes the operation type keyword, colon separator, and the target type name.
@@ -172,6 +178,12 @@ impl<RootOperationTypeDefinition, Container> IntoComponents
 impl<RootOperationTypeDefinition, Container>
   RootOperationTypesDefinition<RootOperationTypeDefinition, Container>
 {
+  /// Creates a new root operation types definition.
+  #[inline]
+  pub const fn new(span: Span, root_operation_types: Container) -> Self {
+    Self { span, root_operation_types, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire root operation types definition.
   ///
   /// The span includes the opening brace, all operation type definitions, and the closing brace.

@@ -114,6 +114,12 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ObjectTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new object type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, implements: Option<ImplementInterfaces>, directives: Option<Directives>, fields_definition: Option<FieldsDefinition>) -> Self {
+    Self { span, name, implements, directives, fields_definition }
+  }
+
   /// Returns a reference to the span covering the entire object definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -350,6 +356,12 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   ObjectTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new object type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, data: ObjectTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire object extension.
   #[inline]
   pub const fn span(&self) -> &Span {

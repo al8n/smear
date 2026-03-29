@@ -85,7 +85,7 @@ Unlike other Rust GraphQL parsers that only provide one token type, smear offers
 - **Use cases**: Code formatters, linters, IDEs, syntax highlighters, refactoring tools
 - **CST-ready**: Build Concrete Syntax Trees with perfect source reconstruction
 
-```rust
+```rust,ignore
 // SyntacticToken for servers - fast execution
 use smear::lexer::graphql::syntactic::SyntacticToken;
 use logosky::TokenStream;

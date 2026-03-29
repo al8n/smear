@@ -62,6 +62,16 @@ impl<Definition, Container> IntoComponents for Document<Definition, Container> {
 }
 
 impl<Definition, Container> Document<Definition, Container> {
+  /// Creates a new document with the given span and definitions.
+  #[inline]
+  pub const fn new(span: Span, definitions: Container) -> Self {
+    Self {
+      span,
+      definitions,
+      _m: PhantomData,
+    }
+  }
+
   /// Returns a reference to the span covering the entire document.
   ///
   /// The span represents the source location from the first character of the first definition

@@ -137,6 +137,12 @@ impl<Directives, RootOperationTypesDefinition> IntoComponents
 impl<Directives, RootOperationTypesDefinition>
   SchemaDefinition<Directives, RootOperationTypesDefinition>
 {
+  /// Creates a new schema definition.
+  #[inline]
+  pub const fn new(span: Span, directives: Option<Directives>, operation_type_definitions: RootOperationTypesDefinition) -> Self {
+    Self { span, directives, operation_type_definitions }
+  }
+
   /// Returns a reference to the span covering the entire schema definition.
   ///
   /// The span includes the optional description, schema keyword, optional directives,
@@ -505,6 +511,12 @@ impl<Directives, RootOperationTypesDefinition> IntoComponents
 impl<Directives, RootOperationTypesDefinition>
   SchemaExtension<Directives, RootOperationTypesDefinition>
 {
+  /// Creates a new schema extension.
+  #[inline]
+  pub const fn new(span: Span, content: SchemaExtensionData<Directives, RootOperationTypesDefinition>) -> Self {
+    Self { span, content }
+  }
+
   /// Returns a reference to the span covering the entire schema extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through

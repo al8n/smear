@@ -132,6 +132,12 @@ impl<Name, Directives> IntoComponents for ScalarTypeDefinition<Name, Directives>
 }
 
 impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
+  /// Creates a new scalar type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Option<Directives>) -> Self {
+    Self { span, name, directives }
+  }
+
   /// Returns a reference to the span covering the entire scalar definition.
   ///
   /// The span encompasses the complete scalar definition from the optional description
@@ -262,6 +268,12 @@ impl<Name, Directives> IntoComponents for ScalarTypeExtension<Name, Directives> 
 }
 
 impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
+  /// Creates a new scalar type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
+    Self { span, name, directives }
+  }
+
   /// Returns a reference to the span covering the entire scalar extension.
   ///
   /// The span encompasses the complete extension from the `extend` keyword through

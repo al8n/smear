@@ -364,6 +364,13 @@ impl<Char, StateError> UnterminatedSpreadOperatorError for LexerErrors<Char, Sta
   }
 }
 
+impl<Char, StateError> From<StateError> for LexerErrors<Char, StateError> {
+  #[inline]
+  fn from(error: StateError) -> Self {
+    LexerError::const_new(Span::new(0, 0), LexerErrorData::State(error)).into()
+  }
+}
+
 impl<Char, StateError> BadStateError for LexerError<Char, StateError> {
   type StateError = StateError;
   #[inline]

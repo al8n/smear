@@ -585,6 +585,12 @@ impl<Location, Container> IntoComponents for DirectiveLocations<Location, Contai
 }
 
 impl<Location, Container> DirectiveLocations<Location, Container> {
+  /// Creates a new directive locations list.
+  #[inline]
+  pub const fn new(span: Span, locations: Container) -> Self {
+    Self { span, locations, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire directive locations.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -736,6 +742,12 @@ impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, L
 }
 
 impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
+  /// Creates a new directive definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, arguments_definition: Option<Args>, repeateable: bool, directive_locations: Locations) -> Self {
+    Self { span, name, arguments_definition, repeateable, directive_locations }
+  }
+
   /// Returns a reference to the span covering the entire directive definition.
   ///
   /// The span includes the optional description, directive keyword, name,

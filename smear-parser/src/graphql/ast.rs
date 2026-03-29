@@ -2,16 +2,22 @@
 
 use std::vec::Vec;
 
+// PhantomData is unused currently but reserved for future use.
+#[allow(unused_imports)]
+use core::marker::PhantomData;
+
 use smear_lexer::tokit::{
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+  Emitter, InputRef, Lexer, Parse, ParseContext, Parser, SimpleSpan as Span,
+  error::token::UnexpectedTokenOf,
   lexer::FromLogos,
+  span::Spanned,
+  state::recursion_tracker::RecursionLimitExceeded,
 };
 
 use super::Expectation;
 use super::error::{Error, Errors};
 use crate::lexer::graphql::syntactic::{
-  SyntacticLexer, SyntacticToken, SyntacticTokenKind,
+  SyntacticLexer, SyntacticLexerErrors, SyntacticToken, SyntacticTokenKind,
 };
 
 pub use default::*;
@@ -28,6 +34,7 @@ mod keyword;
 mod location;
 mod name;
 mod operation_type;
+mod parse_str_impl;
 mod punctuator;
 mod ty;
 mod type_system;
@@ -97,9 +104,71 @@ where
 }
 
 /// Parse a value of type `T` from a string slice using the AST token.
-pub trait ParseStr {
+///
+/// This trait is implemented for types parameterized by `&'a str`, where the
+/// lifetime connects the input string to the parsed output.
+///
+/// # Lifetime
+///
+/// The lifetime parameter `'a` connects the input string to the parsed output.
+/// The parsed AST borrows from the input string.
+pub trait ParseStr<'a>: Sized {
   /// Parses a value of this type from the given string slice.
-  fn parse_str(input: &str) -> Result<Self, SyntacticTokenErrors<&str>>
+  fn parse_str(input: &'a str) -> Result<Self, SyntacticTokenErrors<&'a str>>;
+}
+
+/// Parse a value of type `T` from a byte slice using the AST token.
+pub trait ParseBytesSlice {
+  /// Parses a value of this type from the given byte slice.
+  fn parse_bytes_slice(input: &[u8]) -> Result<Self, SyntacticTokenErrors<&[u8]>>
   where
     Self: Sized;
+}
+
+/// Parse a value of type `T` from bytes using the AST token.
+#[cfg(feature = "bytes")]
+pub trait ParseBytes {
+  /// Parses a value of this type from the given bytes.
+  fn parse_bytes(input: &bytes::Bytes) -> Result<Self, SyntacticTokenErrors<bytes::Bytes>>
+  where
+    Self: Sized;
+}
+
+// Implement From<SyntacticLexerErrors> for SyntacticTokenErrors to satisfy FromEmitterError.
+// This converts lexer errors (which include RecursionLimitExceeded) into parser errors.
+impl<S> From<SyntacticLexerErrors> for SyntacticTokenErrors<S> {
+  #[inline]
+  fn from(err: SyntacticLexerErrors) -> Self {
+    SyntacticTokenError::new(
+      Span::new(0, 0),
+      super::error::ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
+    ).into()
+  }
+}
+
+// Implement From<UnexpectedTokenOf> for SyntacticTokenErrors to satisfy FromEmitterError.
+impl<'inp, S: Clone> From<UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>> for SyntacticTokenErrors<S>
+where
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
+{
+  #[inline]
+  fn from(err: UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>) -> Self {
+    let (span, found, _expected) = err.into_components();
+    // Convert the expected token kinds to our Expectation type.
+    // We take the first expected kind if available.
+    let expectation = Expectation::Name; // default fallback
+    match found {
+      Some(token) => SyntacticTokenError::unexpected_token(token, expectation, span).into(),
+      None => SyntacticTokenError::unexpected_end_of_input(span).into(),
+    }
+  }
+}
+
+/// Helper to run a parse function against a string input using tokit's Parser infrastructure.
+pub fn run_parse_str<'inp, O>(
+  f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
+  input: &'inp str,
+) -> Result<O, SyntacticTokenErrors<&'inp str>> {
+  Parser::with_parser(f).parse_str(input)
 }

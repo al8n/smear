@@ -88,6 +88,12 @@ impl<Type> IntoComponents for ListType<Type> {
 }
 
 impl<Type> ListType<Type> {
+  /// Creates a new list type.
+  #[inline]
+  pub const fn new(span: Span, ty: Type, required: bool) -> Self {
+    Self { span, ty, required }
+  }
+
   /// Returns a reference to the span covering the entire list type.
   ///
   /// The span includes the brackets, element type, and optional bang modifier.

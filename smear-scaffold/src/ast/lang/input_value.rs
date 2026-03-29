@@ -43,6 +43,12 @@ pub struct DefaultInputValue<Value> {
 }
 
 impl<Value> DefaultInputValue<Value> {
+  /// Creates a new default input value.
+  #[inline]
+  pub const fn new(span: Span, value: Value) -> Self {
+    Self { span, value }
+  }
+
   /// Returns the source span of the entire default value assignment.
   ///
   /// This span covers from the `=` token through the last character of the

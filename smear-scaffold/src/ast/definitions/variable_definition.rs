@@ -204,6 +204,12 @@ impl<Variable, Type, DefaultValue, Directives> IntoComponents
 impl<Variable, Type, DefaultValue, Directives>
   VariableDefinition<Variable, Type, DefaultValue, Directives>
 {
+  /// Creates a new variable definition.
+  #[inline]
+  pub const fn new(span: Span, variable: Variable, ty: Type, directives: Option<Directives>, default_value: Option<DefaultValue>) -> Self {
+    Self { span, variable, ty, directives, default_value }
+  }
+
   /// Returns a reference to the span covering the entire variable definition.
   ///
   /// The span includes the optional description, variable (with $ prefix), colon,
@@ -379,6 +385,12 @@ impl<VariableDefinition, Container> IntoComponents
 }
 
 impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Container> {
+  /// Creates a new variables definition.
+  #[inline]
+  pub const fn new(span: Span, variables: Container) -> Self {
+    Self { span, variables, _v: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire variables definition.
   ///
   /// The span includes the opening parenthesis, all variable definitions,

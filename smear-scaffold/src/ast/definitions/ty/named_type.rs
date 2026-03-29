@@ -77,6 +77,12 @@ impl<Name> IntoComponents for NamedType<Name> {
 }
 
 impl<Name> NamedType<Name> {
+  /// Creates a new named type.
+  #[inline]
+  pub const fn new(span: Span, name: Name, required: bool) -> Self {
+    Self { span, name, required }
+  }
+
   /// Returns a reference to the span covering the entire named type.
   ///
   /// The span includes the type name and optional bang modifier,

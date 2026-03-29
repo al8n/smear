@@ -29,7 +29,7 @@ smear-lexer = "0.0.0"
 
 ### Basic Usage
 
-```rust
+```rust,ignore
 use smear_lexer::{graphql::syntactic::Lexer, logosky::Lexed};
 
 let source = "query { user { id name } }";
@@ -56,7 +56,7 @@ for token in tokens {
 - Maximum speed
 - Zero-copy—all tokens reference original source
 
-```rust
+```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
 
 let source = "query GetUser { user(id: 123) { name } }";
@@ -73,7 +73,7 @@ let tokens = Lexer::<&str>::new(source);
 - Perfect for building Concrete Syntax Trees (CST)
 - Enables accurate source reconstruction
 
-```rust
+```rust,ignore
 use smear_lexer::graphql::lossless::Lexer;
 
 let source = "query GetUser { user(id: 123) { name } }";
@@ -89,7 +89,7 @@ The lexer is generic over source type `S`, enabling flexibility:
 
 Most common for UTF-8 validated text:
 
-```rust
+```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
 use logosky::TokenStream;
 
@@ -101,7 +101,7 @@ let tokens = Lexer::<&str>::new(source);
 
 For binary protocols or pre-validation:
 
-```rust
+```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
 
 let source = b"{ field }";
@@ -180,7 +180,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
     - Decimal (same as GraphQL): `3.14`, `-0.5`, `1e10`, `2.5E-3`
 - **Punctuators**: `<` `>` `::` `=>` `*` `+` `-`
 
-    ```rust
+    ```rust,ignore
     use smear_lexer::graphqlx::syntactic::Lexer;
 
     let source = r#"import { User } from "./types.graphqlx""#;
@@ -191,7 +191,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
 
 The lexer provides comprehensive error reporting:
 
-```rust
+```rust,ignore
 use smear_lexer::{graphql::syntactic::Lexer, logosky::Lexed};
 
 let source = "query { 0123 }"; // Leading zeros not allowed

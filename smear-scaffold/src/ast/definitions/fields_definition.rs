@@ -116,6 +116,12 @@ impl<Name, Arguments, Type, Directives> IntoComponents
 }
 
 impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, Directives> {
+  /// Creates a new field definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, arguments_definition: Option<Arguments>, ty: Type, directives: Option<Directives>) -> Self {
+    Self { span, name, arguments_definition, ty, directives }
+  }
+
   /// Returns a reference to the span covering the entire field definition.
   ///
   /// The span includes the optional description, field name, optional arguments,
@@ -258,6 +264,12 @@ impl<FieldDefinition, Container> IntoComponents for FieldsDefinition<FieldDefini
 }
 
 impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
+  /// Creates a new fields definition.
+  #[inline]
+  pub const fn new(span: Span, fields: Container) -> Self {
+    Self { span, fields, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire fields definition.
   ///
   /// The span includes the opening brace, all field definitions, and the closing brace.

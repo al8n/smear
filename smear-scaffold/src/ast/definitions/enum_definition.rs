@@ -80,6 +80,12 @@ impl<EnumValue, Directives> IntoComponents for EnumValueDefinition<EnumValue, Di
 }
 
 impl<EnumValue, Directives> EnumValueDefinition<EnumValue, Directives> {
+  /// Creates a new enum value definition.
+  #[inline]
+  pub const fn new(span: Span, enum_value: EnumValue, directives: Option<Directives>) -> Self {
+    Self { span, enum_value, directives }
+  }
+
   /// Returns a reference to the span covering the entire enum value definition.
   ///
   /// The span includes the optional description, enum value name, and optional directives.
@@ -197,6 +203,12 @@ impl<EnumValueDefinition, Container> IntoComponents
 }
 
 impl<EnumValueDefinition, Container> EnumValuesDefinition<EnumValueDefinition, Container> {
+  /// Creates a new enum values definition.
+  #[inline]
+  pub const fn new(span: Span, enum_values: Container) -> Self {
+    Self { span, enum_values, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire enum values definition.
   ///
   /// The span includes the opening brace, all enum value definitions, and the closing brace.
@@ -315,6 +327,12 @@ impl<Name, Directives, EnumValuesDefinition> IntoComponents
 impl<Name, Directives, EnumValuesDefinition>
   EnumTypeDefinition<Name, Directives, EnumValuesDefinition>
 {
+  /// Creates a new enum type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Option<Directives>, enum_values: Option<EnumValuesDefinition>) -> Self {
+    Self { span, name, directives, enum_values }
+  }
+
   /// Returns a reference to the span covering the entire enum definition.
   ///
   /// The span includes the optional description, enum keyword, name, optional
@@ -524,6 +542,12 @@ impl<Name, Directives, EnumValuesDefinition> IntoComponents
 impl<Name, Directives, EnumValuesDefinition>
   EnumTypeExtension<Name, Directives, EnumValuesDefinition>
 {
+  /// Creates a new enum type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, data: EnumTypeExtensionData<Directives, EnumValuesDefinition>) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire enum extension.
   ///
   /// The span includes the extend keyword, enum keyword, name, and all

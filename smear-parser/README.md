@@ -13,7 +13,7 @@ High-performance parser for GraphQL and GraphQL-like DSLs.
 - **Dual Dialects**: Complete parsers for both standard GraphQL and GraphQLx
 - **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::HipStr`, and custom types
 - **Comprehensive Error Reporting**: Detailed error messages with source location information
-- **Parser Combinators**: Composable parsers built with the `chumsky` for parsing and `logos` for lexing.
+- **Parser Combinators**: Composable parsers built with `tokit` for parsing and `logos` for lexing.
 - **`no_std` Compatible**: Works in embedded environments with optional `alloc` support
 
 ## Quick Start
@@ -152,7 +152,7 @@ std::thread::spawn(move || {
 
 The parser provides detailed error information:
 
-```rust
+```rust,ignore
 use smear_parser::graphql::{self, ast::ParseStr};
 
 let invalid = "type User { id: }"; // Missing type

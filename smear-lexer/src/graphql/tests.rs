@@ -1,7 +1,7 @@
 use tokit::{
-  Token,
+  SimpleSpan,
+  lexer::FromLogos,
   logos::{Lexer, Logos, Source},
-  utils::Span,
 };
 
 use crate::{
@@ -32,7 +32,7 @@ where
   );
 }
 
-pub(super) trait TestToken<'a>: Token<'a> + Eq + Copy + core::fmt::Debug {
+pub(super) trait TestToken<'a>: FromLogos<'a> + Eq + Copy + core::fmt::Debug {
   fn is_ignored(&self) -> bool;
 
   fn block_string_literal(&self) -> Option<&'a str>;
@@ -53,7 +53,7 @@ pub(super) trait TestToken<'a>: Token<'a> + Eq + Copy + core::fmt::Debug {
   }
 }
 
-pub(super) struct TestLexer<'a, T: Token<'a>> {
+pub(super) struct TestLexer<'a, T: FromLogos<'a>> {
   inner: Lexer<'a, T::Logos>,
 }
 
@@ -65,7 +65,7 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
       match self.inner.next() {
         None => return None,
         Some(Ok(tok)) => {
-          let tok = T::from(tok);
+          let tok = T::from_logos(tok);
           if tok.is_ignored() {
             // continue lexing
             continue;
@@ -323,14 +323,14 @@ where
     .data()
     .unwrap_int_ref()
     .unwrap_leading_zeros_ref()
-    .unwrap_span_ref();
-  assert_eq!(err1, &Span::new(0, 2));
+    .unwrap_range_ref();
+  assert_eq!(err1, &SimpleSpan::new(0, 2));
   let err2 = errs[1]
     .data()
     .unwrap_int_ref()
     .unwrap_unexpected_suffix_ref()
-    .unwrap_span_ref();
-  assert_eq!(err2, &Span::new(2, 5));
+    .unwrap_range_ref();
+  assert_eq!(err2, &SimpleSpan::new(2, 5));
 
   let mut lexer = Token::test_lexer("-00abc");
   let errs = lexer.next().unwrap().unwrap_err();
@@ -339,14 +339,14 @@ where
     .data()
     .unwrap_int_ref()
     .unwrap_leading_zeros_ref()
-    .unwrap_span_ref();
-  assert_eq!(err1, &Span::new(1, 3));
+    .unwrap_range_ref();
+  assert_eq!(err1, &SimpleSpan::new(1, 3));
   let err2 = errs[1]
     .data()
     .unwrap_int_ref()
     .unwrap_unexpected_suffix_ref()
-    .unwrap_span_ref();
-  assert_eq!(err2, &Span::new(3, 6));
+    .unwrap_range_ref();
+  assert_eq!(err2, &SimpleSpan::new(3, 6));
 }
 
 pub(super) fn test_float_leading_zeros_and_other<'a, Token, StateError>()
@@ -371,7 +371,7 @@ where
     .unwrap_float_ref()
     .unwrap_unexpected_end_ref();
   assert_eq!(err2.hint(), &FloatHint::Fractional);
-  assert_eq!(errs[1].span(), Span::new(0, 3));
+  assert_eq!(errs[1].span(), SimpleSpan::new(0, 3));
 
   let mut lexer = Token::test_lexer("-01.");
   let errs = lexer.next().unwrap().unwrap_err();
@@ -388,7 +388,7 @@ where
     .unwrap_float_ref()
     .unwrap_unexpected_end_ref();
   assert_eq!(err2.hint(), &FloatHint::Fractional);
-  assert_eq!(errs[1].span(), Span::new(0, 4));
+  assert_eq!(errs[1].span(), SimpleSpan::new(0, 4));
 
   let mut lexer = Token::test_lexer("00001.23abcd");
   let errs = lexer.next().unwrap().unwrap_err();
@@ -397,14 +397,14 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_leading_zeros_ref()
-    .unwrap_span_ref();
-  assert_eq!(err1, &Span::new(0, 4));
+    .unwrap_range_ref();
+  assert_eq!(err1, &SimpleSpan::new(0, 4));
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
-    .unwrap_span_ref();
-  assert_eq!(err2, &Span::new(8, 12));
+    .unwrap_range_ref();
+  assert_eq!(err2, &SimpleSpan::new(8, 12));
 }
 
 pub(super) fn test_invalid_number_suffix<'a, Token, StateError>()
@@ -424,7 +424,7 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
+    .unwrap_range();
   assert_eq!(err, (1..4).into());
 
   let mut lexer = Token::test_lexer("0a");
@@ -451,8 +451,8 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
-  assert_eq!(err, Span::new(2, 5));
+    .unwrap_range();
+  assert_eq!(err, SimpleSpan::new(2, 5));
 
   let mut lexer = Token::test_lexer("-0a");
   let err = lexer
@@ -478,8 +478,8 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
-  assert_eq!(err, Span::new(3, 6));
+    .unwrap_range();
+  assert_eq!(err, SimpleSpan::new(3, 6));
 
   let mut lexer = Token::test_lexer("123a");
   let err = lexer
@@ -505,8 +505,8 @@ where
     .into_data()
     .unwrap_int()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
-  assert_eq!(err, Span::new(4, 7));
+    .unwrap_range();
+  assert_eq!(err, SimpleSpan::new(4, 7));
 
   let mut lexer = Token::test_lexer("-123a");
   let err = lexer
@@ -644,8 +644,8 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
-  assert_eq!(err, Span::new(4, 6));
+    .unwrap_range();
+  assert_eq!(err, SimpleSpan::new(4, 6));
 
   let mut lexer = Token::test_lexer("-1.23.4 ");
   let err = lexer
@@ -657,8 +657,8 @@ where
     .into_data()
     .unwrap_float()
     .unwrap_unexpected_suffix()
-    .unwrap_span();
-  assert_eq!(err, Span::new(5, 7));
+    .unwrap_range();
+  assert_eq!(err, SimpleSpan::new(5, 7));
   assert_eq!(lexer.span(), 0..7);
 
   // check that we don't consume trailing valid items
@@ -835,8 +835,8 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
-    .unwrap_span();
-  assert_eq!(err2, Span::new(4, 8));
+    .unwrap_range();
+  assert_eq!(err2, SimpleSpan::new(4, 8));
 
   let mut lexer = Token::test_lexer("-.123abcd");
   let errs = lexer.next().unwrap().unwrap_err();
@@ -849,8 +849,8 @@ where
     .data()
     .unwrap_float_ref()
     .unwrap_unexpected_suffix_ref()
-    .unwrap_span();
-  assert_eq!(err2, Span::new(5, 9));
+    .unwrap_range();
+  assert_eq!(err2, SimpleSpan::new(5, 9));
 }
 
 pub(super) fn test_unexpected_float_eof<'a, Token, StateError>()
@@ -1107,7 +1107,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Fractional);
-  assert_eq!(err.lexeme().unwrap_span(), (2..5).into());
+  assert_eq!(err.lexeme().unwrap_range(), (2..5).into());
   assert_eq!(lexer.span(), (0..5));
 
   let mut lexer = Token::test_lexer("-1.abc");
@@ -1121,7 +1121,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Fractional);
-  assert_eq!(err.lexeme().unwrap_span(), (3..6).into());
+  assert_eq!(err.lexeme().unwrap_range(), (3..6).into());
   assert_eq!(lexer.span(), (0..6));
 
   let mut lexer = Token::test_lexer("1.e1");
@@ -1135,7 +1135,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Fractional);
-  assert_eq!(err.lexeme().unwrap_span(), (2..4).into());
+  assert_eq!(err.lexeme().unwrap_range(), (2..4).into());
   assert_eq!(lexer.span(), (0..4));
 
   let mut lexer = Token::test_lexer("-1.e1");
@@ -1149,7 +1149,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Fractional);
-  assert_eq!(err.lexeme().unwrap_span(), (3..5).into());
+  assert_eq!(err.lexeme().unwrap_range(), (3..5).into());
   assert_eq!(lexer.span(), (0..5));
 
   let mut lexer = Token::test_lexer("1.0eA");
@@ -1193,7 +1193,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (4..12).into());
+  assert_eq!(err.lexeme().unwrap_range(), (4..12).into());
   assert_eq!(lexer.span(), 0..12);
 
   let mut lexer = Token::test_lexer("-1.0eA123.456 some_name");
@@ -1207,7 +1207,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (5..13).into());
+  assert_eq!(err.lexeme().unwrap_range(), (5..13).into());
   assert_eq!(lexer.span(), 0..13);
 
   let mut lexer = Token::test_lexer("1eA");
@@ -1251,7 +1251,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (2..10).into());
+  assert_eq!(err.lexeme().unwrap_range(), (2..10).into());
   assert_eq!(lexer.span(), 0..10);
 
   let mut lexer = Token::test_lexer("-1eA123.456");
@@ -1265,7 +1265,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (3..11).into());
+  assert_eq!(err.lexeme().unwrap_range(), (3..11).into());
   assert_eq!(lexer.span(), (0..11));
 
   let mut lexer = Token::test_lexer("1eA123.456 some_name");
@@ -1279,7 +1279,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (2..10).into());
+  assert_eq!(err.lexeme().unwrap_range(), (2..10).into());
   assert_eq!(lexer.span(), (0..10));
 
   let mut lexer = Token::test_lexer("-1eA123.456 some_name");
@@ -1293,7 +1293,7 @@ where
     .unwrap_float()
     .unwrap_unexpected_lexeme();
   assert_eq!(err.hint(), &FloatHint::Exponent(ExponentHint::SignOrDigit));
-  assert_eq!(err.lexeme().unwrap_span(), (3..11).into());
+  assert_eq!(err.lexeme().unwrap_range(), (3..11).into());
   assert_eq!(lexer.span(), (0..11));
 }
 
@@ -1454,7 +1454,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, 1));
+  assert_eq!(err.span(), SimpleSpan::new(0, 1));
   let err1 = err
     .into_data()
     .unwrap_string()
@@ -1469,7 +1469,7 @@ where
   assert_eq!(errs.len(), 1);
 
   let err1 = errs.pop().unwrap();
-  assert_eq!(err1.span(), Span::new(0, 13));
+  assert_eq!(err1.span(), SimpleSpan::new(0, 13));
 
   let err1 = err1
     .into_data()
@@ -1484,7 +1484,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, 17));
+  assert_eq!(err.span(), SimpleSpan::new(0, 17));
   let err1 = err
     .into_data()
     .unwrap_string()
@@ -1500,7 +1500,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, 21));
+  assert_eq!(err.span(), SimpleSpan::new(0, 21));
   let err1 = err
     .into_data()
     .unwrap_string()
@@ -1517,7 +1517,7 @@ where
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
     }
     LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err1.lexeme().unwrap_span(), Span::new(9, 11));
+      assert_eq!(err1.lexeme().unwrap_range(), SimpleSpan::new(9, 11));
     }
   }
 
@@ -1525,7 +1525,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, r#""hello✨"#.len()));
+  assert_eq!(err.span(), SimpleSpan::new(0, r#""hello✨"#.len()));
   let err1 = err
     .into_data()
     .unwrap_string()
@@ -1540,7 +1540,7 @@ where
   let err = errs.pop().unwrap();
   assert_eq!(
     err.span(),
-    Span::new(0, r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#.len())
+    SimpleSpan::new(0, r#""\n\n\\u{c}\nPSK\\u{1}\\0\\0\\0י"#.len())
   );
 
   let err1 = err
@@ -1564,7 +1564,7 @@ where
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
 
-  assert_eq!(err.span(), Span::new(0, 6));
+  assert_eq!(err.span(), SimpleSpan::new(0, 6));
 
   let err = err.into_data().unwrap_string();
   assert_eq!(err.len(), 2, "Expected 2 errors, got {err:?}");
@@ -1572,7 +1572,7 @@ where
     .unwrap_unicode_ref()
     .unwrap_fixed_ref()
     .unwrap_incomplete_ref();
-  assert_eq!(err1.span(), Span::new(1, 6));
+  assert_eq!(err1.span(), SimpleSpan::new(1, 6));
 
   let err2 = err[1].unwrap_unterminated_ref();
   assert_eq!(err2.hint(), &LitStrDelimiterHint::Quote);
@@ -1583,7 +1583,7 @@ where
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
 
-  assert_eq!(err.span(), Span::new(0, 3));
+  assert_eq!(err.span(), SimpleSpan::new(0, 3));
 
   let err = err.into_data().unwrap_string();
   assert_eq!(err.len(), 2, "Expected 2 errors, got {err:?}");
@@ -1591,7 +1591,7 @@ where
     .unwrap_unicode_ref()
     .unwrap_fixed_ref()
     .unwrap_incomplete_ref();
-  assert_eq!(err1.span(), Span::new(1, 3));
+  assert_eq!(err1.span(), SimpleSpan::new(1, 3));
 
   let err2 = err[1].unwrap_unterminated_ref();
   assert_eq!(err2.hint(), &LitStrDelimiterHint::Quote);
@@ -1627,7 +1627,7 @@ hello
       assert_eq!(err1.lexeme().unwrap_char_ref().position(), 1);
     }
     LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err1.lexeme().unwrap_span(), Span::new(1, 3));
+      assert_eq!(err1.lexeme().unwrap_range(), SimpleSpan::new(1, 3));
     }
   }
   assert_eq!(lexer.span(), 0..9);
@@ -1643,7 +1643,7 @@ hello
       assert_eq!(err2.lexeme().unwrap_char_ref().position(), 7);
     }
     LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err2.lexeme().unwrap_span(), Span::new(7, 9));
+      assert_eq!(err2.lexeme().unwrap_range(), SimpleSpan::new(7, 9));
     }
   }
   assert_eq!(lexer.span(), 0..9);
@@ -1720,7 +1720,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
-  assert_eq!(err.span(), Span::new(16, 22));
+  assert_eq!(err.span(), SimpleSpan::new(16, 22));
 
   let err2 = &errs[1];
   let err = err2
@@ -1728,7 +1728,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
-  assert_eq!(err.span(), Span::new(22, 28));
+  assert_eq!(err.span(), SimpleSpan::new(22, 28));
 
   let mut lexer = Token::test_lexer(r#""split pair \uD83D \uDE00""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1741,7 +1741,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
-  assert_eq!(err.span(), Span::new(12, 18));
+  assert_eq!(err.span(), SimpleSpan::new(12, 18));
 
   let err2 = &errs[1];
   let err = err2
@@ -1749,7 +1749,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
-  assert_eq!(err.span(), Span::new(19, 25));
+  assert_eq!(err.span(), SimpleSpan::new(19, 25));
 
   let mut lexer = Token::test_lexer(r#""Lone lead surrogate \uD83E""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1761,7 +1761,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::High);
-  assert_eq!(err.span(), Span::new(21, 27));
+  assert_eq!(err.span(), SimpleSpan::new(21, 27));
 
   let mut lexer = Token::test_lexer(r#""Lone trail surrogate \uDD80""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1773,7 +1773,7 @@ where
     .unwrap_fixed_ref()
     .unwrap_unpaired_surrogate_ref();
   assert_eq!(err.hint(), &UnpairedSurrogateHint::Low);
-  assert_eq!(err.span(), Span::new(22, 28));
+  assert_eq!(err.span(), SimpleSpan::new(22, 28));
 }
 
 pub(super) fn test_unterminated_block_string<'a, Token, StateError>()
@@ -1786,7 +1786,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, 3));
+  assert_eq!(err.span(), SimpleSpan::new(0, 3));
   let err1 = err
     .into_data()
     .unwrap_string()
@@ -1800,7 +1800,7 @@ where
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), Span::new(0, 4));
+  assert_eq!(err.span(), SimpleSpan::new(0, 4));
   let err1 = err
     .into_data()
     .unwrap_string()
