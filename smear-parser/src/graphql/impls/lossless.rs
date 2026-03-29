@@ -1,18 +1,45 @@
-// use logosky::{TokenStream, utils::tracker::LimitExceeded};
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  span::Spanned,
+};
 
-// use crate::{
-//   error::Extra,
-//   lexer::token::lossless::{Token, TokenKind},
-// };
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind};
+use super::super::error::{Error, Errors};
+use super::super::Expectation;
 
-// pub use ast::*;
+pub use ast::*;
 
-// mod ast;
+mod ast;
 
-// /// The token stream type used for the lossless parser implementation.
-// pub type LosslessTokenStream<'a> = TokenStream<'a, Token<'a>>;
-// /// The parser extra type used for the lossless parser implementation.
-// pub type LosslessParserExtra<'a, S> = Extra<S, Token<'a>, TokenKind, char, LimitExceeded>;
-// /// The error type used for the lossless parser implementation.
-// pub type LosslessTokenErrors<'a, S> =
-//   crate::error::Errors<S, Token<'a>, TokenKind, char, LimitExceeded>;
+/// The error type used for the lossless parser implementation.
+pub type LosslessTokenError<S> =
+  Error<S, LosslessToken<S>, char, Expectation>;
+/// The errors type used for the lossless parser implementation.
+pub type LosslessTokenErrors<S> =
+  Errors<S, LosslessToken<S>, char, Expectation>;
+
+/// Helper to consume a token from an InputRef and produce a span.
+///
+/// Returns `Ok(Spanned { span, data: token })` on success, or an appropriate error.
+#[inline]
+fn next_token<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<Spanned<LosslessToken<S>>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  Lang: ?Sized,
+{
+  let cursor = input.cursor().clone();
+  match input.next()? {
+    Some(spanned) => Ok(spanned),
+    None => {
+      let span = input.span_since(&cursor);
+      Err(LosslessTokenError::unexpected_end_of_input(span).into())
+    }
+  }
+}

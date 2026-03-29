@@ -1,47 +1,40 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable};
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext,
+  span::Spanned,
+  utils::cmp::Equivalent,
+};
 
-use crate::{error::Error, parser::enum_value::EnumValue};
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::Expectation;
+use crate::value::EnumValue;
 
-use super::*;
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for EnumValue<&'a str>
+/// Parses a GraphQL enum value from the lossless input.
+pub fn parse_enum_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<EnumValue<S>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          Token::Identifier(name) => match name {
-            "true" | "false" | "null" => Err(Error::invalid_enum_value(name, span).into()),
-            _ => Ok(EnumValue::new(span, name)),
-          },
-          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
-        }
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::Identifier(name) => match () {
+      () if "true".equivalent(&name)
+        || "false".equivalent(&name)
+        || "null".equivalent(&name) =>
+      {
+        Err(LosslessTokenError::invalid_enum_value(name, span).into())
       }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::lossless::LosslessParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_enum_value_parser() {
-    let parser = EnumValue::parser::<LosslessParserExtra<&str>>();
-    let input = r#"foo"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "foo");
-    assert_eq!(parsed.span(), &Span::new(0, 3));
+      _ => Ok(EnumValue::new(span, name)),
+    },
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::EnumValue, span).into()),
   }
 }

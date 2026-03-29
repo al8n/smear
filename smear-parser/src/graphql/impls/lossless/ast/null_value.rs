@@ -1,47 +1,35 @@
-use chumsky::{Parser, extra::ParserExtra, prelude::any};
-use logosky::{Lexed, Parseable};
+use smear_lexer::tokit::{
+  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext,
+  span::Spanned,
+  utils::cmp::Equivalent,
+};
 
-use crate::{error::Error, parser::null::NullValue};
+use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
+use crate::graphql::Expectation;
+use crate::value::NullValue;
 
-use super::*;
+use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 
-impl<'a> Parseable<'a, LosslessTokenStream<'a>, Token<'a>, LosslessTokenErrors<'a, &'a str>>
-  for NullValue<&'a str>
+/// Parses a GraphQL null value from the lossless input.
+pub fn parse_null_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+) -> Result<NullValue<S>, LosslessTokenErrors<S>>
+where
+  S: Clone,
+  LosslessToken<S>: FromLogos<'inp>,
+  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
 {
-  #[inline]
-  fn parser<E>() -> impl Parser<'a, LosslessTokenStream<'a>, Self, E> + Clone
-  where
-    Self: Sized,
-    E: ParserExtra<'a, LosslessTokenStream<'a>, Error = LosslessTokenErrors<'a, &'a str>> + 'a,
-  {
-    any().try_map(|res, span: Span| match res {
-      Lexed::Token(tok) => {
-        let (span, tok) = tok.into_components();
-        match tok {
-          Token::Identifier(name) => match name {
-            "null" => Ok(NullValue::new(span, name)),
-            val => Err(Error::invalid_null_value(val, span).into()),
-          },
-          tok => Err(Error::unexpected_token(tok, TokenKind::Identifier, span).into()),
-        }
-      }
-      Lexed::Error(err) => Err(Error::from_lexer_errors(err, span).into()),
-    })
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::parser::lossless::LosslessParserExtra;
-
-  use super::*;
-
-  #[test]
-  fn test_null_value_parser() {
-    let parser = NullValue::parser::<LosslessParserExtra<&str>>();
-    let input = r#"null"#;
-    let parsed = parser.parse(LosslessTokenStream::new(input)).unwrap();
-    assert_eq!(*parsed.source(), "null");
-    assert_eq!(parsed.span(), Span::new(0, 4));
+  let Spanned { span, data: token } = next_token(input)?;
+  match token {
+    LosslessToken::Identifier(name) => match () {
+      () if "null".equivalent(&name) => Ok(NullValue::new(span, name)),
+      _ => Err(LosslessTokenError::invalid_null_value(name, span).into()),
+    },
+    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::NullValue, span).into()),
   }
 }
