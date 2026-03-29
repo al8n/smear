@@ -17,6 +17,12 @@ pub struct ImplementInterfaces<Name, Container = Vec<Name>> {
 }
 
 impl<Name, Container> ImplementInterfaces<Name, Container> {
+  /// Creates a new implements interfaces clause.
+  #[inline]
+  pub const fn new(span: Span, interfaces: Container) -> Self {
+    Self { span, interfaces, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire implements clause.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -177,6 +183,12 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   InterfaceTypeDefinition<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new interface type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, implements: Option<ImplementInterfaces>, directives: Option<Directives>, fields_definition: Option<FieldsDefinition>) -> Self {
+    Self { span, name, implements, directives, fields_definition }
+  }
+
   /// Returns a reference to the span covering the entire interface definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -411,6 +423,12 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition> IntoComponents
 impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
   InterfaceTypeExtension<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
+  /// Creates a new interface type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire interface extension.
   ///
   /// Includes the `extend interface` keywords, interface name, and all extension data.

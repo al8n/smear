@@ -109,6 +109,12 @@ impl<InputValueDefinition, Container> IntoComponents
 }
 
 impl<InputValueDefinition, Container> ArgumentsDefinition<InputValueDefinition, Container> {
+  /// Creates a new arguments definition.
+  #[inline]
+  pub const fn new(span: Span, values: Container) -> Self {
+    Self { span, values, _input_value_definition: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire arguments definition.
   ///
   /// The span includes the opening parenthesis, all input value definitions,

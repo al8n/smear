@@ -59,6 +59,12 @@ impl<Name> IntoComponents for Alias<Name> {
 }
 
 impl<Name> Alias<Name> {
+  /// Creates a new alias.
+  #[inline]
+  pub const fn new(span: Span, name: Name) -> Self {
+    Self { span, name }
+  }
+
   /// Returns a reference to the span covering the entire alias.
   ///
   /// The span includes both the alias name and the colon separator.
@@ -254,6 +260,12 @@ impl<Alias, Name, Arguments, Directives, SelectionSet> IntoComponents
 impl<Alias, Name, Arguments, Directives, SelectionSet>
   Field<Alias, Name, Arguments, Directives, SelectionSet>
 {
+  /// Creates a new field.
+  #[inline]
+  pub const fn new(span: Span, alias: Option<Alias>, name: Name, arguments: Option<Arguments>, directives: Option<Directives>, selection_set: Option<SelectionSet>) -> Self {
+    Self { span, alias, name, arguments, directives, selection_set }
+  }
+
   /// Returns a reference to the span covering the entire field.
   ///
   /// The span includes the alias (if present), field name, arguments, directives,

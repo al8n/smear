@@ -163,6 +163,12 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet> IntoComponents
 impl<FragmentName, TypeCondition, Directives, SelectionSet>
   FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet>
 {
+  /// Creates a new fragment definition.
+  #[inline]
+  pub const fn new(span: Span, name: FragmentName, type_condition: TypeCondition, directives: Option<Directives>, selection_set: SelectionSet) -> Self {
+    Self { span, name, type_condition, directives, selection_set }
+  }
+
   /// Returns a reference to the span covering the entire fragment definition.
   ///
   /// The span includes the optional description, fragment keyword, name,

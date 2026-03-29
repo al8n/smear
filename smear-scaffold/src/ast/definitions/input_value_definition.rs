@@ -148,6 +148,12 @@ impl<Name, Type, DefaultValue, Directives> IntoComponents
 impl<Name, Type, DefaultValue, Directives>
   InputValueDefinition<Name, Type, DefaultValue, Directives>
 {
+  /// Creates a new input value definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, ty: Type, default_value: Option<DefaultValue>, directives: Option<Directives>) -> Self {
+    Self { span, name, ty, default_value, directives }
+  }
+
   /// Returns a reference to the span covering the entire input value definition.
   ///
   /// The span includes the optional description, name, colon, type, optional

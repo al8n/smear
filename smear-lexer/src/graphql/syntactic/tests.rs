@@ -1,4 +1,4 @@
-use tokit::{Lexed, TokenStream, utils::recursion_tracker::RecursionLimiter};
+use tokit::{lexer::FromLogos, logos::Logos, state::recursion_tracker::RecursionLimiter};
 
 use super::*;
 
@@ -167,9 +167,10 @@ fn test_escape_triple_quote_block_string() {
 fn test_bom_lexing() {
   let input = "\u{feff}";
 
-  let mut lexer = TokenStream::<StrSyntacticToken<'_>>::new(input).into_iter();
+  type LogosToken<'a> = <StrSyntacticToken<'a> as FromLogos<'a>>::Logos;
+  let mut lexer = LogosToken::lexer(input);
 
-  assert_eq!(lexer.next(), None);
+  assert!(lexer.next().is_none());
 }
 
 #[test]
@@ -178,15 +179,17 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let lexer = TokenStream::<StrSyntacticToken<'_>>::with_state(
+  type LogosToken<'a> = <StrSyntacticToken<'a> as FromLogos<'a>>::Logos;
+  let mut lexer = LogosToken::lexer_with_extras(
     query.as_str(),
     RecursionLimiter::with_limitation(depth - 1),
   );
 
-  for result in lexer {
-    match result {
-      Lexed::Token(_) => {}
-      Lexed::Error(mut errors) => {
+  loop {
+    match lexer.next() {
+      None => break,
+      Some(Ok(_)) => {}
+      Some(Err(mut errors)) => {
         let err = errors.pop().unwrap().into_data().unwrap_state();
         assert_eq!(err.depth(), depth);
         assert_eq!(err.limitation(), depth - 1);

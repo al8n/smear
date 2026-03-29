@@ -40,6 +40,12 @@ impl<Name, Container> IntoComponents for UnionMemberTypes<Name, Container> {
 }
 
 impl<Name, Container> UnionMemberTypes<Name, Container> {
+  /// Creates a new union member types list.
+  #[inline]
+  pub const fn new(span: Span, members: Container) -> Self {
+    Self { span, members, _m: PhantomData }
+  }
+
   /// Returns a reference to the span covering the entire union member types.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -201,6 +207,12 @@ impl<Name, Directives, MemberTypes> IntoComponents
 }
 
 impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, MemberTypes> {
+  /// Creates a new union type definition.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Option<Directives>, members: Option<MemberTypes>) -> Self {
+    Self { span, name, directives, members }
+  }
+
   /// Returns a reference to the span covering the entire union definition.
   #[inline]
   pub const fn span(&self) -> &Span {
@@ -356,6 +368,12 @@ impl<Name, Directives, MemberTypes> IntoComponents
 }
 
 impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberTypes> {
+  /// Creates a new union type extension.
+  #[inline]
+  pub const fn new(span: Span, name: Name, data: UnionTypeExtensionData<Directives, MemberTypes>) -> Self {
+    Self { span, name, data }
+  }
+
   /// Returns a reference to the span covering the entire union extension.
   ///
   /// The span includes the `extend union` keywords, union name, and all extension

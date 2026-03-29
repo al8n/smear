@@ -133,6 +133,19 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet> IntoCom
 impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
   NamedOperationDefinition<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
 {
+  /// Creates a new named operation definition.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    operation_type: OperationType,
+    name: Option<Name>,
+    variable_definitions: Option<VariablesDefinition>,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self { span, operation_type, name, variable_definitions, directives, selection_set }
+  }
+
   /// Returns a reference to the span covering the entire operation definition.
   #[inline]
   pub const fn span(&self) -> &Span {

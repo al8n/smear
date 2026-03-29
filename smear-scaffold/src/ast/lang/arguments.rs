@@ -54,6 +54,12 @@ impl<Name, Value> IntoComponents for Argument<Name, Value> {
 }
 
 impl<Name, Value> Argument<Name, Value> {
+  /// Creates a new argument.
+  #[inline]
+  pub const fn new(span: Span, name: Name, value: Value) -> Self {
+    Self { span, name, value }
+  }
+
   /// Returns the source span of the entire argument.
   ///
   /// This span covers from the first character of the argument name through
@@ -162,6 +168,12 @@ impl<Arg, Container> IntoComponents for Arguments<Arg, Container> {
 }
 
 impl<Arg, Container> Arguments<Arg, Container> {
+  /// Creates a new arguments list.
+  #[inline]
+  pub const fn new(span: Span, l_paren: LParen, arguments: Container, r_paren: RParen) -> Self {
+    Self { span, l_paren, arguments, r_paren, _arg: PhantomData }
+  }
+
   /// Returns the source span of the entire argument list.
   ///
   /// This span covers from the opening parenthesis through the closing
