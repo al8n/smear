@@ -179,6 +179,65 @@ impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span
   }
 }
 
+// Implement FromSeparatedError for SyntacticTokenErrors to satisfy SeparatedEmitter via FatalContext.
+// The `FromEmitterError` supertrait is satisfied by the blanket impl in tokit via the
+// `From<SyntacticLexerErrors>` and `From<UnexpectedTokenOf>` impls above, but only when the
+// compiler can resolve `<SyntacticToken<S> as Token>::Error`. We add an explicit
+// `SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>`
+// bound so the blanket can kick in.
+impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromSeparatedError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+where
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+{
+  #[inline]
+  fn from_missing_separator(
+    _name: smear_lexer::tokit::utils::CowStr,
+    err: smear_lexer::tokit::error::token::MissingTokenOf<'inp, SyntacticLexer<'inp, S>>,
+  ) -> Self {
+    let off = err.offset();
+    let span = Span::new(off, off);
+    SyntacticTokenError::new(
+      span,
+      super::error::ErrorData::Other(std::borrow::Cow::Borrowed("missing separator")),
+    ).into()
+  }
+
+  #[inline]
+  fn from_missing_element(
+    err: smear_lexer::tokit::error::syntax::MissingSyntaxOf<'inp, SyntacticLexer<'inp, S>>,
+  ) -> Self {
+    let off = err.offset();
+    let span = Span::new(off, off);
+    SyntacticTokenError::new(
+      span,
+      super::error::ErrorData::Other(std::borrow::Cow::Borrowed("missing element")),
+    ).into()
+  }
+}
+
+// Implement FromUnexpectedTrailingSeparatorError for SyntacticTokenErrors.
+// Required by the `allow_leading` combinator variant.
+impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromUnexpectedTrailingSeparatorError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+where
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+{
+  #[inline]
+  fn from_unexpected_trailing_separator(
+    _name: smear_lexer::tokit::utils::CowStr,
+    err: UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>,
+  ) -> Self {
+    let (span, found, _expected) = err.into_components();
+    match found {
+      Some(token) => SyntacticTokenError::unexpected_token(token, Expectation::Name, span).into(),
+      None => SyntacticTokenError::unexpected_end_of_input(span).into(),
+    }
+  }
+}
+
 /// Helper to run a parse function against a string input using tokit's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
   f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
