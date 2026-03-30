@@ -9,10 +9,12 @@ use std::vec;
 use std::vec::Vec;
 
 use smear_lexer::tokit::{
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
+  SimpleSpan as Span,
+  cache::Peeked,
   lexer::FromLogos,
   span::Spanned,
-  utils::cmp::Equivalent,
+  utils::{Maybe, cmp::Equivalent, typenum::U1},
 };
 use smear_scaffold::ast::{self as scaffold, FragmentName};
 
@@ -31,6 +33,26 @@ use super::{
 use crate::lexer::graphql::syntactic::{
   SyntacticLexer, SyntacticToken, SyntacticTokenKind,
 };
+
+// ─── Peek helper ─────────────────────────────────────────────────────────────
+
+/// Helper macro to uniformly access the `&SyntacticToken<S>` from a peeked
+/// `Maybe<CachedTokenRef, CachedToken>` element (the `Ref` variant has an extra
+/// level of indirection).
+macro_rules! with_peeked_token {
+  ($tok:expr, |$t:ident| $body:expr) => {
+    match $tok {
+      Maybe::Ref(cached) => {
+        let $t: &SyntacticToken<S> = *cached.token().data();
+        $body
+      }
+      Maybe::Owned(cached) => {
+        let $t: &SyntacticToken<S> = cached.token().data();
+        $body
+      }
+    }
+  };
+}
 
 // ─── Helper functions ────────────────────────────────────────────────────────
 
@@ -175,27 +197,38 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  let cursor = input.cursor().clone();
-  match peek_kind(input) {
-    Some(SyntacticTokenKind::LBracket) => {
-      next_token(input)?;
+  let eot_span = Span::new(0, 0);
+  (
+    |input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = input.cursor().clone();
+      next_token(input)?; // consume '['
       let inner = parse_type(input)?;
       expect_token(input, SyntacticTokenKind::RBracket)?;
       let required = try_token(input, SyntacticTokenKind::Bang)?.is_some();
       let span = input.span_since(&cursor);
       Ok(Type::List(Box::new(scaffold::ListType::new(span, inner, required))))
-    }
-    Some(SyntacticTokenKind::Identifier) => {
+    },
+    |input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = input.cursor().clone();
       let name = parse_name(input)?;
       let required = try_token(input, SyntacticTokenKind::Bang)?.is_some();
       let span = input.span_since(&cursor);
       Ok(Type::Name(scaffold::NamedType::new(span, name, required)))
-    }
-    _ => {
-      let tok = next_token(input)?;
-      Err(SyntacticTokenError::unexpected_token(tok.data().clone(), Expectation::Name, tok.span()).into())
-    }
-  }
+    },
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+            SyntacticTokenKind::LBracket => Ok(Branch::B0),
+            SyntacticTokenKind::Identifier => Ok(Branch::B1),
+            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 // ─── Const Arguments & Directives ────────────────────────────────────────────
@@ -718,8 +751,8 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  match peek_kind(input) {
-    Some(SyntacticTokenKind::Spread) => {
+  (
+    |input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = input.cursor().clone();
       next_token(input)?; // consume ...
       if peek_keyword(input, "on") {
@@ -739,9 +772,23 @@ where
         let dirs = parse_directives(input)?;
         Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(input.span_since(&cursor), fname, dirs)))
       }
-    }
-    _ => parse_field(input).map(|f| Selection::Field(f.into())),
-  }
+    },
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_field(input).map(|f| Selection::Field(f.into()))
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+            SyntacticTokenKind::Spread => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a selection set: `'{' Selection+ '}'`.
@@ -1068,14 +1115,32 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_keyword(input, "scalar") { return parse_scalar_type_definition(input).map(TypeDefinition::Scalar); }
-  if peek_keyword(input, "type") { return parse_object_type_definition(input).map(TypeDefinition::Object); }
-  if peek_keyword(input, "interface") { return parse_interface_type_definition(input).map(TypeDefinition::Interface); }
-  if peek_keyword(input, "union") { return parse_union_type_definition(input).map(TypeDefinition::Union); }
-  if peek_keyword(input, "enum") { return parse_enum_type_definition(input).map(TypeDefinition::Enum); }
-  if peek_keyword(input, "input") { return parse_input_object_type_definition(input).map(TypeDefinition::InputObject); }
-  let tok = next_token(input)?;
-  Err(SyntacticTokenError::unexpected_token(tok.data().clone(), Expectation::Name, tok.span()).into())
+  let eot_span = Span::new(0, 0);
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_scalar_type_definition(inp).map(TypeDefinition::Scalar)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_object_type_definition(inp).map(TypeDefinition::Object)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_interface_type_definition(inp).map(TypeDefinition::Interface)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_union_type_definition(inp).map(TypeDefinition::Union)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_enum_type_definition(inp).map(TypeDefinition::Enum)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_input_object_type_definition(inp).map(TypeDefinition::InputObject)),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
+            SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
+            SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
+            SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
+            SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
+            SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
+            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 // ─── Extensions ──────────────────────────────────────────────────────────────
@@ -1093,88 +1158,106 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_keyword(input, "scalar") {
-    let c = input.cursor().clone();
-    parse_scalar(input)?;
-    let name = parse_name(input)?;
-    let dirs = parse_const_directives(input)?;
-    let span = input.span_since(&c);
-    return Ok(TypeExtension::Scalar(scaffold::ScalarTypeExtension::new(span, name, dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new())))));
-  }
-  if peek_keyword(input, "type") {
-    let c = input.cursor().clone();
-    parse_type_kw(input)?;
-    let name = parse_name(input)?;
-    let impls = parse_implements(input)?;
-    let dirs = parse_const_directives(input)?;
-    let fields = parse_fields_definition(input)?;
-    let span = input.span_since(&c);
-    let data = match (impls, dirs, fields) {
-      (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-      (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives { implements: i, directives: d },
-      _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeExtension::Object(scaffold::ObjectTypeExtension::new(span, name, data)));
-  }
-  if peek_keyword(input, "interface") {
-    let c = input.cursor().clone();
-    parse_interface(input)?;
-    let name = parse_name(input)?;
-    let impls = parse_implements(input)?;
-    let dirs = parse_const_directives(input)?;
-    let fields = parse_fields_definition(input)?;
-    let span = input.span_since(&c);
-    let data = match (impls, dirs, fields) {
-      (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-      (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives { implements: i, directives: d },
-      _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeExtension::Interface(scaffold::InterfaceTypeExtension::new(span, name, data)));
-  }
-  if peek_keyword(input, "union") {
-    let c = input.cursor().clone();
-    parse_union(input)?;
-    let name = parse_name(input)?;
-    let dirs = parse_const_directives(input)?;
-    let members = parse_union_members(input)?;
-    let span = input.span_since(&c);
-    let data = match (dirs, members) {
-      (d, Some(m)) => scaffold::UnionTypeExtensionData::Members { directives: d, members: m },
-      (Some(d), None) => scaffold::UnionTypeExtensionData::Directives(d),
-      _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeExtension::Union(scaffold::UnionTypeExtension::new(span, name, data)));
-  }
-  if peek_keyword(input, "enum") {
-    let c = input.cursor().clone();
-    parse_enum(input)?;
-    let name = parse_name(input)?;
-    let dirs = parse_const_directives(input)?;
-    let vals = parse_enum_values_definition(input)?;
-    let span = input.span_since(&c);
-    let data = match (dirs, vals) {
-      (d, Some(v)) => scaffold::EnumTypeExtensionData::Values { directives: d, values: v },
-      (Some(d), None) => scaffold::EnumTypeExtensionData::Directives(d),
-      _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeExtension::Enum(scaffold::EnumTypeExtension::new(span, name, data)));
-  }
-  if peek_keyword(input, "input") {
-    let c = input.cursor().clone();
-    parse_input_kw(input)?;
-    let name = parse_name(input)?;
-    let dirs = parse_const_directives(input)?;
-    let fields = parse_input_fields_definition(input)?;
-    let span = input.span_since(&c);
-    let data = match (dirs, fields) {
-      (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields { directives: d, fields: f },
-      (Some(d), None) => scaffold::InputObjectTypeExtensionData::Directives(d),
-      _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeExtension::InputObject(scaffold::InputObjectTypeExtension::new(span, name, data)));
-  }
-  let tok = next_token(input)?;
-  Err(SyntacticTokenError::unexpected_token(tok.data().clone(), Expectation::Name, tok.span()).into())
+  let eot_span = Span::new(0, 0);
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_scalar(inp)?;
+      let name = parse_name(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let span = inp.span_since(&c);
+      Ok(TypeExtension::Scalar(scaffold::ScalarTypeExtension::new(span, name, dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new())))))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_type_kw(inp)?;
+      let name = parse_name(inp)?;
+      let impls = parse_implements(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let fields = parse_fields_definition(inp)?;
+      let span = inp.span_since(&c);
+      let data = match (impls, dirs, fields) {
+        (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields { implements: i, directives: d, fields: f },
+        (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives { implements: i, directives: d },
+        _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeExtension::Object(scaffold::ObjectTypeExtension::new(span, name, data)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_interface(inp)?;
+      let name = parse_name(inp)?;
+      let impls = parse_implements(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let fields = parse_fields_definition(inp)?;
+      let span = inp.span_since(&c);
+      let data = match (impls, dirs, fields) {
+        (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields { implements: i, directives: d, fields: f },
+        (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives { implements: i, directives: d },
+        _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeExtension::Interface(scaffold::InterfaceTypeExtension::new(span, name, data)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_union(inp)?;
+      let name = parse_name(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let members = parse_union_members(inp)?;
+      let span = inp.span_since(&c);
+      let data = match (dirs, members) {
+        (d, Some(m)) => scaffold::UnionTypeExtensionData::Members { directives: d, members: m },
+        (Some(d), None) => scaffold::UnionTypeExtensionData::Directives(d),
+        _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeExtension::Union(scaffold::UnionTypeExtension::new(span, name, data)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_enum(inp)?;
+      let name = parse_name(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let vals = parse_enum_values_definition(inp)?;
+      let span = inp.span_since(&c);
+      let data = match (dirs, vals) {
+        (d, Some(v)) => scaffold::EnumTypeExtensionData::Values { directives: d, values: v },
+        (Some(d), None) => scaffold::EnumTypeExtensionData::Directives(d),
+        _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeExtension::Enum(scaffold::EnumTypeExtension::new(span, name, data)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_input_kw(inp)?;
+      let name = parse_name(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let fields = parse_input_fields_definition(inp)?;
+      let span = inp.span_since(&c);
+      let data = match (dirs, fields) {
+        (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields { directives: d, fields: f },
+        (Some(d), None) => scaffold::InputObjectTypeExtensionData::Directives(d),
+        _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeExtension::InputObject(scaffold::InputObjectTypeExtension::new(span, name, data)))
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
+            SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
+            SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
+            SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
+            SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
+            SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
+            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a type system extension: `'extend' (SchemaExtension | TypeExtension)`.
@@ -1191,25 +1274,41 @@ where
   Lang: ?Sized,
 {
   parse_extend(input)?;
-  if peek_keyword(input, "schema") {
-    let c = input.cursor().clone();
-    parse_schema(input)?;
-    let dirs = parse_const_directives(input)?;
-    let ops = if peek_kind(input) == Some(SyntacticTokenKind::LBrace) {
-      Some(parse_root_operation_types_definition(input)?)
-    } else {
-      None
-    };
-    let span = input.span_since(&c);
-    let data = match (dirs, ops) {
-      (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations { directives: Some(d), definitions: o },
-      (Some(d), None) => scaffold::SchemaExtensionData::Directives(d),
-      (None, Some(o)) => scaffold::SchemaExtensionData::Operations { directives: None, definitions: o },
-      (None, None) => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
-    };
-    return Ok(TypeSystemExtension::Schema(scaffold::SchemaExtension::new(span, data)));
-  }
-  parse_type_extension(input).map(TypeSystemExtension::Type)
+  (
+    |inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let c = inp.cursor().clone();
+      parse_schema(inp)?;
+      let dirs = parse_const_directives(inp)?;
+      let ops = if peek_kind(inp) == Some(SyntacticTokenKind::LBrace) {
+        Some(parse_root_operation_types_definition(inp)?)
+      } else {
+        None
+      };
+      let span = inp.span_since(&c);
+      let data = match (dirs, ops) {
+        (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations { directives: Some(d), definitions: o },
+        (Some(d), None) => scaffold::SchemaExtensionData::Directives(d),
+        (None, Some(o)) => scaffold::SchemaExtensionData::Operations { directives: None, definitions: o },
+        (None, None) => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
+      };
+      Ok(TypeSystemExtension::Schema(scaffold::SchemaExtension::new(span, data)))
+    },
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_type_extension(inp).map(TypeSystemExtension::Type)
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 // ─── Operation / Fragment / Document ─────────────────────────────────────────
@@ -1227,22 +1326,38 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) == Some(SyntacticTokenKind::LBrace) {
-    return Ok(scaffold::OperationDefinition::Shorthand(parse_selection_set(input)?));
-  }
-  let cursor = input.cursor().clone();
-  let op = parse_operation_type(input)?;
-  let name = if peek_kind(input) == Some(SyntacticTokenKind::Identifier) && !peek_keyword(input, "on") {
-    Some(parse_name(input)?)
-  } else {
-    None
-  };
-  let vars = parse_variables_definition(input)?;
-  let dirs = parse_directives(input)?;
-  let ss = parse_selection_set(input)?;
-  Ok(scaffold::OperationDefinition::Named(
-    scaffold::NamedOperationDefinition::new(input.span_since(&cursor), op, name, vars, dirs, ss),
-  ))
+  (
+    |inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      Ok(scaffold::OperationDefinition::Shorthand(parse_selection_set(inp)?))
+    },
+    |inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = inp.cursor().clone();
+      let op = parse_operation_type(inp)?;
+      let name = if peek_kind(inp) == Some(SyntacticTokenKind::Identifier) && !peek_keyword(inp, "on") {
+        Some(parse_name(inp)?)
+      } else {
+        None
+      };
+      let vars = parse_variables_definition(inp)?;
+      let dirs = parse_directives(inp)?;
+      let ss = parse_selection_set(inp)?;
+      Ok(scaffold::OperationDefinition::Named(
+        scaffold::NamedOperationDefinition::new(inp.span_since(&cursor), op, name, vars, dirs, ss),
+      ))
+    },
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+            SyntacticTokenKind::LBrace => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a fragment definition.
@@ -1283,11 +1398,26 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_keyword(input, "fragment") {
-    parse_fragment_definition(input).map(scaffold::ExecutableDefinition::Fragment)
-  } else {
-    parse_operation_definition(input).map(scaffold::ExecutableDefinition::Operation)
-  }
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_fragment_definition(inp).map(scaffold::ExecutableDefinition::Fragment)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_operation_definition(inp).map(scaffold::ExecutableDefinition::Operation)
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "fragment".equivalent(s) => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a definition (type system or executable).
@@ -1303,17 +1433,39 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  let is_ts = peek_keyword(input, "schema") || peek_keyword(input, "scalar") || peek_keyword(input, "type") ||
-    peek_keyword(input, "interface") || peek_keyword(input, "union") || peek_keyword(input, "enum") ||
-    peek_keyword(input, "input") || peek_keyword(input, "directive");
-  if is_ts {
-    let def = if peek_keyword(input, "schema") { scaffold::TypeSystemDefinition::Schema(parse_schema_definition(input)?) }
-    else if peek_keyword(input, "directive") { scaffold::TypeSystemDefinition::Directive(parse_directive_definition(input)?) }
-    else { scaffold::TypeSystemDefinition::Type(parse_type_definition(input)?) };
-    Ok(scaffold::Definition::TypeSystem(def))
-  } else {
-    parse_executable_definition(input).map(scaffold::Definition::Executable)
-  }
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_schema_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Schema(d)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_directive_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Directive(d)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_type_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Type(d)))
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_executable_definition(inp).map(scaffold::Definition::Executable)
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
+            SyntacticToken::Identifier(s) if "directive".equivalent(s) => Ok(Branch::B1),
+            SyntacticToken::Identifier(s) if "scalar".equivalent(s)
+              || "type".equivalent(s)
+              || "interface".equivalent(s)
+              || "union".equivalent(s)
+              || "enum".equivalent(s)
+              || "input".equivalent(s) => Ok(Branch::B2),
+            _ => Ok(Branch::B3),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a definition or extension.
@@ -1329,15 +1481,30 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_keyword(input, "extend") {
-    parse_type_system_extension(input).map(scaffold::DefinitionOrExtension::Extension)
-  } else {
-    let cursor = input.cursor().clone();
-    let desc = parse_description(input)?;
-    let def = parse_definition(input)?;
-    let span = input.span_since(&cursor);
-    Ok(scaffold::DefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
-  }
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_type_system_extension(inp).map(scaffold::DefinitionOrExtension::Extension)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = inp.cursor().clone();
+      let desc = parse_description(inp)?;
+      let def = parse_definition(inp)?;
+      let span = inp.span_since(&cursor);
+      Ok(scaffold::DefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a type system definition or extension.
@@ -1353,17 +1520,32 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_keyword(input, "extend") {
-    parse_type_system_extension(input).map(scaffold::TypeSystemDefinitionOrExtension::Extension)
-  } else {
-    let cursor = input.cursor().clone();
-    let desc = parse_description(input)?;
-    let def = if peek_keyword(input, "schema") { scaffold::TypeSystemDefinition::Schema(parse_schema_definition(input)?) }
-    else if peek_keyword(input, "directive") { scaffold::TypeSystemDefinition::Directive(parse_directive_definition(input)?) }
-    else { scaffold::TypeSystemDefinition::Type(parse_type_definition(input)?) };
-    let span = input.span_since(&cursor);
-    Ok(scaffold::TypeSystemDefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
-  }
+  (
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_type_system_extension(inp).map(scaffold::TypeSystemDefinitionOrExtension::Extension)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = inp.cursor().clone();
+      let desc = parse_description(inp)?;
+      let def = if peek_keyword(inp, "schema") { scaffold::TypeSystemDefinition::Schema(parse_schema_definition(inp)?) }
+      else if peek_keyword(inp, "directive") { scaffold::TypeSystemDefinition::Directive(parse_directive_definition(inp)?) }
+      else { scaffold::TypeSystemDefinition::Type(parse_type_definition(inp)?) };
+      let span = inp.span_since(&cursor);
+      Ok(scaffold::TypeSystemDefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t {
+            SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
+            _ => Ok(Branch::B1),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// Parses a document (repeated definitions until EOF).

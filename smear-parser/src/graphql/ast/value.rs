@@ -1,4 +1,4 @@
-use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
 
 use super::{
   DefaultVec, Expectation, Name, SyntacticTokenError, SyntacticTokenErrors,
@@ -6,10 +6,12 @@ use super::{
 };
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
+  Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
+  SimpleSpan as Span,
+  cache::Peeked,
   lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::{self, AsSpan, IntoSpan, Spanned},
-  utils::cmp::Equivalent,
+  span::{AsSpan, IntoSpan, Spanned},
+  utils::{Maybe, cmp::Equivalent, typenum::U1},
 };
 use std::vec::Vec;
 use smear_scaffold::ast as scaffold;
@@ -111,6 +113,23 @@ impl<S> IntoSpan<Span> for InputValue<S> {
   }
 }
 
+/// Helper macro to uniformly access the `&SyntacticToken<S>` from a peeked
+/// `Maybe<CachedTokenRef, CachedToken>` element.
+macro_rules! with_peeked_token {
+  ($tok:expr, |$t:ident| $body:expr) => {
+    match $tok {
+      Maybe::Ref(cached) => {
+        let $t: &SyntacticToken<S> = *cached.token().data();
+        $body
+      }
+      Maybe::Owned(cached) => {
+        let $t: &SyntacticToken<S> = cached.token().data();
+        $body
+      }
+    }
+  };
+}
+
 /// Parses an InputValue from the input (recursive, supports variables).
 pub fn parse_input_value<'inp, S, Ctx, Lang>(
   input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
@@ -124,48 +143,66 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  let Spanned { span, data: token } = next_token(input)?;
-
-  match token {
-    SyntacticToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))),
-    SyntacticToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))),
-    SyntacticToken::LitInlineStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
-    SyntacticToken::LitBlockStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
-    SyntacticToken::Identifier(name) => match () {
-      () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
-      () if "false".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, false))),
-      () if "null".equivalent(&name) => Ok(InputValue::Null(NullValue::new(span, name))),
-      _ => Ok(InputValue::Enum(EnumValue::new(span, name))),
-    },
-    SyntacticToken::Dollar => {
-      let name = parse_name(input)?;
+  let eot_span = Span::new(0, 0);
+  (
+    // B0: Float
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token { SyntacticToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))), _ => unreachable!() }
+    }),
+    // B1: Int
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token { SyntacticToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))), _ => unreachable!() }
+    }),
+    // B2: String (inline or block)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token {
+        SyntacticToken::LitInlineStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
+        SyntacticToken::LitBlockStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
+        _ => unreachable!(),
+      }
+    }),
+    // B3: Identifier (true/false/null/enum)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token {
+        SyntacticToken::Identifier(name) => match () {
+          () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
+          () if "false".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, false))),
+          () if "null".equivalent(&name) => Ok(InputValue::Null(NullValue::new(span, name))),
+          _ => Ok(InputValue::Enum(EnumValue::new(span, name))),
+        },
+        _ => unreachable!(),
+      }
+    }),
+    // B4: Dollar (variable)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, .. } = next_token(inp)?;
+      let name = parse_name(inp)?;
       let full_span = Span::new(span.start(), name.span().end());
       Ok(InputValue::Variable(VariableValue::new(full_span, name)))
-    }
-    SyntacticToken::LBrace => {
-      // Parse object fields
+    }),
+    // B5: LBrace (object)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, .. } = next_token(inp)?;
       let mut fields = Vec::new();
       loop {
-        // Check for closing brace
-        let saved = input.save();
-        match next_token(input) {
+        let saved = inp.save();
+        match next_token(inp) {
           Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
-            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            let full_span = Span::new(span.start(), inp.span_since(&saved.cursor()).end());
             return Ok(InputValue::Object(scaffold::Object::new(
               Span::new(span.start(), full_span.end()),
               fields,
             )));
           }
-          Ok(tok) => {
-            input.restore(saved);
-            // Parse field: name : value
-            let field_name = parse_name(input)?;
-            let _colon = next_token(input)?; // expect colon
-            let value = parse_input_value(input)?;
+          Ok(_tok) => {
+            inp.restore(saved);
+            let field_name = parse_name(inp)?;
+            let _colon = next_token(inp)?;
+            let value = parse_input_value(inp)?;
             let field_span = Span::new(field_name.span().start(), value.as_span().end());
             fields.push(scaffold::ObjectField::new(field_span, field_name, value));
           }
@@ -174,32 +211,50 @@ where
           }
         }
       }
-    }
-    SyntacticToken::LBracket => {
-      // Parse list elements
+    }),
+    // B6: LBracket (list)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, .. } = next_token(inp)?;
       let mut elements = Vec::new();
       loop {
-        let saved = input.save();
-        match next_token(input) {
+        let saved = inp.save();
+        match next_token(inp) {
           Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
-            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            let full_span = Span::new(span.start(), inp.span_since(&saved.cursor()).end());
             return Ok(InputValue::List(scaffold::List::new(
               Span::new(span.start(), full_span.end()),
               elements,
             )));
           }
           Ok(_) => {
-            input.restore(saved);
-            elements.push(parse_input_value(input)?);
+            inp.restore(saved);
+            elements.push(parse_input_value(inp)?);
           }
           Err(_) => {
             return Err(SyntacticTokenError::unclosed_list(span).into());
           }
         }
       }
-    }
-    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::InputValue, span).into()),
-  }
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+            SyntacticTokenKind::Float => Ok(Branch::B0),
+            SyntacticTokenKind::Int => Ok(Branch::B1),
+            SyntacticTokenKind::InlineString | SyntacticTokenKind::BlockString => Ok(Branch::B2),
+            SyntacticTokenKind::Identifier => Ok(Branch::B3),
+            SyntacticTokenKind::Dollar => Ok(Branch::B4),
+            SyntacticTokenKind::LBrace => Ok(Branch::B5),
+            SyntacticTokenKind::LBracket => Ok(Branch::B6),
+            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::InputValue, eot_span).into()),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
 
 /// GraphQL constant input value (schema context).
@@ -270,40 +325,59 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  let Spanned { span, data: token } = next_token(input)?;
-
-  match token {
-    SyntacticToken::LitFloat(raw) => Ok(ConstInputValue::Float(FloatValue::new(span, raw))),
-    SyntacticToken::LitInt(raw) => Ok(ConstInputValue::Int(IntValue::new(span, raw))),
-    SyntacticToken::LitInlineStr(raw) => {
-      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
-    }
-    SyntacticToken::LitBlockStr(raw) => {
-      Ok(ConstInputValue::String(StringValue::new(span, raw.into())))
-    }
-    SyntacticToken::Identifier(name) => match () {
-      () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
-      () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
-      () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
-      _ => Ok(ConstInputValue::Enum(EnumValue::new(span, name))),
-    },
-    SyntacticToken::LBrace => {
+  let eot_span = Span::new(0, 0);
+  (
+    // B0: Float
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token { SyntacticToken::LitFloat(raw) => Ok(ConstInputValue::Float(FloatValue::new(span, raw))), _ => unreachable!() }
+    }),
+    // B1: Int
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token { SyntacticToken::LitInt(raw) => Ok(ConstInputValue::Int(IntValue::new(span, raw))), _ => unreachable!() }
+    }),
+    // B2: String (inline or block)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token {
+        SyntacticToken::LitInlineStr(raw) => Ok(ConstInputValue::String(StringValue::new(span, raw.into()))),
+        SyntacticToken::LitBlockStr(raw) => Ok(ConstInputValue::String(StringValue::new(span, raw.into()))),
+        _ => unreachable!(),
+      }
+    }),
+    // B3: Identifier (true/false/null/enum)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, data: token } = next_token(inp)?;
+      match token {
+        SyntacticToken::Identifier(name) => match () {
+          () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
+          () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
+          () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
+          _ => Ok(ConstInputValue::Enum(EnumValue::new(span, name))),
+        },
+        _ => unreachable!(),
+      }
+    }),
+    // B4: LBrace (object)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, .. } = next_token(inp)?;
       let mut fields = Vec::new();
       loop {
-        let saved = input.save();
-        match next_token(input) {
+        let saved = inp.save();
+        match next_token(inp) {
           Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
-            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            let full_span = Span::new(span.start(), inp.span_since(&saved.cursor()).end());
             return Ok(ConstInputValue::Object(scaffold::Object::new(
               Span::new(span.start(), full_span.end()),
               fields,
             )));
           }
           Ok(_) => {
-            input.restore(saved);
-            let field_name = parse_name(input)?;
-            let _colon = next_token(input)?;
-            let value = parse_const_input_value(input)?;
+            inp.restore(saved);
+            let field_name = parse_name(inp)?;
+            let _colon = next_token(inp)?;
+            let value = parse_const_input_value(inp)?;
             let field_span = Span::new(field_name.span().start(), value.as_span().end());
             fields.push(scaffold::ObjectField::new(field_span, field_name, value));
           }
@@ -312,29 +386,47 @@ where
           }
         }
       }
-    }
-    SyntacticToken::LBracket => {
+    }),
+    // B5: LBracket (list)
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let Spanned { span, .. } = next_token(inp)?;
       let mut elements = Vec::new();
       loop {
-        let saved = input.save();
-        match next_token(input) {
+        let saved = inp.save();
+        match next_token(inp) {
           Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
-            let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
+            let full_span = Span::new(span.start(), inp.span_since(&saved.cursor()).end());
             return Ok(ConstInputValue::List(scaffold::List::new(
               Span::new(span.start(), full_span.end()),
               elements,
             )));
           }
           Ok(_) => {
-            input.restore(saved);
-            elements.push(parse_const_input_value(input)?);
+            inp.restore(saved);
+            elements.push(parse_const_input_value(inp)?);
           }
           Err(_) => {
             return Err(SyntacticTokenError::unclosed_list(span).into());
           }
         }
       }
-    }
-    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into()),
-  }
+    }),
+  )
+    .peek_then_choice::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+        match peeked.pop_front() {
+          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+            SyntacticTokenKind::Float => Ok(Branch::B0),
+            SyntacticTokenKind::Int => Ok(Branch::B1),
+            SyntacticTokenKind::InlineString | SyntacticTokenKind::BlockString => Ok(Branch::B2),
+            SyntacticTokenKind::Identifier => Ok(Branch::B3),
+            SyntacticTokenKind::LBrace => Ok(Branch::B4),
+            SyntacticTokenKind::LBracket => Ok(Branch::B5),
+            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::ConstInputValue, eot_span).into()),
+          }),
+        }
+      },
+    )
+    .parse_input(input)
 }
