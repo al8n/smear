@@ -171,6 +171,76 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
+// ─── From<punct::*> for SyntacticTokenKind ──────────────────────────────────
+// Required by the `Punctuator` trait impls on tokit's punctuator structs
+// (e.g. `tokit::punct::Pipe`), which are used as the `Sep` type parameter
+// in `SeparatedWhile`.
+
+impl From<tokit::punct::Pipe<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Pipe<(), (), ()>) -> Self { Self::Pipe }
+}
+
+impl From<tokit::punct::Ampersand<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Ampersand<(), (), ()>) -> Self { Self::Ampersand }
+}
+
+impl From<tokit::punct::At<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::At<(), (), ()>) -> Self { Self::At }
+}
+
+impl From<tokit::punct::Colon<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Colon<(), (), ()>) -> Self { Self::Colon }
+}
+
+impl From<tokit::punct::OpenParen<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::OpenParen<(), (), ()>) -> Self { Self::LParen }
+}
+
+impl From<tokit::punct::CloseParen<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::CloseParen<(), (), ()>) -> Self { Self::RParen }
+}
+
+impl From<tokit::punct::OpenBrace<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::OpenBrace<(), (), ()>) -> Self { Self::LBrace }
+}
+
+impl From<tokit::punct::CloseBrace<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::CloseBrace<(), (), ()>) -> Self { Self::RBrace }
+}
+
+impl From<tokit::punct::OpenBracket<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::OpenBracket<(), (), ()>) -> Self { Self::LBracket }
+}
+
+impl From<tokit::punct::CloseBracket<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::CloseBracket<(), (), ()>) -> Self { Self::RBracket }
+}
+
+impl From<tokit::punct::Equal<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Equal<(), (), ()>) -> Self { Self::Equal }
+}
+
+impl From<tokit::punct::Exclamation<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Exclamation<(), (), ()>) -> Self { Self::Bang }
+}
+
+impl From<tokit::punct::Dollar<(), (), ()>> for SyntacticTokenKind {
+  #[inline]
+  fn from(_: tokit::punct::Dollar<(), (), ()>) -> Self { Self::Dollar }
+}
+
 /// The kind of a [`SyntacticToken`], without the associated source data.
 ///
 /// This enum represents the type of a token without carrying the actual source slice,

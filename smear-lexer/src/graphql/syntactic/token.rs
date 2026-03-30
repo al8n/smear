@@ -85,6 +85,22 @@ macro_rules! token_impl {
         }
       }
 
+      impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::PunctuatorToken<'b> for SyntacticToken<$slice> {
+        fn pipe() -> Option<Self::Kind> { Some(SyntacticTokenKind::Pipe) }
+        fn ampersand() -> Option<Self::Kind> { Some(SyntacticTokenKind::Ampersand) }
+        fn at() -> Option<Self::Kind> { Some(SyntacticTokenKind::At) }
+        fn colon() -> Option<Self::Kind> { Some(SyntacticTokenKind::Colon) }
+        fn open_paren() -> Option<Self::Kind> { Some(SyntacticTokenKind::LParen) }
+        fn close_paren() -> Option<Self::Kind> { Some(SyntacticTokenKind::RParen) }
+        fn open_brace() -> Option<Self::Kind> { Some(SyntacticTokenKind::LBrace) }
+        fn close_brace() -> Option<Self::Kind> { Some(SyntacticTokenKind::RBrace) }
+        fn open_bracket() -> Option<Self::Kind> { Some(SyntacticTokenKind::LBracket) }
+        fn close_bracket() -> Option<Self::Kind> { Some(SyntacticTokenKind::RBracket) }
+        fn equal() -> Option<Self::Kind> { Some(SyntacticTokenKind::Equal) }
+        fn exclamation() -> Option<Self::Kind> { Some(SyntacticTokenKind::Bang) }
+        fn dollar() -> Option<Self::Kind> { Some(SyntacticTokenKind::Dollar) }
+      }
+
       #[derive(
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
@@ -258,6 +274,22 @@ macro_rules! token_impl {
         fn is_trivia(&self) -> bool {
           false
         }
+      }
+
+      impl<'b> tokit::token::PunctuatorToken<'b> for SyntacticToken<$slice> {
+        fn pipe() -> Option<Self::Kind> { Some(SyntacticTokenKind::Pipe) }
+        fn ampersand() -> Option<Self::Kind> { Some(SyntacticTokenKind::Ampersand) }
+        fn at() -> Option<Self::Kind> { Some(SyntacticTokenKind::At) }
+        fn colon() -> Option<Self::Kind> { Some(SyntacticTokenKind::Colon) }
+        fn open_paren() -> Option<Self::Kind> { Some(SyntacticTokenKind::LParen) }
+        fn close_paren() -> Option<Self::Kind> { Some(SyntacticTokenKind::RParen) }
+        fn open_brace() -> Option<Self::Kind> { Some(SyntacticTokenKind::LBrace) }
+        fn close_brace() -> Option<Self::Kind> { Some(SyntacticTokenKind::RBrace) }
+        fn open_bracket() -> Option<Self::Kind> { Some(SyntacticTokenKind::LBracket) }
+        fn close_bracket() -> Option<Self::Kind> { Some(SyntacticTokenKind::RBracket) }
+        fn equal() -> Option<Self::Kind> { Some(SyntacticTokenKind::Equal) }
+        fn exclamation() -> Option<Self::Kind> { Some(SyntacticTokenKind::Bang) }
+        fn dollar() -> Option<Self::Kind> { Some(SyntacticTokenKind::Dollar) }
       }
 
       #[derive(
