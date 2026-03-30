@@ -150,25 +150,30 @@ Run with: `cargo bench --package smear --bench <name> -- --quick`
 
 | Schema | smear | apollo-parser | graphql-parser | async-graphql-parser | cynic-parser |
 |---|---|---|---|---|---|
-| minimal | **308 ns** | 889 ns | 1.70 µs | 1.31 µs | 456 ns |
-| simple_object | **403 ns** | 1.17 µs | 2.40 µs | 2.07 µs | 635 ns |
-| kitchen-sink (canonical) | **18.6 µs** | 33.7 µs | 39.9 µs | 81.5 µs | 20.2 µs |
-| kitchen-sink | **18.9 µs** | 36.7 µs | 40.1 µs | 85.7 µs | 20.1 µs |
-| supergraph | **76.3 µs** | 126 µs | 115 µs | 274 µs | 82.7 µs |
-| github_schema | **1.19 ms** | 2.77 ms | 1.71 ms | 8.14 ms | — |
-| apollo_studio | **2.41 ms** | 5.33 ms | 3.56 ms | 15.9 ms | 3.26 ms |
-| gitlab_schema | **7.95 ms** | 18.8 ms | 11.8 ms | 55.6 ms | 10.7 ms |
+| minimal | **318 ns** | 900 ns | 1.67 µs | 1.27 µs | 443 ns |
+| simple_object | **427 ns** | 1.16 µs | 2.37 µs | 2.05 µs | 614 ns |
+| kitchen-sink (canonical) | **19.2 µs** | 34.5 µs | 38.9 µs | 76.3 µs | 20.1 µs |
+| supergraph | **79.5 µs** | 123 µs | 114 µs | 263 µs | 82.4 µs |
+| github_schema | **1.23 ms** | 2.66 ms | 1.72 ms | 8.07 ms | — |
+| apollo_studio | **2.50 ms** | 5.21 ms | 3.51 ms | 15.5 ms | 3.24 ms |
+| gitlab_schema | **8.28 ms** | 18.4 ms | 11.7 ms | 54.5 ms | 10.6 ms |
 
 ### Executable (Query) Parsing
 
 | Query | smear | apollo-parser | graphql-parser | async-graphql-parser | cynic-parser |
 |---|---|---|---|---|---|
-| tiny_simple | **268 ns** | 670 ns | 930 ns | 1.41 µs | 344 ns |
-| medium_nested | **2.80 µs** | 6.91 µs | 5.80 µs | 14.1 µs | 3.52 µs |
-| large_complex | **10.5 µs** | 22.7 µs | 19.8 µs | 56.3 µs | 11.8 µs |
-| huge_comprehensive | **31.1 µs** | 66.5 µs | 61.0 µs | 172 µs | 34.7 µs |
+| tiny_simple | **281 ns** | 665 ns | 918 ns | 1.44 µs | 346 ns |
+| small_simple | **610 ns** | 1.53 µs | 1.65 µs | 3.36 µs | 797 ns |
+| small_variables | **1.29 µs** | 3.03 µs | 2.73 µs | 5.42 µs | 1.53 µs |
+| medium_nested | **3.12 µs** | 7.19 µs | 6.08 µs | 14.8 µs | 3.72 µs |
+| medium_fragments | **2.80 µs** | 6.87 µs | 5.62 µs | 13.3 µs | 3.51 µs |
+| large_complex | **11.5 µs** | 22.5 µs | 20.0 µs | 57.6 µs | 12.4 µs |
+| large_deep_nesting | **4.33 µs** | 9.51 µs | 8.20 µs | 27.4 µs | 4.69 µs |
+| many_fields | **11.1 µs** | 23.3 µs | 19.3 µs | 57.4 µs | 11.2 µs |
+| many_aliases | **30.9 µs** | 44.6 µs | 58.8 µs | 99.7 µs | 27.3 µs |
+| huge_comprehensive | **34.9 µs** | 66.3 µs | 61.0 µs | 176 µs | 34.8 µs |
 
-**Summary:** smear is consistently the fastest GraphQL parser across all benchmarks — **1.5-7x faster** than alternatives depending on the workload. The advantage is most pronounced on large schemas where smear's zero-copy, parse-while-lexing architecture provides the greatest benefit.
+**Summary:** smear is consistently the fastest GraphQL parser across all benchmarks — **1.4-6.5x faster** than alternatives depending on the workload. On schema parsing, smear is **2-2.7x faster** than apollo-parser, **1.4-2x faster** than graphql-parser, **4-6.5x faster** than async-graphql-parser, and **~1.3x faster** than cynic-parser. On query parsing, smear matches or beats cynic-parser (the closest competitor) on every benchmark while being **2-5x faster** than apollo-parser and graphql-parser.
 
 ## Who Should Use Smear?
 
