@@ -5,14 +5,15 @@
 //! satisfies the required trait bounds.
 
 use std::boxed::Box;
-use std::vec;
 use std::vec::Vec;
 
 use smear_lexer::tokit::{
-  Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
+  Accumulator, Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
   SimpleSpan as Span,
   cache::Peeked,
+  emitter::FullContainerEmitter,
   lexer::FromLogos,
+  parser::Action,
   span::Spanned,
   utils::{Maybe, cmp::Equivalent, typenum::{U1, U3}},
 };
@@ -54,6 +55,46 @@ macro_rules! with_peeked_token {
   };
 }
 
+/// Decision closure: stop when the next token is the given kind (or EOF).
+macro_rules! stop_at {
+  ($kind:expr) => {
+    |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _: &mut _| {
+      Ok(match peeked.pop_front() {
+        None => Action::Stop,
+        Some(tok) => with_peeked_token!(&tok, |t| {
+          if t.kind() == $kind { Action::Stop } else { Action::Continue }
+        }),
+      })
+    }
+  };
+}
+
+/// Decision closure: continue while the next token is the given kind.
+macro_rules! continue_while {
+  ($kind:expr) => {
+    |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _: &mut _| {
+      Ok(match peeked.pop_front() {
+        None => Action::Stop,
+        Some(tok) => with_peeked_token!(&tok, |t| {
+          if t.kind() == $kind { Action::Continue } else { Action::Stop }
+        }),
+      })
+    }
+  };
+}
+
+/// Decision closure: continue while there is any token (stop at EOF).
+macro_rules! continue_while_some {
+  () => {
+    |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _: &mut _| {
+      Ok(match peeked.pop_front() {
+        None => Action::Stop,
+        Some(_) => Action::Continue,
+      })
+    }
+  };
+}
+
 // ─── Helper functions ────────────────────────────────────────────────────────
 
 /// Peek at the next token kind without consuming it.
@@ -66,7 +107,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -89,7 +131,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -115,7 +158,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -137,7 +181,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -164,7 +209,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -193,7 +239,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -242,7 +289,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -263,17 +311,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
   let cursor = input.cursor().clone();
   let l = smear_lexer::punctuator::LParen::new(next_token(input)?.into_span());
-  let mut args = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RParen) {
-    args.push(parse_const_argument(input)?);
-  }
+  let args = (parse_const_argument as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
+    .collect()
+    .parse_input(input)?;
   let r = smear_lexer::punctuator::RParen::new(next_token(input)?.into_span());
   let span = input.span_since(&cursor);
   Ok(Some(scaffold::Arguments::new(span, l, args, r)))
@@ -288,7 +337,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -309,16 +359,17 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::At) { return Ok(None); }
   let cursor = input.cursor().clone();
-  let mut ds = Vec::new();
-  while peek_kind(input) == Some(SyntacticTokenKind::At) {
-    ds.push(parse_const_directive(input)?);
-  }
+  let ds = (parse_const_directive as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::At))
+    .collect()
+    .parse_input(input)?;
   let span = input.span_since(&cursor);
   Ok(Some(scaffold::Directives::new(span, ds)))
 }
@@ -334,7 +385,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -355,17 +407,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
   let cursor = input.cursor().clone();
   let l = smear_lexer::punctuator::LParen::new(next_token(input)?.into_span());
-  let mut args = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RParen) {
-    args.push(parse_argument(input)?);
-  }
+  let args = (parse_argument as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
+    .collect()
+    .parse_input(input)?;
   let r = smear_lexer::punctuator::RParen::new(next_token(input)?.into_span());
   let span = input.span_since(&cursor);
   Ok(Some(scaffold::Arguments::new(span, l, args, r)))
@@ -380,7 +433,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -401,20 +455,23 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::At) { return Ok(None); }
   let cursor = input.cursor().clone();
-  let mut ds = Vec::new();
-  while peek_kind(input) == Some(SyntacticTokenKind::At) {
+  let ds = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
     let c2 = input.cursor().clone();
     expect_token(input, SyntacticTokenKind::At)?;
     let name = parse_name(input)?;
     let args = parse_arguments(input)?;
-    ds.push(scaffold::Directive::new(input.span_since(&c2), name, args));
-  }
+    Ok(scaffold::Directive::new(input.span_since(&c2), name, args))
+  })
+    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::At))
+    .collect()
+    .parse_input(input)?;
   let span = input.span_since(&cursor);
   Ok(Some(scaffold::Directives::new(span, ds)))
 }
@@ -430,7 +487,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -452,7 +510,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -476,16 +535,17 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LParen)?;
-  let mut defs = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RParen) {
-    defs.push(parse_input_value_definition(input)?);
-  }
+  let defs = (parse_input_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RParen)?;
   Ok(scaffold::ArgumentsDefinition::new(input.span_since(&cursor), defs))
 }
@@ -499,7 +559,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -521,7 +582,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -545,17 +607,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let mut fs = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RBrace) {
-    fs.push(parse_field_definition(input)?);
-  }
+  let fs = (parse_field_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
   Ok(Some(scaffold::FieldsDefinition::new(input.span_since(&cursor), fs)))
 }
@@ -569,17 +632,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let mut fs = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RBrace) {
-    fs.push(parse_input_value_definition(input)?);
-  }
+  let fs = (parse_input_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
   Ok(Some(scaffold::InputFieldsDefinition::new(input.span_since(&cursor), fs)))
 }
@@ -595,7 +659,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -603,11 +668,17 @@ where
   let cursor = input.cursor().clone();
   next_token(input)?;
   let _ = try_token(input, SyntacticTokenKind::Ampersand)?;
-  let mut ns = vec![parse_name(input)?];
-  while peek_kind(input) == Some(SyntacticTokenKind::Ampersand) {
-    next_token(input)?;
-    ns.push(parse_name(input)?);
-  }
+  let first = parse_name(input)?;
+  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+    next_token(input)?; // consume '&'
+    parse_name(input)
+  })
+    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Ampersand))
+    .collect()
+    .parse_input(input)?;
+  let mut ns = Vec::with_capacity(1 + rest.len());
+  ns.push(first);
+  ns.extend(rest);
   Ok(Some(scaffold::ImplementInterfaces::new(input.span_since(&cursor), ns)))
 }
 
@@ -620,7 +691,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -628,11 +700,17 @@ where
   let cursor = input.cursor().clone();
   next_token(input)?;
   let _ = try_token(input, SyntacticTokenKind::Pipe)?;
-  let mut ms = vec![parse_name(input)?];
-  while peek_kind(input) == Some(SyntacticTokenKind::Pipe) {
-    next_token(input)?;
-    ms.push(parse_name(input)?);
-  }
+  let first = parse_name(input)?;
+  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+    next_token(input)?; // consume '|'
+    parse_name(input)
+  })
+    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Pipe))
+    .collect()
+    .parse_input(input)?;
+  let mut ms = Vec::with_capacity(1 + rest.len());
+  ms.push(first);
+  ms.extend(rest);
   Ok(Some(scaffold::UnionMemberTypes::new(input.span_since(&cursor), ms)))
 }
 
@@ -645,17 +723,24 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
   let _ = try_token(input, SyntacticTokenKind::Pipe)?;
-  let mut locs = vec![parse_location(input)?];
-  while peek_kind(input) == Some(SyntacticTokenKind::Pipe) {
-    next_token(input)?;
-    locs.push(parse_location(input)?);
-  }
+  let first = parse_location(input)?;
+  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+    next_token(input)?; // consume '|'
+    parse_location(input)
+  })
+    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Pipe))
+    .collect()
+    .parse_input(input)?;
+  let mut locs = Vec::with_capacity(1 + rest.len());
+  locs.push(first);
+  locs.extend(rest);
   Ok(scaffold::DirectiveLocations::new(input.span_since(&cursor), locs))
 }
 
@@ -668,7 +753,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -689,17 +775,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let mut vs = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RBrace) {
-    vs.push(parse_enum_value_definition(input)?);
-  }
+  let vs = (parse_enum_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
   Ok(Some(scaffold::EnumValuesDefinition::new(input.span_since(&cursor), vs)))
 }
@@ -715,7 +802,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -747,7 +835,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -828,16 +917,17 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let mut sels = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RBrace) && peek_kind(input).is_some() {
-    sels.push(parse_selection(input)?);
-  }
+  let sels = (parse_selection as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
   Ok(scaffold::SelectionSet::new(input.span_since(&cursor), sels))
 }
@@ -853,7 +943,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -872,7 +963,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -896,17 +988,18 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LParen)?;
-  let mut vs = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RParen) {
-    vs.push(parse_variable_definition(input)?);
-  }
+  let vs = (parse_variable_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RParen)?;
   Ok(Some(scaffold::VariablesDefinition::new(input.span_since(&cursor), vs)))
 }
@@ -922,7 +1015,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -942,16 +1036,17 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let mut ds = Vec::new();
-  while peek_kind(input) != Some(SyntacticTokenKind::RBrace) {
-    ds.push(parse_root_operation_type_definition(input)?);
-  }
+  let ds = (parse_root_operation_type_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
+    .collect()
+    .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
   Ok(scaffold::RootOperationTypesDefinition::new(input.span_since(&cursor), ds))
 }
@@ -967,7 +1062,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -987,7 +1083,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1009,7 +1106,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1031,7 +1129,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1052,7 +1151,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1073,7 +1173,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1094,7 +1195,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1119,7 +1221,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1139,7 +1242,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1182,7 +1286,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1297,7 +1402,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1350,7 +1456,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1397,7 +1504,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1422,7 +1530,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1457,7 +1566,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1505,7 +1615,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1544,7 +1655,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1585,15 +1697,16 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let mut defs = Vec::new();
-  while peek_kind(input).is_some() {
-    defs.push(parse_definition_or_extension(input)?);
-  }
+  let defs = (parse_definition_or_extension as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(continue_while_some!())
+    .collect()
+    .parse_input(input)?;
   Ok(scaffold::Document::new(input.span_since(&cursor), defs))
 }
 
@@ -1606,15 +1719,16 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let mut defs = Vec::new();
-  while peek_kind(input).is_some() {
-    defs.push(parse_executable_definition(input)?);
-  }
+  let defs = (parse_executable_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(continue_while_some!())
+    .collect()
+    .parse_input(input)?;
   Ok(scaffold::Document::new(input.span_since(&cursor), defs))
 }
 
@@ -1627,15 +1741,16 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let mut defs = Vec::new();
-  while peek_kind(input).is_some() {
-    defs.push(parse_type_system_definition_or_extension(input)?);
-  }
+  let defs = (parse_type_system_definition_or_extension as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+    .repeated_while::<_, U1>(continue_while_some!())
+    .collect()
+    .parse_input(input)?;
   Ok(scaffold::Document::new(input.span_since(&cursor), defs))
 }
 
@@ -1650,7 +1765,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1669,7 +1785,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1688,7 +1805,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1707,7 +1825,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1726,7 +1845,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1755,7 +1875,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1784,7 +1905,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1812,7 +1934,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1840,7 +1963,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1862,7 +1986,8 @@ where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {

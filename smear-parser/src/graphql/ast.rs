@@ -167,6 +167,18 @@ where
   }
 }
 
+// Implement From<FullContainer> for SyntacticTokenErrors to satisfy FullContainerEmitter.
+// With Vec-based containers this error should never actually be triggered in practice.
+impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>> for SyntacticTokenErrors<S> {
+  #[inline]
+  fn from(err: smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>) -> Self {
+    SyntacticTokenError::new(
+      *err.span(),
+      super::error::ErrorData::Other(std::borrow::Cow::Borrowed("container full")),
+    ).into()
+  }
+}
+
 /// Helper to run a parse function against a string input using tokit's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
   f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
