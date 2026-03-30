@@ -14,7 +14,7 @@ use smear_lexer::tokit::{
   cache::Peeked,
   lexer::FromLogos,
   span::Spanned,
-  utils::{Maybe, cmp::Equivalent, typenum::U1},
+  utils::{Maybe, cmp::Equivalent, typenum::{U1, U3}},
 };
 use smear_scaffold::ast::{self as scaffold, FragmentName};
 
@@ -752,38 +752,66 @@ where
   Lang: ?Sized,
 {
   (
-    |input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+    // B0: ... on <TypeCondition> → inline fragment with type condition
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = input.cursor().clone();
       next_token(input)?; // consume ...
-      if peek_keyword(input, "on") {
-        next_token(input)?;
-        let tn = parse_name(input)?;
-        let tc = TypeCondition::new(input.span_since(&cursor), tn);
-        let dirs = parse_directives(input)?;
-        let ss = parse_selection_set(input)?;
-        Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), Some(tc), dirs, ss)))
-      } else if peek_kind(input) == Some(SyntacticTokenKind::LBrace) || peek_kind(input) == Some(SyntacticTokenKind::At) {
-        let dirs = parse_directives(input)?;
-        let ss = parse_selection_set(input)?;
-        Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), None, dirs, ss)))
-      } else {
-        let name = parse_name(input)?;
-        let fname = FragmentName::new(name.span().clone(), name.source_ref().clone());
-        let dirs = parse_directives(input)?;
-        Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(input.span_since(&cursor), fname, dirs)))
-      }
-    },
+      next_token(input)?; // consume "on"
+      let tn = parse_name(input)?;
+      let tc = TypeCondition::new(input.span_since(&cursor), tn);
+      let dirs = parse_directives(input)?;
+      let ss = parse_selection_set(input)?;
+      Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), Some(tc), dirs, ss)))
+    }),
+    // B1: ... { → inline fragment without type condition (selection set)
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = input.cursor().clone();
+      next_token(input)?; // consume ...
+      let dirs = parse_directives(input)?;
+      let ss = parse_selection_set(input)?;
+      Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), None, dirs, ss)))
+    }),
+    // B2: ... @ → inline fragment with directives, no type condition
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = input.cursor().clone();
+      next_token(input)?; // consume ...
+      let dirs = parse_directives(input)?;
+      let ss = parse_selection_set(input)?;
+      Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), None, dirs, ss)))
+    }),
+    // B3: ... <name> → fragment spread
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      let cursor = input.cursor().clone();
+      next_token(input)?; // consume ...
+      let name = parse_name(input)?;
+      let fname = FragmentName::new(name.span().clone(), name.source_ref().clone());
+      let dirs = parse_directives(input)?;
+      Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(input.span_since(&cursor), fname, dirs)))
+    }),
+    // B4: field
     (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       parse_field(input).map(|f| Selection::Field(f.into()))
     }),
   )
-    .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+    .peek_then_choice::<_, U3>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| {
         match peeked.pop_front() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
           Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
-            SyntacticTokenKind::Spread => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
+            SyntacticTokenKind::Spread => {
+              // Peek second token to dispatch spread variants
+              match peeked.pop_front() {
+                None => Ok(Branch::B1), // just `...` at end → treat as inline fragment
+                Some(tok2) => with_peeked_token!(&tok2, |t2| match t2 {
+                  SyntacticToken::Identifier(s) if "on".equivalent(s) => Ok(Branch::B0),
+                  SyntacticToken::Identifier(_) => Ok(Branch::B3),
+                  _ if t2.kind() == SyntacticTokenKind::LBrace => Ok(Branch::B1),
+                  _ if t2.kind() == SyntacticTokenKind::At => Ok(Branch::B2),
+                  _ => Ok(Branch::B1), // fallback: inline fragment
+                }),
+              }
+            }
+            _ => Ok(Branch::B4),
           }),
         }
       },
@@ -1447,8 +1475,8 @@ where
       parse_executable_definition(inp).map(scaffold::Definition::Executable)
     }),
   )
-    .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+    .peek_then_choice::<_, U3>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| {
         match peeked.pop_front() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
           Some(tok) => with_peeked_token!(&tok, |t| match t {
@@ -1493,8 +1521,8 @@ where
       Ok(scaffold::DefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
     }),
   )
-    .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
+    .peek_then_choice::<_, U3>(
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| {
         match peeked.pop_front() {
           None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
           Some(tok) => with_peeked_token!(&tok, |t| match t {
