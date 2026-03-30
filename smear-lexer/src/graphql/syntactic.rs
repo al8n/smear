@@ -6,7 +6,7 @@ use super::{
   error,
 };
 
-use token::token;
+use token::{token, token_impl};
 
 mod token;
 
