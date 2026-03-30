@@ -20,6 +20,7 @@ use crate::lexer::graphql::syntactic::{
   SyntacticLexer, SyntacticLexerErrors, SyntacticToken, SyntacticTokenKind,
 };
 
+pub use combinators::*;
 pub use default::*;
 pub use fragment::*;
 pub use name::*;
@@ -27,6 +28,7 @@ pub use ty::*;
 pub use type_system::*;
 pub use value::*;
 
+pub mod combinators;
 mod default;
 mod error;
 mod fragment;
