@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
@@ -171,7 +171,13 @@ impl<Arg, Container> Arguments<Arg, Container> {
   /// Creates a new arguments list.
   #[inline]
   pub const fn new(span: Span, l_paren: LParen, arguments: Container, r_paren: RParen) -> Self {
-    Self { span, l_paren, arguments, r_paren, _arg: PhantomData }
+    Self {
+      span,
+      l_paren,
+      arguments,
+      r_paren,
+      _arg: PhantomData,
+    }
   }
 
   /// Returns the source span of the entire argument list.

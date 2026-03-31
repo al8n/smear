@@ -1,10 +1,15 @@
+use core::marker::PhantomData;
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}, syntax_tree_display::DisplaySyntaxTree},
+  utils::{
+    IntoComponents,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
+    syntax_tree_display::DisplaySyntaxTree,
+  },
 };
-use core::marker::PhantomData;
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 
 use smear_lexer::keywords::*;
 
@@ -588,7 +593,11 @@ impl<Location, Container> DirectiveLocations<Location, Container> {
   /// Creates a new directive locations list.
   #[inline]
   pub const fn new(span: Span, locations: Container) -> Self {
-    Self { span, locations, _m: PhantomData }
+    Self {
+      span,
+      locations,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire directive locations.
@@ -744,8 +753,20 @@ impl<Name, Args, Locations> IntoComponents for DirectiveDefinition<Name, Args, L
 impl<Name, Args, Locations> DirectiveDefinition<Name, Args, Locations> {
   /// Creates a new directive definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, arguments_definition: Option<Args>, repeateable: bool, directive_locations: Locations) -> Self {
-    Self { span, name, arguments_definition, repeateable, directive_locations }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    arguments_definition: Option<Args>,
+    repeateable: bool,
+    directive_locations: Locations,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      arguments_definition,
+      repeateable,
+      directive_locations,
+    }
   }
 
   /// Returns a reference to the span covering the entire directive definition.

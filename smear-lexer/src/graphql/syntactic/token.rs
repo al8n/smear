@@ -87,7 +87,34 @@ macro_rules! token_impl {
 
       impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::KeywordToken<'b> for SyntacticToken<$slice> {
         fn keyword(&self) -> Option<&'static str> {
-          $crate::graphql::syntactic::graphql_keyword(self)
+          match self {
+            Self::Identifier(ident) => {
+              let s: &[u8] = ident.as_ref();
+              match s {
+                b"type" => Some("type"),
+                b"interface" => Some("interface"),
+                b"union" => Some("union"),
+                b"enum" => Some("enum"),
+                b"input" => Some("input"),
+                b"scalar" => Some("scalar"),
+                b"extend" => Some("extend"),
+                b"schema" => Some("schema"),
+                b"directive" => Some("directive"),
+                b"fragment" => Some("fragment"),
+                b"query" => Some("query"),
+                b"mutation" => Some("mutation"),
+                b"subscription" => Some("subscription"),
+                b"implements" => Some("implements"),
+                b"repeatable" => Some("repeatable"),
+                b"on" => Some("on"),
+                b"true" => Some("true"),
+                b"false" => Some("false"),
+                b"null" => Some("null"),
+                _ => None,
+              }
+            },
+            _ => None,
+          }
         }
       }
 

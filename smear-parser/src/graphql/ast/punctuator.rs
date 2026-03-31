@@ -1,9 +1,9 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+use smear_lexer::{
+  punctuator::*,
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
+  },
 };
-use smear_lexer::punctuator::*;
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
 use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};

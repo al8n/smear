@@ -1,6 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokit::state::recursion_tracker::RecursionLimitExceeded;
-use tokit::utils::cmp::Equivalent;
+use tokit::{state::recursion_tracker::RecursionLimitExceeded, utils::cmp::Equivalent};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -13,11 +12,25 @@ mod token;
 
 /// All GraphQL reserved keywords.
 const GRAPHQL_KEYWORDS: &[&str] = &[
-  "type", "interface", "union", "enum", "input", "scalar",
-  "extend", "schema", "directive", "fragment",
-  "query", "mutation", "subscription",
-  "implements", "repeatable", "on",
-  "true", "false", "null",
+  "type",
+  "interface",
+  "union",
+  "enum",
+  "input",
+  "scalar",
+  "extend",
+  "schema",
+  "directive",
+  "fragment",
+  "query",
+  "mutation",
+  "subscription",
+  "implements",
+  "repeatable",
+  "on",
+  "true",
+  "false",
+  "null",
 ];
 
 /// Check if a `SyntacticToken` is a GraphQL keyword, returning the keyword string if so.
@@ -27,9 +40,10 @@ where
   str: tokit::utils::cmp::Equivalent<S>,
 {
   match tok {
-    SyntacticToken::Identifier(s) => {
-      GRAPHQL_KEYWORDS.iter().copied().find(|kw| (*kw).equivalent(s))
-    }
+    SyntacticToken::Identifier(s) => GRAPHQL_KEYWORDS
+      .iter()
+      .copied()
+      .find(|kw| (*kw).equivalent(s)),
     _ => None,
   }
 }
@@ -44,14 +58,11 @@ mod str;
 pub type SyntacticLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
 
 /// The error data type for lexing based on syntactic token with `char` source.
-pub type SyntacticLexerErrorData =
-  error::LexerErrorData<char, RecursionLimitExceeded>;
+pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic token with `char` source.
-pub type SyntacticLexerError =
-  error::LexerError<char, RecursionLimitExceeded>;
+pub type SyntacticLexerError = error::LexerError<char, RecursionLimitExceeded>;
 /// A collection of errors for syntactic token with `char` source.
-pub type SyntacticLexerErrors =
-  error::LexerErrors<char, RecursionLimitExceeded>;
+pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
 
 /// A syntactic token for GraphQL lexing that only includes syntactically significant tokens.
 ///
@@ -202,67 +213,93 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
 
 impl From<tokit::punct::Pipe<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Pipe<(), (), ()>) -> Self { Self::Pipe }
+  fn from(_: tokit::punct::Pipe<(), (), ()>) -> Self {
+    Self::Pipe
+  }
 }
 
 impl From<tokit::punct::Ampersand<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Ampersand<(), (), ()>) -> Self { Self::Ampersand }
+  fn from(_: tokit::punct::Ampersand<(), (), ()>) -> Self {
+    Self::Ampersand
+  }
 }
 
 impl From<tokit::punct::At<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::At<(), (), ()>) -> Self { Self::At }
+  fn from(_: tokit::punct::At<(), (), ()>) -> Self {
+    Self::At
+  }
 }
 
 impl From<tokit::punct::Colon<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Colon<(), (), ()>) -> Self { Self::Colon }
+  fn from(_: tokit::punct::Colon<(), (), ()>) -> Self {
+    Self::Colon
+  }
 }
 
 impl From<tokit::punct::OpenParen<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenParen<(), (), ()>) -> Self { Self::LParen }
+  fn from(_: tokit::punct::OpenParen<(), (), ()>) -> Self {
+    Self::LParen
+  }
 }
 
 impl From<tokit::punct::CloseParen<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseParen<(), (), ()>) -> Self { Self::RParen }
+  fn from(_: tokit::punct::CloseParen<(), (), ()>) -> Self {
+    Self::RParen
+  }
 }
 
 impl From<tokit::punct::OpenBrace<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenBrace<(), (), ()>) -> Self { Self::LBrace }
+  fn from(_: tokit::punct::OpenBrace<(), (), ()>) -> Self {
+    Self::LBrace
+  }
 }
 
 impl From<tokit::punct::CloseBrace<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseBrace<(), (), ()>) -> Self { Self::RBrace }
+  fn from(_: tokit::punct::CloseBrace<(), (), ()>) -> Self {
+    Self::RBrace
+  }
 }
 
 impl From<tokit::punct::OpenBracket<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenBracket<(), (), ()>) -> Self { Self::LBracket }
+  fn from(_: tokit::punct::OpenBracket<(), (), ()>) -> Self {
+    Self::LBracket
+  }
 }
 
 impl From<tokit::punct::CloseBracket<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseBracket<(), (), ()>) -> Self { Self::RBracket }
+  fn from(_: tokit::punct::CloseBracket<(), (), ()>) -> Self {
+    Self::RBracket
+  }
 }
 
 impl From<tokit::punct::Equal<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Equal<(), (), ()>) -> Self { Self::Equal }
+  fn from(_: tokit::punct::Equal<(), (), ()>) -> Self {
+    Self::Equal
+  }
 }
 
 impl From<tokit::punct::Exclamation<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Exclamation<(), (), ()>) -> Self { Self::Bang }
+  fn from(_: tokit::punct::Exclamation<(), (), ()>) -> Self {
+    Self::Bang
+  }
 }
 
 impl From<tokit::punct::Dollar<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Dollar<(), (), ()>) -> Self { Self::Dollar }
+  fn from(_: tokit::punct::Dollar<(), (), ()>) -> Self {
+    Self::Dollar
+  }
 }
 
 /// The kind of a [`SyntacticToken`], without the associated source data.

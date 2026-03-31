@@ -1,10 +1,12 @@
 use derive_more::{From, Into};
-use smear_lexer::tokit::{
-  SimpleSpan as Span,
-  span::{AsSpan, IntoSpan},
-  utils::IntoComponents,
+use smear_lexer::{
+  keywords,
+  tokit::{
+    SimpleSpan as Span,
+    span::{AsSpan, IntoSpan},
+    utils::IntoComponents,
+  },
 };
-use smear_lexer::keywords;
 use smear_scaffold::ast::{self as scaffold, And, DirectiveLocations, Location};
 
 use super::*;

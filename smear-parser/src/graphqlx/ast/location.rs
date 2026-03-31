@@ -1,10 +1,9 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext,
-  span::Spanned,
-  utils::cmp::Equivalent,
+use smear_lexer::{
+  keywords,
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned, utils::cmp::Equivalent,
+  },
 };
-use smear_lexer::keywords;
 use smear_scaffold::ast::{ExecutableDirectiveLocation, Location, TypeSystemDirectiveLocation};
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
@@ -17,7 +16,8 @@ pub fn parse_location<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp>,
-  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  SyntacticLexer<'inp, S>:
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
@@ -36,24 +36,30 @@ where
         () if "SUBSCRIPTION".equivalent(&name) => Location::Executable(
           ExecutableDirectiveLocation::Subscription(keywords::SubscriptionLocation::new(span)),
         ),
-        () if "FIELD_DEFINITION".equivalent(&name) => Location::TypeSystem(
-          TypeSystemDirectiveLocation::FieldDefinition(keywords::FieldDefinitionLocation::new(span)),
-        ),
+        () if "FIELD_DEFINITION".equivalent(&name) => {
+          Location::TypeSystem(TypeSystemDirectiveLocation::FieldDefinition(
+            keywords::FieldDefinitionLocation::new(span),
+          ))
+        }
         () if "FIELD".equivalent(&name) => Location::Executable(
           ExecutableDirectiveLocation::Field(keywords::FieldLocation::new(span)),
         ),
-        () if "FRAGMENT_DEFINITION".equivalent(&name) => Location::Executable(
-          ExecutableDirectiveLocation::FragmentDefinition(keywords::FragmentDefinitionLocation::new(span)),
-        ),
+        () if "FRAGMENT_DEFINITION".equivalent(&name) => {
+          Location::Executable(ExecutableDirectiveLocation::FragmentDefinition(
+            keywords::FragmentDefinitionLocation::new(span),
+          ))
+        }
         () if "FRAGMENT_SPREAD".equivalent(&name) => Location::Executable(
           ExecutableDirectiveLocation::FragmentSpread(keywords::FragmentSpreadLocation::new(span)),
         ),
         () if "INLINE_FRAGMENT".equivalent(&name) => Location::Executable(
           ExecutableDirectiveLocation::InlineFragment(keywords::InlineFragmentLocation::new(span)),
         ),
-        () if "VARIABLE_DEFINITION".equivalent(&name) => Location::Executable(
-          ExecutableDirectiveLocation::VariableDefinition(keywords::VariableDefinitionLocation::new(span)),
-        ),
+        () if "VARIABLE_DEFINITION".equivalent(&name) => {
+          Location::Executable(ExecutableDirectiveLocation::VariableDefinition(
+            keywords::VariableDefinitionLocation::new(span),
+          ))
+        }
         () if "SCHEMA".equivalent(&name) => Location::TypeSystem(
           TypeSystemDirectiveLocation::Schema(keywords::SchemaLocation::new(span)),
         ),
@@ -63,9 +69,11 @@ where
         () if "OBJECT".equivalent(&name) => Location::TypeSystem(
           TypeSystemDirectiveLocation::Object(keywords::ObjectLocation::new(span)),
         ),
-        () if "ARGUMENT_DEFINITION".equivalent(&name) => Location::TypeSystem(
-          TypeSystemDirectiveLocation::ArgumentDefinition(keywords::ArgumentDefinitionLocation::new(span)),
-        ),
+        () if "ARGUMENT_DEFINITION".equivalent(&name) => {
+          Location::TypeSystem(TypeSystemDirectiveLocation::ArgumentDefinition(
+            keywords::ArgumentDefinitionLocation::new(span),
+          ))
+        }
         () if "INTERFACE".equivalent(&name) => Location::TypeSystem(
           TypeSystemDirectiveLocation::Interface(keywords::InterfaceLocation::new(span)),
         ),
@@ -75,19 +83,23 @@ where
         () if "ENUM_VALUE".equivalent(&name) => Location::TypeSystem(
           TypeSystemDirectiveLocation::EnumValue(keywords::EnumValueLocation::new(span)),
         ),
-        () if "ENUM".equivalent(&name) => Location::TypeSystem(
-          TypeSystemDirectiveLocation::Enum(keywords::EnumLocation::new(span)),
-        ),
+        () if "ENUM".equivalent(&name) => Location::TypeSystem(TypeSystemDirectiveLocation::Enum(
+          keywords::EnumLocation::new(span),
+        )),
         () if "INPUT_OBJECT".equivalent(&name) => Location::TypeSystem(
           TypeSystemDirectiveLocation::InputObject(keywords::InputObjectLocation::new(span)),
         ),
-        () if "INPUT_FIELD_DEFINITION".equivalent(&name) => Location::TypeSystem(
-          TypeSystemDirectiveLocation::InputFieldDefinition(keywords::InputFieldDefinitionLocation::new(span)),
-        ),
+        () if "INPUT_FIELD_DEFINITION".equivalent(&name) => {
+          Location::TypeSystem(TypeSystemDirectiveLocation::InputFieldDefinition(
+            keywords::InputFieldDefinitionLocation::new(span),
+          ))
+        }
         _ => return Err(SyntacticTokenError::unknown_directive_location(name, span).into()),
       };
       Ok(loc)
     }
-    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::DirectiveLocation, span).into()),
+    tok => {
+      Err(SyntacticTokenError::unexpected_token(tok, Expectation::DirectiveLocation, span).into())
+    }
   }
 }

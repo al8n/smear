@@ -1,12 +1,11 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
 
 /// Represents a collection of input field definitions in a GraphQL input object type.
 ///
@@ -159,7 +158,11 @@ impl<InputValueDefinition, Container> InputFieldsDefinition<InputValueDefinition
   /// Creates a new input fields definition.
   #[inline]
   pub const fn new(span: Span, values: Container) -> Self {
-    Self { span, values, _input_value_definition: PhantomData }
+    Self {
+      span,
+      values,
+      _input_value_definition: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire input values definition.

@@ -4,38 +4,46 @@
 //! with `&str`, `&[u8]`, `bytes::Bytes`, or any other source type that
 //! satisfies the required trait bounds.
 
-use std::boxed::Box;
-use std::vec::Vec;
+use std::{boxed::Box, vec::Vec};
 
 use smear_lexer::tokit::{
   Accumulator, Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
-  SimpleSpan as Span,
+  SimpleSpan as Span, TryParseInput,
   cache::Peeked,
-  emitter::FullContainerEmitter,
-  emitter::{SeparatedEmitter, TooFewEmitter, UnexpectedLeadingSeparatorEmitter, UnexpectedTrailingSeparatorEmitter},
+  emitter::{
+    FullContainerEmitter, SeparatedEmitter, TooFewEmitter, UnexpectedLeadingSeparatorEmitter,
+    UnexpectedTrailingSeparatorEmitter,
+  },
   lexer::FromLogos,
   parser::Action,
   span::Spanned,
-  token::{PunctuatorToken, KeywordToken},
-  utils::{Maybe, cmp::Equivalent, typenum::{U1, U3}},
+  token::{KeywordToken, PunctuatorToken},
+  utils::{
+    Maybe,
+    cmp::Equivalent,
+    typenum::{U1, U3},
+  },
 };
 use smear_scaffold::ast::{self as scaffold, FragmentName};
+use tokit::{
+  try_parse_input::ParseAttempt,
+  utils::{Expected, typenum::U2},
+};
 
 use super::{
-  Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token,
-  name::{Name, parse_name},
-  value::*,
-  keyword::*,
-  location::parse_location,
-  operation_type::parse_operation_type,
+  Expectation, SyntacticTokenError, SyntacticTokenErrors,
   default::*,
   fragment::*,
+  keyword::*,
+  location::parse_location,
+  name::{Name, parse_name},
+  next_token,
+  operation_type::parse_operation_type,
   ty::Type,
   type_system::*,
+  value::*,
 };
-use crate::lexer::graphql::syntactic::{
-  SyntacticLexer, SyntacticToken, SyntacticTokenKind,
-};
+use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
 
 // ─── Peek helper ─────────────────────────────────────────────────────────────
 
@@ -64,7 +72,11 @@ macro_rules! stop_at {
       Ok(match peeked.pop_front() {
         None => Action::Stop,
         Some(tok) => with_peeked_token!(&tok, |t| {
-          if t.kind() == $kind { Action::Stop } else { Action::Continue }
+          if t.kind() == $kind {
+            Action::Stop
+          } else {
+            Action::Continue
+          }
         }),
       })
     }
@@ -78,7 +90,11 @@ macro_rules! continue_while {
       Ok(match peeked.pop_front() {
         None => Action::Stop,
         Some(tok) => with_peeked_token!(&tok, |t| {
-          if t.kind() == $kind { Action::Continue } else { Action::Stop }
+          if t.kind() == $kind {
+            Action::Continue
+          } else {
+            Action::Stop
+          }
         }),
       })
     }
@@ -126,16 +142,10 @@ pub fn peek_kind<'inp, S, Ctx, Lang>(
 ) -> Option<SyntacticTokenKind>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -155,16 +165,10 @@ pub fn peek_keyword<'inp, S, Ctx, Lang>(
 ) -> bool
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp> + KeywordToken<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -187,16 +191,10 @@ pub fn try_token<'inp, S, Ctx, Lang>(
 ) -> Result<Option<Spanned<SyntacticToken<S>>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -215,64 +213,71 @@ pub fn expect_token<'inp, S, Ctx, Lang>(
 ) -> Result<Spanned<SyntacticToken<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  let tok = next_token(input)?;
-  if tok.data().kind() == expected {
-    Ok(tok)
-  } else {
-    Err(SyntacticTokenError::unexpected_token(
-      tok.data().clone(),
-      Expectation::from(expected),
-      tok.span(),
-    ).into())
+  match input.next()? {
+    Some(Spanned { span, data: token }) => {
+      if token.kind() == expected {
+        Ok(Spanned { span, data: token })
+      } else {
+        Err(SyntacticTokenError::unexpected_token(token, Expectation::from(expected), span).into())
+      }
+    }
+    None => {
+      let span = input.span();
+      Err(SyntacticTokenError::unexpected_end_of_input(*span).into())
+    }
   }
+  // tokit::parser::expect_of(|t: &SyntacticToken<S>| {
+  //   if t.kind() == expected {
+  //     Ok(())
+  //   } else {
+  //     Err(Expected::one(expected))
+  //   }
+  // })
+  // .spanned()
+  // .parse_input(input)
 }
 
 // ─── Description ─────────────────────────────────────────────────────────────
 
 /// Parses an optional description (StringValue).
-pub fn parse_description<'inp, S, Ctx, Lang>(
+///
+/// This fn make sure there is no token be consumed if the next token is not a string literal,
+/// so it can be used in places where a description is optional and followed by other constructs (e.g. type definitions).
+pub fn try_parse_description<'inp, S, Ctx, Lang>(
   input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
-) -> Result<Option<StringValue<S>>, SyntacticTokenErrors<S>>
+) -> Result<ParseAttempt<StringValue<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  match peek_kind(input) {
-    Some(SyntacticTokenKind::InlineString | SyntacticTokenKind::BlockString) => {
-      let tok = next_token(input)?;
-      let span = tok.span();
-      match tok.into_data() {
-        SyntacticToken::LitInlineStr(s) => Ok(Some(StringValue::new(span, s.into()))),
-        SyntacticToken::LitBlockStr(s) => Ok(Some(StringValue::new(span, s.into()))),
-        _ => unreachable!(),
-      }
-    }
-    _ => Ok(None),
-  }
+  input
+    .try_expect(|spanned| {
+      matches!(
+        spanned.data().kind(),
+        SyntacticTokenKind::InlineString | SyntacticTokenKind::BlockString
+      )
+    })
+    .map(|val| {
+      val
+        .map(|Spanned { span, data: token }| match token {
+          SyntacticToken::LitInlineStr(s) => StringValue::new(span, s.into()),
+          SyntacticToken::LitBlockStr(s) => StringValue::new(span, s.into()),
+          _ => unreachable!(),
+        })
+        .into()
+    })
 }
 
 // ─── Type ────────────────────────────────────────────────────────────────────
@@ -284,7 +289,8 @@ pub fn parse_type<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -305,7 +311,9 @@ where
       expect_token(input, SyntacticTokenKind::RBracket)?;
       let required = try_token(input, SyntacticTokenKind::Bang)?.is_some();
       let span = input.span_since(&cursor);
-      Ok(Type::List(Box::new(scaffold::ListType::new(span, inner, required))))
+      Ok(Type::List(Box::new(scaffold::ListType::new(
+        span, inner, required,
+      ))))
     },
     |input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = input.cursor().clone();
@@ -316,15 +324,16 @@ where
     },
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
-            SyntacticTokenKind::LBracket => Ok(Branch::B0),
-            SyntacticTokenKind::Identifier => Ok(Branch::B1),
-            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+          SyntacticTokenKind::LBracket => Ok(Branch::B0),
+          SyntacticTokenKind::Identifier => Ok(Branch::B1),
+          _ => Err(
+            SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()
+          ),
+        }),
       },
     )
     .parse_input(input)
@@ -338,16 +347,10 @@ pub fn parse_const_argument<'inp, S, Ctx, Lang>(
 ) -> Result<ConstArgument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -366,7 +369,8 @@ pub fn parse_const_arguments<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -378,10 +382,13 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LParen) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   let l = smear_lexer::punctuator::LParen::new(next_token(input)?.into_span());
-  let args = (parse_const_argument as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let args = (parse_const_argument
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
     .collect()
     .parse_input(input)?;
@@ -397,7 +404,8 @@ pub fn parse_const_directive<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -424,7 +432,8 @@ pub fn parse_const_directives<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -436,9 +445,12 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::At) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::At) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
-  let ds = (parse_const_directive as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let ds = (parse_const_directive
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::At))
     .collect()
     .parse_input(input)?;
@@ -454,16 +466,10 @@ pub fn parse_argument<'inp, S, Ctx, Lang>(
 ) -> Result<Argument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -482,7 +488,8 @@ pub fn parse_arguments<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -494,10 +501,13 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LParen) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   let l = smear_lexer::punctuator::LParen::new(next_token(input)?.into_span());
-  let args = (parse_argument as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let args = (parse_argument
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
     .collect()
     .parse_input(input)?;
@@ -513,7 +523,8 @@ pub fn parse_directive<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -540,7 +551,8 @@ pub fn parse_directives<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -552,7 +564,9 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::At) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::At) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   let ds = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
     let c2 = input.cursor().clone();
@@ -561,9 +575,9 @@ where
     let args = parse_arguments(input)?;
     Ok(scaffold::Directive::new(input.span_since(&c2), name, args))
   })
-    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::At))
-    .collect()
-    .parse_input(input)?;
+  .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::At))
+  .collect()
+  .parse_input(input)?;
   let span = input.span_since(&cursor);
   Ok(Some(scaffold::Directives::new(span, ds)))
 }
@@ -577,7 +591,8 @@ pub fn parse_default_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -589,11 +604,16 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::Equal) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::Equal) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   next_token(input)?;
   let value = parse_const_input_value(input)?;
-  Ok(Some(scaffold::DefaultInputValue::new(input.span_since(&cursor), value)))
+  Ok(Some(scaffold::DefaultInputValue::new(
+    input.span_since(&cursor),
+    value,
+  )))
 }
 
 // ─── Input Value / Arguments Definitions ─────────────────────────────────────
@@ -605,7 +625,8 @@ pub fn parse_input_value_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -618,14 +639,18 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let desc = parse_description(input)?;
+  let desc = try_parse_description(input)?;
   let name = parse_name(input)?;
   expect_token(input, SyntacticTokenKind::Colon)?;
   let ty = parse_type(input)?;
   let dv = parse_default_value(input)?;
   let dirs = parse_const_directives(input)?;
   let span = input.span_since(&cursor);
-  Ok(scaffold::Described::new(span, desc, scaffold::InputValueDefinition::new(span, name, ty, dv, dirs)))
+  Ok(scaffold::Described::new(
+    span,
+    desc.into(),
+    scaffold::InputValueDefinition::new(span, name, ty, dv, dirs),
+  ))
 }
 
 /// Parses arguments definition: `'(' InputValueDefinition+ ')'`.
@@ -635,7 +660,8 @@ pub fn parse_arguments_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -649,12 +675,16 @@ where
 {
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LParen)?;
-  let defs = (parse_input_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let defs = (parse_input_value_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RParen)?;
-  Ok(scaffold::ArgumentsDefinition::new(input.span_since(&cursor), defs))
+  Ok(scaffold::ArgumentsDefinition::new(
+    input.span_since(&cursor),
+    defs,
+  ))
 }
 
 /// Parses optional arguments definition.
@@ -664,7 +694,8 @@ pub fn parse_opt_arguments_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -692,7 +723,8 @@ pub fn parse_field_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -705,14 +737,18 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let desc = parse_description(input)?;
+  let desc = try_parse_description(input)?;
   let name = parse_name(input)?;
   let args = parse_opt_arguments_definition(input)?;
   expect_token(input, SyntacticTokenKind::Colon)?;
   let ty = parse_type(input)?;
   let dirs = parse_const_directives(input)?;
   let span = input.span_since(&cursor);
-  Ok(scaffold::Described::new(span, desc, scaffold::FieldDefinition::new(span, name, args, ty, dirs)))
+  Ok(scaffold::Described::new(
+    span,
+    desc.into(),
+    scaffold::FieldDefinition::new(span, name, args, ty, dirs),
+  ))
 }
 
 /// Parses optional fields definition: `'{' FieldDefinition+ '}'`.
@@ -722,7 +758,8 @@ pub fn parse_fields_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -734,15 +771,21 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let fs = (parse_field_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let fs = (parse_field_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
-  Ok(Some(scaffold::FieldsDefinition::new(input.span_since(&cursor), fs)))
+  Ok(Some(scaffold::FieldsDefinition::new(
+    input.span_since(&cursor),
+    fs,
+  )))
 }
 
 /// Parses optional input fields definition: `'{' InputValueDefinition+ '}'`.
@@ -752,7 +795,8 @@ pub fn parse_input_fields_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -764,15 +808,21 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let fs = (parse_input_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let fs = (parse_input_value_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
-  Ok(Some(scaffold::InputFieldsDefinition::new(input.span_since(&cursor), fs)))
+  Ok(Some(scaffold::InputFieldsDefinition::new(
+    input.span_since(&cursor),
+    fs,
+  )))
 }
 
 // ─── Implements / Union Members / Directive Locations / Enum Values ──────────
@@ -784,7 +834,8 @@ pub fn parse_implements<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -796,17 +847,25 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if !peek_keyword(input, "implements") { return Ok(None); }
+  if !peek_keyword(input, "implements") {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   next_token(input)?;
   // &? Name (& Name)* — allow optional leading &, stop at keywords
-  let ns: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
-    .separated_while::<smear_lexer::tokit::punct::Ampersand<(), (), Lang>, _, U1>(continue_while_name!())
-    .allow_leading()
-    .at_least(1)
-    .collect()
-    .parse_input(input)?;
-  Ok(Some(scaffold::ImplementInterfaces::new(input.span_since(&cursor), ns)))
+  let ns: Vec<_> =
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
+      .separated_while::<smear_lexer::tokit::punct::Ampersand<(), (), Lang>, _, U1>(
+        continue_while_name!(),
+      )
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .parse_input(input)?;
+  Ok(Some(scaffold::ImplementInterfaces::new(
+    input.span_since(&cursor),
+    ns,
+  )))
 }
 
 /// Parses optional union member types: `'=' '|'? Name ('|' Name)*`.
@@ -816,7 +875,8 @@ pub fn parse_union_members<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -828,17 +888,25 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::Equal) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::Equal) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   next_token(input)?;
   // |? Name (| Name)* — allow optional leading |, stop at keywords
-  let ms: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
-    .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(continue_while_name!())
-    .allow_leading()
-    .at_least(1)
-    .collect()
-    .parse_input(input)?;
-  Ok(Some(scaffold::UnionMemberTypes::new(input.span_since(&cursor), ms)))
+  let ms: Vec<_> =
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
+      .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(
+        continue_while_name!(),
+      )
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .parse_input(input)?;
+  Ok(Some(scaffold::UnionMemberTypes::new(
+    input.span_since(&cursor),
+    ms,
+  )))
 }
 
 /// Parses directive locations: `'|'? Location ('|' Location)*`.
@@ -848,7 +916,8 @@ pub fn parse_directive_locations<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -862,13 +931,19 @@ where
 {
   let cursor = input.cursor().clone();
   // |? Location (| Location)+ — allow optional leading |, at least 1 location, stop at keywords
-  let locs: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_location(input))
-    .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(continue_while_name!())
-    .allow_leading()
-    .at_least(1)
-    .collect()
-    .parse_input(input)?;
-  Ok(scaffold::DirectiveLocations::new(input.span_since(&cursor), locs))
+  let locs: Vec<_> =
+    (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_location(input))
+      .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(
+        continue_while_name!(),
+      )
+      .allow_leading()
+      .at_least(1)
+      .collect()
+      .parse_input(input)?;
+  Ok(scaffold::DirectiveLocations::new(
+    input.span_since(&cursor),
+    locs,
+  ))
 }
 
 /// Parses an enum value definition: `Description? Name Directives?`.
@@ -878,7 +953,8 @@ pub fn parse_enum_value_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -891,11 +967,15 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let desc = parse_description(input)?;
+  let desc = try_parse_description(input)?;
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
   let span = input.span_since(&cursor);
-  Ok(scaffold::Described::new(span, desc, scaffold::EnumValueDefinition::new(span, name, dirs)))
+  Ok(scaffold::Described::new(
+    span,
+    desc.into(),
+    scaffold::EnumValueDefinition::new(span, name, dirs),
+  ))
 }
 
 /// Parses optional enum values definition: `'{' EnumValueDefinition+ '}'`.
@@ -905,7 +985,8 @@ pub fn parse_enum_values_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -917,15 +998,21 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LBrace) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let vs = (parse_enum_value_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let vs = (parse_enum_value_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
-  Ok(Some(scaffold::EnumValuesDefinition::new(input.span_since(&cursor), vs)))
+  Ok(Some(scaffold::EnumValuesDefinition::new(
+    input.span_since(&cursor),
+    vs,
+  )))
 }
 
 // ─── Selection Set ───────────────────────────────────────────────────────────
@@ -933,11 +1020,15 @@ where
 /// Parses a field: `Alias? Name Arguments? Directives? SelectionSet?`.
 pub fn parse_field<'inp, S, Ctx, Lang>(
   input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
-) -> Result<scaffold::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>, SyntacticTokenErrors<S>>
+) -> Result<
+  scaffold::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>,
+  SyntacticTokenErrors<S>,
+>
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -954,7 +1045,10 @@ where
   let (alias, name) = if peek_kind(input) == Some(SyntacticTokenKind::Colon) {
     next_token(input)?;
     let n2 = parse_name(input)?;
-    (Some(scaffold::Alias::new(input.span_since(&cursor), name1)), n2)
+    (
+      Some(scaffold::Alias::new(input.span_since(&cursor), name1)),
+      n2,
+    )
   } else {
     (None, name1)
   };
@@ -965,7 +1059,14 @@ where
   } else {
     None
   };
-  Ok(scaffold::Field::new(input.span_since(&cursor), alias, name, args, dirs, ss))
+  Ok(scaffold::Field::new(
+    input.span_since(&cursor),
+    alias,
+    name,
+    args,
+    dirs,
+    ss,
+  ))
 }
 
 /// Parses a selection: field, fragment spread, or inline fragment.
@@ -980,7 +1081,8 @@ pub fn parse_selection<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1009,18 +1111,34 @@ where
     let tc = TypeCondition::new(input.span_since(&cursor), tn);
     let dirs = parse_directives(input)?;
     let ss = parse_selection_set(input)?;
-    Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), Some(tc), dirs, ss)))
-  } else if peek_kind(input) == Some(SyntacticTokenKind::LBrace) || peek_kind(input) == Some(SyntacticTokenKind::At) {
+    Ok(Selection::InlineFragment(scaffold::InlineFragment::new(
+      input.span_since(&cursor),
+      Some(tc),
+      dirs,
+      ss,
+    )))
+  } else if peek_kind(input) == Some(SyntacticTokenKind::LBrace)
+    || peek_kind(input) == Some(SyntacticTokenKind::At)
+  {
     // ... Directives? SelectionSet  (inline fragment without type condition)
     let dirs = parse_directives(input)?;
     let ss = parse_selection_set(input)?;
-    Ok(Selection::InlineFragment(scaffold::InlineFragment::new(input.span_since(&cursor), None, dirs, ss)))
+    Ok(Selection::InlineFragment(scaffold::InlineFragment::new(
+      input.span_since(&cursor),
+      None,
+      dirs,
+      ss,
+    )))
   } else {
     // ... Name Directives?  (fragment spread)
     let name = parse_name(input)?;
     let fname = FragmentName::new(name.span().clone(), name.source_ref().clone());
     let dirs = parse_directives(input)?;
-    Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(input.span_since(&cursor), fname, dirs)))
+    Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(
+      input.span_since(&cursor),
+      fname,
+      dirs,
+    )))
   }
 }
 
@@ -1031,7 +1149,8 @@ pub fn parse_selection_set<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1062,15 +1181,11 @@ pub fn parse_variable_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
-    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1080,6 +1195,32 @@ where
   Ok(VariableValue::new(input.span_since(&cursor), name))
 }
 
+/// Parses a variable value: `'$' Name`.
+pub fn try_parse_variable_value<'inp, S, Ctx, Lang>(
+  input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
+) -> Result<ParseAttempt<VariableValue<S>>, SyntacticTokenErrors<S>>
+where
+  S: Clone,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
+  Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  str: Equivalent<S>,
+  Lang: ?Sized,
+{
+  match input.try_expect_dollar()? {
+    Some(dollar) => {
+      let name = parse_name(input)?;
+      let mut span = dollar.into_span();
+      span.set_end(name.span().end());
+      Ok(ParseAttempt::Accept(VariableValue::new(span, name)))
+    }
+    None => Ok(ParseAttempt::Decline),
+  }
+}
+
 /// Parses a variable definition: `Description? '$' Name ':' Type Default? Directives?`.
 pub fn parse_variable_definition<'inp, S, Ctx, Lang>(
   input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
@@ -1087,7 +1228,8 @@ pub fn parse_variable_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1100,14 +1242,18 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let desc = parse_description(input)?;
+  let desc = try_parse_description(input)?;
   let var = parse_variable_value(input)?;
   expect_token(input, SyntacticTokenKind::Colon)?;
   let ty = parse_type(input)?;
   let dv = parse_default_value(input)?;
   let dirs = parse_directives(input)?;
   let span = input.span_since(&cursor);
-  Ok(scaffold::Described::new(span, desc, scaffold::VariableDefinition::new(span, var, ty, dirs, dv)))
+  Ok(scaffold::Described::new(
+    span,
+    desc.into(),
+    scaffold::VariableDefinition::new(span, var, ty, dirs, dv),
+  ))
 }
 
 /// Parses optional variables definition: `'(' VariableDefinition+ ')'`.
@@ -1117,7 +1263,8 @@ pub fn parse_variables_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1129,15 +1276,21 @@ where
   str: Equivalent<S>,
   Lang: ?Sized,
 {
-  if peek_kind(input) != Some(SyntacticTokenKind::LParen) { return Ok(None); }
+  if peek_kind(input) != Some(SyntacticTokenKind::LParen) {
+    return Ok(None);
+  }
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LParen)?;
-  let vs = (parse_variable_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let vs = (parse_variable_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RParen))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RParen)?;
-  Ok(Some(scaffold::VariablesDefinition::new(input.span_since(&cursor), vs)))
+  Ok(Some(scaffold::VariablesDefinition::new(
+    input.span_since(&cursor),
+    vs,
+  )))
 }
 
 // ─── Root Operation Types ────────────────────────────────────────────────────
@@ -1149,7 +1302,8 @@ pub fn parse_root_operation_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1165,7 +1319,11 @@ where
   let op = parse_operation_type(input)?;
   expect_token(input, SyntacticTokenKind::Colon)?;
   let name = parse_name(input)?;
-  Ok(scaffold::RootOperationTypeDefinition::new(input.span_since(&cursor), op, name))
+  Ok(scaffold::RootOperationTypeDefinition::new(
+    input.span_since(&cursor),
+    op,
+    name,
+  ))
 }
 
 /// Parses root operation types definition: `'{' RootOperationTypeDefinition+ '}'`.
@@ -1175,7 +1333,8 @@ pub fn parse_root_operation_types_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1189,12 +1348,16 @@ where
 {
   let cursor = input.cursor().clone();
   expect_token(input, SyntacticTokenKind::LBrace)?;
-  let ds = (parse_root_operation_type_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let ds = (parse_root_operation_type_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(stop_at!(SyntacticTokenKind::RBrace))
     .collect()
     .parse_input(input)?;
   expect_token(input, SyntacticTokenKind::RBrace)?;
-  Ok(scaffold::RootOperationTypesDefinition::new(input.span_since(&cursor), ds))
+  Ok(scaffold::RootOperationTypesDefinition::new(
+    input.span_since(&cursor),
+    ds,
+  ))
 }
 
 // ─── Type System Definitions ─────────────────────────────────────────────────
@@ -1206,7 +1369,8 @@ pub fn parse_scalar_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1222,7 +1386,11 @@ where
   parse_scalar(input)?;
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
-  Ok(scaffold::ScalarTypeDefinition::new(input.span_since(&cursor), name, dirs))
+  Ok(scaffold::ScalarTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    dirs,
+  ))
 }
 
 /// Parses an object type definition.
@@ -1232,7 +1400,8 @@ pub fn parse_object_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1250,7 +1419,13 @@ where
   let impls = parse_implements(input)?;
   let dirs = parse_const_directives(input)?;
   let fields = parse_fields_definition(input)?;
-  Ok(scaffold::ObjectTypeDefinition::new(input.span_since(&cursor), name, impls, dirs, fields))
+  Ok(scaffold::ObjectTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    impls,
+    dirs,
+    fields,
+  ))
 }
 
 /// Parses an interface type definition.
@@ -1260,7 +1435,8 @@ pub fn parse_interface_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1278,7 +1454,13 @@ where
   let impls = parse_implements(input)?;
   let dirs = parse_const_directives(input)?;
   let fields = parse_fields_definition(input)?;
-  Ok(scaffold::InterfaceTypeDefinition::new(input.span_since(&cursor), name, impls, dirs, fields))
+  Ok(scaffold::InterfaceTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    impls,
+    dirs,
+    fields,
+  ))
 }
 
 /// Parses a union type definition.
@@ -1288,7 +1470,8 @@ pub fn parse_union_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1305,7 +1488,12 @@ where
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
   let members = parse_union_members(input)?;
-  Ok(scaffold::UnionTypeDefinition::new(input.span_since(&cursor), name, dirs, members))
+  Ok(scaffold::UnionTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    dirs,
+    members,
+  ))
 }
 
 /// Parses an enum type definition.
@@ -1315,7 +1503,8 @@ pub fn parse_enum_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1332,7 +1521,12 @@ where
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
   let vals = parse_enum_values_definition(input)?;
-  Ok(scaffold::EnumTypeDefinition::new(input.span_since(&cursor), name, dirs, vals))
+  Ok(scaffold::EnumTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    dirs,
+    vals,
+  ))
 }
 
 /// Parses an input object type definition.
@@ -1342,7 +1536,8 @@ pub fn parse_input_object_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1359,7 +1554,12 @@ where
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
   let fields = parse_input_fields_definition(input)?;
-  Ok(scaffold::InputObjectTypeDefinition::new(input.span_since(&cursor), name, dirs, fields))
+  Ok(scaffold::InputObjectTypeDefinition::new(
+    input.span_since(&cursor),
+    name,
+    dirs,
+    fields,
+  ))
 }
 
 /// Parses a directive definition.
@@ -1369,7 +1569,8 @@ pub fn parse_directive_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1387,10 +1588,18 @@ where
   let name = parse_name(input)?;
   let args = parse_opt_arguments_definition(input)?;
   let rep = peek_keyword(input, "repeatable");
-  if rep { next_token(input)?; }
+  if rep {
+    next_token(input)?;
+  }
   parse_on(input)?;
   let locs = parse_directive_locations(input)?;
-  Ok(scaffold::DirectiveDefinition::new(input.span_since(&cursor), name, args, rep, locs))
+  Ok(scaffold::DirectiveDefinition::new(
+    input.span_since(&cursor),
+    name,
+    args,
+    rep,
+    locs,
+  ))
 }
 
 /// Parses a schema definition.
@@ -1400,7 +1609,8 @@ pub fn parse_schema_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1416,7 +1626,11 @@ where
   parse_schema(input)?;
   let dirs = parse_const_directives(input)?;
   let ops = parse_root_operation_types_definition(input)?;
-  Ok(scaffold::SchemaDefinition::new(input.span_since(&cursor), dirs, ops))
+  Ok(scaffold::SchemaDefinition::new(
+    input.span_since(&cursor),
+    dirs,
+    ops,
+  ))
 }
 
 /// Parses a type definition by dispatching on keyword.
@@ -1426,7 +1640,8 @@ pub fn parse_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1440,27 +1655,40 @@ where
 {
   let eot_span = Span::new(0, 0);
   (
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_scalar_type_definition(inp).map(TypeDefinition::Scalar)),
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_object_type_definition(inp).map(TypeDefinition::Object)),
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_interface_type_definition(inp).map(TypeDefinition::Interface)),
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_union_type_definition(inp).map(TypeDefinition::Union)),
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_enum_type_definition(inp).map(TypeDefinition::Enum)),
-    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_input_object_type_definition(inp).map(TypeDefinition::InputObject)),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_scalar_type_definition(inp).map(TypeDefinition::Scalar)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_object_type_definition(inp).map(TypeDefinition::Object)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_interface_type_definition(inp).map(TypeDefinition::Interface)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_union_type_definition(inp).map(TypeDefinition::Union)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_enum_type_definition(inp).map(TypeDefinition::Enum)
+    }),
+    (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
+      parse_input_object_type_definition(inp).map(TypeDefinition::InputObject)
+    }),
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
-            SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
-            SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
-            SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
-            SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
-            SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
-            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
+          SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
+          SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
+          SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
+          SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
+          SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
+          _ => Err(
+            SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()
+          ),
+        }),
       },
     )
     .parse_input(input)
@@ -1475,7 +1703,8 @@ pub fn parse_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1495,7 +1724,11 @@ where
       let name = parse_name(inp)?;
       let dirs = parse_const_directives(inp)?;
       let span = inp.span_since(&c);
-      Ok(TypeExtension::Scalar(scaffold::ScalarTypeExtension::new(span, name, dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new())))))
+      Ok(TypeExtension::Scalar(scaffold::ScalarTypeExtension::new(
+        span,
+        name,
+        dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new())),
+      )))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let c = inp.cursor().clone();
@@ -1506,11 +1739,20 @@ where
       let fields = parse_fields_definition(inp)?;
       let span = inp.span_since(&c);
       let data = match (impls, dirs, fields) {
-        (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-        (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives { implements: i, directives: d },
+        (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields {
+          implements: i,
+          directives: d,
+          fields: f,
+        },
+        (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives {
+          implements: i,
+          directives: d,
+        },
         _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeExtension::Object(scaffold::ObjectTypeExtension::new(span, name, data)))
+      Ok(TypeExtension::Object(scaffold::ObjectTypeExtension::new(
+        span, name, data,
+      )))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let c = inp.cursor().clone();
@@ -1521,11 +1763,20 @@ where
       let fields = parse_fields_definition(inp)?;
       let span = inp.span_since(&c);
       let data = match (impls, dirs, fields) {
-        (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-        (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives { implements: i, directives: d },
+        (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields {
+          implements: i,
+          directives: d,
+          fields: f,
+        },
+        (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives {
+          implements: i,
+          directives: d,
+        },
         _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeExtension::Interface(scaffold::InterfaceTypeExtension::new(span, name, data)))
+      Ok(TypeExtension::Interface(
+        scaffold::InterfaceTypeExtension::new(span, name, data),
+      ))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let c = inp.cursor().clone();
@@ -1535,11 +1786,16 @@ where
       let members = parse_union_members(inp)?;
       let span = inp.span_since(&c);
       let data = match (dirs, members) {
-        (d, Some(m)) => scaffold::UnionTypeExtensionData::Members { directives: d, members: m },
+        (d, Some(m)) => scaffold::UnionTypeExtensionData::Members {
+          directives: d,
+          members: m,
+        },
         (Some(d), None) => scaffold::UnionTypeExtensionData::Directives(d),
         _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeExtension::Union(scaffold::UnionTypeExtension::new(span, name, data)))
+      Ok(TypeExtension::Union(scaffold::UnionTypeExtension::new(
+        span, name, data,
+      )))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let c = inp.cursor().clone();
@@ -1549,11 +1805,16 @@ where
       let vals = parse_enum_values_definition(inp)?;
       let span = inp.span_since(&c);
       let data = match (dirs, vals) {
-        (d, Some(v)) => scaffold::EnumTypeExtensionData::Values { directives: d, values: v },
+        (d, Some(v)) => scaffold::EnumTypeExtensionData::Values {
+          directives: d,
+          values: v,
+        },
         (Some(d), None) => scaffold::EnumTypeExtensionData::Directives(d),
         _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeExtension::Enum(scaffold::EnumTypeExtension::new(span, name, data)))
+      Ok(TypeExtension::Enum(scaffold::EnumTypeExtension::new(
+        span, name, data,
+      )))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let c = inp.cursor().clone();
@@ -1563,27 +1824,33 @@ where
       let fields = parse_input_fields_definition(inp)?;
       let span = inp.span_since(&c);
       let data = match (dirs, fields) {
-        (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields { directives: d, fields: f },
+        (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields {
+          directives: d,
+          fields: f,
+        },
         (Some(d), None) => scaffold::InputObjectTypeExtensionData::Directives(d),
         _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeExtension::InputObject(scaffold::InputObjectTypeExtension::new(span, name, data)))
+      Ok(TypeExtension::InputObject(
+        scaffold::InputObjectTypeExtension::new(span, name, data),
+      ))
     }),
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
-            SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
-            SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
-            SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
-            SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
-            SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
-            _ => Err(SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(eot_span).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "scalar".equivalent(s) => Ok(Branch::B0),
+          SyntacticToken::Identifier(s) if "type".equivalent(s) => Ok(Branch::B1),
+          SyntacticToken::Identifier(s) if "interface".equivalent(s) => Ok(Branch::B2),
+          SyntacticToken::Identifier(s) if "union".equivalent(s) => Ok(Branch::B3),
+          SyntacticToken::Identifier(s) if "enum".equivalent(s) => Ok(Branch::B4),
+          SyntacticToken::Identifier(s) if "input".equivalent(s) => Ok(Branch::B5),
+          _ => Err(
+            SyntacticTokenError::unexpected_token(t.clone(), Expectation::Name, eot_span).into()
+          ),
+        }),
       },
     )
     .parse_input(input)
@@ -1596,7 +1863,8 @@ pub fn parse_type_system_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1621,26 +1889,33 @@ where
       };
       let span = inp.span_since(&c);
       let data = match (dirs, ops) {
-        (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations { directives: Some(d), definitions: o },
+        (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations {
+          directives: Some(d),
+          definitions: o,
+        },
         (Some(d), None) => scaffold::SchemaExtensionData::Directives(d),
-        (None, Some(o)) => scaffold::SchemaExtensionData::Operations { directives: None, definitions: o },
+        (None, Some(o)) => scaffold::SchemaExtensionData::Operations {
+          directives: None,
+          definitions: o,
+        },
         (None, None) => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
       };
-      Ok(TypeSystemExtension::Schema(scaffold::SchemaExtension::new(span, data)))
+      Ok(TypeSystemExtension::Schema(scaffold::SchemaExtension::new(
+        span, data,
+      )))
     },
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       parse_type_extension(inp).map(TypeSystemExtension::Type)
     }),
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
+          _ => Ok(Branch::B1),
+        }),
       },
     )
     .parse_input(input)
@@ -1655,7 +1930,8 @@ pub fn parse_operation_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1669,16 +1945,19 @@ where
 {
   (
     |inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-      Ok(scaffold::OperationDefinition::Shorthand(parse_selection_set(inp)?))
+      Ok(scaffold::OperationDefinition::Shorthand(
+        parse_selection_set(inp)?,
+      ))
     },
     |inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = inp.cursor().clone();
       let op = parse_operation_type(inp)?;
-      let name = if peek_kind(inp) == Some(SyntacticTokenKind::Identifier) && !peek_keyword(inp, "on") {
-        Some(parse_name(inp)?)
-      } else {
-        None
-      };
+      let name =
+        if peek_kind(inp) == Some(SyntacticTokenKind::Identifier) && !peek_keyword(inp, "on") {
+          Some(parse_name(inp)?)
+        } else {
+          None
+        };
       let vars = parse_variables_definition(inp)?;
       let dirs = parse_directives(inp)?;
       let ss = parse_selection_set(inp)?;
@@ -1688,14 +1967,13 @@ where
     },
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
-            SyntacticTokenKind::LBrace => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t.kind() {
+          SyntacticTokenKind::LBrace => Ok(Branch::B0),
+          _ => Ok(Branch::B1),
+        }),
       },
     )
     .parse_input(input)
@@ -1708,7 +1986,8 @@ pub fn parse_fragment_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1729,7 +2008,13 @@ where
   let tc = TypeCondition::new(tn.span().clone(), tn);
   let dirs = parse_directives(input)?;
   let ss = parse_selection_set(input)?;
-  Ok(scaffold::FragmentDefinition::new(input.span_since(&cursor), fname, tc, dirs, ss))
+  Ok(scaffold::FragmentDefinition::new(
+    input.span_since(&cursor),
+    fname,
+    tc,
+    dirs,
+    ss,
+  ))
 }
 
 /// Parses an executable definition: fragment or operation.
@@ -1739,7 +2024,8 @@ pub fn parse_executable_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1760,14 +2046,13 @@ where
     }),
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "fragment".equivalent(s) => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "fragment".equivalent(s) => Ok(Branch::B0),
+          _ => Ok(Branch::B1),
+        }),
       },
     )
     .parse_input(input)
@@ -1780,7 +2065,8 @@ pub fn parse_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1794,34 +2080,38 @@ where
 {
   (
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-      parse_schema_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Schema(d)))
+      parse_schema_definition(inp)
+        .map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Schema(d)))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-      parse_directive_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Directive(d)))
+      parse_directive_definition(inp)
+        .map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Directive(d)))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-      parse_type_definition(inp).map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Type(d)))
+      parse_type_definition(inp)
+        .map(|d| scaffold::Definition::TypeSystem(scaffold::TypeSystemDefinition::Type(d)))
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       parse_executable_definition(inp).map(scaffold::Definition::Executable)
     }),
   )
     .peek_then_choice::<_, U3>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
-            SyntacticToken::Identifier(s) if "directive".equivalent(s) => Ok(Branch::B1),
-            SyntacticToken::Identifier(s) if "scalar".equivalent(s)
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "schema".equivalent(s) => Ok(Branch::B0),
+          SyntacticToken::Identifier(s) if "directive".equivalent(s) => Ok(Branch::B1),
+          SyntacticToken::Identifier(s)
+            if "scalar".equivalent(s)
               || "type".equivalent(s)
               || "interface".equivalent(s)
               || "union".equivalent(s)
               || "enum".equivalent(s)
-              || "input".equivalent(s) => Ok(Branch::B2),
-            _ => Ok(Branch::B3),
-          }),
-        }
+              || "input".equivalent(s) =>
+            Ok(Branch::B2),
+          _ => Ok(Branch::B3),
+        }),
       },
     )
     .parse_input(input)
@@ -1834,7 +2124,8 @@ pub fn parse_definition_or_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1852,21 +2143,22 @@ where
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = inp.cursor().clone();
-      let desc = parse_description(inp)?;
+      let desc = try_parse_description(inp)?;
       let def = parse_definition(inp)?;
       let span = inp.span_since(&cursor);
-      Ok(scaffold::DefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
+      Ok(scaffold::DefinitionOrExtension::Definition(
+        scaffold::Described::new(span, desc.into(), def),
+      ))
     }),
   )
     .peek_then_choice::<_, U3>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U3>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
+          _ => Ok(Branch::B1),
+        }),
       },
     )
     .parse_input(input)
@@ -1879,7 +2171,8 @@ pub fn parse_type_system_definition_or_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1897,23 +2190,28 @@ where
     }),
     (|inp: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
       let cursor = inp.cursor().clone();
-      let desc = parse_description(inp)?;
-      let def = if peek_keyword(inp, "schema") { scaffold::TypeSystemDefinition::Schema(parse_schema_definition(inp)?) }
-      else if peek_keyword(inp, "directive") { scaffold::TypeSystemDefinition::Directive(parse_directive_definition(inp)?) }
-      else { scaffold::TypeSystemDefinition::Type(parse_type_definition(inp)?) };
+      let desc = try_parse_description(inp)?;
+      let def = if peek_keyword(inp, "schema") {
+        scaffold::TypeSystemDefinition::Schema(parse_schema_definition(inp)?)
+      } else if peek_keyword(inp, "directive") {
+        scaffold::TypeSystemDefinition::Directive(parse_directive_definition(inp)?)
+      } else {
+        scaffold::TypeSystemDefinition::Type(parse_type_definition(inp)?)
+      };
       let span = inp.span_since(&cursor);
-      Ok(scaffold::TypeSystemDefinitionOrExtension::Definition(scaffold::Described::new(span, desc, def)))
+      Ok(scaffold::TypeSystemDefinitionOrExtension::Definition(
+        scaffold::Described::new(span, desc.into(), def),
+      ))
     }),
   )
     .peek_then_choice::<_, U1>(
-      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| {
-        match peeked.pop_front() {
-          None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
-          Some(tok) => with_peeked_token!(&tok, |t| match t {
-            SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
-            _ => Ok(Branch::B1),
-          }),
-        }
+      |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _emitter| match peeked.pop_front()
+      {
+        None => Err(SyntacticTokenError::unexpected_end_of_input(Span::new(0, 0)).into()),
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) if "extend".equivalent(s) => Ok(Branch::B0),
+          _ => Ok(Branch::B1),
+        }),
       },
     )
     .parse_input(input)
@@ -1926,7 +2224,8 @@ pub fn parse_document<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1939,7 +2238,8 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let defs = (parse_definition_or_extension as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let defs = (parse_definition_or_extension
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(continue_while_some!())
     .collect()
     .parse_input(input)?;
@@ -1953,7 +2253,8 @@ pub fn parse_executable_document<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1966,7 +2267,8 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let defs = (parse_executable_definition as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let defs = (parse_executable_definition
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(continue_while_some!())
     .collect()
     .parse_input(input)?;
@@ -1980,7 +2282,8 @@ pub fn parse_type_system_document<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -1993,7 +2296,8 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  let defs = (parse_type_system_definition_or_extension as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
+  let defs = (parse_type_system_definition_or_extension
+    as fn(&mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>) -> _)
     .repeated_while::<_, U1>(continue_while_some!())
     .collect()
     .parse_input(input)?;
@@ -2009,7 +2313,8 @@ pub fn parse_described_object_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2022,9 +2327,13 @@ where
   Lang: ?Sized,
 {
   let c = input.cursor().clone();
-  let d = parse_description(input)?;
+  let d = try_parse_description(input)?;
   let def = parse_object_type_definition(input)?;
-  Ok(scaffold::Described::new(input.span_since(&c), d, def))
+  Ok(scaffold::Described::new(
+    input.span_since(&c),
+    d.into(),
+    def,
+  ))
 }
 
 /// Parses a described interface type definition.
@@ -2034,7 +2343,8 @@ pub fn parse_described_interface_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2047,9 +2357,13 @@ where
   Lang: ?Sized,
 {
   let c = input.cursor().clone();
-  let d = parse_description(input)?;
+  let d = try_parse_description(input)?;
   let def = parse_interface_type_definition(input)?;
-  Ok(scaffold::Described::new(input.span_since(&c), d, def))
+  Ok(scaffold::Described::new(
+    input.span_since(&c),
+    d.into(),
+    def,
+  ))
 }
 
 /// Parses a described enum type definition.
@@ -2059,7 +2373,8 @@ pub fn parse_described_enum_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2072,9 +2387,13 @@ where
   Lang: ?Sized,
 {
   let c = input.cursor().clone();
-  let d = parse_description(input)?;
+  let d = try_parse_description(input)?;
   let def = parse_enum_type_definition(input)?;
-  Ok(scaffold::Described::new(input.span_since(&c), d, def))
+  Ok(scaffold::Described::new(
+    input.span_since(&c),
+    d.into(),
+    def,
+  ))
 }
 
 /// Parses a described input object type definition.
@@ -2084,7 +2403,8 @@ pub fn parse_described_input_object_type_definition<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2097,9 +2417,13 @@ where
   Lang: ?Sized,
 {
   let c = input.cursor().clone();
-  let d = parse_description(input)?;
+  let d = try_parse_description(input)?;
   let def = parse_input_object_type_definition(input)?;
-  Ok(scaffold::Described::new(input.span_since(&c), d, def))
+  Ok(scaffold::Described::new(
+    input.span_since(&c),
+    d.into(),
+    def,
+  ))
 }
 
 /// Parses an object type extension: `'extend' 'type' ...`.
@@ -2109,7 +2433,8 @@ pub fn parse_object_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2130,8 +2455,15 @@ where
   let fields = parse_fields_definition(input)?;
   let span = input.span_since(&c);
   let data = match (impls, dirs, fields) {
-    (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-    (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives { implements: i, directives: d },
+    (i, d, Some(f)) => scaffold::ObjectTypeExtensionData::Fields {
+      implements: i,
+      directives: d,
+      fields: f,
+    },
+    (i, Some(d), None) => scaffold::ObjectTypeExtensionData::Directives {
+      implements: i,
+      directives: d,
+    },
     _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
   };
   Ok(scaffold::ObjectTypeExtension::new(span, name, data))
@@ -2144,7 +2476,8 @@ pub fn parse_interface_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2165,8 +2498,15 @@ where
   let fields = parse_fields_definition(input)?;
   let span = input.span_since(&c);
   let data = match (impls, dirs, fields) {
-    (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields { implements: i, directives: d, fields: f },
-    (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives { implements: i, directives: d },
+    (i, d, Some(f)) => scaffold::InterfaceTypeExtensionData::Fields {
+      implements: i,
+      directives: d,
+      fields: f,
+    },
+    (i, Some(d), None) => scaffold::InterfaceTypeExtensionData::Directives {
+      implements: i,
+      directives: d,
+    },
     _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
   };
   Ok(scaffold::InterfaceTypeExtension::new(span, name, data))
@@ -2179,7 +2519,8 @@ pub fn parse_enum_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2199,7 +2540,10 @@ where
   let vals = parse_enum_values_definition(input)?;
   let span = input.span_since(&c);
   let data = match (dirs, vals) {
-    (d, Some(v)) => scaffold::EnumTypeExtensionData::Values { directives: d, values: v },
+    (d, Some(v)) => scaffold::EnumTypeExtensionData::Values {
+      directives: d,
+      values: v,
+    },
     (Some(d), None) => scaffold::EnumTypeExtensionData::Directives(d),
     _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
   };
@@ -2213,7 +2557,8 @@ pub fn parse_input_object_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2233,7 +2578,10 @@ where
   let fields = parse_input_fields_definition(input)?;
   let span = input.span_since(&c);
   let data = match (dirs, fields) {
-    (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields { directives: d, fields: f },
+    (d, Some(f)) => scaffold::InputObjectTypeExtensionData::Fields {
+      directives: d,
+      fields: f,
+    },
     (Some(d), None) => scaffold::InputObjectTypeExtensionData::Directives(d),
     _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
   };
@@ -2247,7 +2595,8 @@ pub fn parse_scalar_type_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2265,7 +2614,11 @@ where
   let name = parse_name(input)?;
   let dirs = parse_const_directives(input)?;
   let span = input.span_since(&c);
-  Ok(scaffold::ScalarTypeExtension::new(span, name, dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new()))))
+  Ok(scaffold::ScalarTypeExtension::new(
+    span,
+    name,
+    dirs.unwrap_or_else(|| scaffold::Directives::new(span, Vec::new())),
+  ))
 }
 
 /// Parses a schema extension: `'extend' 'schema' ...`.
@@ -2275,7 +2628,8 @@ pub fn parse_schema_extension<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + KeywordToken<'inp>,
-  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>>
+    + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
@@ -2298,9 +2652,15 @@ where
   };
   let span = input.span_since(&c);
   let data = match (dirs, ops) {
-    (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations { directives: Some(d), definitions: o },
+    (Some(d), Some(o)) => scaffold::SchemaExtensionData::Operations {
+      directives: Some(d),
+      definitions: o,
+    },
     (Some(d), None) => scaffold::SchemaExtensionData::Directives(d),
-    (None, Some(o)) => scaffold::SchemaExtensionData::Operations { directives: None, definitions: o },
+    (None, Some(o)) => scaffold::SchemaExtensionData::Operations {
+      directives: None,
+      definitions: o,
+    },
     _ => return Err(SyntacticTokenError::unexpected_end_of_input(span).into()),
   };
   Ok(scaffold::SchemaExtension::new(span, data))

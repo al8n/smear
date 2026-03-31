@@ -131,7 +131,9 @@ fn handle_invalid_escaped_unicode<'a>(
     lexer.bump(idx);
     return Err(
       UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
-        span.start, span.end + idx,)))
+        span.start,
+        span.end + idx,
+      )))
       .into(),
     );
   }

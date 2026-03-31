@@ -1,12 +1,13 @@
+use core::marker::PhantomData;
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
+  utils::{
+    IntoComponents,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
-use core::marker::PhantomData;
 use std::vec::Vec;
-
-
 
 /// Represents a collection of member types that a GraphQL union can include.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,7 +44,11 @@ impl<Name, Container> UnionMemberTypes<Name, Container> {
   /// Creates a new union member types list.
   #[inline]
   pub const fn new(span: Span, members: Container) -> Self {
-    Self { span, members, _m: PhantomData }
+    Self {
+      span,
+      members,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire union member types.
@@ -209,8 +214,18 @@ impl<Name, Directives, MemberTypes> IntoComponents
 impl<Name, Directives, MemberTypes> UnionTypeDefinition<Name, Directives, MemberTypes> {
   /// Creates a new union type definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, directives: Option<Directives>, members: Option<MemberTypes>) -> Self {
-    Self { span, name, directives, members }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    members: Option<MemberTypes>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      members,
+    }
   }
 
   /// Returns a reference to the span covering the entire union definition.
@@ -370,7 +385,11 @@ impl<Name, Directives, MemberTypes> IntoComponents
 impl<Name, Directives, MemberTypes> UnionTypeExtension<Name, Directives, MemberTypes> {
   /// Creates a new union type extension.
   #[inline]
-  pub const fn new(span: Span, name: Name, data: UnionTypeExtensionData<Directives, MemberTypes>) -> Self {
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: UnionTypeExtensionData<Directives, MemberTypes>,
+  ) -> Self {
     Self { span, name, data }
   }
 

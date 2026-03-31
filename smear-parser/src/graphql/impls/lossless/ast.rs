@@ -1,7 +1,5 @@
 use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
 };
 
 use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind};

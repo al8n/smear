@@ -20,14 +20,11 @@ mod str;
 // pub type Lexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
 
 /// The error data type for lexing based on lossless token with `char` source.
-pub type LosslessLexerErrorData =
-  error::LexerErrorData<char, LimitExceeded>;
+pub type LosslessLexerErrorData = error::LexerErrorData<char, LimitExceeded>;
 /// The error type for lexing based on lossless token with `char` source.
-pub type LosslessLexerError =
-  error::LexerError<char, LimitExceeded>;
+pub type LosslessLexerError = error::LexerError<char, LimitExceeded>;
 /// A collection of errors for lossless token with `char` source.
-pub type LosslessLexerErrors =
-  error::LexerErrors<char, LimitExceeded>;
+pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 
 /// A lossless token for GraphQLx lexing that preserves all source information including trivia.
 ///

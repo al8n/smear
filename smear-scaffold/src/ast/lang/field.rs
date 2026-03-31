@@ -1,7 +1,12 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, human_display::DisplayHuman, sdl_display::{DisplayCompact, DisplayPretty}, syntax_tree_display::DisplaySyntaxTree},
+  utils::{
+    IntoComponents,
+    human_display::DisplayHuman,
+    sdl_display::{DisplayCompact, DisplayPretty},
+    syntax_tree_display::DisplaySyntaxTree,
+  },
 };
 
 pub use standard::*;
@@ -262,8 +267,22 @@ impl<Alias, Name, Arguments, Directives, SelectionSet>
 {
   /// Creates a new field.
   #[inline]
-  pub const fn new(span: Span, alias: Option<Alias>, name: Name, arguments: Option<Arguments>, directives: Option<Directives>, selection_set: Option<SelectionSet>) -> Self {
-    Self { span, alias, name, arguments, directives, selection_set }
+  pub const fn new(
+    span: Span,
+    alias: Option<Alias>,
+    name: Name,
+    arguments: Option<Arguments>,
+    directives: Option<Directives>,
+    selection_set: Option<SelectionSet>,
+  ) -> Self {
+    Self {
+      span,
+      alias,
+      name,
+      arguments,
+      directives,
+      selection_set,
+    }
   }
 
   /// Returns a reference to the span covering the entire field.

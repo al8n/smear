@@ -1,7 +1,11 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use tokit::{SimpleSpan, error::{UnexpectedEnd, UnexpectedLexeme}, utils::{Lexeme, PositionedChar}};
+use tokit::{
+  SimpleSpan,
+  error::{UnexpectedEnd, UnexpectedLexeme},
+  utils::{Lexeme, PositionedChar},
+};
 
 type Span = SimpleSpan;
 

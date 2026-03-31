@@ -1,14 +1,16 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
-  utils::cmp::Equivalent,
+use smear_lexer::{
+  punctuator::Comma,
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
+    utils::cmp::Equivalent,
+  },
 };
-use smear_lexer::punctuator::Comma;
 
-use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
-use crate::graphql::Expectation;
-use crate::hints::LineTerminatorHint;
+use crate::{
+  graphql::Expectation,
+  hints::LineTerminatorHint,
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken},
+};
 
 /// Hint for the type of whitespace encountered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -162,11 +164,25 @@ where
   let saved = input.save();
   match next_token(input) {
     Ok(Spanned { span, data: token }) => match token {
-      LosslessToken::Space => Ok(Some(Ignored::Whitespace(Whitespace::new(WhiteSpaceHint::Space, span)))),
-      LosslessToken::Tab => Ok(Some(Ignored::Whitespace(Whitespace::new(WhiteSpaceHint::Tab, span)))),
-      LosslessToken::Newline => Ok(Some(Ignored::LineTerminator(LineTerminator::new(LineTerminatorHint::NewLine, span)))),
-      LosslessToken::CarriageReturn => Ok(Some(Ignored::LineTerminator(LineTerminator::new(LineTerminatorHint::CarriageReturn, span)))),
-      LosslessToken::CarriageReturnAndNewline => Ok(Some(Ignored::LineTerminator(LineTerminator::new(LineTerminatorHint::CarriageReturnNewLine, span)))),
+      LosslessToken::Space => Ok(Some(Ignored::Whitespace(Whitespace::new(
+        WhiteSpaceHint::Space,
+        span,
+      )))),
+      LosslessToken::Tab => Ok(Some(Ignored::Whitespace(Whitespace::new(
+        WhiteSpaceHint::Tab,
+        span,
+      )))),
+      LosslessToken::Newline => Ok(Some(Ignored::LineTerminator(LineTerminator::new(
+        LineTerminatorHint::NewLine,
+        span,
+      )))),
+      LosslessToken::CarriageReturn => Ok(Some(Ignored::LineTerminator(LineTerminator::new(
+        LineTerminatorHint::CarriageReturn,
+        span,
+      )))),
+      LosslessToken::CarriageReturnAndNewline => Ok(Some(Ignored::LineTerminator(
+        LineTerminator::new(LineTerminatorHint::CarriageReturnNewLine, span),
+      ))),
       LosslessToken::Bom(_) => Ok(Some(Ignored::ByteOrderMark(Bom::new(span)))),
       LosslessToken::Comment(content) => Ok(Some(Ignored::Comment(Comment::new(span, content)))),
       LosslessToken::Comma => Ok(Some(Ignored::Comma(Comma::new(span)))),
@@ -322,7 +338,9 @@ impl<T, S> Padded<T, S> {
 /// Parses a value padded on the left by ignored tokens.
 pub fn parse_padded_left<'inp, S, Ctx, Lang, T>(
   input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
-  parse_value: impl FnOnce(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<T, LosslessTokenErrors<S>>,
+  parse_value: impl FnOnce(
+    &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  ) -> Result<T, LosslessTokenErrors<S>>,
 ) -> Result<PaddedLeft<T, S>, LosslessTokenErrors<S>>
 where
   S: Clone,
@@ -336,13 +354,19 @@ where
   let ignored = parse_ignored_list(input)?;
   let value = parse_value(input)?;
   let span = input.span_since(&cursor);
-  Ok(PaddedLeft { span, ignored, value })
+  Ok(PaddedLeft {
+    span,
+    ignored,
+    value,
+  })
 }
 
 /// Parses a value padded on the right by ignored tokens.
 pub fn parse_padded_right<'inp, S, Ctx, Lang, T>(
   input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
-  parse_value: impl FnOnce(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<T, LosslessTokenErrors<S>>,
+  parse_value: impl FnOnce(
+    &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  ) -> Result<T, LosslessTokenErrors<S>>,
 ) -> Result<PaddedRight<T, S>, LosslessTokenErrors<S>>
 where
   S: Clone,
@@ -356,13 +380,19 @@ where
   let value = parse_value(input)?;
   let ignored = parse_ignored_list(input)?;
   let span = input.span_since(&cursor);
-  Ok(PaddedRight { span, value, ignored })
+  Ok(PaddedRight {
+    span,
+    value,
+    ignored,
+  })
 }
 
 /// Parses a value padded on both sides by ignored tokens.
 pub fn parse_padded<'inp, S, Ctx, Lang, T>(
   input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
-  parse_value: impl FnOnce(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<T, LosslessTokenErrors<S>>,
+  parse_value: impl FnOnce(
+    &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  ) -> Result<T, LosslessTokenErrors<S>>,
 ) -> Result<Padded<T, S>, LosslessTokenErrors<S>>
 where
   S: Clone,
@@ -377,5 +407,10 @@ where
   let value = parse_value(input)?;
   let right_ignored = parse_ignored_list(input)?;
   let span = input.span_since(&cursor);
-  Ok(Padded { span, left_ignored, value, right_ignored })
+  Ok(Padded {
+    span,
+    left_ignored,
+    value,
+    right_ignored,
+  })
 }

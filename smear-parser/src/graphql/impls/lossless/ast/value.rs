@@ -1,25 +1,23 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
   utils::cmp::Equivalent,
 };
 
-use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
-use crate::graphql::ast::Name;
-use crate::graphql::Expectation;
-use crate::value::{
-  BooleanValue, EnumValue, FloatValue, IntValue, NullValue, StringValue, VariableValue,
-};
-use smear_scaffold::ast as scaffold;
 use super::{
-  LosslessTokenError, LosslessTokenErrors, next_token,
+  LosslessTokenError, LosslessTokenErrors,
   list::parse_list,
   name::parse_name,
+  next_token,
   object::{self, ObjectField, parse_object},
   padded::Padded,
 };
+use crate::{
+  graphql::{Expectation, ast::Name},
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken},
+  value::{BooleanValue, EnumValue, FloatValue, IntValue, NullValue, StringValue, VariableValue},
+};
+use smear_scaffold::ast as scaffold;
 
 /// GraphQL input value for CST (preserves trivia, supports variables).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
@@ -53,7 +51,8 @@ pub fn parse_input_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   LosslessToken<S>: FromLogos<'inp>,
-  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  LosslessLexer<'inp, S>:
+    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
   str: Equivalent<S>,
@@ -65,12 +64,8 @@ where
   match token {
     LosslessToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))),
     LosslessToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))),
-    LosslessToken::LitInlineStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
-    LosslessToken::LitBlockStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
+    LosslessToken::LitInlineStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
+    LosslessToken::LitBlockStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
     LosslessToken::Identifier(name) => match () {
       () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
       () if "false".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, false))),
@@ -128,7 +123,8 @@ pub fn parse_const_input_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   LosslessToken<S>: FromLogos<'inp>,
-  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  LosslessLexer<'inp, S>:
+    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
   str: Equivalent<S>,
@@ -148,7 +144,9 @@ where
     }
     LosslessToken::Identifier(name) => match () {
       () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
-      () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
+      () if "false".equivalent(&name) => {
+        Ok(ConstInputValue::Boolean(BooleanValue::new(span, false)))
+      }
       () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
       _ => Ok(ConstInputValue::Enum(EnumValue::new(span, name))),
     },
@@ -162,6 +160,8 @@ where
       let obj = parse_object(input, parse_const_input_value)?;
       Ok(ConstInputValue::Object(obj))
     }
-    tok => Err(LosslessTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into()),
+    tok => {
+      Err(LosslessTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into())
+    }
   }
 }

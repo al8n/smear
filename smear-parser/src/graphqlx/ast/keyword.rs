@@ -1,14 +1,12 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
-  utils::cmp::Equivalent,
+use smear_lexer::{
+  keywords::{self, *},
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
+    utils::cmp::Equivalent,
+  },
 };
-use smear_lexer::keywords::{self, *};
 
-use super::{
-  Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token,
-};
+use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
 use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 
 /// Generic keyword parser helper.
@@ -20,7 +18,8 @@ fn parse_keyword<'inp, S, Ctx, Lang, T>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp>,
-  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  SyntacticLexer<'inp, S>:
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,

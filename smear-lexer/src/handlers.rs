@@ -1,14 +1,12 @@
 use tokit::{
   SimpleSpan,
-  logos::{Logos, Lexer, Source},
   error::{UnexpectedEnd, UnexpectedLexeme},
-  utils::{
-    CharLen, Lexeme, PositionedChar,
-  },
+  logos::{Lexer, Logos, Source},
   state::{
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
+  utils::{CharLen, Lexeme, PositionedChar},
 };
 
 type Span = SimpleSpan;

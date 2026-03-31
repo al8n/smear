@@ -1,8 +1,5 @@
 use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext,
-  span::Spanned,
-  utils::cmp::Equivalent,
+  Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned, utils::cmp::Equivalent,
 };
 
 use super::super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
@@ -17,7 +14,8 @@ pub fn parse_enum_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp>,
-  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  SyntacticLexer<'inp, S>:
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
@@ -26,10 +24,7 @@ where
   let Spanned { span, data: token } = next_token(input)?;
   match token {
     SyntacticToken::Identifier(name) => match () {
-      () if "true".equivalent(&name)
-        || "false".equivalent(&name)
-        || "null".equivalent(&name) =>
-      {
+      () if "true".equivalent(&name) || "false".equivalent(&name) || "null".equivalent(&name) => {
         Err(SyntacticTokenError::invalid_enum_value(name, span).into())
       }
       _ => Ok(EnumValue::new(span, name)),

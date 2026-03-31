@@ -13,59 +13,59 @@ use smear_lexer::tokit::{
 
 /// An identifier.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Ident<S> {
-  span: Span,
-  value: S,
+pub struct Ident<V, S = Span> {
+  span: S,
+  value: V,
 }
 
-impl<S> Ident<S> {
+impl<V, S> Ident<V, S> {
   /// Creates a new identifier with the given span and value.
   ///
   /// The span represents the location of the identifier in the source text,
   /// and the value is the actual source text.
   #[inline]
-  pub(crate) const fn new(span: Span, value: S) -> Self {
+  pub(crate) const fn new(span: S, value: V) -> Self {
     Self { span, value }
   }
 
   /// Returns the span of the name.
   #[inline]
-  pub const fn span(&self) -> &Span {
+  pub const fn span(&self) -> &S {
     &self.span
   }
 
   /// Returns the underlying source value.
   #[inline]
-  pub const fn source(&self) -> S
+  pub const fn source(&self) -> V
   where
-    S: Copy,
+    V: Copy,
   {
     self.value
   }
 
   /// Returns reference of the underlying source value.
   #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
+  pub const fn source_ref(&self) -> &V {
     &self.value
   }
 }
 
-impl<S> AsSpan<Span> for Ident<S> {
+impl<V, S> AsSpan<S> for Ident<V, S> {
   #[inline]
-  fn as_span(&self) -> &Span {
+  fn as_span(&self) -> &S {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for Ident<S> {
+impl<V, S> IntoSpan<S> for Ident<V, S> {
   #[inline]
-  fn into_span(self) -> Span {
+  fn into_span(self) -> S {
     self.span
   }
 }
 
-impl<S> IntoComponents for Ident<S> {
-  type Components = (Span, S);
+impl<V, S> IntoComponents for Ident<V, S> {
+  type Components = (S, V);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -73,9 +73,9 @@ impl<S> IntoComponents for Ident<S> {
   }
 }
 
-impl<S> Display for Ident<S>
+impl<V, S> Display for Ident<V, S>
 where
-  S: DisplayHuman,
+  V: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -83,8 +83,8 @@ where
   }
 }
 
-impl<S> core::ops::Deref for Ident<S> {
-  type Target = S;
+impl<V, S> core::ops::Deref for Ident<V, S> {
+  type Target = V;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
@@ -92,33 +92,33 @@ impl<S> core::ops::Deref for Ident<S> {
   }
 }
 
-impl<S> DisplayCompact for Ident<S>
+impl<V, S> DisplayCompact for Ident<V, S>
 where
-  S: DisplayHuman,
+  V: DisplayHuman,
 {
   type Options = ();
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.value.fmt(f)
+    self.value.display().fmt(f)
   }
 }
 
-impl<S> DisplayPretty for Ident<S>
+impl<V, S> DisplayPretty for Ident<V, S>
 where
-  S: DisplayHuman,
+  V: DisplayHuman,
 {
   type Options = ();
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.value.fmt(f)
+    self.value.display().fmt(f)
   }
 }
 
-impl<S> PartialEq<str> for Ident<S>
+impl<V, S> PartialEq<str> for Ident<V, S>
 where
-  str: Equivalent<S>,
+  str: Equivalent<V>,
 {
   #[inline]
   fn eq(&self, other: &str) -> bool {
@@ -126,9 +126,9 @@ where
   }
 }
 
-impl<S> PartialEq<&str> for Ident<S>
+impl<V, S> PartialEq<&str> for Ident<V, S>
 where
-  str: Equivalent<S>,
+  str: Equivalent<V>,
 {
   #[inline]
   fn eq(&self, other: &&str) -> bool {
@@ -136,29 +136,29 @@ where
   }
 }
 
-impl<S> PartialEq<Ident<S>> for str
+impl<V, S> PartialEq<Ident<V, S>> for str
 where
-  str: Equivalent<S>,
+  str: Equivalent<V>,
 {
   #[inline]
-  fn eq(&self, other: &Ident<S>) -> bool {
+  fn eq(&self, other: &Ident<V, S>) -> bool {
     self.equivalent(&other.value)
   }
 }
 
-impl<S> PartialEq<Ident<S>> for &str
+impl<V, S> PartialEq<Ident<V, S>> for &str
 where
-  str: Equivalent<S>,
+  str: Equivalent<V>,
 {
   #[inline]
-  fn eq(&self, other: &Ident<S>) -> bool {
+  fn eq(&self, other: &Ident<V, S>) -> bool {
     self.equivalent(&other.value)
   }
 }
 
-impl<S> PartialEq<[u8]> for Ident<S>
+impl<V, S> PartialEq<[u8]> for Ident<V, S>
 where
-  [u8]: Equivalent<S>,
+  [u8]: Equivalent<V>,
 {
   #[inline]
   fn eq(&self, other: &[u8]) -> bool {
@@ -166,39 +166,39 @@ where
   }
 }
 
-impl<S> PartialEq<Ident<S>> for [u8]
+impl<V, S> PartialEq<Ident<V, S>> for [u8]
 where
-  [u8]: Equivalent<S>,
+  [u8]: Equivalent<V>,
 {
   #[inline]
-  fn eq(&self, other: &Ident<S>) -> bool {
+  fn eq(&self, other: &Ident<V, S>) -> bool {
     self.equivalent(&other.value)
   }
 }
 
-impl<S> Equivalent<Ident<S>> for str
+impl<V, S> Equivalent<Ident<V, S>> for str
 where
-  str: Equivalent<S>,
+  str: Equivalent<V>,
 {
   #[inline]
-  fn equivalent(&self, other: &Ident<S>) -> bool {
+  fn equivalent(&self, other: &Ident<V, S>) -> bool {
     self.equivalent(other.source_ref())
   }
 }
 
-impl<S> Equivalent<Ident<S>> for [u8]
+impl<V, S> Equivalent<Ident<V, S>> for [u8]
 where
-  [u8]: Equivalent<S>,
+  [u8]: Equivalent<V>,
 {
   #[inline]
-  fn equivalent(&self, other: &Ident<S>) -> bool {
+  fn equivalent(&self, other: &Ident<V, S>) -> bool {
     self.equivalent(other.source_ref())
   }
 }
 
-impl<S> Equivalent<[u8]> for Ident<S>
+impl<V, S> Equivalent<[u8]> for Ident<V, S>
 where
-  [u8]: Equivalent<S>,
+  [u8]: Equivalent<V>,
 {
   #[inline]
   fn equivalent(&self, other: &[u8]) -> bool {

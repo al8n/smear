@@ -142,7 +142,9 @@ fn handle_invalid_escaped_unicode<'a>(
     lexer.bump(take); // consume what was there to make progress
     return Err(
       UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
-        span.start, span.end + take,)))
+        span.start,
+        span.end + take,
+      )))
       .into(),
     );
   }

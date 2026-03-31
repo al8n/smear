@@ -1,12 +1,11 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
 
 /// Represents an arguments definition in GraphQL schema syntax.
 ///
@@ -112,7 +111,11 @@ impl<InputValueDefinition, Container> ArgumentsDefinition<InputValueDefinition, 
   /// Creates a new arguments definition.
   #[inline]
   pub const fn new(span: Span, values: Container) -> Self {
-    Self { span, values, _input_value_definition: PhantomData }
+    Self {
+      span,
+      values,
+      _input_value_definition: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire arguments definition.

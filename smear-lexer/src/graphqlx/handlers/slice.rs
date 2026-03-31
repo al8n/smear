@@ -4,10 +4,10 @@ use crate::{
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
 };
 use tokit::{
-  logos::{Lexer, Logos, Source},
   error::UnexpectedEnd,
-  utils::Lexeme,
+  logos::{Lexer, Logos, Source},
   state::tracker::Limiter,
+  utils::Lexeme,
 };
 
 use super::error;
@@ -297,7 +297,11 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::binary(
       lexer.span().into(),
-      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name(0, "binary".into(), BinaryHint::Digit)),
+      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name(
+        0,
+        "binary".into(),
+        BinaryHint::Digit,
+      )),
     ));
     return Err(errs);
   }
@@ -349,7 +353,11 @@ where
   if remainder_ref.is_empty() {
     errs.push(error::LexerError::octal(
       lexer.span().into(),
-      OctalError::UnexpectedEnd(UnexpectedEnd::with_name(0, "octal".into(), OctalHint::Digit)),
+      OctalError::UnexpectedEnd(UnexpectedEnd::with_name(
+        0,
+        "octal".into(),
+        OctalHint::Digit,
+      )),
     ));
     return Err(errs);
   }

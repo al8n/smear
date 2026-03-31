@@ -1,9 +1,8 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-
 
 pub use list::List;
 pub use map::{Map, MapEntry};

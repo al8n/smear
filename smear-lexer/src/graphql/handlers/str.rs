@@ -2,8 +2,8 @@ use super::error::{self, FloatError};
 use tokit::{
   SimpleSpan,
   logos::{Lexer, Logos, Source},
-  utils::{Lexeme, PositionedChar},
   state::tracker::Limiter,
+  utils::{Lexeme, PositionedChar},
 };
 
 type Span = SimpleSpan;

@@ -1,23 +1,21 @@
 use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
 };
 
+use super::super::{
+  Expectation,
+  error::{Error, Errors},
+};
 use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind};
-use super::super::error::{Error, Errors};
-use super::super::Expectation;
 
 pub use ast::*;
 
 mod ast;
 
 /// The error type used for the lossless parser implementation.
-pub type LosslessTokenError<S> =
-  Error<S, LosslessToken<S>, char, Expectation>;
+pub type LosslessTokenError<S> = Error<S, LosslessToken<S>, char, Expectation>;
 /// The errors type used for the lossless parser implementation.
-pub type LosslessTokenErrors<S> =
-  Errors<S, LosslessToken<S>, char, Expectation>;
+pub type LosslessTokenErrors<S> = Errors<S, LosslessToken<S>, char, Expectation>;
 
 /// Helper to consume a token from an InputRef and produce a span.
 ///

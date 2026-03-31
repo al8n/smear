@@ -1,9 +1,8 @@
+use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
 };
-use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-
 
 use super::{MapType, SetType};
 

@@ -1,12 +1,11 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
 
 /// Represents a single enum value definition in a GraphQL enum type.
 ///
@@ -83,7 +82,11 @@ impl<EnumValue, Directives> EnumValueDefinition<EnumValue, Directives> {
   /// Creates a new enum value definition.
   #[inline]
   pub const fn new(span: Span, enum_value: EnumValue, directives: Option<Directives>) -> Self {
-    Self { span, enum_value, directives }
+    Self {
+      span,
+      enum_value,
+      directives,
+    }
   }
 
   /// Returns a reference to the span covering the entire enum value definition.
@@ -206,7 +209,11 @@ impl<EnumValueDefinition, Container> EnumValuesDefinition<EnumValueDefinition, C
   /// Creates a new enum values definition.
   #[inline]
   pub const fn new(span: Span, enum_values: Container) -> Self {
-    Self { span, enum_values, _m: PhantomData }
+    Self {
+      span,
+      enum_values,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire enum values definition.
@@ -329,8 +336,18 @@ impl<Name, Directives, EnumValuesDefinition>
 {
   /// Creates a new enum type definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, directives: Option<Directives>, enum_values: Option<EnumValuesDefinition>) -> Self {
-    Self { span, name, directives, enum_values }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    enum_values: Option<EnumValuesDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      enum_values,
+    }
   }
 
   /// Returns a reference to the span covering the entire enum definition.
@@ -544,7 +561,11 @@ impl<Name, Directives, EnumValuesDefinition>
 {
   /// Creates a new enum type extension.
   #[inline]
-  pub const fn new(span: Span, name: Name, data: EnumTypeExtensionData<Directives, EnumValuesDefinition>) -> Self {
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: EnumTypeExtensionData<Directives, EnumValuesDefinition>,
+  ) -> Self {
     Self { span, name, data }
   }
 
