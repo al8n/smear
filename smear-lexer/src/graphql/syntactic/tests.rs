@@ -180,10 +180,8 @@ fn test_recursion_limit() {
   let query = field.replace("{}", "{b}").to_string();
 
   type LogosToken<'a> = <StrSyntacticToken<'a> as FromLogos<'a>>::Logos;
-  let mut lexer = LogosToken::lexer_with_extras(
-    query.as_str(),
-    RecursionLimiter::with_limitation(depth - 1),
-  );
+  let mut lexer =
+    LogosToken::lexer_with_extras(query.as_str(), RecursionLimiter::with_limitation(depth - 1));
 
   loop {
     match lexer.next() {

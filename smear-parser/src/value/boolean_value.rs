@@ -2,7 +2,10 @@ use core::fmt::Display;
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
+  utils::{
+    IntoComponents,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
 
 /// A boolean value literal.

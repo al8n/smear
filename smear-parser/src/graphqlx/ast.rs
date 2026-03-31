@@ -3,16 +3,14 @@
 use std::vec::Vec;
 
 use smear_lexer::tokit::{
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
-  lexer::FromLogos,
+  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
 };
 
-use super::Expectation;
-use super::error::{Error, Errors};
-use crate::lexer::graphqlx::syntactic::{
-  SyntacticLexer, SyntacticToken, SyntacticTokenKind,
+use super::{
+  Expectation,
+  error::{Error, Errors},
 };
+use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
 
 pub use default::*;
 pub use import::*;
@@ -66,11 +64,9 @@ impl From<SyntacticTokenKind> for Expectation {
 }
 
 /// The error type used for the AST parser implementation.
-pub type SyntacticTokenError<S> =
-  Error<S, SyntacticToken<S>, char, Expectation>;
+pub type SyntacticTokenError<S> = Error<S, SyntacticToken<S>, char, Expectation>;
 /// The errors type used for the AST parser implementation.
-pub type SyntacticTokenErrors<S> =
-  Errors<S, SyntacticToken<S>, char, Expectation>;
+pub type SyntacticTokenErrors<S> = Errors<S, SyntacticToken<S>, char, Expectation>;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;

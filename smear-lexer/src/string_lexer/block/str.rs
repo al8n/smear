@@ -1,5 +1,6 @@
 use tokit::{
-  lexer::Lexable, logos::{Lexer, Logos, Source},
+  lexer::Lexable,
+  logos::{Lexer, Logos, Source},
 };
 
 use crate::error::{StringError, StringErrors};

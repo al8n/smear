@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 // use crate::{
 //   smear_lexer::keywords::On,
@@ -9,7 +9,6 @@ use smear_lexer::tokit::{
 //   scaffold::{self, FragmentSpread},
 // };
 use derive_more::{From, Into};
-
 
 use crate::ast::{self};
 

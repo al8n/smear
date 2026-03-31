@@ -1,10 +1,9 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext,
-  span::Spanned,
-  utils::cmp::Equivalent,
+use smear_lexer::{
+  keywords::{Mutation, Query, Subscription},
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned, utils::cmp::Equivalent,
+  },
 };
-use smear_lexer::keywords::{Mutation, Query, Subscription};
 use smear_scaffold::ast::OperationType;
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
@@ -17,7 +16,8 @@ pub fn parse_operation_type<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp>,
-  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  SyntacticLexer<'inp, S>:
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
@@ -29,7 +29,9 @@ where
       let op = match () {
         () if "query".equivalent(&name) => OperationType::Query(Query::new(span)),
         () if "mutation".equivalent(&name) => OperationType::Mutation(Mutation::new(span)),
-        () if "subscription".equivalent(&name) => OperationType::Subscription(Subscription::new(span)),
+        () if "subscription".equivalent(&name) => {
+          OperationType::Subscription(Subscription::new(span))
+        }
         _ => return Err(SyntacticTokenError::unknown_operation_type(name, span).into()),
       };
       Ok(op)

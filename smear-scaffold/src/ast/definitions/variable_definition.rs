@@ -1,10 +1,9 @@
+use core::marker::PhantomData;
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-use core::marker::PhantomData;
-
 
 use std::vec::Vec;
 
@@ -206,8 +205,20 @@ impl<Variable, Type, DefaultValue, Directives>
 {
   /// Creates a new variable definition.
   #[inline]
-  pub const fn new(span: Span, variable: Variable, ty: Type, directives: Option<Directives>, default_value: Option<DefaultValue>) -> Self {
-    Self { span, variable, ty, directives, default_value }
+  pub const fn new(
+    span: Span,
+    variable: Variable,
+    ty: Type,
+    directives: Option<Directives>,
+    default_value: Option<DefaultValue>,
+  ) -> Self {
+    Self {
+      span,
+      variable,
+      ty,
+      directives,
+      default_value,
+    }
   }
 
   /// Returns a reference to the span covering the entire variable definition.
@@ -388,7 +399,11 @@ impl<VariableDefinition, Container> VariablesDefinition<VariableDefinition, Cont
   /// Creates a new variables definition.
   #[inline]
   pub const fn new(span: Span, variables: Container) -> Self {
-    Self { span, variables, _v: PhantomData }
+    Self {
+      span,
+      variables,
+      _v: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire variables definition.

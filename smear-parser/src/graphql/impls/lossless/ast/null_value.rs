@@ -1,13 +1,12 @@
 use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext,
-  span::Spanned,
-  utils::cmp::Equivalent,
+  Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned, utils::cmp::Equivalent,
 };
 
-use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
-use crate::graphql::Expectation;
-use crate::value::NullValue;
+use crate::{
+  graphql::Expectation,
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken},
+  value::NullValue,
+};
 
 use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 
@@ -18,7 +17,8 @@ pub fn parse_null_value<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   LosslessToken<S>: FromLogos<'inp>,
-  LosslessLexer<'inp, S>: Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  LosslessLexer<'inp, S>:
+    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
   str: Equivalent<S>,

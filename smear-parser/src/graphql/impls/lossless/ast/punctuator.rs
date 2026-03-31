@@ -1,12 +1,14 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
+use smear_lexer::{
+  punctuator::*,
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
+  },
 };
-use smear_lexer::punctuator::*;
 
-use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
-use crate::graphql::Expectation;
+use crate::{
+  graphql::Expectation,
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken},
+};
 
 use super::{LosslessTokenError, LosslessTokenErrors, next_token};
 

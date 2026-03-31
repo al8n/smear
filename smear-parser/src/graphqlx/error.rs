@@ -79,11 +79,15 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// An unexpected end was found in an object type extension.
   UnexpectedEndOfObjectExtension(smear_lexer::tokit::error::UnexpectedEnd<ObjectTypeExtensionHint>),
   /// An unexpected end was found in an interface type extension.
-  UnexpectedEndOfInterfaceExtension(smear_lexer::tokit::error::UnexpectedEnd<InterfaceTypeExtensionHint>),
+  UnexpectedEndOfInterfaceExtension(
+    smear_lexer::tokit::error::UnexpectedEnd<InterfaceTypeExtensionHint>,
+  ),
   /// An unexpected end was found in an enum type extension.
   UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd<EnumTypeExtensionHint>),
   /// An unexpected end was found in an input object type extension.
-  UnexpectedEndOfInputObjectExtension(smear_lexer::tokit::error::UnexpectedEnd<InputObjectTypeExtensionHint>),
+  UnexpectedEndOfInputObjectExtension(
+    smear_lexer::tokit::error::UnexpectedEnd<InputObjectTypeExtensionHint>,
+  ),
   /// An unexpected end was found in a union type extension.
   UnexpectedEndOfUnionExtension(smear_lexer::tokit::error::UnexpectedEnd<UnionTypeExtensionHint>),
   /// An unexpected end was found in a schema extension.
@@ -122,7 +126,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
+      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        0,
         CowStr::from_static("variable value"),
         hint,
       )),
@@ -146,10 +151,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfObjectFieldValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("object field value"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfObjectFieldValue(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("object field value"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -161,10 +169,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfObjectExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("object type extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfObjectExtension(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("object type extension"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -176,10 +187,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfInterfaceExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("interface type extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfInterfaceExtension(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("interface type extension"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -188,7 +202,8 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
+      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        0,
         CowStr::from_static("enum type extension"),
         hint,
       )),
@@ -203,10 +218,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   ) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfInputObjectExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("input object type extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfInputObjectExtension(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("input object type extension"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -215,10 +233,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfUnionExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("union type extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfUnionExtension(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("union type extension"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -227,10 +248,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfSchemaExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(0,
-        CowStr::from_static("schema extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfSchemaExtension(
+        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("schema extension"),
+          hint,
+        ),
+      ),
     )
   }
 

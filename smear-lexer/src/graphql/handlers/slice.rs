@@ -5,8 +5,8 @@ use crate::{
 use tokit::{
   SimpleSpan,
   logos::{Lexer, Logos, Source},
-  utils::{Lexeme, PositionedChar},
   state::tracker::Limiter,
+  utils::{Lexeme, PositionedChar},
 };
 
 type Span = SimpleSpan;

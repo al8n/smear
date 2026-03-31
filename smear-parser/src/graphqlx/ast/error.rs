@@ -5,10 +5,7 @@ use crate::{
     ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
   },
 };
-use smear_lexer::tokit::{
-  SimpleSpan as Span,
-  utils::IntoComponents,
-};
+use smear_lexer::tokit::{SimpleSpan as Span, utils::IntoComponents};
 use smear_scaffold::error::{
   InvalidFragmentTypePath, UnclosedBraceError, UnclosedBracketError,
   UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,
@@ -16,8 +13,8 @@ use smear_scaffold::error::{
   UnexpectedEndOfSchemaExtensionError, UnexpectedEndOfUnionExtensionError,
 };
 
-use crate::ident::Ident;
 use super::*;
+use crate::ident::Ident;
 
 impl<S> ParseVariableValueError<Ident<S>> for SyntacticTokenError<S> {
   #[inline]
@@ -38,10 +35,8 @@ impl<S> ParseVariableValueError<Ident<S>> for SyntacticTokenError<S> {
 impl<S> ParseVariableValueError<Ident<S>> for SyntacticTokenErrors<S> {
   #[inline]
   fn missing_dollar_token(name: Ident<S>, span: Span) -> Self {
-    <SyntacticTokenError<S> as ParseVariableValueError<Ident<S>>>::missing_dollar_token(
-      name, span,
-    )
-    .into()
+    <SyntacticTokenError<S> as ParseVariableValueError<Ident<S>>>::missing_dollar_token(name, span)
+      .into()
   }
 
   #[inline]

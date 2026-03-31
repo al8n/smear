@@ -1,12 +1,11 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
 
 /// Represents a single root operation type definition that maps an operation type to a GraphQL Object type.
 ///
@@ -67,7 +66,11 @@ impl<Name, OperationType> RootOperationTypeDefinition<Name, OperationType> {
   /// Creates a new root operation type definition.
   #[inline]
   pub const fn new(span: Span, operation_type: OperationType, name: Name) -> Self {
-    Self { span, operation_type, name }
+    Self {
+      span,
+      operation_type,
+      name,
+    }
   }
 
   /// Returns a reference to the span covering the entire root operation type definition.
@@ -181,7 +184,11 @@ impl<RootOperationTypeDefinition, Container>
   /// Creates a new root operation types definition.
   #[inline]
   pub const fn new(span: Span, root_operation_types: Container) -> Self {
-    Self { span, root_operation_types, _m: PhantomData }
+    Self {
+      span,
+      root_operation_types,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire root operation types definition.

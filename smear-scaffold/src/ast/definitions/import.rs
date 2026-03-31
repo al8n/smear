@@ -1,13 +1,12 @@
+use core::marker::PhantomData;
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-use core::marker::PhantomData;
 use std::vec::Vec;
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-
 
 use super::Path;
 

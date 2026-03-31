@@ -1,11 +1,11 @@
 use tokit::{
-  logos::{Logos, Lexer, Source},
   error::{UnexpectedEnd, UnexpectedLexeme},
-  utils::Lexeme,
+  logos::{Lexer, Logos, Source},
   state::{
     recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
     tracker::{LimitExceeded, Limiter},
   },
+  utils::Lexeme,
 };
 
 use crate::{

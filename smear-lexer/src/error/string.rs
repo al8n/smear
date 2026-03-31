@@ -1,7 +1,11 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use tokit::{SimpleSpan, error::{UnexpectedEnd, UnexpectedLexeme}, utils::{Lexeme, PositionedChar, CowStr}};
+use tokit::{
+  SimpleSpan,
+  error::{UnexpectedEnd, UnexpectedLexeme},
+  utils::{CowStr, Lexeme, PositionedChar},
+};
 
 type Span = SimpleSpan;
 
@@ -639,7 +643,8 @@ impl<Char> StringError<Char> {
   /// Creates an unterminated string error.
   #[inline]
   pub const fn unterminated_inline_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(0,
+    Self::Unterminated(UnexpectedEnd::with_name(
+      0,
       CowStr::from_static("string value"),
       LitStrDelimiterHint::Quote,
     ))
@@ -648,7 +653,8 @@ impl<Char> StringError<Char> {
   /// Creates an unterminated block string error.
   #[inline]
   pub const fn unterminated_block_string() -> Self {
-    Self::Unterminated(UnexpectedEnd::with_name(0,
+    Self::Unterminated(UnexpectedEnd::with_name(
+      0,
       CowStr::from_static("string value"),
       LitStrDelimiterHint::TripleQuote,
     ))

@@ -2,6 +2,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(warnings, missing_docs)]
+#![allow(clippy::result_large_err)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc as std;

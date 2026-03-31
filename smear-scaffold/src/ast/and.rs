@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 /// A simple pair structure representing two sequentially parsed elements.

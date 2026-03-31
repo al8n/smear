@@ -20,14 +20,11 @@ mod str;
 pub type SyntacticLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
 
 /// The error data type for lexing based on syntactic token with `char` source.
-pub type SyntacticLexerErrorData =
-  error::LexerErrorData<char, RecursionLimitExceeded>;
+pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic token with `char` source.
-pub type SyntacticLexerError =
-  error::LexerError<char, RecursionLimitExceeded>;
+pub type SyntacticLexerError = error::LexerError<char, RecursionLimitExceeded>;
 /// A collection of errors for syntactic token with `char` source.
-pub type SyntacticLexerErrors =
-  error::LexerErrors<char, RecursionLimitExceeded>;
+pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
 
 /// A syntactic token for GraphQLx lexing that only includes syntactically significant tokens.
 ///

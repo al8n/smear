@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 /// Represents a named GraphQL type with optional non-null modifier.
@@ -80,7 +80,11 @@ impl<Name> NamedType<Name> {
   /// Creates a new named type.
   #[inline]
   pub const fn new(span: Span, name: Name, required: bool) -> Self {
-    Self { span, name, required }
+    Self {
+      span,
+      name,
+      required,
+    }
   }
 
   /// Returns a reference to the span covering the entire named type.

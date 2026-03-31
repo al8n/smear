@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 /// Represents a GraphQL input value definition.
@@ -150,8 +150,20 @@ impl<Name, Type, DefaultValue, Directives>
 {
   /// Creates a new input value definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, ty: Type, default_value: Option<DefaultValue>, directives: Option<Directives>) -> Self {
-    Self { span, name, ty, default_value, directives }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    ty: Type,
+    default_value: Option<DefaultValue>,
+    directives: Option<Directives>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      ty,
+      default_value,
+      directives,
+    }
   }
 
   /// Returns a reference to the span covering the entire input value definition.

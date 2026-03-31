@@ -1,12 +1,11 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 use core::marker::PhantomData;
 use std::vec::Vec;
-
 
 /// Represents a single field definition in a GraphQL object, interface, or input type.
 ///
@@ -118,8 +117,20 @@ impl<Name, Arguments, Type, Directives> IntoComponents
 impl<Name, Arguments, Type, Directives> FieldDefinition<Name, Arguments, Type, Directives> {
   /// Creates a new field definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, arguments_definition: Option<Arguments>, ty: Type, directives: Option<Directives>) -> Self {
-    Self { span, name, arguments_definition, ty, directives }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    arguments_definition: Option<Arguments>,
+    ty: Type,
+    directives: Option<Directives>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      arguments_definition,
+      ty,
+      directives,
+    }
   }
 
   /// Returns a reference to the span covering the entire field definition.
@@ -267,7 +278,11 @@ impl<FieldDefinition, Container> FieldsDefinition<FieldDefinition, Container> {
   /// Creates a new fields definition.
   #[inline]
   pub const fn new(span: Span, fields: Container) -> Self {
-    Self { span, fields, _m: PhantomData }
+    Self {
+      span,
+      fields,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire fields definition.

@@ -1,8 +1,8 @@
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
 };
-use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 /// Type definition for GraphQL specification.
 #[derive(Debug, Clone, IsVariant, Unwrap, TryUnwrap)]

@@ -1,9 +1,9 @@
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 /// Represents a named GraphQL operation definition with explicit operation type and optional metadata.
 ///
@@ -143,7 +143,14 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet>
     directives: Option<Directives>,
     selection_set: SelectionSet,
   ) -> Self {
-    Self { span, operation_type, name, variable_definitions, directives, selection_set }
+    Self {
+      span,
+      operation_type,
+      name,
+      variable_definitions,
+      directives,
+      selection_set,
+    }
   }
 
   /// Returns a reference to the span covering the entire operation definition.

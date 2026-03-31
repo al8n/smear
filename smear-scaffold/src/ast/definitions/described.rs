@@ -1,7 +1,7 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
 
 /// A node with an optional description.
@@ -55,7 +55,11 @@ impl<T, Description> Described<T, Description> {
   /// Creates a new described node with the given span, optional description, and node.
   #[inline]
   pub const fn new(span: Span, description: Option<Description>, node: T) -> Self {
-    Self { span, description, node }
+    Self {
+      span,
+      description,
+      node,
+    }
   }
 
   /// Returns the span of the described node.

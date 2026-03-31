@@ -1,12 +1,13 @@
+use core::marker::PhantomData;
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, sdl_display::{DisplayCompact, DisplayPretty}},
+  utils::{
+    IntoComponents,
+    sdl_display::{DisplayCompact, DisplayPretty},
+  },
 };
-use core::marker::PhantomData;
 use std::vec::Vec;
-
-
 
 /// Represents a collection of interfaces that a GraphQL type or interface implements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,7 +21,11 @@ impl<Name, Container> ImplementInterfaces<Name, Container> {
   /// Creates a new implements interfaces clause.
   #[inline]
   pub const fn new(span: Span, interfaces: Container) -> Self {
-    Self { span, interfaces, _m: PhantomData }
+    Self {
+      span,
+      interfaces,
+      _m: PhantomData,
+    }
   }
 
   /// Returns a reference to the span covering the entire implements clause.
@@ -185,8 +190,20 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   /// Creates a new interface type definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, implements: Option<ImplementInterfaces>, directives: Option<Directives>, fields_definition: Option<FieldsDefinition>) -> Self {
-    Self { span, name, implements, directives, fields_definition }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    implements: Option<ImplementInterfaces>,
+    directives: Option<Directives>,
+    fields_definition: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      implements,
+      directives,
+      fields_definition,
+    }
   }
 
   /// Returns a reference to the span covering the entire interface definition.
@@ -425,7 +442,11 @@ impl<Name, ImplementInterfaces, Directives, FieldsDefinition>
 {
   /// Creates a new interface type extension.
   #[inline]
-  pub const fn new(span: Span, name: Name, data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>) -> Self {
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InterfaceTypeExtensionData<ImplementInterfaces, Directives, FieldsDefinition>,
+  ) -> Self {
     Self { span, name, data }
   }
 

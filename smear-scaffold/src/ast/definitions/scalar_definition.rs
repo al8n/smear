@@ -1,9 +1,8 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-
 
 /// Represents a GraphQL scalar type definition that defines custom data types with specific serialization behavior.
 ///
@@ -135,7 +134,11 @@ impl<Name, Directives> ScalarTypeDefinition<Name, Directives> {
   /// Creates a new scalar type definition.
   #[inline]
   pub const fn new(span: Span, name: Name, directives: Option<Directives>) -> Self {
-    Self { span, name, directives }
+    Self {
+      span,
+      name,
+      directives,
+    }
   }
 
   /// Returns a reference to the span covering the entire scalar definition.
@@ -271,7 +274,11 @@ impl<Name, Directives> ScalarTypeExtension<Name, Directives> {
   /// Creates a new scalar type extension.
   #[inline]
   pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
-    Self { span, name, directives }
+    Self {
+      span,
+      name,
+      directives,
+    }
   }
 
   /// Returns a reference to the span covering the entire scalar extension.

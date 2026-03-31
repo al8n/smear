@@ -1,9 +1,8 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-
 
 /// Represents a GraphQL schema definition that describes the structure and capabilities of a GraphQL service.
 ///
@@ -139,8 +138,16 @@ impl<Directives, RootOperationTypesDefinition>
 {
   /// Creates a new schema definition.
   #[inline]
-  pub const fn new(span: Span, directives: Option<Directives>, operation_type_definitions: RootOperationTypesDefinition) -> Self {
-    Self { span, directives, operation_type_definitions }
+  pub const fn new(
+    span: Span,
+    directives: Option<Directives>,
+    operation_type_definitions: RootOperationTypesDefinition,
+  ) -> Self {
+    Self {
+      span,
+      directives,
+      operation_type_definitions,
+    }
   }
 
   /// Returns a reference to the span covering the entire schema definition.
@@ -513,7 +520,10 @@ impl<Directives, RootOperationTypesDefinition>
 {
   /// Creates a new schema extension.
   #[inline]
-  pub const fn new(span: Span, content: SchemaExtensionData<Directives, RootOperationTypesDefinition>) -> Self {
+  pub const fn new(
+    span: Span,
+    content: SchemaExtensionData<Directives, RootOperationTypesDefinition>,
+  ) -> Self {
     Self { span, content }
   }
 

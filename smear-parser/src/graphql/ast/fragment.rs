@@ -1,10 +1,12 @@
-use smear_lexer::tokit::{
-  lexer::FromLogos,
-  Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
-  span::Spanned,
-  utils::{IntoComponents, cmp::Equivalent},
+use smear_lexer::{
+  graphql::syntactic::SyntacticLexerErrors,
+  tokit::{
+    Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+    lexer::FromLogos,
+    span::Spanned,
+    utils::{IntoComponents, cmp::Equivalent},
+  },
 };
-use smear_lexer::graphql::syntactic::SyntacticLexerErrors;
 use smear_scaffold::ast::{self as scaffold, FragmentName};
 
 use super::{Expectation, Name, SyntacticTokenError, SyntacticTokenErrors, next_token};
@@ -20,7 +22,8 @@ pub fn parse_fragment_name<'inp, S, Ctx, Lang>(
 where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp>,
-  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+  SyntacticLexer<'inp, S>:
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,

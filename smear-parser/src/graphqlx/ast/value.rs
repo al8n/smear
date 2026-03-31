@@ -1,23 +1,20 @@
-use crate::{
-  hints::VariableValueHint, ident::Ident,
-};
+use crate::{hints::VariableValueHint, ident::Ident};
 
-use super::{
-  DefaultVec, Expectation, SyntacticTokenError, SyntacticTokenErrors,
-  next_token,
-};
+use super::{DefaultVec, Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
 use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::tokit::{
-  lexer::FromLogos,
   Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  lexer::FromLogos,
   span::{AsSpan, IntoSpan, Spanned},
   utils::cmp::Equivalent,
 };
+use smear_scaffold::{
+  ast::{self as scaffold, Path},
+  error::{UnclosedBraceError, UnclosedBracketError},
+};
 use std::vec::Vec;
-use smear_scaffold::ast::{self as scaffold, Path};
-use smear_scaffold::error::{UnclosedBraceError, UnclosedBracketError};
 
 pub use boolean_value::*;
 pub use enum_value::*;
@@ -155,12 +152,8 @@ where
   match token {
     SyntacticToken::LitFloat(raw) => Ok(InputValue::Float(FloatValue::new(span, raw))),
     SyntacticToken::LitInt(raw) => Ok(InputValue::Int(IntValue::new(span, raw))),
-    SyntacticToken::LitInlineStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
-    SyntacticToken::LitBlockStr(raw) => {
-      Ok(InputValue::String(StringValue::new(span, raw.into())))
-    }
+    SyntacticToken::LitInlineStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
+    SyntacticToken::LitBlockStr(raw) => Ok(InputValue::String(StringValue::new(span, raw.into()))),
     SyntacticToken::PathSeparator => {
       // Parse path segments after ::
       let mut segments = Vec::new();
@@ -168,7 +161,10 @@ where
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::PathSeparator, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::PathSeparator,
+            ..
+          }) => {
             segments.push(parse_name(input)?);
           }
           _ => {
@@ -178,7 +174,9 @@ where
         }
       }
       let full_span = Span::new(span.start(), input.span_since(&input.cursor()).end());
-      Ok(InputValue::Enum(EnumValue::new(Path::new(full_span, segments, true))))
+      Ok(InputValue::Enum(EnumValue::new(Path::new(
+        full_span, segments, true,
+      ))))
     }
     SyntacticToken::Identifier(name) => match () {
       () if "true".equivalent(&name) => Ok(InputValue::Boolean(BooleanValue::new(span, true))),
@@ -187,12 +185,18 @@ where
       () if "set".equivalent(&name) => {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::LBrace,
+            ..
+          }) => {
             let mut values = Vec::new();
             loop {
               let saved2 = input.save();
               match next_token(input) {
-                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                Ok(Spanned {
+                  data: SyntacticToken::RBrace,
+                  ..
+                }) => {
                   let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
                   return Ok(InputValue::Set(Set::new(full_span, values)));
                 }
@@ -208,19 +212,27 @@ where
           }
           _ => {
             input.restore(saved);
-            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(
+              span, name,
+            )))))
           }
         }
-      },
+      }
       () if "map".equivalent(&name) => {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::LBrace,
+            ..
+          }) => {
             let mut entries = Vec::new();
             loop {
               let saved2 = input.save();
               match next_token(input) {
-                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                Ok(Spanned {
+                  data: SyntacticToken::RBrace,
+                  ..
+                }) => {
                   let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
                   return Ok(InputValue::Map(Map::new(full_span, entries)));
                 }
@@ -241,11 +253,15 @@ where
           }
           _ => {
             input.restore(saved);
-            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+            Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(
+              span, name,
+            )))))
           }
         }
-      },
-      _ => Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name))))),
+      }
+      _ => Ok(InputValue::Enum(EnumValue::new(Path::from(Ident::new(
+        span, name,
+      ))))),
     },
     SyntacticToken::Dollar => {
       let name = parse_name(input)?;
@@ -258,7 +274,10 @@ where
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::RBrace,
+            ..
+          }) => {
             let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
             return Ok(InputValue::Object(scaffold::Object::new(
               Span::new(span.start(), full_span.end()),
@@ -274,9 +293,10 @@ where
             fields.push(scaffold::ObjectField::new(field_span, field_name, value));
           }
           Err(_) => {
-            return Err(SyntacticTokenErrors::unclosed_brace(
-              Span::new(span.start(), input.span_since(&input.cursor()).end()),
-            ));
+            return Err(SyntacticTokenErrors::unclosed_brace(Span::new(
+              span.start(),
+              input.span_since(&input.cursor()).end(),
+            )));
           }
         }
       }
@@ -287,7 +307,10 @@ where
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::RBracket,
+            ..
+          }) => {
             let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
             return Ok(InputValue::List(scaffold::List::new(
               Span::new(span.start(), full_span.end()),
@@ -299,9 +322,10 @@ where
             elements.push(parse_input_value(input)?);
           }
           Err(_) => {
-            return Err(SyntacticTokenErrors::unclosed_bracket(
-              Span::new(span.start(), input.span_since(&input.cursor()).end()),
-            ));
+            return Err(SyntacticTokenErrors::unclosed_bracket(Span::new(
+              span.start(),
+              input.span_since(&input.cursor()).end(),
+            )));
           }
         }
       }
@@ -405,7 +429,10 @@ where
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::PathSeparator, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::PathSeparator,
+            ..
+          }) => {
             segments.push(parse_name(input)?);
           }
           _ => {
@@ -415,21 +442,31 @@ where
         }
       }
       let full_span = Span::new(span.start(), input.span_since(&input.cursor()).end());
-      Ok(ConstInputValue::Enum(EnumValue::new(Path::new(full_span, segments, true))))
+      Ok(ConstInputValue::Enum(EnumValue::new(Path::new(
+        full_span, segments, true,
+      ))))
     }
     SyntacticToken::Identifier(name) => match () {
       () if "true".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, true))),
-      () if "false".equivalent(&name) => Ok(ConstInputValue::Boolean(BooleanValue::new(span, false))),
+      () if "false".equivalent(&name) => {
+        Ok(ConstInputValue::Boolean(BooleanValue::new(span, false)))
+      }
       () if "null".equivalent(&name) => Ok(ConstInputValue::Null(NullValue::new(span, name))),
       () if "set".equivalent(&name) => {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::LBrace,
+            ..
+          }) => {
             let mut values = Vec::new();
             loop {
               let saved2 = input.save();
               match next_token(input) {
-                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                Ok(Spanned {
+                  data: SyntacticToken::RBrace,
+                  ..
+                }) => {
                   let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
                   return Ok(ConstInputValue::Set(ConstSet::new(full_span, values)));
                 }
@@ -445,19 +482,27 @@ where
           }
           _ => {
             input.restore(saved);
-            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(
+              Ident::new(span, name),
+            ))))
           }
         }
-      },
+      }
       () if "map".equivalent(&name) => {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::LBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::LBrace,
+            ..
+          }) => {
             let mut entries = Vec::new();
             loop {
               let saved2 = input.save();
               match next_token(input) {
-                Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+                Ok(Spanned {
+                  data: SyntacticToken::RBrace,
+                  ..
+                }) => {
                   let full_span = Span::new(span.start(), input.span_since(&saved2.cursor()).end());
                   return Ok(ConstInputValue::Map(ConstMap::new(full_span, entries)));
                 }
@@ -477,18 +522,25 @@ where
           }
           _ => {
             input.restore(saved);
-            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name)))))
+            Ok(ConstInputValue::Enum(EnumValue::new(Path::from(
+              Ident::new(span, name),
+            ))))
           }
         }
-      },
-      _ => Ok(ConstInputValue::Enum(EnumValue::new(Path::from(Ident::new(span, name))))),
+      }
+      _ => Ok(ConstInputValue::Enum(EnumValue::new(Path::from(
+        Ident::new(span, name),
+      )))),
     },
     SyntacticToken::LBrace => {
       let mut fields = Vec::new();
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::RBrace, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::RBrace,
+            ..
+          }) => {
             let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
             return Ok(ConstInputValue::Object(scaffold::Object::new(
               Span::new(span.start(), full_span.end()),
@@ -504,9 +556,10 @@ where
             fields.push(scaffold::ObjectField::new(field_span, field_name, value));
           }
           Err(_) => {
-            return Err(SyntacticTokenErrors::unclosed_brace(
-              Span::new(span.start(), input.span_since(&input.cursor()).end()),
-            ));
+            return Err(SyntacticTokenErrors::unclosed_brace(Span::new(
+              span.start(),
+              input.span_since(&input.cursor()).end(),
+            )));
           }
         }
       }
@@ -516,7 +569,10 @@ where
       loop {
         let saved = input.save();
         match next_token(input) {
-          Ok(Spanned { data: SyntacticToken::RBracket, .. }) => {
+          Ok(Spanned {
+            data: SyntacticToken::RBracket,
+            ..
+          }) => {
             let full_span = Span::new(span.start(), input.span_since(&saved.cursor()).end());
             return Ok(ConstInputValue::List(scaffold::List::new(
               Span::new(span.start(), full_span.end()),
@@ -528,13 +584,16 @@ where
             elements.push(parse_const_input_value(input)?);
           }
           Err(_) => {
-            return Err(SyntacticTokenErrors::unclosed_bracket(
-              Span::new(span.start(), input.span_since(&input.cursor()).end()),
-            ));
+            return Err(SyntacticTokenErrors::unclosed_bracket(Span::new(
+              span.start(),
+              input.span_since(&input.cursor()).end(),
+            )));
           }
         }
       }
     }
-    tok => Err(SyntacticTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into()),
+    tok => {
+      Err(SyntacticTokenError::unexpected_token(tok, Expectation::ConstInputValue, span).into())
+    }
   }
 }

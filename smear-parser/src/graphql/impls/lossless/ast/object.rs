@@ -1,19 +1,21 @@
 use smear_lexer::tokit::{
-  lexer::FromLogos,
   Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
+  lexer::FromLogos,
   span::{AsSpan, IntoSpan, Spanned},
   utils::IntoComponents,
 };
 
-use crate::lexer::graphql::lossless::{LosslessLexer, LosslessToken};
-use crate::graphql::ast::Name;
-use crate::graphql::Expectation;
+use crate::{
+  graphql::{Expectation, ast::Name},
+  lexer::graphql::lossless::{LosslessLexer, LosslessToken},
+};
 use smear_lexer::punctuator::Colon;
 use smear_scaffold::ast as scaffold;
 
 use super::{
-  LosslessTokenError, LosslessTokenErrors, next_token,
+  LosslessTokenError, LosslessTokenErrors,
   name::parse_name,
+  next_token,
   padded::{Padded, PaddedLeft, PaddedRight, parse_padded, parse_padded_left, parse_padded_right},
   punctuator::parse_colon,
 };
@@ -22,7 +24,8 @@ use super::{
 ///
 /// Uses a custom container type to store `Padded<ObjectField<V, S>, S>` elements
 /// rather than the default `scaffold::ObjectField`.
-pub type CstObject<V, S> = scaffold::Object<Name<S>, V, std::vec::Vec<Padded<ObjectField<V, S>, S>>>;
+pub type CstObject<V, S> =
+  scaffold::Object<Name<S>, V, std::vec::Vec<Padded<ObjectField<V, S>, S>>>;
 
 /// A single field within a GraphQL input object literal (CST variant with trivia).
 ///
@@ -114,7 +117,9 @@ impl<InputValue, S> ObjectField<InputValue, S> {
 /// Parses a single object field from the lossless input.
 pub fn parse_object_field<'inp, S, Ctx, Lang, V>(
   input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
-  parse_value: impl FnOnce(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<V, LosslessTokenErrors<S>>,
+  parse_value: impl FnOnce(
+    &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  ) -> Result<V, LosslessTokenErrors<S>>,
 ) -> Result<ObjectField<V, S>, LosslessTokenErrors<S>>
 where
   S: Clone,
@@ -138,7 +143,9 @@ where
 /// with trivia preserved around each field.
 pub fn parse_object<'inp, S, Ctx, Lang, V>(
   input: &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
-  parse_value: impl Fn(&mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>) -> Result<V, LosslessTokenErrors<S>>,
+  parse_value: impl Fn(
+    &mut InputRef<'inp, '_, LosslessLexer<'inp, S>, Ctx, Lang>,
+  ) -> Result<V, LosslessTokenErrors<S>>,
 ) -> Result<CstObject<V, S>, LosslessTokenErrors<S>>
 where
   S: Clone,
@@ -149,10 +156,15 @@ where
   Lang: ?Sized,
 {
   // Parse opening brace
-  let Spanned { span: open_span, data: token } = next_token(input)?;
+  let Spanned {
+    span: open_span,
+    data: token,
+  } = next_token(input)?;
   match token {
     LosslessToken::LBrace => {}
-    tok => return Err(LosslessTokenError::unexpected_token(tok, Expectation::LBrace, open_span).into()),
+    tok => {
+      return Err(LosslessTokenError::unexpected_token(tok, Expectation::LBrace, open_span).into());
+    }
   }
 
   let mut fields = std::vec::Vec::new();
@@ -161,7 +173,10 @@ where
     // Check for closing brace
     let saved = input.save();
     match next_token(input) {
-      Ok(Spanned { data: LosslessToken::RBrace, .. }) => {
+      Ok(Spanned {
+        data: LosslessToken::RBrace,
+        ..
+      }) => {
         let full_span = Span::new(open_span.start(), input.span_since(&saved.cursor()).end());
         return Ok(scaffold::Object::new(full_span, fields));
       }

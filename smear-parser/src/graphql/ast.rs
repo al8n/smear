@@ -8,14 +8,14 @@ use core::marker::PhantomData;
 
 use smear_lexer::tokit::{
   Emitter, InputRef, Lexer, Parse, ParseContext, Parser, SimpleSpan as Span,
-  error::token::UnexpectedTokenOf,
-  lexer::FromLogos,
-  span::Spanned,
+  error::token::UnexpectedTokenOf, lexer::FromLogos, span::Spanned,
   state::recursion_tracker::RecursionLimitExceeded,
 };
 
-use super::Expectation;
-use super::error::{Error, Errors};
+use super::{
+  Expectation,
+  error::{Error, Errors},
+};
 use crate::lexer::graphql::syntactic::{
   SyntacticLexer, SyntacticLexerErrors, SyntacticToken, SyntacticTokenKind,
 };
@@ -71,11 +71,9 @@ impl From<SyntacticTokenKind> for Expectation {
 }
 
 /// The error type used for the AST parser implementation.
-pub type SyntacticTokenError<S> =
-  Error<S, SyntacticToken<S>, char, Expectation>;
+pub type SyntacticTokenError<S> = Error<S, SyntacticToken<S>, char, Expectation>;
 /// The errors type used for the AST parser implementation.
-pub type SyntacticTokenErrors<S> =
-  Errors<S, SyntacticToken<S>, char, Expectation>;
+pub type SyntacticTokenErrors<S> = Errors<S, SyntacticToken<S>, char, Expectation>;
 
 /// The default container type used for collections in the AST.
 pub type DefaultVec<T> = Vec<T>;
@@ -99,8 +97,8 @@ where
   match input.next()? {
     Some(spanned) => Ok(spanned),
     None => {
-      let span = input.span().clone();
-      Err(SyntacticTokenError::unexpected_end_of_input(span).into())
+      let span = input.span();
+      Err(SyntacticTokenError::unexpected_end_of_input(*span).into())
     }
   }
 }
@@ -144,12 +142,14 @@ impl<S> From<SyntacticLexerErrors> for SyntacticTokenErrors<S> {
     SyntacticTokenError::new(
       Span::new(0, 0),
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
-    ).into()
+    )
+    .into()
   }
 }
 
 // Implement From<UnexpectedTokenOf> for SyntacticTokenErrors to satisfy FromEmitterError.
-impl<'inp, S: Clone> From<UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>> for SyntacticTokenErrors<S>
+impl<'inp, S: Clone> From<UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>>
+  for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
@@ -169,13 +169,16 @@ where
 
 // Implement From<FullContainer> for SyntacticTokenErrors to satisfy FullContainerEmitter.
 // With Vec-based containers this error should never actually be triggered in practice.
-impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>> for SyntacticTokenErrors<S> {
+impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>>
+  for SyntacticTokenErrors<S>
+{
   #[inline]
   fn from(err: smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>) -> Self {
     SyntacticTokenError::new(
       *err.span(),
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("container full")),
-    ).into()
+    )
+    .into()
   }
 }
 
@@ -185,7 +188,8 @@ impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span
 // compiler can resolve `<SyntacticToken<S> as Token>::Error`. We add an explicit
 // `SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>`
 // bound so the blanket can kick in.
-impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromSeparatedError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromSeparatedError<'inp, SyntacticLexer<'inp, S>>
+  for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
@@ -201,7 +205,8 @@ where
     SyntacticTokenError::new(
       span,
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("missing separator")),
-    ).into()
+    )
+    .into()
   }
 
   #[inline]
@@ -213,13 +218,16 @@ where
     SyntacticTokenError::new(
       span,
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("missing element")),
-    ).into()
+    )
+    .into()
   }
 }
 
 // Implement FromUnexpectedTrailingSeparatorError for SyntacticTokenErrors.
 // Required by the `allow_leading` combinator variant.
-impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromUnexpectedTrailingSeparatorError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+impl<'inp, S: Clone>
+  smear_lexer::tokit::emitter::FromUnexpectedTrailingSeparatorError<'inp, SyntacticLexer<'inp, S>>
+  for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
@@ -240,7 +248,9 @@ where
 
 // Implement FromUnexpectedLeadingSeparatorError for SyntacticTokenErrors.
 // Required when the `UnexpectedLeadingSeparatorEmitter` bound is present on emitters.
-impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromUnexpectedLeadingSeparatorError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+impl<'inp, S: Clone>
+  smear_lexer::tokit::emitter::FromUnexpectedLeadingSeparatorError<'inp, SyntacticLexer<'inp, S>>
+  for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
@@ -260,19 +270,33 @@ where
 }
 
 // Implement From<TooFew> for SyntacticTokenErrors to satisfy TooFewEmitter (at_least).
-impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::TooFew<Span, Lang>> for SyntacticTokenErrors<S> {
+impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::TooFew<Span, Lang>>
+  for SyntacticTokenErrors<S>
+{
   #[inline]
   fn from(err: smear_lexer::tokit::error::syntax::TooFew<Span, Lang>) -> Self {
     SyntacticTokenError::new(
       err.span().clone(),
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("too few elements")),
-    ).into()
+    )
+    .into()
   }
 }
 
 /// Helper to run a parse function against a string input using tokit's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
-  f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
+  f: impl for<'c> FnMut(
+    &mut InputRef<
+      'inp,
+      'c,
+      SyntacticLexer<'inp, &'inp str>,
+      smear_lexer::tokit::FatalContext<
+        'inp,
+        SyntacticLexer<'inp, &'inp str>,
+        SyntacticTokenErrors<&'inp str>,
+      >,
+    >,
+  ) -> Result<O, SyntacticTokenErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, SyntacticTokenErrors<&'inp str>> {
   Parser::with_parser(f).parse_str(input)

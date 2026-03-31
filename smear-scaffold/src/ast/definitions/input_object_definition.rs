@@ -1,10 +1,8 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-
-
 
 /// Represents a complete input object type definition in GraphQL schema.
 ///
@@ -187,8 +185,18 @@ impl<Name, Directives, FieldsDefinition>
 {
   /// Creates a new input object type definition.
   #[inline]
-  pub const fn new(span: Span, name: Name, directives: Option<Directives>, fields: Option<FieldsDefinition>) -> Self {
-    Self { span, name, directives, fields }
+  pub const fn new(
+    span: Span,
+    name: Name,
+    directives: Option<Directives>,
+    fields: Option<FieldsDefinition>,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+      fields,
+    }
   }
 
   /// Returns a reference to the span covering the entire input object definition.
@@ -409,7 +417,11 @@ impl<Name, Directives, FieldsDefinition>
 {
   /// Creates a new input object type extension.
   #[inline]
-  pub const fn new(span: Span, name: Name, data: InputObjectTypeExtensionData<Directives, FieldsDefinition>) -> Self {
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InputObjectTypeExtensionData<Directives, FieldsDefinition>,
+  ) -> Self {
     Self { span, name, data }
   }
 

@@ -1,9 +1,8 @@
 use smear_lexer::tokit::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents},
+  utils::IntoComponents,
 };
-
 
 /// Represents a named fragment definition in GraphQL.
 ///
@@ -165,8 +164,20 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet>
 {
   /// Creates a new fragment definition.
   #[inline]
-  pub const fn new(span: Span, name: FragmentName, type_condition: TypeCondition, directives: Option<Directives>, selection_set: SelectionSet) -> Self {
-    Self { span, name, type_condition, directives, selection_set }
+  pub const fn new(
+    span: Span,
+    name: FragmentName,
+    type_condition: TypeCondition,
+    directives: Option<Directives>,
+    selection_set: SelectionSet,
+  ) -> Self {
+    Self {
+      span,
+      name,
+      type_condition,
+      directives,
+      selection_set,
+    }
   }
 
   /// Returns a reference to the span covering the entire fragment definition.
