@@ -97,29 +97,20 @@ macro_rules! continue_while_some {
   };
 }
 
-/// GraphQL reserved keywords that can follow a separated list and signal its end.
-const GRAPHQL_KEYWORDS: &[&str] = &[
-  "type", "interface", "union", "enum", "input", "scalar",
-  "extend", "schema", "directive", "fragment",
-  "query", "mutation", "subscription",
-  "implements", "repeatable", "on",
-];
-
 /// Decision closure: continue while the next token is a non-keyword identifier.
-/// Used for `separated_while` where elements are identifiers but the list
-/// must stop at GraphQL keywords that start the next definition.
+/// Uses `KeywordToken::is_keyword()` for fast dispatch — no string comparison.
 macro_rules! continue_while_name {
   () => {
     |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _: &mut _| {
       Ok(match peeked.pop_front() {
         None => Action::Stop,
-        Some(tok) => with_peeked_token!(&tok, |t| match t {
-          SyntacticToken::Identifier(s) => {
-            // Stop if this identifier is a GraphQL keyword
-            let is_kw = GRAPHQL_KEYWORDS.iter().any(|kw| kw.equivalent(s));
-            if is_kw { Action::Stop } else { Action::Continue }
+        Some(tok) => with_peeked_token!(&tok, |t| {
+          use smear_lexer::tokit::token::KeywordToken;
+          if t.kind() == SyntacticTokenKind::Identifier && !t.is_keyword() {
+            Action::Continue
+          } else {
+            Action::Stop
           }
-          _ => Action::Stop,
         }),
       })
     }
@@ -135,7 +126,7 @@ pub fn peek_kind<'inp, S, Ctx, Lang>(
 ) -> Option<SyntacticTokenKind>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -164,7 +155,7 @@ pub fn peek_keyword<'inp, S, Ctx, Lang>(
 ) -> bool
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -196,7 +187,7 @@ pub fn try_token<'inp, S, Ctx, Lang>(
 ) -> Result<Option<Spanned<SyntacticToken<S>>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -224,7 +215,7 @@ pub fn expect_token<'inp, S, Ctx, Lang>(
 ) -> Result<Spanned<SyntacticToken<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -257,7 +248,7 @@ pub fn parse_description<'inp, S, Ctx, Lang>(
 ) -> Result<Option<StringValue<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -292,7 +283,7 @@ pub fn parse_type<'inp, S, Ctx, Lang>(
 ) -> Result<Type<Name<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -347,7 +338,7 @@ pub fn parse_const_argument<'inp, S, Ctx, Lang>(
 ) -> Result<ConstArgument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -374,7 +365,7 @@ pub fn parse_const_arguments<'inp, S, Ctx, Lang>(
 ) -> Result<Option<ConstArguments<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -405,7 +396,7 @@ pub fn parse_const_directive<'inp, S, Ctx, Lang>(
 ) -> Result<ConstDirective<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -432,7 +423,7 @@ pub fn parse_const_directives<'inp, S, Ctx, Lang>(
 ) -> Result<Option<ConstDirectives<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -463,7 +454,7 @@ pub fn parse_argument<'inp, S, Ctx, Lang>(
 ) -> Result<Argument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -490,7 +481,7 @@ pub fn parse_arguments<'inp, S, Ctx, Lang>(
 ) -> Result<Option<Arguments<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -521,7 +512,7 @@ pub fn parse_directive<'inp, S, Ctx, Lang>(
 ) -> Result<Directive<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -548,7 +539,7 @@ pub fn parse_directives<'inp, S, Ctx, Lang>(
 ) -> Result<Option<Directives<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -585,7 +576,7 @@ pub fn parse_default_value<'inp, S, Ctx, Lang>(
 ) -> Result<Option<DefaultInputValue<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -613,7 +604,7 @@ pub fn parse_input_value_definition<'inp, S, Ctx, Lang>(
 ) -> Result<InputValueDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -643,7 +634,7 @@ pub fn parse_arguments_definition<'inp, S, Ctx, Lang>(
 ) -> Result<ArgumentsDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -672,7 +663,7 @@ pub fn parse_opt_arguments_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Option<ArgumentsDefinition<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -700,7 +691,7 @@ pub fn parse_field_definition<'inp, S, Ctx, Lang>(
 ) -> Result<FieldDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -730,7 +721,7 @@ pub fn parse_fields_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Option<FieldsDefinition<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -760,7 +751,7 @@ pub fn parse_input_fields_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Option<InputFieldsDefinition<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -792,7 +783,7 @@ pub fn parse_implements<'inp, S, Ctx, Lang>(
 ) -> Result<Option<scaffold::ImplementInterfaces<Name<S>>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -824,7 +815,7 @@ pub fn parse_union_members<'inp, S, Ctx, Lang>(
 ) -> Result<Option<scaffold::UnionMemberTypes<Name<S>>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -856,7 +847,7 @@ pub fn parse_directive_locations<'inp, S, Ctx, Lang>(
 ) -> Result<scaffold::DirectiveLocations<scaffold::Location>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -886,7 +877,7 @@ pub fn parse_enum_value_definition<'inp, S, Ctx, Lang>(
 ) -> Result<EnumValueDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -913,7 +904,7 @@ pub fn parse_enum_values_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Option<EnumValuesDefinition<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -945,7 +936,7 @@ pub fn parse_field<'inp, S, Ctx, Lang>(
 ) -> Result<scaffold::Field<Alias<S>, Name<S>, Arguments<S>, Directives<S>, SelectionSet<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -983,7 +974,7 @@ pub fn parse_selection<'inp, S, Ctx, Lang>(
 ) -> Result<Selection<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1070,7 +1061,7 @@ pub fn parse_selection_set<'inp, S, Ctx, Lang>(
 ) -> Result<SelectionSet<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1101,7 +1092,7 @@ pub fn parse_variable_value<'inp, S, Ctx, Lang>(
 ) -> Result<VariableValue<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1126,7 +1117,7 @@ pub fn parse_variable_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DescribedVariableDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1156,7 +1147,7 @@ pub fn parse_variables_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Option<VariablesDefinition<S>>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1188,7 +1179,7 @@ pub fn parse_root_operation_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<RootOperationTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1214,7 +1205,7 @@ pub fn parse_root_operation_types_definition<'inp, S, Ctx, Lang>(
 ) -> Result<RootOperationTypesDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1245,7 +1236,7 @@ pub fn parse_scalar_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<ScalarTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1271,7 +1262,7 @@ pub fn parse_object_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<ObjectTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1299,7 +1290,7 @@ pub fn parse_interface_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<InterfaceTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1327,7 +1318,7 @@ pub fn parse_union_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<UnionTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1354,7 +1345,7 @@ pub fn parse_enum_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<EnumTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1381,7 +1372,7 @@ pub fn parse_input_object_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<InputObjectTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1408,7 +1399,7 @@ pub fn parse_directive_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DirectiveDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1439,7 +1430,7 @@ pub fn parse_schema_definition<'inp, S, Ctx, Lang>(
 ) -> Result<SchemaDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1465,7 +1456,7 @@ pub fn parse_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<TypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1514,7 +1505,7 @@ pub fn parse_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<TypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1635,7 +1626,7 @@ pub fn parse_type_system_extension<'inp, S, Ctx, Lang>(
 ) -> Result<TypeSystemExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1694,7 +1685,7 @@ pub fn parse_operation_definition<'inp, S, Ctx, Lang>(
 ) -> Result<OperationDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1747,7 +1738,7 @@ pub fn parse_fragment_definition<'inp, S, Ctx, Lang>(
 ) -> Result<FragmentDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1778,7 +1769,7 @@ pub fn parse_executable_definition<'inp, S, Ctx, Lang>(
 ) -> Result<ExecutableDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1819,7 +1810,7 @@ pub fn parse_definition<'inp, S, Ctx, Lang>(
 ) -> Result<Definition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1873,7 +1864,7 @@ pub fn parse_definition_or_extension<'inp, S, Ctx, Lang>(
 ) -> Result<DefinitionOrExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1918,7 +1909,7 @@ pub fn parse_type_system_definition_or_extension<'inp, S, Ctx, Lang>(
 ) -> Result<TypeSystemDefinitionOrExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1965,7 +1956,7 @@ pub fn parse_document<'inp, S, Ctx, Lang>(
 ) -> Result<Document<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -1992,7 +1983,7 @@ pub fn parse_executable_document<'inp, S, Ctx, Lang>(
 ) -> Result<ExecutableDocument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2019,7 +2010,7 @@ pub fn parse_type_system_document<'inp, S, Ctx, Lang>(
 ) -> Result<TypeSystemDocument<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2048,7 +2039,7 @@ pub fn parse_described_object_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DescribedObjectTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2073,7 +2064,7 @@ pub fn parse_described_interface_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DescribedInterfaceTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2098,7 +2089,7 @@ pub fn parse_described_enum_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DescribedEnumTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2123,7 +2114,7 @@ pub fn parse_described_input_object_type_definition<'inp, S, Ctx, Lang>(
 ) -> Result<DescribedInputObjectTypeDefinition<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2148,7 +2139,7 @@ pub fn parse_object_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<ObjectTypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2183,7 +2174,7 @@ pub fn parse_interface_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<InterfaceTypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2218,7 +2209,7 @@ pub fn parse_enum_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<EnumTypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2252,7 +2243,7 @@ pub fn parse_input_object_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<InputObjectTypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2286,7 +2277,7 @@ pub fn parse_scalar_type_extension<'inp, S, Ctx, Lang>(
 ) -> Result<ScalarTypeExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
@@ -2314,7 +2305,7 @@ pub fn parse_schema_extension<'inp, S, Ctx, Lang>(
 ) -> Result<SchemaExtension<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp> + smear_lexer::tokit::token::KeywordToken<'inp>,
   <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
