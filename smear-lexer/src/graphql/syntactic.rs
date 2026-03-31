@@ -1,5 +1,6 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokit::state::recursion_tracker::RecursionLimitExceeded;
+use tokit::utils::cmp::Equivalent;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -9,6 +10,29 @@ use super::{
 use token::{token, token_impl};
 
 mod token;
+
+/// All GraphQL reserved keywords.
+const GRAPHQL_KEYWORDS: &[&str] = &[
+  "type", "interface", "union", "enum", "input", "scalar",
+  "extend", "schema", "directive", "fragment",
+  "query", "mutation", "subscription",
+  "implements", "repeatable", "on",
+  "true", "false", "null",
+];
+
+/// Check if a `SyntacticToken` is a GraphQL keyword, returning the keyword string if so.
+#[inline]
+pub fn graphql_keyword<S>(tok: &SyntacticToken<S>) -> Option<&'static str>
+where
+  str: tokit::utils::cmp::Equivalent<S>,
+{
+  match tok {
+    SyntacticToken::Identifier(s) => {
+      GRAPHQL_KEYWORDS.iter().copied().find(|kw| (*kw).equivalent(s))
+    }
+    _ => None,
+  }
+}
 
 #[cfg(test)]
 mod tests;

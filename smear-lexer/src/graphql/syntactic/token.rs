@@ -85,6 +85,12 @@ macro_rules! token_impl {
         }
       }
 
+      impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::KeywordToken<'b> for SyntacticToken<$slice> {
+        fn keyword(&self) -> Option<&'static str> {
+          $crate::graphql::syntactic::graphql_keyword(self)
+        }
+      }
+
       impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::PunctuatorToken<'b> for SyntacticToken<$slice> {
         fn pipe() -> Option<Self::Kind> { Some(SyntacticTokenKind::Pipe) }
         fn ampersand() -> Option<Self::Kind> { Some(SyntacticTokenKind::Ampersand) }
@@ -273,6 +279,12 @@ macro_rules! token_impl {
         #[inline(always)]
         fn is_trivia(&self) -> bool {
           false
+        }
+      }
+
+      impl<'b> tokit::token::KeywordToken<'b> for SyntacticToken<$slice> {
+        fn keyword(&self) -> Option<&'static str> {
+          $crate::graphql::syntactic::graphql_keyword(self)
         }
       }
 
