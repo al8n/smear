@@ -1,172 +1,70 @@
-/// Defines the punctuators.
-///
-/// # Examples
-/// ```rust
-/// use smear_lexer::punctuator;
-///
-/// punctuator! {
-///   (LAngle, "L_ANGLE", "<"),
-///   (RAngle, "R_ANGLE", ">"),
-/// }
-/// ```
-#[macro_export]
-macro_rules! punctuator {
-  ($(($name:ident, $syntax_tree_display: literal, $punct:literal)),+$(,)?) => {
-    paste::paste! {
-      $(
-        #[doc = "The `" $punct "` punctuator"]
-        #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash)]
-        pub struct $name {
-          span: $crate::__private::tokit::SimpleSpan,
-        }
+//! Punctuation tokens used in GraphQL and GraphQLx.
+//!
+//! These are type aliases over [`tokit::punct`] types, parameterised with
+//! [`SimpleSpan`](tokit::SimpleSpan) so they carry positional information
+//! without source content.
 
-        impl $name {
-          /// Creates a new punctuator with the given span.
-          #[inline(always)]
-          pub const fn new(span: $crate::__private::tokit::SimpleSpan) -> Self {
-            Self { span }
-          }
+use crate::__private::tokit;
 
-          #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
-          #[inline]
-          pub const fn raw() -> &'static ::core::primitive::str {
-            $punct
-          }
+/// The `@` punctuator.
+pub type At = tokit::punct::At<tokit::SimpleSpan>;
 
-          #[doc = "Returns the raw string literal of the `" $punct "` punctuator."]
-          #[inline]
-          pub const fn as_str(&self) -> &'static ::core::primitive::str {
-            Self::raw()
-          }
+/// The `&` punctuator.
+pub type Ampersand = tokit::punct::Ampersand<tokit::SimpleSpan>;
 
-          #[doc = "Returns the span of the `" $punct "` punctuator."]
-          #[inline]
-          pub const fn span(&self) -> &$crate::__private::tokit::SimpleSpan {
-            &self.span
-          }
-        }
+/// The `*` punctuator.
+pub type Asterisk = tokit::punct::Asterisk<tokit::SimpleSpan>;
 
-        impl ::core::cmp::PartialEq<::core::primitive::str> for $name {
-          #[inline]
-          fn eq(&self, other: &::core::primitive::str) -> bool {
-            self.as_str().eq(other)
-          }
-        }
+/// The `!` punctuator.
+pub type Bang = tokit::punct::Exclamation<tokit::SimpleSpan>;
 
-        impl ::core::cmp::PartialOrd<::core::primitive::str> for $name {
-          #[inline]
-          fn partial_cmp(&self, other: &::core::primitive::str) -> ::core::option::Option<::core::cmp::Ordering> {
-            self.as_str().partial_cmp(other)
-          }
-        }
+/// The `,` punctuator.
+pub type Comma = tokit::punct::Comma<tokit::SimpleSpan>;
 
-        impl ::core::cmp::PartialEq<$name> for ::core::primitive::str {
-          #[inline]
-          fn eq(&self, other: &$name) -> bool {
-            self.eq(other.as_str())
-          }
-        }
+/// The `:` punctuator.
+pub type Colon = tokit::punct::Colon<tokit::SimpleSpan>;
 
-        impl ::core::cmp::PartialOrd<$name> for ::core::primitive::str {
-          #[inline]
-          fn partial_cmp(&self, other: &$name) -> ::core::option::Option<::core::cmp::Ordering> {
-            self.partial_cmp(other.as_str())
-          }
-        }
+/// The `$` punctuator.
+pub type Dollar = tokit::punct::Dollar<tokit::SimpleSpan>;
 
-        impl ::core::borrow::Borrow<::core::primitive::str> for $name {
-          #[inline]
-          fn borrow(&self) -> &::core::primitive::str {
-            self.as_str()
-          }
-        }
+/// The `=` punctuator.
+pub type Equal = tokit::punct::Equal<tokit::SimpleSpan>;
 
-        impl ::core::convert::AsRef<::core::primitive::str> for $name {
-          #[inline]
-          fn as_ref(&self) -> &::core::primitive::str {
-            self.as_str()
-          }
-        }
+/// The `|` punctuator.
+pub type Pipe = tokit::punct::Pipe<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::span::AsSpan<$crate::__private::tokit::SimpleSpan> for $name {
-          #[inline]
-          fn as_span(&self) -> &$crate::__private::tokit::SimpleSpan {
-            self.span()
-          }
-        }
+/// The `...` punctuator.
+pub type Spread = tokit::punct::Spread<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::span::IntoSpan<$crate::__private::tokit::SimpleSpan> for $name {
-          #[inline]
-          fn into_span(self) -> $crate::__private::tokit::SimpleSpan {
-            self.span
-          }
-        }
+/// The `[` punctuator.
+pub type LBracket = tokit::punct::OpenBracket<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::utils::IntoComponents for $name {
-          type Components = $crate::__private::tokit::SimpleSpan;
+/// The `]` punctuator.
+pub type RBracket = tokit::punct::CloseBracket<tokit::SimpleSpan>;
 
-          #[inline]
-          fn into_components(self) -> Self::Components {
-            <Self as $crate::__private::tokit::span::IntoSpan<$crate::__private::tokit::SimpleSpan>>::into_span(self)
-          }
-        }
+/// The `{` punctuator.
+pub type LBrace = tokit::punct::OpenBrace<tokit::SimpleSpan>;
 
-        impl ::core::fmt::Display for $name {
-          #[inline(always)]
-          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            ::core::fmt::Display::fmt($punct, f)
-          }
-        }
+/// The `}` punctuator.
+pub type RBrace = tokit::punct::CloseBrace<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::utils::human_display::DisplayHuman for $name {
-          #[inline]
-          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-            ::core::fmt::Display::fmt(self, f)
-          }
-        }
+/// The `(` punctuator.
+pub type LParen = tokit::punct::OpenParen<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::utils::sdl_display::DisplayCompact for $name {
-          type Options = ();
+/// The `)` punctuator.
+pub type RParen = tokit::punct::CloseParen<tokit::SimpleSpan>;
 
-          #[inline]
-          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>, _: &Self::Options) -> ::core::fmt::Result {
-            ::core::fmt::Display::fmt(self, f)
-          }
-        }
+/// The `<` punctuator.
+pub type LAngle = tokit::punct::OpenAngle<tokit::SimpleSpan>;
 
-        impl $crate::__private::tokit::utils::sdl_display::DisplayPretty for $name {
-          type Options = ();
+/// The `>` punctuator.
+pub type RAngle = tokit::punct::CloseAngle<tokit::SimpleSpan>;
 
-          #[inline]
-          fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>, _: &Self::Options) -> ::core::fmt::Result {
-            ::core::fmt::Display::fmt(self, f)
-          }
-        }
-      )*
-    }
-  };
-}
+/// The `=>` punctuator.
+pub type FatArrow = tokit::punct::FatArrow<tokit::SimpleSpan>;
 
-punctuator!(
-  (At, "AT", "@"),
-  (Ampersand, "AMPERSAND", "&"),
-  (Asterisk, "ASTERISK", "*"),
-  (Bang, "BANG", "!"),
-  (Comma, "COMMA", ","),
-  (Colon, "COLON", ":"),
-  (Dollar, "DOLAR", "$"),
-  (Equal, "EQUAL", "="),
-  (Pipe, "PIPE", "|"),
-  (Spread, "SPREAD", "..."),
-  (LBracket, "L_BRACKET", "["),
-  (RBracket, "R_BRACKET", "]"),
-  (LBrace, "L_BRACE", "{"),
-  (RBrace, "R_BRACE", "}"),
-  (LParen, "L_PAREN", "("),
-  (RParen, "R_PAREN", ")"),
-  (LAngle, "L_ANGLE", "<"),
-  (RAngle, "R_ANGLE", ">"),
-  (FatArrow, "FAT_ARROW", "=>"),
-  (ThinArrow, "THIN_ARROW", "->"),
-  (PathSeparator, "PATH_SEPARATOR", "::"),
-);
+/// The `->` punctuator.
+pub type ThinArrow = tokit::punct::Arrow<tokit::SimpleSpan>;
+
+/// The `::` punctuator.
+pub type PathSeparator = tokit::punct::DoubleColon<tokit::SimpleSpan>;
