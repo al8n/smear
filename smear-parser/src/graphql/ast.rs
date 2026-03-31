@@ -82,7 +82,8 @@ pub type DefaultVec<T> = Vec<T>;
 
 /// Helper to consume a token from an InputRef and produce a span.
 ///
-/// Returns `Ok((span, token))` on success, or an appropriate error.
+/// Returns `Ok(spanned_token)` on success, or an appropriate error.
+/// Avoids cursor clone on the happy path (token found).
 #[inline]
 fn next_token<'inp, S, Ctx, Lang>(
   input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>,
@@ -95,11 +96,10 @@ where
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   Lang: ?Sized,
 {
-  let cursor = input.cursor().clone();
   match input.next()? {
     Some(spanned) => Ok(spanned),
     None => {
-      let span = input.span_since(&cursor);
+      let span = input.span().clone();
       Err(SyntacticTokenError::unexpected_end_of_input(span).into())
     }
   }
