@@ -757,6 +757,7 @@ where
   if !peek_keyword(input, "implements") { return Ok(None); }
   let cursor = input.cursor().clone();
   next_token(input)?;
+  // Optional leading '&', first Name, then (& Name)*
   let _ = try_token(input, SyntacticTokenKind::Ampersand)?;
   let first = parse_name(input)?;
   let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
@@ -793,6 +794,7 @@ where
   if peek_kind(input) != Some(SyntacticTokenKind::Equal) { return Ok(None); }
   let cursor = input.cursor().clone();
   next_token(input)?;
+  // Optional leading '|', first Name, then (| Name)*
   let _ = try_token(input, SyntacticTokenKind::Pipe)?;
   let first = parse_name(input)?;
   let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
@@ -827,6 +829,7 @@ where
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
+  // Optional leading '|', first Location, then (| Location)*
   let _ = try_token(input, SyntacticTokenKind::Pipe)?;
   let first = parse_location(input)?;
   let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
