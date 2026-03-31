@@ -9,8 +9,10 @@ use smear_lexer::tokit::{
   Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput,
   SimpleSpan as Span,
   cache::Peeked,
+  emitter::{FullContainerEmitter, SeparatedEmitter, UnexpectedLeadingSeparatorEmitter, UnexpectedTrailingSeparatorEmitter},
   lexer::FromLogos,
   span::{AsSpan, IntoSpan, Spanned},
+  token::PunctuatorToken,
   utils::{Maybe, cmp::Equivalent, typenum::U1},
 };
 use std::vec::Vec;
@@ -136,10 +138,15 @@ pub fn parse_input_value<'inp, S, Ctx, Lang>(
 ) -> Result<InputValue<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -318,10 +325,15 @@ pub fn parse_const_input_value<'inp, S, Ctx, Lang>(
 ) -> Result<ConstInputValue<S>, SyntacticTokenErrors<S>>
 where
   S: Clone,
-  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
+  <SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Kind: From<smear_lexer::tokit::punct::Pipe<(), (), ()>> + From<smear_lexer::tokit::punct::Ampersand<(), (), ()>>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
-  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
+  Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>
+    + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {

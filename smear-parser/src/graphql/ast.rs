@@ -238,6 +238,27 @@ where
   }
 }
 
+// Implement FromUnexpectedLeadingSeparatorError for SyntacticTokenErrors.
+// Required when the `UnexpectedLeadingSeparatorEmitter` bound is present on emitters.
+impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromUnexpectedLeadingSeparatorError<'inp, SyntacticLexer<'inp, S>> for SyntacticTokenErrors<S>
+where
+  SyntacticToken<S>: FromLogos<'inp>,
+  SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+{
+  #[inline]
+  fn from_unexpected_leading_separator(
+    _name: smear_lexer::tokit::utils::CowStr,
+    err: UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>,
+  ) -> Self {
+    let (span, found, _expected) = err.into_components();
+    match found {
+      Some(token) => SyntacticTokenError::unexpected_token(token, Expectation::Name, span).into(),
+      None => SyntacticTokenError::unexpected_end_of_input(span).into(),
+    }
+  }
+}
+
 /// Helper to run a parse function against a string input using tokit's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
   f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
