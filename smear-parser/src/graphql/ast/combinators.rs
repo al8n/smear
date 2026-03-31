@@ -12,7 +12,7 @@ use smear_lexer::tokit::{
   SimpleSpan as Span,
   cache::Peeked,
   emitter::FullContainerEmitter,
-  emitter::{SeparatedEmitter, UnexpectedLeadingSeparatorEmitter, UnexpectedTrailingSeparatorEmitter},
+  emitter::{SeparatedEmitter, TooFewEmitter, UnexpectedLeadingSeparatorEmitter, UnexpectedTrailingSeparatorEmitter},
   lexer::FromLogos,
   parser::Action,
   span::Spanned,
@@ -97,6 +97,35 @@ macro_rules! continue_while_some {
   };
 }
 
+/// GraphQL reserved keywords that can follow a separated list and signal its end.
+const GRAPHQL_KEYWORDS: &[&str] = &[
+  "type", "interface", "union", "enum", "input", "scalar",
+  "extend", "schema", "directive", "fragment",
+  "query", "mutation", "subscription",
+  "implements", "repeatable", "on",
+];
+
+/// Decision closure: continue while the next token is a non-keyword identifier.
+/// Used for `separated_while` where elements are identifiers but the list
+/// must stop at GraphQL keywords that start the next definition.
+macro_rules! continue_while_name {
+  () => {
+    |mut peeked: Peeked<'_, 'inp, SyntacticLexer<'inp, S>, U1>, _: &mut _| {
+      Ok(match peeked.pop_front() {
+        None => Action::Stop,
+        Some(tok) => with_peeked_token!(&tok, |t| match t {
+          SyntacticToken::Identifier(s) => {
+            // Stop if this identifier is a GraphQL keyword
+            let is_kw = GRAPHQL_KEYWORDS.iter().any(|kw| kw.equivalent(s));
+            if is_kw { Action::Stop } else { Action::Continue }
+          }
+          _ => Action::Stop,
+        }),
+      })
+    }
+  };
+}
+
 // ─── Helper functions ────────────────────────────────────────────────────────
 
 /// Peek at the next token kind without consuming it.
@@ -114,7 +143,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -142,7 +172,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -173,7 +204,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -200,7 +232,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -232,7 +265,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -266,7 +300,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -320,7 +355,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -346,7 +382,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -376,7 +413,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -402,7 +440,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -432,7 +471,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -458,7 +498,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -488,7 +529,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -514,7 +556,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -550,7 +593,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -577,7 +621,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -606,7 +651,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -634,7 +680,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -661,7 +708,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -690,7 +738,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -719,7 +768,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -750,26 +800,21 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if !peek_keyword(input, "implements") { return Ok(None); }
   let cursor = input.cursor().clone();
   next_token(input)?;
-  // Optional leading '&', first Name, then (& Name)*
-  let _ = try_token(input, SyntacticTokenKind::Ampersand)?;
-  let first = parse_name(input)?;
-  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-    next_token(input)?; // consume '&'
-    parse_name(input)
-  })
-    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Ampersand))
+  // &? Name (& Name)* — allow optional leading &, stop at keywords
+  let ns: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
+    .separated_while::<smear_lexer::tokit::punct::Ampersand<(), (), Lang>, _, U1>(continue_while_name!())
+    .allow_leading()
+    .at_least(1)
     .collect()
     .parse_input(input)?;
-  let mut ns = Vec::with_capacity(1 + rest.len());
-  ns.push(first);
-  ns.extend(rest);
   Ok(Some(scaffold::ImplementInterfaces::new(input.span_since(&cursor), ns)))
 }
 
@@ -787,26 +832,21 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   if peek_kind(input) != Some(SyntacticTokenKind::Equal) { return Ok(None); }
   let cursor = input.cursor().clone();
   next_token(input)?;
-  // Optional leading '|', first Name, then (| Name)*
-  let _ = try_token(input, SyntacticTokenKind::Pipe)?;
-  let first = parse_name(input)?;
-  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-    next_token(input)?; // consume '|'
-    parse_name(input)
-  })
-    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Pipe))
+  // |? Name (| Name)* — allow optional leading |, stop at keywords
+  let ms: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_name(input))
+    .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(continue_while_name!())
+    .allow_leading()
+    .at_least(1)
     .collect()
     .parse_input(input)?;
-  let mut ms = Vec::with_capacity(1 + rest.len());
-  ms.push(first);
-  ms.extend(rest);
   Ok(Some(scaffold::UnionMemberTypes::new(input.span_since(&cursor), ms)))
 }
 
@@ -824,24 +864,19 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
   let cursor = input.cursor().clone();
-  // Optional leading '|', first Location, then (| Location)*
-  let _ = try_token(input, SyntacticTokenKind::Pipe)?;
-  let first = parse_location(input)?;
-  let rest: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| {
-    next_token(input)?; // consume '|'
-    parse_location(input)
-  })
-    .repeated_while::<_, U1>(continue_while!(SyntacticTokenKind::Pipe))
+  // |? Location (| Location)+ — allow optional leading |, at least 1 location, stop at keywords
+  let locs: Vec<_> = (|input: &mut InputRef<'inp, '_, SyntacticLexer<'inp, S>, Ctx, Lang>| parse_location(input))
+    .separated_while::<smear_lexer::tokit::punct::Pipe<(), (), Lang>, _, U1>(continue_while_name!())
+    .allow_leading()
+    .at_least(1)
     .collect()
     .parse_input(input)?;
-  let mut locs = Vec::with_capacity(1 + rest.len());
-  locs.push(first);
-  locs.extend(rest);
   Ok(scaffold::DirectiveLocations::new(input.span_since(&cursor), locs))
 }
 
@@ -859,7 +894,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -885,7 +921,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -916,7 +953,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -953,7 +991,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1039,7 +1078,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1069,7 +1109,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1093,7 +1134,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1122,7 +1164,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1153,7 +1196,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1178,7 +1222,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1208,7 +1253,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1233,7 +1279,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1260,7 +1307,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1287,7 +1335,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1313,7 +1362,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1339,7 +1389,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1365,7 +1416,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1395,7 +1447,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1420,7 +1473,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1468,7 +1522,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1588,7 +1643,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1646,7 +1702,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1698,7 +1755,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1728,7 +1786,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1768,7 +1827,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1821,7 +1881,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1865,7 +1926,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1911,7 +1973,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1937,7 +2000,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1963,7 +2027,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -1991,7 +2056,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2015,7 +2081,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2039,7 +2106,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2063,7 +2131,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2087,7 +2156,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2121,7 +2191,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2155,7 +2226,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2188,7 +2260,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2221,7 +2294,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
@@ -2248,7 +2322,8 @@ where
     + FullContainerEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + SeparatedEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
     + UnexpectedLeadingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
+    + UnexpectedTrailingSeparatorEmitter<'inp, SyntacticLexer<'inp, S>, Lang>
+    + TooFewEmitter<'inp, SyntacticLexer<'inp, S>, Lang>,
   str: Equivalent<S>,
   Lang: ?Sized,
 {
