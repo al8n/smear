@@ -259,6 +259,17 @@ where
   }
 }
 
+// Implement From<TooFew> for SyntacticTokenErrors to satisfy TooFewEmitter (at_least).
+impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::TooFew<Span, Lang>> for SyntacticTokenErrors<S> {
+  #[inline]
+  fn from(err: smear_lexer::tokit::error::syntax::TooFew<Span, Lang>) -> Self {
+    SyntacticTokenError::new(
+      err.span().clone(),
+      super::error::ErrorData::Other(std::borrow::Cow::Borrowed("too few elements")),
+    ).into()
+  }
+}
+
 /// Helper to run a parse function against a string input using tokit's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
   f: impl for<'c> FnMut(&mut InputRef<'inp, 'c, SyntacticLexer<'inp, &'inp str>, smear_lexer::tokit::FatalContext<'inp, SyntacticLexer<'inp, &'inp str>, SyntacticTokenErrors<&'inp str>>>) -> Result<O, SyntacticTokenErrors<&'inp str>>,
