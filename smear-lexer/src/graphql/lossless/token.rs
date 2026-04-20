@@ -280,7 +280,7 @@ macro_rules! token_impl {
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b> tokit::Token<'b> for LosslessToken<$slice> {
+      impl tokit::Token<'_> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
 

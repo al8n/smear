@@ -294,7 +294,7 @@ macro_rules! token_impl {
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b> tokit::Token<'b> for SyntacticToken<$slice> {
+      impl tokit::Token<'_> for SyntacticToken<$slice> {
         type Kind = SyntacticTokenKind;
         type Error = TokenErrors;
 
@@ -309,13 +309,13 @@ macro_rules! token_impl {
         }
       }
 
-      impl<'b> tokit::token::KeywordToken<'b> for SyntacticToken<$slice> {
+      impl tokit::token::KeywordToken<'_> for SyntacticToken<$slice> {
         fn keyword(&self) -> Option<&'static str> {
           $crate::graphql::syntactic::graphql_keyword(self)
         }
       }
 
-      impl<'b> tokit::token::PunctuatorToken<'b> for SyntacticToken<$slice> {
+      impl tokit::token::PunctuatorToken<'_> for SyntacticToken<$slice> {
         fn pipe() -> Option<Self::Kind> { Some(SyntacticTokenKind::Pipe) }
         fn ampersand() -> Option<Self::Kind> { Some(SyntacticTokenKind::Ampersand) }
         fn at() -> Option<Self::Kind> { Some(SyntacticTokenKind::At) }

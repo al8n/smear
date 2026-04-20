@@ -7,6 +7,44 @@ use crate::error::{StringError, StringErrors};
 
 use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainStr};
 
+/// `&[u8]`-source variant of [`super::str::find_block_close_simd`]. The
+/// algorithm is byte-for-byte identical (block-string scanning works on
+/// raw bytes; UTF-8 status is irrelevant because both `"` (0x22) and
+/// `\` (0x5C) are below 0x80 and so can never appear inside a UTF-8
+/// continuation byte). See the str-side function for the full spec
+/// citation and edge-case discussion.
+#[inline]
+fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
+  let mut pos = 0usize;
+  let mut escaped = 0usize;
+
+  while pos < body.len() {
+    let q_off = match lexsimd::skip::skip_until(&body[pos..], b'"') {
+      Some(n) => pos + n,
+      None => return (None, escaped),
+    };
+
+    if q_off + 3 > body.len() {
+      return (None, escaped);
+    }
+
+    if body[q_off + 1] != b'"' || body[q_off + 2] != b'"' {
+      pos = q_off + 1;
+      continue;
+    }
+
+    if q_off > 0 && body[q_off - 1] == b'\\' {
+      escaped += 1;
+      pos = q_off + 3;
+      continue;
+    }
+
+    return (Some(q_off), escaped);
+  }
+
+  (None, escaped)
+}
+
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[logos(crate = tokit::logos, utf8 = false, error(StringError<u8>))]
 pub(crate) enum BlockStringToken {
@@ -55,65 +93,52 @@ where
 {
   let remainder = lexer.remainder();
   let remainder_bytes = remainder.as_ref();
-  let lexer_span = lexer.span();
-  let mut string_lexer = BlockStringToken::lexer(remainder_bytes);
-  let mut errs = StringErrors::default();
 
-  let mut num_escaped_triple_quotes = 0;
-  while let Some(string_token) = string_lexer.next() {
-    match string_token {
-      Err(mut e) => {
-        e.bump(lexer_span.end);
-        errs.push(e);
+  // Phase-2 SIMD scan, identical shape to the str-side variant.
+  let (close_off, num_escaped_triple_quotes) = find_block_close_simd(remainder_bytes);
+
+  match close_off {
+    Some(start) => {
+      lexer.bump(start + 3);
+
+      let content = &remainder_bytes[..start];
+
+      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+      while lines.next().is_some() {
+        // callbacks already updated `lines.extras`
       }
-      Ok(BlockStringToken::EscapedTripleQuote) => {
-        num_escaped_triple_quotes += 1;
+
+      let plan = super::compute_block_normalization_plan(
+        &lines.extras,
+        !content.is_empty(),
+        num_escaped_triple_quotes,
+      );
+
+      if plan.is_clean {
+        return Ok(LitPlainStr::new(lexer.slice()).into());
       }
-      Ok(BlockStringToken::Continue | BlockStringToken::Backslash | BlockStringToken::Quote) => {}
-      Ok(BlockStringToken::TripleQuote) => {
-        // Outer lexer consumes up to (and including) the closing """
-        lexer.bump(string_lexer.span().end);
 
-        // inner content (between opening and closing)
-        let content = &remainder_bytes[..string_lexer.span().start];
-
-        // sub-lex the inner content to compute normalization knobs (no allocations)
-        let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-        while lines.next().is_some() {
-          // callbacks already updated `lines.extras`
-        }
-
-        // Build the normalization plan + exact capacity
-        let plan = super::compute_block_normalization_plan(
-          &lines.extras,
-          !content.is_empty(),
+      Ok(
+        LitComplexBlockStr::new(
+          lexer.slice(),
           num_escaped_triple_quotes,
-        );
-
-        if plan.is_clean {
-          return Ok(LitPlainStr::new(lexer.slice()).into());
-        }
-
-        return Ok(
-          LitComplexBlockStr::new(
-            lexer.slice(),
-            num_escaped_triple_quotes,
-            lines.extras.has_cr_terminators,
-            lines.extras.leading_blank_lines,
-            plan.effective_trailing,
-            plan.common_indent,
-            plan.total_lines,
-            plan.required_capacity,
-          )
-          .into(),
-        );
-      }
+          lines.extras.has_cr_terminators,
+          lines.extras.leading_blank_lines,
+          plan.effective_trailing,
+          plan.common_indent,
+          plan.total_lines,
+          plan.required_capacity,
+        )
+        .into(),
+      )
+    }
+    None => {
+      lexer.bump(remainder_bytes.len());
+      let mut errs = StringErrors::default();
+      errs.push(StringError::unterminated_block_string());
+      Err(errs)
     }
   }
-
-  lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_block_string());
-  Err(errs)
 }
 
 // ---- sub-lexer over inner block-string content ----
