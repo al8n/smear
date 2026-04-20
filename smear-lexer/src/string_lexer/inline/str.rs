@@ -77,8 +77,8 @@ fn try_parse_next_unicode_escape(remainder: &str) -> Option<u32> {
 }
 
 #[inline(always)]
-fn handle_fixed_width_escape_unicode<'a>(
-  lexer: &mut Lexer<'a, StringToken>,
+fn handle_fixed_width_escape_unicode(
+  lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
   let hex_part = &slice[2..];
@@ -111,8 +111,8 @@ fn handle_fixed_width_escape_unicode<'a>(
 }
 
 #[inline]
-fn handle_invalid_escaped_unicode<'a>(
-  lexer: &mut Lexer<'a, StringToken>,
+fn handle_invalid_escaped_unicode(
+  lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let remainder = lexer.remainder();
   let mut idx = 0;
@@ -225,8 +225,8 @@ fn handle_invalid_escaped_unicode<'a>(
 }
 
 #[inline(always)]
-fn handle_braced_escape_unicode<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn handle_braced_escape_unicode(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   // Slice looks like r#"\u{...}"#, guaranteed by the regex.
   let s = lexer.slice();
@@ -253,8 +253,8 @@ fn handle_braced_escape_unicode<'a>(
 }
 
 #[inline(always)]
-fn handle_semi_braced_escape_unicode<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn handle_semi_braced_escape_unicode(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let remainder = lexer.remainder();
 
@@ -268,8 +268,8 @@ fn handle_semi_braced_escape_unicode<'a>(
 }
 
 #[inline(always)]
-fn empty_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn empty_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::empty_braced_unicode_escape(lexer.span().into()),
@@ -277,8 +277,8 @@ fn empty_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn too_many_hex_digits_in_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn too_many_hex_digits_in_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
   let counts = slice.len() - 4; // subtract \u{}
@@ -288,8 +288,8 @@ fn too_many_hex_digits_in_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn unclosed_brace_in_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn unclosed_brace_in_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),
@@ -297,8 +297,8 @@ fn unclosed_brace_in_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn handle_invalid_escaped_character<'a>(
-  lexer: &mut Lexer<'a, StringToken>,
+fn handle_invalid_escaped_character(
+  lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
 
