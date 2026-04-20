@@ -37,12 +37,15 @@ use tokit::{
 };
 
 use crate::{
-  error::BadStateError,
+  error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::{
     error::{LexerError, LexerErrors},
     syntactic::SyntacticToken,
   },
 };
+
+mod bytes_token;
+mod str_token;
 
 /// Maximum byte recursion depth — matches the default in
 /// [`tokit::state::recursion_tracker::RecursionLimiter`].
@@ -91,13 +94,16 @@ impl AsBytes for [u8] {
 /// block string is a delegation.
 pub struct SimdSyntacticLexer<'inp, S: Source<usize> + ?Sized = str> {
   src: &'inp S,
-  span: SimpleSpan,
-  /// Start byte of the most recently returned token, for `Lexer::slice()`.
-  token_start: usize,
+  /// Current scan position. Advanced by trivia-skip, comment-skip, and each
+  /// token scan. Never exposed directly — callers see `last_span`.
+  cursor: usize,
+  /// Span of the most recently *returned* token. Updated only on `return`,
+  /// never on `continue`, so `span()` is always the last real token.
+  last_span: SimpleSpan,
   state: RecursionLimiter,
 }
 
-impl<'inp, S: Source<usize> + ?Sized> Lexer<'inp> for SimdSyntacticLexer<'inp, S>
+impl<'inp, S> Lexer<'inp> for SimdSyntacticLexer<'inp, S>
 where
   SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
   LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
@@ -110,8 +116,8 @@ where
     >,
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  S: Source<usize>,
-  S::Slice<'inp>: AsBytes,
+  S: Source<usize> + ?Sized,
+  S::Slice<'inp>: AsBytes + Slice<'inp, Char = u8>,
 {
   type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
 
@@ -132,8 +138,8 @@ where
   fn with_state(src: &'inp Self::Source, state: Self::State) -> Self {
     Self {
       src,
-      span: SimpleSpan::const_new(0, 0),
-      token_start: 0,
+      cursor: 0,
+      last_span: SimpleSpan::const_new(0, 0),
       state,
     }
   }
@@ -143,7 +149,7 @@ where
     self
       .state
       .check()
-      .map_err(|e| LexerError::bad_state(self.span, e).into())
+      .map_err(|e| LexerError::bad_state(self.last_span, e).into())
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -168,109 +174,122 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn span(&self) -> Self::Span {
-    self.span
+    self.last_span
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn slice(&self) -> <Self::Source as Source<Self::Offset>>::Slice<'inp> {
     self
       .src
-      .slice(&self.token_start..self.span.end_ref())
+      .slice(self.last_span.start_ref()..self.last_span.end_ref())
       .unwrap()
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokit::Token<'inp>>::Error>> {
+    // Emit a single-byte punctuation token. `token_start` is the loop-local
+    // variable captured from the enclosing scope.
+    macro_rules! emit_punct {
+      ($this:ident: $token_start:expr, $expr:expr) => {{
+        $this.cursor += 1;
+        $this.last_span = SimpleSpan::new($token_start, $this.cursor);
+        Ok($expr)
+      }};
+    }
+
     macro_rules! decrease_recursion {
-      ($this:ident: $expr:expr) => {{
-        $this.span.bump(&1);
+      ($this:ident: $token_start:expr, $expr:expr) => {{
+        $this.cursor += 1;
+        $this.last_span = SimpleSpan::new($token_start, $this.cursor);
         $this.state_mut().decrease();
         Ok($expr)
       }};
     }
 
     macro_rules! increase_recursion {
-      ($this:ident: $expr:expr) => {{
-        $this.span.bump(&1);
+      ($this:ident: $token_start:expr, $expr:expr) => {{
+        $this.cursor += 1;
+        $this.last_span = SimpleSpan::new($token_start, $this.cursor);
         $this.state_mut().increase();
         $this.check().map(|_| $expr).map_err(Into::into)
       }};
     }
 
-    macro_rules! emit_punct {
-      ($this:ident: $expr:expr) => {{
-        $this.span.bump(&1);
-        Ok($expr)
-      }};
-    }
-
     loop {
-      // Skip trivia BEFORE peeking, so the match below sees the first
-      // meaningful byte and the ident / punct fast paths fire for every
-      // token, not just ones with no leading whitespace.
       self.skip_ws_and_comma();
 
-      let cursor = self.span.end();
-      let src = self.src.slice(&cursor..)?;
+      let token_start = self.cursor;
+      let src = self.src.slice(&token_start..)?;
       if src.is_empty() {
         return None;
       }
 
       let bytes = src.as_bytes();
       let byte = bytes[0];
-      self.token_start = cursor;
+
       match byte {
-        // Identifier — by far the most common GraphQL token. The arm
-        // body (`lex_identifier`) already knows the first byte is in
-        // [a-zA-Z_], so it skips re-checking it.
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+          let len = self.lex_identifier(bytes);
+          self.last_span = SimpleSpan::new(token_start, self.cursor);
           return self
             .src
-            .slice(&cursor..&(cursor + self.lex_identifier(bytes)))
+            .slice(&token_start..&(token_start + len))
             .map(|ident| Ok(SyntacticToken::Identifier(ident)));
         }
-        // Single-byte structural punctuation, listed inline so the
-        // compiler folds the dispatch into the same jump table as the
-        // ident range. No `Option` unwrap on the hot path.
-        b'!' => return Some(emit_punct!(self: SyntacticToken::Bang)),
-        b'&' => return Some(emit_punct!(self: SyntacticToken::Ampersand)),
-        b'(' => return Some(increase_recursion!(self: SyntacticToken::LParen)),
-        b')' => return Some(decrease_recursion!(self: SyntacticToken::RParen)),
-        b':' => return Some(emit_punct!(self: SyntacticToken::Colon)),
-        b'=' => return Some(emit_punct!(self: SyntacticToken::Equal)),
-        b'@' => return Some(emit_punct!(self: SyntacticToken::At)),
-        b'$' => return Some(emit_punct!(self: SyntacticToken::Dollar)),
-        b'[' => return Some(increase_recursion!(self: SyntacticToken::LBracket)),
-        b']' => return Some(decrease_recursion!(self: SyntacticToken::RBracket)),
-        b'{' => return Some(increase_recursion!(self: SyntacticToken::LBrace)),
-        b'}' => return Some(decrease_recursion!(self: SyntacticToken::RBrace)),
-        b'|' => return Some(emit_punct!(self: SyntacticToken::Pipe)),
-        // Comment — eat the rest of the line and re-loop.
+        b'!' => return Some(emit_punct!(self: token_start, SyntacticToken::Bang)),
+        b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
+        b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
+        b')' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RParen)),
+        b':' => return Some(emit_punct!(self: token_start, SyntacticToken::Colon)),
+        b'=' => return Some(emit_punct!(self: token_start, SyntacticToken::Equal)),
+        b'@' => return Some(emit_punct!(self: token_start, SyntacticToken::At)),
+        b'$' => return Some(emit_punct!(self: token_start, SyntacticToken::Dollar)),
+        b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
+        b']' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBracket)),
+        b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
+        b'}' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace)),
+        b'|' => return Some(emit_punct!(self: token_start, SyntacticToken::Pipe)),
+        b'.' => {
+          if bytes.starts_with(b"...") {
+            self.cursor += 3;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            return Some(Ok(SyntacticToken::Spread));
+          }
+          if bytes.starts_with(b"..") {
+            self.cursor += 2;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(self.last_span);
+            return Some(Err(err));
+          }
+          self.cursor += 1;
+          self.last_span = SimpleSpan::new(token_start, self.cursor);
+          let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(self.last_span);
+          return Some(Err(err));
+        }
         b'#' => {
           self.skip_comment();
           continue;
         }
-        // BOM — only a real BOM if the next two bytes match. Non-BOM
-        // bytes that happen to start with 0xEF (UTF-8 high planes) fall
-        // through to the delegate.
         0xEF if bytes.starts_with(b"\xEF\xBB\xBF") => {
-          self.span.bump(&3);
+          self.cursor += 3;
           continue;
         }
-        // Slow path: numbers, strings, spread `...`, errors.
-        // Fresh lexer per delegation — benchmark vs persistent to decide.
         _ => {
-          let mut lexer = LogosLexer::with_state(self.src, self.state);
-          lexer.bump(self.span.end_ref());
-          match lexer.lex()? {
+          let mut logos = LogosLexer::with_state(self.src, self.state);
+          logos.bump(&self.cursor);
+          match logos.lex()? {
             Ok(tok) => {
-              self.span = lexer.inner().span().into();
-              self.state = *lexer.state();
+              let end = logos.inner().span().end;
+              self.cursor = end;
+              self.last_span = SimpleSpan::new(token_start, end);
+              self.state = *logos.state();
               return Some(Ok(tok));
             }
             Err(res) => {
-              self.span = lexer.inner().span().into();
-              return Some(Err(res.into()));
+              let end = logos.inner().span().end;
+              self.cursor = end;
+              self.last_span = SimpleSpan::new(token_start, end);
+              return Some(Err(res));
             }
           }
         }
@@ -280,7 +299,7 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn bump(&mut self, n: &Self::Offset) {
-    self.span.bump(n);
+    self.cursor += n;
   }
 }
 
@@ -305,24 +324,24 @@ where
   /// branchy interpretation overhead.
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn skip_ws_and_comma(&mut self) {
-    let Some(rest) = self.src.slice(self.span.end_ref()..) else {
+    let Some(rest) = self.src.slice(&self.cursor..) else {
       return;
     };
     let n = skip_ws_and_comma(rest.as_bytes());
-    self.span.bump(&n);
+    self.cursor += n;
   }
 
   /// Skip a `#…\n|\r` comment body. Cursor is positioned at the `#`.
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn skip_comment(&mut self) {
-    let Some(rest) = self.src.slice(self.span.end_ref()..) else {
+    let Some(rest) = self.src.slice(&self.cursor..) else {
       return;
     };
     let len = match memchr_newline(rest.as_bytes()) {
       Some(n) => n,       // stop AT the newline; loop eats it next
       None => rest.len(), // unterminated -> EOF
     };
-    self.span.bump(&len);
+    self.cursor += len;
   }
 
   // ───── identifier fast path ──────────────────────────────────────────
@@ -351,7 +370,7 @@ where
       }
     }
 
-    self.span.bump(&end);
+    self.cursor += end;
     end
   }
 }

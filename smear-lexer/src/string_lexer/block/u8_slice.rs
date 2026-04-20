@@ -14,18 +14,18 @@ use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockS
 /// continuation byte). See the str-side function for the full spec
 /// citation and edge-case discussion.
 #[inline]
-fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
+fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
   let mut pos = 0usize;
   let mut escaped = 0usize;
 
   while pos < body.len() {
     let q_off = match lexsimd::skip::skip_until(&body[pos..], b'"') {
       Some(n) => pos + n,
-      None => return (None, escaped),
+      None => return (body.len(), None, escaped),
     };
 
     if q_off + 3 > body.len() {
-      return (None, escaped);
+      return (body.len(), None, escaped);
     }
 
     if body[q_off + 1] != b'"' || body[q_off + 2] != b'"' {
@@ -39,10 +39,10 @@ fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
       continue;
     }
 
-    return (Some(q_off), escaped);
+    return (pos, Some(q_off), escaped);
   }
 
-  (None, escaped)
+  (pos, None, escaped)
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -95,7 +95,7 @@ where
   let remainder_bytes = remainder.as_ref();
 
   // Phase-2 SIMD scan, identical shape to the str-side variant.
-  let (close_off, num_escaped_triple_quotes) = find_block_close_simd(remainder_bytes);
+  let (_, close_off, num_escaped_triple_quotes) = find_block_close_simd(remainder_bytes);
 
   match close_off {
     Some(start) => {
@@ -137,6 +137,55 @@ where
       let mut errs = StringErrors::default();
       errs.push(StringError::unterminated_block_string());
       Err(errs)
+    }
+  }
+}
+
+#[inline]
+pub(crate) fn skip_block_str_from_bytes(
+  offset: usize,
+  src: &[u8],
+) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
+  // Phase-2 SIMD scan, identical shape to the str-side variant.
+  let (read, close_off, num_escaped_triple_quotes) = find_block_close_simd(src);
+
+  match close_off {
+    Some(start) => {
+      let content = &src[..start];
+
+      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+      while lines.next().is_some() {
+        // callbacks already updated `lines.extras`
+      }
+
+      let plan = super::compute_block_normalization_plan(
+        &lines.extras,
+        !content.is_empty(),
+        num_escaped_triple_quotes,
+      );
+
+      if plan.is_clean {
+        return Ok(LitPlainStr::new(lines.span().end).into());
+      }
+
+      Ok(
+        LitComplexBlockStr::new(
+          lines.span().end,
+          num_escaped_triple_quotes,
+          lines.extras.has_cr_terminators,
+          lines.extras.leading_blank_lines,
+          plan.effective_trailing,
+          plan.common_indent,
+          plan.total_lines,
+          plan.required_capacity,
+        )
+        .into(),
+      )
+    }
+    None => {
+      let mut errs = StringErrors::default();
+      errs.push(StringError::unterminated_block_string());
+      Err((read, errs))
     }
   }
 }

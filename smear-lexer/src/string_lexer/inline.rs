@@ -8,8 +8,10 @@ use super::LitPlainStr;
 use std::{borrow::Cow, string::String};
 
 pub(crate) use self::{
-  str::{StringToken, lex_inline_str_from_str},
-  u8_slice::{StringToken as BytesStringToken, lex_inline_str_from_bytes},
+  str::{StringToken, lex_inline_str_from_str, skip_inline_str_in_str},
+  u8_slice::{
+    StringToken as BytesStringToken, lex_inline_str_from_bytes, skip_inline_str_in_bytes,
+  },
 };
 
 mod str;
@@ -126,6 +128,17 @@ impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
   }
 }
 
+impl<S> LitInlineStr<Option<S>> {
+  /// a
+  #[inline(always)]
+  pub fn transpose(self) -> Option<LitInlineStr<S>> {
+    match self {
+      LitInlineStr::Plain(s) => s.transpose().map(LitInlineStr::Plain),
+      LitInlineStr::Complex(s) => s.transpose().map(LitInlineStr::Complex),
+    }
+  }
+}
+
 impl<S> LitInlineStr<S> {
   /// Returns the underlying source.
   #[inline(always)]
@@ -136,6 +149,18 @@ impl<S> LitInlineStr<S> {
     match self {
       Self::Plain(s) => s.source(),
       Self::Complex(s) => s.source(),
+    }
+  }
+
+  /// Map
+  #[inline(always)]
+  pub fn map<O, F>(self, f: F) -> LitInlineStr<O>
+  where
+    F: FnOnce(S) -> O,
+  {
+    match self {
+      Self::Plain(s) => LitInlineStr::Plain(s.map(f)),
+      Self::Complex(s) => LitInlineStr::Complex(s.map(f)),
     }
   }
 

@@ -96,7 +96,7 @@ fn try_parse_next_unicode_escape(remainder: &[u8]) -> Option<u32> {
 }
 
 #[inline(always)]
-fn handle_unicode_escape<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), StringError<u8>> {
+fn handle_unicode_escape(lexer: &mut Lexer<'_, StringToken>) -> Result<(), StringError<u8>> {
   let slice = lexer.slice(); // b"\\uXXXX"
   debug_assert!(slice.len() == 6);
   let code_point = parse_u4(&slice[2..6]).unwrap(); // safe by regex
@@ -125,8 +125,8 @@ fn handle_unicode_escape<'a>(lexer: &mut Lexer<'a, StringToken>) -> Result<(), S
 }
 
 #[inline]
-fn handle_invalid_escaped_unicode<'a>(
-  lexer: &mut Lexer<'a, StringToken>,
+fn handle_invalid_escaped_unicode(
+  lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   // We are at b"\\u" with no/partial hex after.
   let remainder = lexer.remainder();
@@ -226,8 +226,8 @@ fn handle_invalid_escaped_unicode<'a>(
 }
 
 #[inline(always)]
-fn handle_invalid_escaped_character<'a>(
-  lexer: &mut Lexer<'a, StringToken>,
+fn handle_invalid_escaped_character(
+  lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   let slice = lexer.slice(); // b'\' <bad>'
   // last byte must exist due to regex
@@ -242,8 +242,8 @@ fn handle_invalid_escaped_character<'a>(
 }
 
 #[inline(always)]
-fn handle_semi_braced_escape_unicode<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn handle_semi_braced_escape_unicode(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   let remainder = lexer.remainder();
 
@@ -257,8 +257,8 @@ fn handle_semi_braced_escape_unicode<'a>(
 }
 
 #[inline(always)]
-fn empty_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn empty_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   Err(StringError::Unicode(
     UnicodeError::empty_braced_unicode_escape(lexer.span().into()),
@@ -266,8 +266,8 @@ fn empty_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn too_many_hex_digits_in_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn too_many_hex_digits_in_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   let slice = lexer.slice();
   let counts = slice.len() - 4; // subtract \u{}
@@ -277,8 +277,8 @@ fn too_many_hex_digits_in_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn unclosed_brace_in_braced_unicode_escape<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn unclosed_brace_in_braced_unicode_escape(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   Err(StringError::Unicode(
     UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),
@@ -286,8 +286,8 @@ fn unclosed_brace_in_braced_unicode_escape<'a>(
 }
 
 #[inline(always)]
-fn handle_braced_escape_unicode<'a>(
-  lexer: &mut tokit::logos::Lexer<'a, StringToken>,
+fn handle_braced_escape_unicode(
+  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
   // Slice looks like r#"\u{...}"#, guaranteed by the regex.
   let s = lexer.slice();
@@ -406,4 +406,64 @@ where
   lexer.bump(string_lexer.span().end);
   errs.push(StringError::unterminated_inline_string());
   Err(errs)
+}
+
+#[inline]
+pub(crate) fn skip_inline_str_in_bytes(
+  offset: usize,
+  src: &[u8],
+) -> Result<LitInlineStr<usize>, (usize, StringErrors<u8>)> {
+  let mut string_lexer = StringToken::lexer(src);
+
+  let mut errs = StringErrors::default();
+  let mut num_unicodes = 0;
+  let mut num_escapes = 0;
+
+  while let Some(tok) = string_lexer.next() {
+    match tok {
+      Ok(StringToken::Quote) => {
+        // Consume closing quote in the outer lexer by the inner span end
+        if !errs.is_empty() {
+          return Err((string_lexer.span().end, errs));
+        }
+
+        return Ok(match (num_escapes != 0, num_unicodes != 0) {
+          (false, false) => LitPlainStr::new(string_lexer.span().end).into(),
+          _ => LitComplexInlineStr::new(string_lexer.span().end, string_lexer.extras).into(),
+        });
+      }
+      Ok(StringToken::LineTerminator(lt)) => {
+        let pos = offset + string_lexer.span().start;
+        let err = match lt {
+          LineTerminatorHint::NewLine => StringError::unexpected_new_line(b'\n', pos),
+          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return(b'\r', pos),
+          LineTerminatorHint::CarriageReturnNewLine => {
+            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
+          }
+        };
+        errs.push(err);
+      }
+      Ok(StringToken::StringCharacters) => {
+        // Plain content normalizes byte-for-byte
+        string_lexer.extras += string_lexer.slice().len();
+      }
+      Ok(StringToken::EscapedUnicode) => {
+        num_unicodes += 1;
+      }
+      Ok(StringToken::EscapedCharacter) => {
+        num_escapes += 1;
+        // \" \\ \/ \b \f \n \r \t  → each becomes exactly 1 UTF-8 byte
+        string_lexer.extras += 1;
+      }
+      Err(mut e) => {
+        // Make inner-byte-lexer relative errors absolute for the outer source
+        e.bump(offset);
+        errs.push(e);
+      }
+    }
+  }
+
+  // No closing quote
+  errs.push(StringError::unterminated_inline_string());
+  Err((string_lexer.span().end, errs))
 }
