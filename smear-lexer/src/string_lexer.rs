@@ -9,8 +9,10 @@ use tokit::{
 
 use crate::error::{StringError, StringErrors};
 
+pub(crate) use block::skip_block_str_from_bytes;
 pub use block::{LitBlockStr, LitComplexBlockStr};
 pub use inline::{LitComplexInlineStr, LitInlineStr};
+pub(crate) use inline::{skip_inline_str_in_bytes, skip_inline_str_in_str};
 
 macro_rules! variant_type {
   (
@@ -40,6 +42,19 @@ macro_rules! variant_type {
       }
     }
 
+    impl<S> $name<Option<S>> {
+      /// transpose
+      pub fn transpose(self) -> Option<$name<S>> {
+        match self.source {
+          Some(source) => Some($name {
+            source,
+            $($field: self.$field),*
+          }),
+          None => None,
+        }
+      }
+    }
+
     impl<S> $name<S> {
       #[inline(always)]
       #[allow(clippy::too_many_arguments)]
@@ -65,6 +80,18 @@ macro_rules! variant_type {
       #[inline(always)]
       pub const fn source(&self) -> S where S: Copy {
         self.source
+      }
+
+      /// Map
+      #[inline(always)]
+      pub fn map<O, F>(self, f: F) -> $name<O>
+      where
+        F: FnOnce(S) -> O,
+      {
+        $name {
+          source: f(self.source),
+          $($field: self.$field),*
+        }
       }
 
       /// Converts this to an equivalent type.

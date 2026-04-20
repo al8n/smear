@@ -5,7 +5,9 @@ use tokit::utils::human_display::DisplayHuman;
 
 pub(crate) use self::{
   str::{BlockStringToken, lex_block_str_from_str},
-  u8_slice::{BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes},
+  u8_slice::{
+    BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes, skip_block_str_from_bytes,
+  },
 };
 
 mod str;
@@ -86,6 +88,17 @@ impl<'a> LitBlockStr<&'a [u8]> {
   }
 }
 
+impl<S> LitBlockStr<Option<S>> {
+  /// a
+  #[inline(always)]
+  pub fn transpose(self) -> Option<LitBlockStr<S>> {
+    match self {
+      Self::Plain(s) => s.transpose().map(LitBlockStr::Plain),
+      Self::Complex(s) => s.transpose().map(LitBlockStr::Complex),
+    }
+  }
+}
+
 impl<S> LitBlockStr<S> {
   /// Returns the underlying source.
   #[inline(always)]
@@ -105,6 +118,18 @@ impl<S> LitBlockStr<S> {
     match self {
       Self::Plain(s) => s.source_ref(),
       Self::Complex(c) => c.source_ref(),
+    }
+  }
+
+  /// Map
+  #[inline(always)]
+  pub fn map<O, F>(self, f: F) -> LitBlockStr<O>
+  where
+    F: FnOnce(S) -> O,
+  {
+    match self {
+      Self::Plain(s) => LitBlockStr::Plain(s.map(f)),
+      Self::Complex(s) => LitBlockStr::Complex(s.map(f)),
     }
   }
 

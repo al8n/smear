@@ -39,9 +39,9 @@ pub mod lossless;
 /// strings, the spread operator, and error reporting are delegated one
 /// token at a time to a fresh Logos lexer. See
 /// [`syntactic_simd::SimdSyntacticLexer`] for the architecture.
-pub mod syntactic_simd;
+pub mod simd;
 
-mod handlers;
+pub(crate) mod handlers;
 
 #[cfg(test)]
 mod tests;
