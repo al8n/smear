@@ -89,25 +89,12 @@ impl AsBytes for [u8] {
 /// strings, spread, errors) re-uses this lexer rather than constructing
 /// a fresh one per call — this matters most on schemas, where every
 /// block string is a delegation.
-pub struct SimdSyntacticLexer<'inp, S: Source<usize> + ?Sized = str>
-where
-  SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
-      'inp,
-      State = RecursionLimiter,
-      Token = SyntacticToken<S::Slice<'inp>>,
-      Source = S,
-      Span = SimpleSpan,
-      Offset = usize,
-    >,
-{
+pub struct SimdSyntacticLexer<'inp, S: Source<usize> + ?Sized = str> {
   src: &'inp S,
   span: SimpleSpan,
+  /// Start byte of the most recently returned token, for `Lexer::slice()`.
+  token_start: usize,
   state: RecursionLimiter,
-  /// Persistent Logos lexer. Reused across delegations so we pay
-  /// only a `bump(delta)` fast-forward instead of a fresh-lexer
-  /// construction + full-scan on every slow-path token.
-  delegate: LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>,
 }
 
 impl<'inp, S: Source<usize> + ?Sized> Lexer<'inp> for SimdSyntacticLexer<'inp, S>
@@ -146,8 +133,8 @@ where
     Self {
       src,
       span: SimpleSpan::const_new(0, 0),
+      token_start: 0,
       state,
-      delegate: LogosLexer::with_state(src, state),
     }
   }
 
@@ -186,7 +173,10 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn slice(&self) -> <Self::Source as Source<Self::Offset>>::Slice<'inp> {
-    self.delegate.slice()
+    self
+      .src
+      .slice(&self.token_start..self.span.end_ref())
+      .unwrap()
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -228,6 +218,7 @@ where
 
       let bytes = src.as_bytes();
       let byte = bytes[0];
+      self.token_start = cursor;
       match byte {
         // Identifier — by far the most common GraphQL token. The arm
         // body (`lex_identifier`) already knows the first byte is in
@@ -267,23 +258,18 @@ where
           continue;
         }
         // Slow path: numbers, strings, spread `...`, errors.
-        // Fast-forward the persistent delegate by the bytes the SIMD
-        // layer consumed since the last delegation, then hand off.
+        // Fresh lexer per delegation — benchmark vs persistent to decide.
         _ => {
-          let logos_cursor = self.delegate.inner().span().end;
-          let delta = self.span.end() - logos_cursor;
-          if delta != 0 {
-            self.delegate.inner_mut().bump(delta);
-          }
-          *self.delegate.state_mut() = self.state;
-          match self.delegate.lex()? {
+          let mut lexer = LogosLexer::with_state(self.src, self.state);
+          lexer.bump(self.span.end_ref());
+          match lexer.lex()? {
             Ok(tok) => {
-              self.span = self.delegate.inner().span().into();
-              self.state = *self.delegate.state();
+              self.span = lexer.inner().span().into();
+              self.state = *lexer.state();
               return Some(Ok(tok));
             }
             Err(res) => {
-              self.span = self.delegate.inner().span().into();
+              self.span = lexer.inner().span().into();
               return Some(Err(res.into()));
             }
           }
