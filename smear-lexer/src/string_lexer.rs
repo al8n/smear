@@ -12,7 +12,7 @@ use crate::error::{StringError, StringErrors};
 pub(crate) use block::skip_block_str_from_bytes;
 pub use block::{LitBlockStr, LitComplexBlockStr};
 pub use inline::{LitComplexInlineStr, LitInlineStr};
-pub(crate) use inline::{skip_inline_str_in_bytes, skip_inline_str_in_str};
+pub(crate) use inline::{skip_inline_str_in_bytes, skip_inline_str_in_str, skip_inline_str_simd};
 
 macro_rules! variant_type {
   (
