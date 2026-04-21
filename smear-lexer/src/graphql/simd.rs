@@ -37,11 +37,13 @@ use tokit::{
 };
 
 use crate::{
-  error::{BadStateError, UnterminatedSpreadOperatorError},
+  LitComplexInlineStr, LitInlineStr, LitPlainStr,
+  error::{BadStateError, StringError, StringErrors, UnterminatedSpreadOperatorError},
   graphql::{
-    error::{LexerError, LexerErrors},
+    error::{LexerError, LexerErrorData, LexerErrors},
     syntactic::SyntacticToken,
   },
+  skip_inline_str_simd,
 };
 
 mod bytes_token;
@@ -97,9 +99,11 @@ pub struct SimdSyntacticLexer<'inp, S: Source<usize> + ?Sized = str> {
   /// Current scan position. Advanced by trivia-skip, comment-skip, and each
   /// token scan. Never exposed directly — callers see `last_span`.
   cursor: usize,
-  /// Span of the most recently *returned* token. Updated only on `return`,
-  /// never on `continue`, so `span()` is always the last real token.
+  /// Span of the most recently *successfully* lexed token. Never updated on
+  /// error returns, so `span()` always reflects the last valid position.
   last_span: SimpleSpan,
+  /// Span of the most recently returned error token, if any.
+  last_error_span: Option<SimpleSpan>,
   state: RecursionLimiter,
 }
 
@@ -140,6 +144,7 @@ where
       src,
       cursor: 0,
       last_span: SimpleSpan::const_new(0, 0),
+      last_error_span: None,
       state,
     }
   }
@@ -209,9 +214,18 @@ where
     macro_rules! increase_recursion {
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
-        $this.last_span = SimpleSpan::new($token_start, $this.cursor);
+        let span = SimpleSpan::new($token_start, $this.cursor);
         $this.state_mut().increase();
-        $this.check().map(|_| $expr).map_err(Into::into)
+        match $this.state.check() {
+          Ok(()) => {
+            $this.last_span = span;
+            Ok($expr)
+          }
+          Err(e) => {
+            $this.last_error_span = Some(span);
+            Err(LexerError::bad_state(span, e).into())
+          }
+        }
       }};
     }
 
@@ -225,9 +239,8 @@ where
       }
 
       let bytes = src.as_bytes();
-      let byte = bytes[0];
-
-      match byte {
+      let b0 = bytes[0];
+      match b0 {
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
           let len = self.lex_identifier(bytes);
           self.last_span = SimpleSpan::new(token_start, self.cursor);
@@ -249,6 +262,7 @@ where
         b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
         b'}' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace)),
         b'|' => return Some(emit_punct!(self: token_start, SyntacticToken::Pipe)),
+        // Spread / unterminated-spread: load b1/b2 lazily — only paid when b0 == b'.'.
         b'.' => {
           if bytes.starts_with(b"...") {
             self.cursor += 3;
@@ -257,18 +271,69 @@ where
           }
           if bytes.starts_with(b"..") {
             self.cursor += 2;
-            self.last_span = SimpleSpan::new(token_start, self.cursor);
-            let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(self.last_span);
+            let span = SimpleSpan::new(token_start, self.cursor);
+            self.last_error_span = Some(span);
+            let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
             return Some(Err(err));
           }
           self.cursor += 1;
-          self.last_span = SimpleSpan::new(token_start, self.cursor);
-          let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(self.last_span);
+          let span = SimpleSpan::new(token_start, self.cursor);
+          self.last_error_span = Some(span);
+          let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
           return Some(Err(err));
         }
         b'#' => {
           self.skip_comment();
           continue;
+        }
+
+        // Block strings (""") fall through to the _ arm (Logos delegate).
+        b'"' if !bytes.starts_with(b"\"\"\"") => {
+          match bytes.get(1).copied() {
+            Some(b'"') => {
+              // Empty inline string "".
+              self.cursor += 2;
+              self.last_span = SimpleSpan::new(token_start, self.cursor);
+              let slice = self.src.slice(&token_start..&self.cursor).unwrap();
+              return Some(Ok(SyntacticToken::LitInlineStr(LitInlineStr::Plain(
+                LitPlainStr::new(slice),
+              ))));
+            }
+            None => {
+              // Lone `"` at end of input — unterminated.
+              self.cursor += 1;
+              let span = SimpleSpan::new(token_start, self.cursor);
+              self.last_error_span = Some(span);
+              let mut errs = StringErrors::default();
+              errs.push(StringError::unterminated_inline_string());
+              return Some(Err(LexerErrors::from(LexerError::new(
+                span,
+                LexerErrorData::String(errs),
+              ))));
+            }
+            Some(_) => match skip_inline_str_simd(token_start + 1, &bytes[1..]) {
+              Ok(lit) => {
+                let consumed = *lit.source_ref();
+                self.cursor += 1 + consumed;
+                self.last_span = SimpleSpan::new(token_start, self.cursor);
+                let slice = self.src.slice(&token_start..&self.cursor).unwrap();
+                let inline = match lit {
+                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainStr::new(slice)),
+                  LitInlineStr::Complex(c) => {
+                    LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
+                  }
+                };
+                return Some(Ok(SyntacticToken::LitInlineStr(inline)));
+              }
+              Err((consumed, string_errs)) => {
+                self.cursor += 1 + consumed;
+                let span = SimpleSpan::new(token_start, self.cursor);
+                self.last_error_span = Some(span);
+                let err = LexerError::new(span, LexerErrorData::String(string_errs));
+                return Some(Err(LexerErrors::from(err)));
+              }
+            },
+          }
         }
         0xEF if bytes.starts_with(b"\xEF\xBB\xBF") => {
           self.cursor += 3;
@@ -288,7 +353,7 @@ where
             Err(res) => {
               let end = logos.inner().span().end;
               self.cursor = end;
-              self.last_span = SimpleSpan::new(token_start, end);
+              self.last_error_span = Some(SimpleSpan::new(token_start, end));
               return Some(Err(res));
             }
           }
@@ -316,6 +381,15 @@ where
     >,
   S::Slice<'inp>: AsBytes,
 {
+  // ───── span accessors ────────────────────────────────────────────────
+
+  /// Span of the most recently returned error token, or `None` if no error
+  /// has been returned yet.
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  pub fn error_span(&self) -> Option<SimpleSpan> {
+    self.last_error_span
+  }
+
   // ───── trivia ────────────────────────────────────────────────────────
 
   /// Skip the single-byte trivia class (space, tab, CR, LF, comma)
@@ -582,3 +656,99 @@ fn memchr_newline(input: &[u8]) -> Option<usize> {
 //     assert_parity(src);
 //   }
 // }
+
+#[cfg(test)]
+mod str_arm_tests {
+  use tokit::{Lexer as _, lexer::Lexer};
+
+  use crate::{
+    LitComplexInlineStr, LitInlineStr, LitPlainStr,
+    graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken},
+  };
+
+  fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+    let mut out = Vec::new();
+    while let Some(tok) = lexer.lex() {
+      out.push(tok.unwrap());
+    }
+    out
+  }
+
+  #[test]
+  fn plain_inline_string() {
+    let toks = lex_all(b"\"hello\"");
+    assert_eq!(toks.len(), 1);
+    assert!(matches!(
+      &toks[0],
+      SyntacticToken::LitInlineStr(LitInlineStr::Plain(s)) if s.as_bytes() == b"\"hello\""
+    ));
+  }
+
+  #[test]
+  fn empty_inline_string() {
+    let toks = lex_all(b"\"\"");
+    assert_eq!(toks.len(), 1);
+    assert!(matches!(
+      &toks[0],
+      SyntacticToken::LitInlineStr(LitInlineStr::Plain(s)) if s.as_bytes() == b"\"\""
+    ));
+  }
+
+  #[test]
+  fn escaped_inline_string() {
+    let toks = lex_all(b"\"hello\\nworld\"");
+    assert_eq!(toks.len(), 1);
+    assert!(matches!(
+      &toks[0],
+      SyntacticToken::LitInlineStr(LitInlineStr::Complex(_))
+    ));
+  }
+
+  #[test]
+  fn inline_string_in_query() {
+    let toks = lex_all(b"{ search(q: \"foo\") { id } }");
+    let strings: Vec<_> = toks
+      .iter()
+      .filter(|t| matches!(t, SyntacticToken::LitInlineStr(_)))
+      .collect();
+    assert_eq!(strings.len(), 1);
+    assert!(matches!(
+      strings[0],
+      SyntacticToken::LitInlineStr(LitInlineStr::Plain(s)) if s.as_bytes() == b"\"foo\""
+    ));
+  }
+
+  #[test]
+  fn lone_quote_at_eof_is_error() {
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"\"");
+    let tok = lexer.lex().unwrap();
+    assert!(tok.is_err());
+    assert_eq!(lexer.error_span(), Some(tokit::SimpleSpan::new(0, 1)));
+  }
+
+  #[test]
+  fn span_not_clobbered_by_error() {
+    // After a valid token followed by an error, span() must still return the
+    // valid token's span, and error_span() must return the error's span.
+    let src = b"hello \"unterminated";
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+
+    // First token: identifier "hello" at 0..5.
+    let first = lexer.lex().unwrap();
+    assert!(first.is_ok());
+    let valid_span = lexer.span();
+    assert_eq!(valid_span, tokit::SimpleSpan::new(0, 5));
+    assert!(lexer.error_span().is_none());
+
+    // Second token: unterminated inline string → error.
+    let second = lexer.lex().unwrap();
+    assert!(second.is_err());
+
+    // span() must still reflect the last *valid* token.
+    assert_eq!(lexer.span(), valid_span);
+    // error_span() must reflect the error token (opening " is at byte 6).
+    let err_span = lexer.error_span().expect("error_span should be set");
+    assert_eq!(err_span, tokit::SimpleSpan::new(6, src.len()));
+  }
+}
