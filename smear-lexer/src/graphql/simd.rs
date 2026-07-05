@@ -26,9 +26,13 @@
 //!
 //! The token mix profiler showed 85-93% of bytes in real **executable
 //! queries** are trivia or identifier — that's the opportunity. Schemas
-//! are dominated by block strings (~60% of bytes) which Logos still
-//! handles, so this layer is expected to give ~negligible gain on schemas.
-//! See the `lex_baseline` bench output for before/after numbers.
+//! are dominated by block strings (~60% of bytes), which Logos still
+//! handles, so this layer was expected to give only a small gain there.
+//! Measured throughput says otherwise: this layer is ~1.9-2x faster than
+//! Logos on both queries *and* schemas alike (`count`, `sample_size(30)`;
+//! e.g. `query/huge_4.2KB` 855 MiB/s -> 1.69 GiB/s, `schema/gmx_69KB`
+//! 1.40 GiB/s -> 2.73 GiB/s). See the `lex_baseline` bench output for full
+//! before/after numbers.
 
 use tokit::{
   Lexer, SimpleSpan, Slice, Source, Token,
@@ -38,9 +42,9 @@ use tokit::{
 
 use crate::{
   LitComplexInlineStr, LitInlineStr, LitPlainStr,
-  error::{BadStateError, StringError, StringErrors, UnterminatedSpreadOperatorError},
+  error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::{
-    error::{LexerError, LexerErrorData, LexerErrors},
+    error::{LexerError, LexerErrors},
     syntactic::SyntacticToken,
   },
   skip_inline_str_simd,
@@ -122,7 +126,7 @@ where
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: Source<usize> + ?Sized,
-  S::Slice<'inp>: AsBytes + Slice<'inp, Char = u8>,
+  S::Slice<'inp>: AsBytes + Slice<'inp>,
 {
   type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
 
@@ -339,16 +343,11 @@ where
               ))));
             }
             None => {
-              // Lone `"` at end of input — unterminated.
-              self.cursor += 1;
-              let span = SimpleSpan::new(token_start, self.cursor);
-              self.last_error_span = Some(span);
-              let mut errs = StringErrors::default();
-              errs.push(StringError::unterminated_inline_string());
-              return Some(Err(LexerErrors::from(LexerError::new(
-                span,
-                LexerErrorData::String(errs),
-              ))));
+              // Lone `"` at end of input — unterminated. Delegate to Logos
+              // so the error is built generically for whatever `Char` this
+              // source uses, instead of hand-rolling it here (hybrid: the
+              // fast path never constructs source-typed errors itself).
+              return self.delegate_to_logos(token_start);
             }
             Some(_) => match skip_inline_str_simd(token_start + 1, &bytes[1..]) {
               Ok(lit) => {
@@ -364,13 +363,13 @@ where
                 };
                 return Some(Ok(SyntacticToken::LitInlineStr(inline)));
               }
-              Err((consumed, string_errs)) => {
-                self.cursor += 1 + consumed;
-                let span = SimpleSpan::new(token_start, self.cursor);
-                self.last_error_span = Some(span);
-                let err = LexerError::new(span, LexerErrorData::String(string_errs));
-                return Some(Err(LexerErrors::from(err)));
-              }
+              // `skip_inline_str_simd` only ever answers "clean, valid
+              // literal" or "byte-indexed anomaly" — like the number fast
+              // path (Phase 1a), any anomaly delegates the *whole* token to
+              // Logos rather than re-deriving the error here. This is also
+              // what drops the `Char = u8` requirement: the only place that
+              // ever built a `StringErrors<u8>` inline is gone.
+              Err(_) => return self.delegate_to_logos(token_start),
             },
           }
         }
@@ -392,9 +391,9 @@ where
 // This block shares the trait impl's exact bound set (verbatim) rather than
 // the weaker one below: `delegate_to_logos`'s return type has to name the
 // concrete `Token`/`Error` types, which requires the `Token<'inp, Error =
-// ..>` and `Char = u8` bounds. Every caller of this method is inside `lex()`
-// above, where those bounds already hold, so this is never more restrictive
-// in practice than the trait impl itself.
+// ..>` bound. Every caller of this method is inside `lex()` above, where
+// those bounds already hold, so this is never more restrictive in practice
+// than the trait impl itself.
 impl<'inp, S> SimdSyntacticLexer<'inp, S>
 where
   SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
@@ -409,7 +408,7 @@ where
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: Source<usize> + ?Sized,
-  S::Slice<'inp>: AsBytes + Slice<'inp, Char = u8>,
+  S::Slice<'inp>: AsBytes + Slice<'inp>,
 {
   /// Delegate the token starting at `token_start` (== `self.cursor`, prior
   /// to any mutation for this token) to the wrapped Logos lexer.
@@ -945,5 +944,91 @@ mod num_arm_tests {
   fn spread_operator_still_fast_paths() {
     let toks = lex_all(b"{ ...Frag }");
     assert!(toks.contains(&SyntacticToken::Spread));
+  }
+}
+
+/// Phase 1b Task 1 probe: before this task, the `Lexer` impl's
+/// `S::Slice<'inp>: Slice<'inp, Char = u8>` bound meant `SimdSyntacticLexer::<str>`
+/// (whose slice is `&str`, `Char = char`) could not satisfy the impl at all, so every
+/// test below was a compile error. Delegating both inline-string error outcomes to
+/// Logos (which builds whatever `Char` type the source needs) let that bound drop,
+/// so `<str>` now compiles and lexes correctly, not just `<[u8]>`.
+#[cfg(test)]
+mod generic_source_tests {
+  use tokit::Lexer as _;
+
+  use crate::{
+    error::StringError,
+    graphql::{
+      error::LexerErrorData,
+      simd::SimdSyntacticLexer,
+      syntactic::{SyntacticLexerErrors, SyntacticToken},
+    },
+  };
+
+  /// Drive a `str`-sourced lexer to completion, collecting every result.
+  fn lex_all(src: &str) -> Vec<Result<SyntacticToken<&str>, SyntacticLexerErrors>> {
+    let mut lexer = SimdSyntacticLexer::<str>::new(src);
+    let mut out = Vec::new();
+    while let Some(tok) = lexer.lex() {
+      out.push(tok);
+    }
+    out
+  }
+
+  #[test]
+  fn str_source_compiles_and_lexes_valid_query_to_completion() {
+    let toks = lex_all("query { a(x: \"hi\") }");
+    assert!(
+      toks.iter().all(Result::is_ok),
+      "expected every token to lex cleanly, got {toks:?}"
+    );
+    // query { a ( x : "hi" ) } -- 9 syntactic tokens.
+    assert_eq!(toks.len(), 9);
+    // The valid inline string still emits inline (generically over `&str`),
+    // it does not delegate.
+    assert!(matches!(
+      &toks[6],
+      Ok(SyntacticToken::LitInlineStr(lit)) if lit.is_plain() && lit.as_str() == "\"hi\""
+    ));
+  }
+
+  #[test]
+  fn str_source_delegates_inline_string_errors_with_char_type() {
+    // Same malformed-escape source text as the `str_bad_escape` oracle golden
+    // file -- confirms the delegated error is genuinely `Char = char`
+    // (`PositionedChar { char: 'q', .. }`), not a leftover `u8`.
+    let toks = lex_all("{ a(x: \"a\\qb\") }");
+    let err = toks
+      .iter()
+      .find_map(|t| t.as_ref().err())
+      .expect("expected a lex error");
+    match err.first().expect("expected at least one error").data() {
+      LexerErrorData::String(errs) => {
+        assert!(
+          matches!(
+            errs.first(),
+            Some(StringError::UnexpectedEscapedCharacter(esc)) if *esc.char_ref() == 'q'
+          ),
+          "expected UnexpectedEscapedCharacter('q'), got {errs:?}"
+        );
+      }
+      other => panic!("expected LexerErrorData::String, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn str_source_lone_quote_at_eof_delegates_to_unterminated_error() {
+    let toks = lex_all("\"");
+    assert_eq!(toks.len(), 1);
+    match toks[0].as_ref().unwrap_err().first().unwrap().data() {
+      LexerErrorData::String(errs) => {
+        assert!(
+          matches!(errs.first(), Some(StringError::Unterminated(_))),
+          "expected Unterminated, got {errs:?}"
+        );
+      }
+      other => panic!("expected LexerErrorData::String, got {other:?}"),
+    }
   }
 }
