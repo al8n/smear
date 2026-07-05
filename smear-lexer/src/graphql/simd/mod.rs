@@ -370,9 +370,23 @@ where
     }
   }
 
+  /// Extend the current token's end by `n`, mirroring `logos::Lexer::bump`:
+  /// the span start is kept while the end — and `cursor`, which always tracks
+  /// the last token's end after a lex — grow by `n`, so `span()`/`slice()`
+  /// include the bumped bytes. The new end is then validated as a source
+  /// boundary.
+  ///
+  /// # Panics
+  ///
+  /// Panics with `"Invalid Lexer bump"` if the new end is not a boundary of
+  /// the source — past its byte length, or (for `str` sources) in the middle
+  /// of a UTF-8 code point — exactly as `logos::Lexer::bump` does.
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn bump(&mut self, n: &Self::Offset) {
-    self.cursor += n;
+    let new_end = self.last_span.end() + *n;
+    self.last_span = SimpleSpan::new(self.last_span.start(), new_end);
+    self.cursor = new_end;
+    assert!(self.src.is_boundary(new_end), "Invalid Lexer bump");
   }
 }
 
@@ -500,3 +514,6 @@ mod generic_source_tests;
 
 #[cfg(test)]
 mod error_parity_tests;
+
+#[cfg(test)]
+mod bump_parity_tests;
