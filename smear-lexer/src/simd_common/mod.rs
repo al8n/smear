@@ -10,7 +10,7 @@
 //! these.
 
 use tokit::{
-  Lexer, Source, Token,
+  Lexer, SimpleSpan, Source, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::RecursionLimiter,
 };
@@ -192,7 +192,7 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
   },
   Error {
     error: <T as Token<'inp>>::Error,
-    end: usize,
+    span: SimpleSpan,
   },
 }
 
@@ -228,8 +228,11 @@ where
       })
     }
     Err(error) => {
-      let end = logos.inner().span().end;
-      Some(Delegated::Error { error, end })
+      // Carry the delegated lexer's own error-token span (absolute offsets)
+      // so the caller's `span()`/`slice()` report the error token exactly like
+      // `LogosLexer`.
+      let span: SimpleSpan = logos.inner().span().into();
+      Some(Delegated::Error { error, span })
     }
   }
 }

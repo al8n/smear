@@ -75,8 +75,9 @@ pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
   /// Current scan position. Advanced by trivia-skip, comment-skip, and each
   /// token scan. Never exposed directly — callers see `last_span`.
   cursor: usize,
-  /// Span of the most recently *successfully* lexed token. Never updated on
-  /// error returns, so `span()` always reflects the last valid position.
+  /// Span of the most recently lexed token, valid or error. Updated on every
+  /// return path so `span()`/`slice()` report the current token exactly like
+  /// `LogosLexer`, including an error token.
   last_span: SimpleSpan,
   /// Span of the most recently returned error token, if any.
   last_error_span: Option<SimpleSpan>,
@@ -127,10 +128,7 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn check(&self) -> Result<(), <Self::Token as tokit::Token<'inp>>::Error> {
-    self
-      .state
-      .check()
-      .map_err(|e| LexerError::bad_state(self.last_span, e).into())
+    self.state.check().map_err(Into::into)
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -218,6 +216,7 @@ where
             Ok($expr)
           }
           Err(e) => {
+            $this.last_span = span;
             $this.last_error_span = Some(span);
             Err(LexerError::bad_state(span, e).into())
           }
@@ -292,6 +291,7 @@ where
           if bytes.starts_with(b"..") {
             self.cursor += 2;
             let span = SimpleSpan::new(token_start, self.cursor);
+            self.last_span = span;
             self.last_error_span = Some(span);
             let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
             return Some(Err(err));
@@ -307,6 +307,7 @@ where
           }
           self.cursor += 1;
           let span = SimpleSpan::new(token_start, self.cursor);
+          self.last_span = span;
           self.last_error_span = Some(span);
           let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
           return Some(Err(err));
@@ -438,9 +439,10 @@ where
         self.state = state;
         Some(Ok(token))
       }
-      Delegated::Error { error, end } => {
-        self.cursor = end;
-        self.last_error_span = Some(SimpleSpan::new(token_start, end));
+      Delegated::Error { error, span } => {
+        self.cursor = span.end();
+        self.last_span = span;
+        self.last_error_span = Some(span);
         Some(Err(error))
       }
     }
@@ -495,3 +497,6 @@ mod num_arm_tests;
 
 #[cfg(test)]
 mod generic_source_tests;
+
+#[cfg(test)]
+mod error_parity_tests;

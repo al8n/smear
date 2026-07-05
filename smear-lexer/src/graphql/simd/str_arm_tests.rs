@@ -67,26 +67,28 @@ fn lone_quote_at_eof_is_error() {
 }
 
 #[test]
-fn span_not_clobbered_by_error() {
-  // After a valid token followed by an error, span() must still return the
-  // valid token's span, and error_span() must return the error's span.
+fn span_and_slice_track_error_token() {
+  // After an error, span()/slice() report the CURRENT (error) token, exactly
+  // like `LogosLexer` — not the previous valid token. error_span() reports the
+  // same span too.
   let src = b"hello \"unterminated";
   let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
 
   // First token: identifier "hello" at 0..5.
   let first = lexer.lex().unwrap();
   assert!(first.is_ok());
-  let valid_span = lexer.span();
-  assert_eq!(valid_span, tokit::SimpleSpan::new(0, 5));
+  assert_eq!(lexer.span(), tokit::SimpleSpan::new(0, 5));
   assert!(lexer.error_span().is_none());
 
-  // Second token: unterminated inline string → error.
+  // Second token: unterminated inline string → error. The opening `"` is at
+  // byte 6 and the error token runs to end of input.
   let second = lexer.lex().unwrap();
   assert!(second.is_err());
 
-  // span() must still reflect the last *valid* token.
-  assert_eq!(lexer.span(), valid_span);
-  // error_span() must reflect the error token (opening " is at byte 6).
-  let err_span = lexer.error_span().expect("error_span should be set");
-  assert_eq!(err_span, tokit::SimpleSpan::new(6, src.len()));
+  let err_span = tokit::SimpleSpan::new(6, src.len());
+  // span()/slice() now reflect the error token (Logos parity).
+  assert_eq!(lexer.span(), err_span);
+  assert_eq!(lexer.slice(), &src[6..]);
+  // error_span() still returns the error span too.
+  assert_eq!(lexer.error_span(), Some(err_span));
 }
