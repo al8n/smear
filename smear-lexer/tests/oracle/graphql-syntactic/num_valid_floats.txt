@@ -1,0 +1,17 @@
+OK  0..1  LBrace
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+OK  7..11  LitFloat("3.14")
+OK  13..14  Identifier("y")
+OK  14..15  Colon
+OK  16..22  LitFloat("1.5e10")
+OK  24..25  Identifier("z")
+OK  25..26  Colon
+OK  27..31  LitFloat("-2.5")
+OK  33..34  Identifier("w")
+OK  34..35  Colon
+OK  36..39  LitFloat("0.0")
+OK  39..40  RParen
+OK  41..42  RBrace

@@ -1,0 +1,11 @@
+OK  0..1  LBrace
+OK  1..2  Space
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+OK  6..7  Space
+OK  7..41  LitBlockStr(Plain(LitPlainStr { source: "\"\"\"line one\nline two\nline three\"\"\"" }))
+OK  41..42  RParen
+OK  42..43  Space
+OK  43..44  RBrace

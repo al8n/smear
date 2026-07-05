@@ -1,0 +1,11 @@
+OK  0..1  LBrace
+OK  1..2  Space
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+OK  6..7  Space
+OK  7..31  LitBlockStr(Complex(LitComplexBlockStr { source: "\"\"\"line1\r\nline2\rline3\"\"\"", num_escaped_triple_quotes: 0, has_cr_terminators: true, leading_blank_lines: 0, trailing_blank_lines: 0, common_indent: 0, total_lines: 3, required_capacity: 17 }))
+OK  31..32  RParen
+OK  32..33  Space
+OK  33..34  RBrace

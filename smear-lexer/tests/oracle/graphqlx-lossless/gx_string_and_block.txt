@@ -1,0 +1,24 @@
+OK  0..27  LitBlockStr(Plain(LitPlainStr { source: "\"\"\"A short block string.\"\"\"" }))
+OK  27..28  Space
+OK  28..32  Identifier("type")
+OK  32..33  Space
+OK  33..34  Identifier("T")
+OK  34..35  Space
+OK  35..36  LBrace
+OK  36..37  Space
+OK  37..38  Identifier("f")
+OK  38..39  LParen
+OK  39..40  Identifier("x")
+OK  40..41  Colon
+OK  41..42  Space
+OK  42..48  Identifier("String")
+OK  48..49  Space
+OK  49..50  Equal
+OK  50..51  Space
+OK  51..57  LitInlineStr(Complex(LitComplexInlineStr { source: "\"a\\nb\"", required_capacity: 3 }))
+OK  57..58  RParen
+OK  58..59  Colon
+OK  59..60  Space
+OK  60..66  Identifier("String")
+OK  66..67  Space
+OK  67..68  RBrace

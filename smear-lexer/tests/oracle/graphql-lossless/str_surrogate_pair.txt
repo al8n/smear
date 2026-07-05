@@ -1,0 +1,11 @@
+OK  0..1  LBrace
+OK  1..2  Space
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+OK  6..7  Space
+OK  7..21  LitInlineStr(Complex(LitComplexInlineStr { source: "\"\\uD83D\\uDE00\"", required_capacity: 4 }))
+OK  21..22  RParen
+OK  22..23  Space
+OK  23..24  RBrace
