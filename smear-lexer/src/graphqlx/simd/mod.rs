@@ -47,6 +47,9 @@ mod error_parity_tests;
 #[cfg(test)]
 mod bump_parity_tests;
 
+#[cfg(test)]
+mod trait_parity_tests;
+
 use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
 
 // Re-exported so the public `graphqlx::simd::{AsBytes, ScanSource}` paths and
@@ -232,8 +235,17 @@ where
       self.skip_ws_and_comma();
 
       let token_start = self.cursor;
-      let src = self.src.slice(&token_start..)?;
+      // Both `None` exits below are EOF. Mirror `LogosLexer`, whose span resets
+      // to `cursor..cursor` (EOF..EOF) once `next()` returns `None` — including
+      // after the trailing trivia/comments the loop just skipped — so that after
+      // EOF `span()`/`slice()` report the empty EOF span and a post-EOF `bump`
+      // grows from EOF, not the stale last token.
+      let Some(src) = self.src.slice(&token_start..) else {
+        self.last_span = SimpleSpan::new(self.cursor, self.cursor);
+        return None;
+      };
       if src.is_empty() {
+        self.last_span = SimpleSpan::new(self.cursor, self.cursor);
         return None;
       }
 
