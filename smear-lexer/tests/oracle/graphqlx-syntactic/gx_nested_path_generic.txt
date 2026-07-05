@@ -1,0 +1,15 @@
+OK  0..4  Identifier("type")
+OK  5..6  Identifier("T")
+OK  7..8  LBrace
+OK  9..10  Identifier("f")
+OK  10..11  Colon
+OK  12..13  Identifier("a")
+OK  13..15  PathSeparator
+OK  15..16  Identifier("b")
+OK  16..18  PathSeparator
+OK  18..19  Identifier("C")
+OK  19..20  LAngle
+OK  20..21  Identifier("D")
+OK  23..24  Identifier("E")
+OK  24..25  RAngle
+OK  26..27  RBrace

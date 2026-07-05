@@ -139,9 +139,8 @@ mod string_lexer;
 mod handlers;
 
 /// Dialect-agnostic SIMD-lexer primitives shared by the GraphQL and GraphQLx
-/// SIMD lexers. Gated on `graphql` (its only current consumer); widen to
-/// `any(graphql, graphqlx)` once the GraphQLx SIMD lexer lands.
-#[cfg(feature = "graphql")]
+/// SIMD lexers.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) mod simd_common;
 
 #[doc(hidden)]

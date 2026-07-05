@@ -1,0 +1,14 @@
+OK  0..4  Identifier("type")
+OK  5..6  Identifier("T")
+OK  7..8  LBrace
+OK  9..10  Identifier("m")
+OK  10..11  Colon
+OK  12..13  LAngle
+OK  13..19  Identifier("String")
+OK  20..22  FatArrow
+OK  23..27  Identifier("List")
+OK  27..28  LAngle
+OK  28..31  Identifier("Int")
+OK  31..32  RAngle
+OK  32..33  RAngle
+OK  34..35  RBrace

@@ -41,6 +41,15 @@ pub mod syntactic {
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
+/// SIMD-accelerated wrapper over the Logos-driven GraphQLx syntactic lexer.
+///
+/// Trivia and identifier scanning are SIMD-fast-pathed; numbers, strings, the
+/// spread operator, and error reporting are delegated one token at a time to a
+/// fresh Logos lexer. Mirrors [`crate::graphql::simd`] and shares its
+/// primitives via `crate::simd_common`. See
+/// [`simd::SimdSyntacticLexer`] for the architecture.
+pub mod simd;
+
 mod ast;
 mod handlers;
 

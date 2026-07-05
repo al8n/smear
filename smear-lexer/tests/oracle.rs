@@ -150,10 +150,7 @@ const EDGES: &[(&str, &str)] = &[
     "{ a(x: \"\"\"foo\n    bar\n    baz\"\"\") }",
   ),
   ("blk_blank_lines", "{ a(x: \"\"\"\ncontent\n\n\"\"\") }"),
-  (
-    "blk_crlf",
-    "{ a(x: \"\"\"line1\r\nline2\rline3\"\"\") }",
-  ),
+  ("blk_crlf", "{ a(x: \"\"\"line1\r\nline2\rline3\"\"\") }"),
   ("blk_escaped_triple", r#"{ a(x: """foo\"""bar""") }"#),
   (
     "blk_multiline_plain",
@@ -697,16 +694,288 @@ const GRAPHQLX_EXTRA: &[(&str, &str)] = &[
   ),
 ];
 
+/// Fixtures added for the SIMD lexer to widen coverage past `GRAPHQLX_EXTRA`:
+/// a multi-segment path feeding a multi-argument generic, doubly-nested angle
+/// brackets behind a fat arrow, and negative radix literals (the `-`-as-sign
+/// dispatch that no `GRAPHQLX_EXTRA` fixture reaches — every `-` there is
+/// space-separated `Minus`). Their goldens are new; the existing goldens are
+/// never re-blessed.
+#[cfg(feature = "graphqlx")]
+const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
+  ("gx_nested_path_generic", "type T { f: a::b::C<D, E> }"),
+  ("gx_nested_map", "type T { m: <String => List<Int>> }"),
+  (
+    "gx_negative_literals",
+    "type T { f(x: Int = -5, y: Float = -2.5, z: Int = -0xFF): Int }",
+  ),
+];
+
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_oracle() {
   use smear_lexer::graphqlx::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
-  for (name, src) in GRAPHQLX_EXTRA.iter() {
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
     let rendered = render_stream!(SyntacticLexer::<&str>::new(src));
     check("graphqlx-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
+}
+
+// `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
+// what the `&str`-sourced Logos oracle above was captured from -- so its render
+// is byte-for-byte identical to the golden files, no conversion needed.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_syntactic_simd_oracle() {
+  use smear_lexer::graphqlx::simd::SimdSyntacticLexer;
+  let mut mismatches = Vec::new();
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
+    let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
+    check("graphqlx-syntactic", name, &rendered, &mut mismatches);
+  }
+  assert_no_mismatches(&mismatches);
+}
+
+// ─── GraphQLx SIMD source matrix: `<str>` vs `<[u8]>`/`<Bytes>` ─────────────
+//
+// The GraphQLx analog of the GraphQL source matrix above. `graphqlx_syntactic_
+// simd_oracle` proves `<str>` matches the golden byte-for-byte; this section
+// proves the byte-flavored sources (`Char = u8`) carry the same kinds, spans,
+// and decoded content, transitively matching the golden without ever comparing
+// `Debug` text across `Char` types. The dialect-agnostic leaf comparators built
+// for the GraphQL matrix (`same_lexeme`, `same_string_errors`, `same_inline_str`,
+// `same_block_str`, ...) are reused verbatim; only the GraphQLx-typed walkers
+// are new, because GraphQLx has radix-number error enums and enum-shaped
+// `LitInt`/`LitFloat` tokens the GraphQL comparators don't cover.
+
+#[cfg(feature = "graphqlx")]
+use smear_lexer::graphqlx::{
+  LitFloat, LitInt,
+  error::{
+    BinaryError, DecimalError as GxDecimalError, FloatError as GxFloatError, HexError,
+    HexFloatError, LexerError as GxLexerError, LexerErrorData as GxErrorData,
+    LexerErrors as GxLexerErrors, OctalError,
+  },
+  simd::SimdSyntacticLexer as GxSimd,
+  syntactic::SyntacticToken as GxToken,
+};
+#[cfg(feature = "graphqlx")]
+use tokit::state::recursion_tracker::RecursionLimitExceeded;
+
+// Each number-error enum reuses the shared `same_lexeme` for its `Char`-bearing
+// suffix leaf; its `UnexpectedEnd`/span-only leaves carry no `Char`, so both
+// sides are the same concrete type and compare by plain `==`.
+#[cfg(feature = "graphqlx")]
+fn same_gx_float_error(byte: &GxFloatError<u8>, str_: &GxFloatError<char>) -> bool {
+  match (byte, str_) {
+    (GxFloatError::UnexpectedSuffix(b), GxFloatError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (GxFloatError::UnexpectedLexeme(b), GxFloatError::UnexpectedLexeme(s)) => {
+      same_unexpected_lexeme(b, s)
+    }
+    (GxFloatError::UnexpectedEnd(b), GxFloatError::UnexpectedEnd(s)) => b == s,
+    (GxFloatError::MissingIntegerPart(b), GxFloatError::MissingIntegerPart(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_hex_float_error(byte: &HexFloatError<u8>, str_: &HexFloatError<char>) -> bool {
+  match (byte, str_) {
+    (HexFloatError::UnexpectedSuffix(b), HexFloatError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (HexFloatError::UnexpectedLexeme(b), HexFloatError::UnexpectedLexeme(s)) => {
+      same_unexpected_lexeme(b, s)
+    }
+    (HexFloatError::UnexpectedEnd(b), HexFloatError::UnexpectedEnd(s)) => b == s,
+    (HexFloatError::MissingIntegerPart(b), HexFloatError::MissingIntegerPart(s)) => b == s,
+    (HexFloatError::MissingExponent(b), HexFloatError::MissingExponent(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_decimal_error(byte: &GxDecimalError<u8>, str_: &GxDecimalError<char>) -> bool {
+  match (byte, str_) {
+    (GxDecimalError::UnexpectedSuffix(b), GxDecimalError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (GxDecimalError::UnexpectedEnd(b), GxDecimalError::UnexpectedEnd(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_hex_error(byte: &HexError<u8>, str_: &HexError<char>) -> bool {
+  match (byte, str_) {
+    (HexError::UnexpectedSuffix(b), HexError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (HexError::UnexpectedEnd(b), HexError::UnexpectedEnd(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_octal_error(byte: &OctalError<u8>, str_: &OctalError<char>) -> bool {
+  match (byte, str_) {
+    (OctalError::UnexpectedSuffix(b), OctalError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (OctalError::UnexpectedEnd(b), OctalError::UnexpectedEnd(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_binary_error(byte: &BinaryError<u8>, str_: &BinaryError<char>) -> bool {
+  match (byte, str_) {
+    (BinaryError::UnexpectedSuffix(b), BinaryError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (BinaryError::UnexpectedEnd(b), BinaryError::UnexpectedEnd(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_error_data(
+  byte: &GxErrorData<u8, RecursionLimitExceeded>,
+  str_: &GxErrorData<char, RecursionLimitExceeded>,
+) -> bool {
+  match (byte, str_) {
+    (GxErrorData::Float(b), GxErrorData::Float(s)) => same_gx_float_error(b, s),
+    (GxErrorData::HexFloat(b), GxErrorData::HexFloat(s)) => same_gx_hex_float_error(b, s),
+    (GxErrorData::Decimal(b), GxErrorData::Decimal(s)) => same_gx_decimal_error(b, s),
+    (GxErrorData::Hex(b), GxErrorData::Hex(s)) => same_gx_hex_error(b, s),
+    (GxErrorData::Octal(b), GxErrorData::Octal(s)) => same_gx_octal_error(b, s),
+    (GxErrorData::Binary(b), GxErrorData::Binary(s)) => same_gx_binary_error(b, s),
+    (GxErrorData::String(b), GxErrorData::String(s)) => same_string_errors(b, s),
+    (GxErrorData::UnexpectedLexeme(b), GxErrorData::UnexpectedLexeme(s)) => same_lexeme(b, s),
+    (GxErrorData::UnknownLexeme(b), GxErrorData::UnknownLexeme(s)) => same_lexeme(b, s),
+    (GxErrorData::UnexpectedEndOfInput, GxErrorData::UnexpectedEndOfInput) => true,
+    (GxErrorData::UnterminatedSpreadOperator, GxErrorData::UnterminatedSpreadOperator) => true,
+    (GxErrorData::State(b), GxErrorData::State(s)) => b == s,
+    (GxErrorData::InvalidUtf8(b), GxErrorData::InvalidUtf8(s)) => b == s,
+    (GxErrorData::Other(b), GxErrorData::Other(s)) => b == s,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_lexer_error(
+  byte: &GxLexerError<u8, RecursionLimitExceeded>,
+  str_: &GxLexerError<char, RecursionLimitExceeded>,
+) -> bool {
+  byte.span() == str_.span() && same_gx_error_data(byte.data(), str_.data())
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_lexer_errors(
+  byte: &GxLexerErrors<u8, RecursionLimitExceeded>,
+  str_: &GxLexerErrors<char, RecursionLimitExceeded>,
+) -> bool {
+  byte.len() == str_.len()
+    && byte
+      .iter()
+      .zip(str_.iter())
+      .all(|(b, s)| same_gx_lexer_error(b, s))
+}
+
+// `LitInt`/`LitFloat` are radix-tagged enums; a matching radix variant plus
+// equal raw bytes proves the byte and str lexers classified the literal the
+// same way (radix is a pure function of the bytes, but the variant match makes
+// any divergence a hard mismatch rather than a silent pass).
+#[cfg(feature = "graphqlx")]
+fn same_gx_lit_int<B: AsBytes>(byte: &LitInt<B>, str_: &LitInt<&str>) -> bool {
+  match (byte, str_) {
+    (LitInt::Decimal(b), LitInt::Decimal(s))
+    | (LitInt::Hex(b), LitInt::Hex(s))
+    | (LitInt::Binary(b), LitInt::Binary(s))
+    | (LitInt::Octal(b), LitInt::Octal(s)) => b.as_bytes() == s.as_bytes(),
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_lit_float<B: AsBytes>(byte: &LitFloat<B>, str_: &LitFloat<&str>) -> bool {
+  match (byte, str_) {
+    (LitFloat::Decimal(b), LitFloat::Decimal(s)) | (LitFloat::Hex(b), LitFloat::Hex(s)) => {
+      b.as_bytes() == s.as_bytes()
+    }
+    _ => false,
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+fn same_gx_token<B: AsBytes>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
+  use GxToken as Tok;
+  if byte.kind() != str_.kind() {
+    return false;
+  }
+  match (byte, str_) {
+    (Tok::Identifier(b), Tok::Identifier(s)) => b.as_bytes() == s.as_bytes(),
+    (Tok::LitInt(b), Tok::LitInt(s)) => same_gx_lit_int(b, s),
+    (Tok::LitFloat(b), Tok::LitFloat(s)) => same_gx_lit_float(b, s),
+    (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => same_inline_str(b, s),
+    (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => same_block_str(b, s),
+    // Every other variant carries no payload; the `kind()` check above already
+    // confirmed they're the same punctuation/spread token.
+    _ => true,
+  }
+}
+
+/// Drives a byte-sourced GraphQLx `SimdSyntacticLexer` and the reference
+/// `<str>`-flavored one over the same fixture text, in lockstep, asserting
+/// every token/error pair is source-agnostically equivalent.
+#[cfg(feature = "graphqlx")]
+macro_rules! assert_gx_matches_str_stream {
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr) => {{
+    let mut byte_lex = $byte_lexer;
+    let mut str_lex = GxSimd::<str>::new($str_src);
+    let mut idx = 0usize;
+    loop {
+      match (byte_lex.lex(), str_lex.lex()) {
+        (None, None) => break,
+        (Some(Ok(bt)), Some(Ok(st))) => {
+          assert_eq!(
+            byte_lex.span(),
+            str_lex.span(),
+            "{}/{}#{idx}: span mismatch (byte={bt:?} str={st:?})",
+            $label,
+            $fixture
+          );
+          assert!(
+            same_gx_token(&bt, &st),
+            "{}/{}#{idx}: content mismatch: byte={bt:?} str={st:?}",
+            $label,
+            $fixture
+          );
+        }
+        (Some(Err(be)), Some(Err(se))) => {
+          assert!(
+            same_gx_lexer_errors(&be, &se),
+            "{}/{}#{idx}: error mismatch:\n  byte={be:?}\n  str={se:?}",
+            $label,
+            $fixture
+          );
+        }
+        (b, s) => panic!(
+          "{}/{}#{idx}: shape mismatch: byte={b:?} str={s:?}",
+          $label, $fixture
+        ),
+      }
+      idx += 1;
+    }
+  }};
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_syntactic_simd_source_matrix_u8() {
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
+    assert_gx_matches_str_stream!("[u8]", name, GxSimd::<[u8]>::new(src.as_bytes()), src);
+  }
+}
+
+#[cfg(all(feature = "graphqlx", feature = "bytes"))]
+#[test]
+fn graphqlx_syntactic_simd_source_matrix_bytes() {
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
+    let owned = bytes::Bytes::copy_from_slice(src.as_bytes());
+    assert_gx_matches_str_stream!("Bytes", name, GxSimd::<bytes::Bytes>::new(&owned), src);
+  }
 }
 
 #[cfg(feature = "graphqlx")]
