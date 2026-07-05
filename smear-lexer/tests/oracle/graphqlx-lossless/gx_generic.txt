@@ -1,0 +1,15 @@
+OK  0..4  Identifier("type")
+OK  4..5  Space
+OK  5..8  Identifier("Box")
+OK  8..9  LAngle
+OK  9..10  Identifier("T")
+OK  10..11  RAngle
+OK  11..12  Space
+OK  12..13  LBrace
+OK  13..14  Space
+OK  14..19  Identifier("value")
+OK  19..20  Colon
+OK  20..21  Space
+OK  21..22  Identifier("T")
+OK  22..23  Space
+OK  23..24  RBrace

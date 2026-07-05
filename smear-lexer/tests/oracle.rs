@@ -134,3 +134,37 @@ fn graphql_lossless_oracle() {
     check("graphql-lossless", name, &rendered);
   }
 }
+
+/// GraphQLx-specific inputs: prefixed-radix numbers + extra punctuation.
+#[cfg(feature = "graphqlx")]
+const GRAPHQLX_EXTRA: &[(&str, &str)] = &[
+  ("gx_hex_int", "type T { f(x: Int = 0xFF): Int }"),
+  ("gx_binary_int", "type T { f(x: Int = 0b1010): Int }"),
+  ("gx_octal_int", "type T { f(x: Int = 0o755): Int }"),
+  ("gx_hex_float", "type T { f(x: Float = 0x1.8p3): Float }"),
+  ("gx_generic", "type Box<T> { value: T }"),
+  ("gx_path_sep", "type T { f: foo::Bar }"),
+  ("gx_fat_arrow", "type T { m: <String => Int> }"),
+  ("gx_arith", "type T { f(x: Int = 1 + 2 * 3 - 4): Int }"),
+  ("gx_bad_hex", "type T { f(x: Int = 0xZZ): Int }"),
+];
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_syntactic_oracle() {
+  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  for (name, src) in GRAPHQLX_EXTRA.iter() {
+    let rendered = render_stream!(SyntacticLexer::<&str>::new(src));
+    check("graphqlx-syntactic", name, &rendered);
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_lossless_oracle() {
+  use smear_lexer::graphqlx::lossless::LosslessLexer;
+  for (name, src) in GRAPHQLX_EXTRA.iter() {
+    let rendered = render_stream!(LosslessLexer::<&str>::new(src));
+    check("graphqlx-lossless", name, &rendered);
+  }
+}
