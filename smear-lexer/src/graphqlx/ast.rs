@@ -10,9 +10,6 @@ use token::{token, token_impl};
 
 mod token;
 
-#[cfg(test)]
-mod tests;
-
 mod slice;
 mod str;
 

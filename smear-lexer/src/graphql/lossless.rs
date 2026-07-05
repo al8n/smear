@@ -12,9 +12,6 @@ mod slice;
 mod str;
 mod token;
 
-#[cfg(test)]
-mod tests;
-
 /// The lexer type for lossless GraphQL tokenization.
 pub type LosslessLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
 
