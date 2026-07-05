@@ -9,10 +9,8 @@ use std::{borrow::Cow, string::String};
 
 pub(crate) use self::{
   simd::skip_inline_str_simd,
-  str::{StringToken, lex_inline_str_from_str, skip_inline_str_in_str},
-  u8_slice::{
-    StringToken as BytesStringToken, lex_inline_str_from_bytes, skip_inline_str_in_bytes,
-  },
+  str::{StringToken, lex_inline_str_from_str},
+  u8_slice::{StringToken as BytesStringToken, lex_inline_str_from_bytes},
 };
 
 mod simd;

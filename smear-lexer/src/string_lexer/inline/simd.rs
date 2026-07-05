@@ -18,8 +18,9 @@
 //!
 //! # API
 //!
-//! [`skip_inline_str_simd`] is a drop-in for `skip_inline_str_in_bytes`; the
-//! source argument `src` starts **after** the opening `"`.
+//! [`skip_inline_str_simd`] scans an inline string body and reports either the
+//! parsed literal or the errors found; the source argument `src` starts
+//! **after** the opening `"`.
 
 use tokit::{
   SimpleSpan,
@@ -235,7 +236,7 @@ fn handle_braced_unicode(
 
 // ─── public interface ─────────────────────────────────────────────────────────
 
-/// SIMD-accelerated inline string scanner (drop-in for `skip_inline_str_in_bytes`).
+/// SIMD-accelerated inline string scanner.
 ///
 /// `src`    — bytes starting **after** the opening `"` (the string body).
 /// `offset` — absolute byte position of `src[0]` in the original source;
@@ -259,7 +260,7 @@ pub(crate) fn skip_inline_str_simd(
     // ── SIMD bulk plain-character scan ───────────────────────────────────────
     // 4 needles → NEON on aarch64 (≥16 bytes); scalar memchr4 otherwise.
     // Stops at the first `"`, `\`, `\r`, or `\n`.
-    let next = match memspan::skip::skip_until(&src[pos..], [b'"', b'\\', b'\r', b'\n']) {
+    let next = match memspan::skip::skip_until(&src[pos..], *b"\"\\\r\n") {
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.

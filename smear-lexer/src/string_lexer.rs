@@ -9,10 +9,9 @@ use tokit::{
 
 use crate::error::{StringError, StringErrors};
 
-pub(crate) use block::skip_block_str_from_bytes;
 pub use block::{LitBlockStr, LitComplexBlockStr};
+pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};
-pub(crate) use inline::{skip_inline_str_in_bytes, skip_inline_str_in_str, skip_inline_str_simd};
 
 macro_rules! variant_type {
   (
@@ -140,49 +139,49 @@ macro_rules! variant_type {
 
 macro_rules! impl_common_traits {
   ($name:ident::<&$lt:lifetime $ty:ty>::$fn:ident) => {
-    impl<$lt> PartialEq<$ty> for $name<&$lt $ty> {
+    impl PartialEq<$ty> for $name<&'_ $ty> {
       #[inline(always)]
       fn eq(&self, other: &$ty) -> bool {
         self.$fn().eq(other)
       }
     }
 
-    impl<$lt> PartialEq<$name<&$lt $ty>> for $ty {
+    impl PartialEq<$name<&'_ $ty>> for $ty {
       #[inline(always)]
-      fn eq(&self, other: &$name<&$lt $ty>) -> bool {
+      fn eq(&self, other: &$name<&'_ $ty>) -> bool {
         other.eq(self)
       }
     }
 
-    impl<$lt> PartialOrd<$ty> for $name<&$lt $ty> {
+    impl PartialOrd<$ty> for $name<&'_ $ty> {
       #[inline(always)]
       fn partial_cmp(&self, other: &$ty) -> Option<core::cmp::Ordering> {
         self.$fn().partial_cmp(other)
       }
     }
 
-    impl<$lt> PartialOrd<$name<&$lt $ty>> for $ty {
+    impl PartialOrd<$name<&'_ $ty>> for $ty {
       #[inline(always)]
-      fn partial_cmp(&self, other: &$name<&$lt $ty>) -> Option<core::cmp::Ordering> {
+      fn partial_cmp(&self, other: &$name<&'_ $ty>) -> Option<core::cmp::Ordering> {
         other.partial_cmp(self).map(core::cmp::Ordering::reverse)
       }
     }
 
-    impl<$lt> core::borrow::Borrow<$ty> for $name<&$lt $ty> {
+    impl core::borrow::Borrow<$ty> for $name<&'_ $ty> {
       #[inline(always)]
       fn borrow(&self) -> &$ty {
         self
       }
     }
 
-    impl<$lt> AsRef<$ty> for $name<&$lt $ty> {
+    impl AsRef<$ty> for $name<&'_ $ty> {
       #[inline(always)]
       fn as_ref(&self) -> &$ty {
         core::borrow::Borrow::borrow(self)
       }
     }
 
-    impl<$lt> core::ops::Deref for $name<&$lt $ty> {
+    impl core::ops::Deref for $name<&'_ $ty> {
       type Target = $ty;
 
       #[inline(always)]

@@ -297,7 +297,7 @@ macro_rules! token_impl {
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b> tokit::Token<'b> for SyntacticToken<$slice> {
+      impl tokit::Token<'_> for SyntacticToken<$slice> {
         type Kind = SyntacticTokenKind;
         type Error = TokenErrors;
 

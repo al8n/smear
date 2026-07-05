@@ -141,55 +141,6 @@ where
   }
 }
 
-#[inline]
-pub(crate) fn skip_block_str_from_bytes(
-  offset: usize,
-  src: &[u8],
-) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
-  // Phase-2 SIMD scan, identical shape to the str-side variant.
-  let (read, close_off, num_escaped_triple_quotes) = find_block_close_simd(src);
-
-  match close_off {
-    Some(start) => {
-      let content = &src[..start];
-
-      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-      while lines.next().is_some() {
-        // callbacks already updated `lines.extras`
-      }
-
-      let plan = super::compute_block_normalization_plan(
-        &lines.extras,
-        !content.is_empty(),
-        num_escaped_triple_quotes,
-      );
-
-      if plan.is_clean {
-        return Ok(LitPlainStr::new(lines.span().end).into());
-      }
-
-      Ok(
-        LitComplexBlockStr::new(
-          lines.span().end,
-          num_escaped_triple_quotes,
-          lines.extras.has_cr_terminators,
-          lines.extras.leading_blank_lines,
-          plan.effective_trailing,
-          plan.common_indent,
-          plan.total_lines,
-          plan.required_capacity,
-        )
-        .into(),
-      )
-    }
-    None => {
-      let mut errs = StringErrors::default();
-      errs.push(StringError::unterminated_block_string());
-      Err((read, errs))
-    }
-  }
-}
-
 // ---- sub-lexer over inner block-string content ----
 #[derive(Logos, Debug)]
 #[logos(crate = tokit::logos, utf8 = false, extras = BlockLineExtras)]
