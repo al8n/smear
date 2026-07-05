@@ -251,36 +251,14 @@ fn graphql_syntactic_simd_oracle() {
 // fooled by formatting coincidences: anything they don't recognize is a hard
 // mismatch (`_ => false`), never a silent pass.
 //
-// NOTE on `bytes::Bytes` / `bstr::BStr` / `hipstr::HipStr` / `hipstr::HipByt`:
-// the task brief asked for `SimdSyntacticLexer::<bytes::Bytes>` here too, but
-// it does not compile, for a reason `AsBytes` cannot fix. `SimdSyntacticLexer`'s
-// `Lexer` impl requires the *delegate* `LogosLexer`'s `Source` associated type
-// to equal `S` exactly (`simd.rs`'s `impl Lexer for SimdSyntacticLexer<S>`
-// where-clause: `LogosLexer<..>: Lexer<.., Source = S, ..>`). For `S = str` or
-// `S = [u8]`, that holds trivially. For every owned/shared source
-// (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt`), the
-// `token!` macro (`graphql/syntactic/token.rs`) always derives the *raw* Logos
-// enum over `&[u8]`/`&str` and converts the matched slice up via
-// `IntoEquivalent` (see `graphql/syntactic/slice.rs`/`str.rs`: every owned-type
-// `token!` invocation passes `&'s [u8]`/`&'s str` as the raw logos slice) --
-// so `<LogosLexer<..> as Lexer>::Source` is always the raw primitive, never
-// the owned wrapper, and the `Source = S` bound can never be satisfied for
-// `S != {str, [u8]}`. `AsBytes` is necessary infrastructure for a future fix
-// (it's what would let `delegate_to_logos` build a byte view of `S` to
-// delegate over), but not sufficient on its own -- `delegate_to_logos` itself
-// would need reworking to delegate over that byte view and convert the result
-// back via `IntoEquivalent`, which is a materially larger change than this
-// task's stated scope (Task 2 report has the full writeup, plus a second,
-// independent bug found for `hipstr` specifically: tokit's `source/mod.rs`
-// and `slice/mod.rs` gate their `hipstr_0_8` support module behind
-// `cfg(feature = "hipstr")`, but smear-lexer's `hipstr` feature only enables
-// `tokit/hipstr_0_8` -- a different, non-implied feature name -- so
-// `tokit::Source`/`tokit::Slice` for `HipByt`/`HipStr` never compile in even
-// before hitting the `Source = S` issue above).
-//
-// The `AsBytes` impls for all four types are still added below (Task 2 Step
-// 1's literal ask) and unit-tested directly against the trait, since they are
-// correct and are exactly the piece a future fix would reuse.
+// The four owned/shared sources are covered too (each feature-gated), driven
+// through the same lockstep comparison. They split by the primitive Logos
+// scans (see `ScanSource` in `graphql/simd.rs`): `Bytes`/`BStr`/`HipByt` scan
+// `[u8]` (`Char = u8`), so they reuse `same_lexer_errors` (u8-vs-char) exactly
+// like `<[u8]>`; `HipStr` scans `str` (`Char = char`), so its errors are the
+// *same* concrete type as the `<str>` reference's and compare by plain `==`.
+// Tokens compare via `same_token` for all of them — it is generic over any
+// `AsBytes` slice, so it handles `Bytes`, `&[u8]`, and `HipStr`/`HipByt` alike.
 
 use smear_lexer::{
   LitBlockStr, LitInlineStr,
@@ -564,15 +542,15 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
   }
 }
 
-/// Drives a byte-flavored `SimdSyntacticLexer` (`Char = u8`) and the
-/// reference `<str>`-flavored one over the same fixture text, in lockstep,
-/// asserting every token/error pair is source-agnostically equivalent (see
-/// `same_token` / `same_lexer_errors` above). `$label` identifies the byte
-/// flavor in failure messages (e.g. `"[u8]"`); it's a macro parameter rather
-/// than hard-coded so a future byte-flavored source (once the limitation
-/// documented above is resolved) can reuse this same driver.
+/// Drives an owned/shared-source `SimdSyntacticLexer` and the reference
+/// `<str>`-flavored one over the same fixture text, in lockstep, asserting
+/// every token/error pair is source-agnostically equivalent (see `same_token`
+/// / `same_lexer_errors` above). `$label` identifies the flavor in failure
+/// messages (e.g. `"[u8]"`, `"Bytes"`). `$err_eq` is the error comparator:
+/// `same_lexer_errors` for the `[u8]`-primitive sources (`Char = u8`), or
+/// plain `==` for `HipStr` (`Char = char`, same error type as `<str>`).
 macro_rules! assert_matches_str_stream {
-  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr) => {{
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {{
     let mut byte_lex = $byte_lexer;
     let mut str_lex = SimdSyntacticLexer::<str>::new($str_src);
     let mut idx = 0usize;
@@ -596,7 +574,7 @@ macro_rules! assert_matches_str_stream {
         }
         (Some(Err(be)), Some(Err(se))) => {
           assert!(
-            same_lexer_errors(&be, &se),
+            $err_eq(&be, &se),
             "{}/{}#{idx}: error mismatch:\n  byte={be:?}\n  str={se:?}",
             $label,
             $fixture
@@ -619,7 +597,72 @@ fn graphql_syntactic_simd_source_matrix_u8() {
       "[u8]",
       name,
       SimdSyntacticLexer::<[u8]>::new(src.as_bytes()),
-      src
+      src,
+      same_lexer_errors
+    );
+  }
+}
+
+#[cfg(feature = "bytes")]
+#[test]
+fn graphql_syntactic_simd_source_matrix_bytes() {
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    let owned = bytes::Bytes::copy_from_slice(src.as_bytes());
+    assert_matches_str_stream!(
+      "Bytes",
+      name,
+      SimdSyntacticLexer::<bytes::Bytes>::new(&owned),
+      src,
+      same_lexer_errors
+    );
+  }
+}
+
+#[cfg(feature = "bstr")]
+#[test]
+fn graphql_syntactic_simd_source_matrix_bstr() {
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    assert_matches_str_stream!(
+      "BStr",
+      name,
+      SimdSyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(src.as_bytes())),
+      src,
+      same_lexer_errors
+    );
+  }
+}
+
+#[cfg(feature = "hipstr")]
+#[test]
+fn graphql_syntactic_simd_source_matrix_hipstr() {
+  // `HipStr` scans `str`, so its errors are `SyntacticLexerErrors<char>` —
+  // the exact type the `<str>` reference produces — and compare by `==`.
+  fn eq_char(byte: &SyntacticLexerErrors<char>, str_: &SyntacticLexerErrors<char>) -> bool {
+    byte == str_
+  }
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    let owned = hipstr::HipStr::from(*src);
+    assert_matches_str_stream!(
+      "HipStr",
+      name,
+      SimdSyntacticLexer::<hipstr::HipStr<'_>>::new(&owned),
+      src,
+      eq_char
+    );
+  }
+}
+
+#[cfg(feature = "hipstr")]
+#[test]
+fn graphql_syntactic_simd_source_matrix_hipbyt() {
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    let owned = hipstr::HipByt::from(src.as_bytes());
+    assert_matches_str_stream!(
+      "HipByt",
+      name,
+      SimdSyntacticLexer::<hipstr::HipByt<'_>>::new(&owned),
+      src,
+      same_lexer_errors
     );
   }
 }

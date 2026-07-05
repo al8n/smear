@@ -132,6 +132,82 @@ impl AsBytes for hipstr::HipByt<'_> {
   }
 }
 
+/// The primitive `str`/`[u8]` source that Logos actually scans for a source
+/// `S`, plus how to borrow `S` as it.
+///
+/// The `token!`-generated Logos enums (`graphql/syntactic/{str,slice}.rs`)
+/// always scan `str`/`[u8]` and convert each matched primitive slice up to
+/// `S::Slice` via `IntoEquivalent`, so `LogosLexer`'s `Source` is always the
+/// primitive — never the owned/shared wrapper. `delegate_to_logos` builds its
+/// `LogosLexer` over this primitive view; the tokens it produces are still
+/// `SyntacticToken<S::Slice>` and compare content-equal to the fast path's.
+pub trait ScanSource: Source<usize> {
+  /// The `str`/`[u8]` primitive Logos scans for this source. Identity for
+  /// `str`/`[u8]`; the wrapper's deref target otherwise.
+  type ScanPrimitive: Source<usize> + ?Sized;
+
+  /// Borrow this source as the primitive Logos scans.
+  fn scan_primitive(&self) -> &Self::ScanPrimitive;
+}
+
+impl ScanSource for str {
+  type ScanPrimitive = str;
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &str {
+    self
+  }
+}
+
+impl ScanSource for [u8] {
+  type ScanPrimitive = [u8];
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &[u8] {
+    self
+  }
+}
+
+#[cfg(feature = "bytes")]
+impl ScanSource for bytes::Bytes {
+  type ScanPrimitive = [u8];
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &[u8] {
+    self
+  }
+}
+
+#[cfg(feature = "bstr")]
+impl ScanSource for bstr::BStr {
+  type ScanPrimitive = [u8];
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &[u8] {
+    self
+  }
+}
+
+#[cfg(feature = "hipstr")]
+impl ScanSource for hipstr::HipStr<'_> {
+  type ScanPrimitive = str;
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &str {
+    self
+  }
+}
+
+#[cfg(feature = "hipstr")]
+impl ScanSource for hipstr::HipByt<'_> {
+  type ScanPrimitive = [u8];
+
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn scan_primitive(&self) -> &[u8] {
+    self
+  }
+}
+
 /// Phase-1 SIMD layer. Streaming, single-pass, one token per call.
 ///
 /// Construct with [`SimdSyntacticLexer::new`] or [`SimdSyntacticLexer::with_limit`],
@@ -163,14 +239,14 @@ where
       'inp,
       State = RecursionLimiter,
       Token = SyntacticToken<S::Slice<'inp>>,
-      Source = S,
+      Source = <S as ScanSource>::ScanPrimitive,
       Span = SimpleSpan,
       Offset = usize,
     >,
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  S: Source<usize> + ?Sized,
-  S::Slice<'inp>: AsBytes + Slice<'inp>,
+  S: ScanSource + ?Sized,
+  S::Slice<'inp>: AsBytes,
 {
   type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
 
@@ -445,14 +521,14 @@ where
       'inp,
       State = RecursionLimiter,
       Token = SyntacticToken<S::Slice<'inp>>,
-      Source = S,
+      Source = <S as ScanSource>::ScanPrimitive,
       Span = SimpleSpan,
       Offset = usize,
     >,
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  S: Source<usize> + ?Sized,
-  S::Slice<'inp>: AsBytes + Slice<'inp>,
+  S: ScanSource + ?Sized,
+  S::Slice<'inp>: AsBytes,
 {
   /// Delegate the token starting at `token_start` (== `self.cursor`, prior
   /// to any mutation for this token) to the wrapped Logos lexer.
@@ -483,7 +559,7 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    let mut logos = LogosLexer::with_state(self.src, self.state);
+    let mut logos = LogosLexer::with_state(self.src.scan_primitive(), self.state);
     logos.bump(&self.cursor);
     match logos.lex()? {
       Ok(tok) => {
@@ -505,15 +581,6 @@ where
 
 impl<'inp, S: Source<usize> + ?Sized> SimdSyntacticLexer<'inp, S>
 where
-  SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
-      'inp,
-      State = RecursionLimiter,
-      Token = SyntacticToken<S::Slice<'inp>>,
-      Source = S,
-      Span = SimpleSpan,
-      Offset = usize,
-    >,
   S::Slice<'inp>: AsBytes,
 {
   // ───── span accessors ────────────────────────────────────────────────
