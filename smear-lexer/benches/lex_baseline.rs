@@ -152,6 +152,33 @@ fn lossless_collect(input: &str) -> Vec<LosslessItem<'_>> {
   tokens
 }
 
+/// GraphQLx syntactic-mode token count, mirroring `syntactic_count` above but
+/// against the GraphQLx grammar (generics, imports, type paths, etc.).
+#[inline(always)]
+fn gx_syntactic_count(input: &str) -> usize {
+  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  let mut lexer = SyntacticLexer::<&str>::new(input);
+  let mut count = 0usize;
+  while let Some(result) = lexer.lex() {
+    let _ = black_box(result);
+    count = count.wrapping_add(1);
+  }
+  count
+}
+
+/// GraphQLx lossless-mode token count, mirroring `lossless_count` above.
+#[inline(always)]
+fn gx_lossless_count(input: &str) -> usize {
+  use smear_lexer::graphqlx::lossless::LosslessLexer;
+  let mut lexer = LosslessLexer::<&str>::new(input);
+  let mut count = 0usize;
+  while let Some(result) = lexer.lex() {
+    let _ = black_box(result);
+    count = count.wrapping_add(1);
+  }
+  count
+}
+
 // ---- groups --------------------------------------------------------------
 
 /// Lexer-only throughput, syntactic mode (skips trivia).
@@ -217,9 +244,28 @@ fn bench_simd(c: &mut Criterion) {
   group.finish();
 }
 
+/// GraphQLx baseline throughput (Logos-driven), same fixtures as the GraphQL
+/// baselines above. Gives every one of the four lexers (graphql/syntactic,
+/// graphql/lossless, graphqlx/syntactic, graphqlx/lossless) a recorded
+/// number to compare future SIMD work against.
+fn bench_graphqlx(c: &mut Criterion) {
+  let mut group = c.benchmark_group("graphqlx/lex/baseline");
+  group.sample_size(30);
+  for (label, input) in INPUTS {
+    group.throughput(Throughput::Bytes(input.len() as u64));
+    group.bench_with_input(BenchmarkId::new("syntactic_count", label), input, |b, input| {
+      b.iter(|| black_box(gx_syntactic_count(black_box(input))))
+    });
+    group.bench_with_input(BenchmarkId::new("lossless_count", label), input, |b, input| {
+      b.iter(|| black_box(gx_lossless_count(black_box(input))))
+    });
+  }
+  group.finish();
+}
+
 // ---- registration --------------------------------------------------------
 
-criterion_group!(benches, bench_syntactic, bench_lossless, bench_simd);
+criterion_group!(benches, bench_syntactic, bench_lossless, bench_simd, bench_graphqlx);
 criterion_main!(benches);
 
 // Compile-time touch on the fixture roots so reorganising those dirs gives
