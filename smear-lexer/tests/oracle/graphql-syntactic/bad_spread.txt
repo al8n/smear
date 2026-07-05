@@ -1,0 +1,4 @@
+OK  0..1  LBrace
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 2, end: 4 }, data: UnterminatedSpreadOperator }])
+OK  4..5  Identifier("x")
+OK  6..7  RBrace

@@ -1,0 +1,8 @@
+OK  0..1  LBrace
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 7, end: 8 }, data: UnexpectedLexeme(Char(PositionedChar { char: '-', position: 7 })) }])
+OK  8..9  RParen
+OK  10..11  RBrace

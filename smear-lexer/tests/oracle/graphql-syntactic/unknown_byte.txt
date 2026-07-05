@@ -1,0 +1,5 @@
+OK  0..1  LBrace
+OK  2..3  Identifier("a")
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 4, end: 5 }, data: UnknownLexeme(Char(PositionedChar { char: '?', position: 4 })) }])
+OK  6..7  Identifier("b")
+OK  8..9  RBrace

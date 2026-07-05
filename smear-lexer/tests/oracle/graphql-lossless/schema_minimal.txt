@@ -1,0 +1,13 @@
+OK  0..6  Identifier("schema")
+OK  6..7  Space
+OK  7..8  LBrace
+OK  8..9  Newline
+OK  9..10  Space
+OK  10..11  Space
+OK  11..16  Identifier("query")
+OK  16..17  Colon
+OK  17..18  Space
+OK  18..23  Identifier("Query")
+OK  23..24  Newline
+OK  24..25  RBrace
+OK  25..26  Newline
