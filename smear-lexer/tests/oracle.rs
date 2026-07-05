@@ -210,142 +210,366 @@ fn graphql_syntactic_oracle() {
   assert_no_mismatches(&mismatches);
 }
 
-// ─── SIMD-vs-golden parity (phase 1a Task 2) ──────────────────────────────
+// ─── SIMD-vs-golden parity (phase 1b Task 2) ──────────────────────────────
 //
-// `SimdSyntacticLexer` is byte-oriented: `SimdSyntacticLexer::<[u8]>` is the
-// only source type it can actually be driven with (see the report for why
-// the struct's own default type parameter, bare `str`, doesn't satisfy the
-// `Lexer` bound at all). That makes its tokens/errors `Char = u8`, while
-// every `graphql-syntactic` golden file above was captured from the
-// `&str`-sourced (`Char = char`) Logos lexer. `{:?}` renders those two
-// differently even for byte-identical content -- e.g. `Identifier([97])`
-// vs. `Identifier("a")` -- so `render_stream!` cannot be reused verbatim
-// here the way the plan assumed; see the two helpers below for the (test-
-// only, narrowly-scoped) adjustment this test makes instead.
-
-/// Rebuild the `&str`-flavored equivalent of a byte-sourced token, so its
-/// `Debug` output matches what the `&str`-sourced Logos oracle renders.
-/// Every fixture byte is valid UTF-8 (they're all Rust string literals), so
-/// the `str::from_utf8`/`TryFrom` conversions below never fail.
-/// `LitInlineStr<&[u8]>` -> `LitInlineStr<&str>` goes through the crate's
-/// public `TryFrom` impl; `LitBlockStr<&[u8]>` -> `LitBlockStr<&str>` goes
-/// through its public `map`. Non-string-literal variants can't panic since
-/// `SyntacticToken` is `#[non_exhaustive]` only for *future* variants, and
-/// today's set is matched exhaustively above the fallback arm.
-fn bytes_token_to_str(tok: smear_lexer::graphql::syntactic::SyntacticToken<&[u8]>) -> String {
-  use smear_lexer::graphql::syntactic::SyntacticToken as Tok;
-  fn s(bytes: &[u8]) -> &str {
-    core::str::from_utf8(bytes).expect("oracle fixtures are valid UTF-8")
-  }
-  match tok {
-    Tok::Ampersand => format!("{:?}", Tok::<&str>::Ampersand),
-    Tok::At => format!("{:?}", Tok::<&str>::At),
-    Tok::RBrace => format!("{:?}", Tok::<&str>::RBrace),
-    Tok::RBracket => format!("{:?}", Tok::<&str>::RBracket),
-    Tok::RParen => format!("{:?}", Tok::<&str>::RParen),
-    Tok::Colon => format!("{:?}", Tok::<&str>::Colon),
-    Tok::Dollar => format!("{:?}", Tok::<&str>::Dollar),
-    Tok::Equal => format!("{:?}", Tok::<&str>::Equal),
-    Tok::Bang => format!("{:?}", Tok::<&str>::Bang),
-    Tok::LBrace => format!("{:?}", Tok::<&str>::LBrace),
-    Tok::LBracket => format!("{:?}", Tok::<&str>::LBracket),
-    Tok::LParen => format!("{:?}", Tok::<&str>::LParen),
-    Tok::Pipe => format!("{:?}", Tok::<&str>::Pipe),
-    Tok::Spread => format!("{:?}", Tok::<&str>::Spread),
-    Tok::Identifier(bytes) => format!("{:?}", Tok::Identifier(s(bytes))),
-    Tok::LitFloat(bytes) => format!("{:?}", Tok::LitFloat(s(bytes))),
-    Tok::LitInt(bytes) => format!("{:?}", Tok::LitInt(s(bytes))),
-    Tok::LitInlineStr(bytes) => format!(
-      "{:?}",
-      Tok::LitInlineStr(
-        smear_lexer::LitInlineStr::<&str>::try_from(bytes)
-          .expect("oracle fixtures are valid UTF-8")
-      )
-    ),
-    Tok::LitBlockStr(bytes) => format!(
-      "{:?}",
-      Tok::LitBlockStr(
-        bytes.map(|b| core::str::from_utf8(b).expect("oracle fixtures are valid UTF-8"))
-      )
-    ),
-    other => panic!(
-      "graphql_syntactic_simd_oracle: unexpected token variant {other:?} \
-       (SyntacticToken gained a new #[non_exhaustive] variant; teach bytes_token_to_str about it)"
-    ),
-  }
-}
-
-/// Rewrite every `char: <digits>` occurrence — the textual shape of
-/// `tokit::utils::PositionedChar<u8>`'s `char` field, however deeply nested
-/// — into `char: '<c>'`, the shape `PositionedChar<char>` renders. This is
-/// the *only* place a delegated Logos error's `Debug` text depends on
-/// `Char = u8` vs. `Char = char` (every other field -- spans, offsets,
-/// hints, counts -- is identical either way), so it is also the only
-/// rewrite needed to compare an `ERR` line against the `&str`-sourced
-/// golden text. Every offending byte here is ASCII (GraphQL's own grammar
-/// never flags a non-ASCII byte this way), so `u8 as char` is a lossless,
-/// infallible reconstruction of what the `char`-sourced lexer produced.
-fn normalize_char_field(rendered: &str) -> String {
-  const NEEDLE: &str = "char: ";
-  let mut out = String::with_capacity(rendered.len());
-  let mut rest = rendered;
-  while let Some(idx) = rest.find(NEEDLE) {
-    let after_needle = idx + NEEDLE.len();
-    out.push_str(&rest[..after_needle]);
-    let tail = &rest[after_needle..];
-    let digits_len = tail.bytes().take_while(u8::is_ascii_digit).count();
-    if digits_len == 0 {
-      // Not a numeric `char:` field (e.g. the *outer* `char:
-      // PositionedChar { .. }` wrapper) -- leave untouched.
-      rest = tail;
-      continue;
-    }
-    let byte: u8 = tail[..digits_len]
-      .parse()
-      .expect("PositionedChar<u8>::char is always a valid u8 literal");
-    out.push_str(&format!("{:?}", byte as char));
-    rest = &tail[digits_len..];
-  }
-  out.push_str(rest);
-  out
-}
-
-/// Like `render_stream!`, but for the byte-sourced `SimdSyntacticLexer<[u8]>`:
-/// normalizes each token/error so the rendered text is directly comparable
-/// to the existing `&str`-sourced `graphql-syntactic` golden files. See the
-/// module-level comment above for why `render_stream!` itself can't be
-/// reused as-is for this lexer.
-fn render_simd_stream_as_str(src: &str) -> String {
-  use smear_lexer::graphql::simd::SimdSyntacticLexer;
-  let mut lex = SimdSyntacticLexer::<[u8]>::new(src.as_bytes());
-  let mut out = String::new();
-  while let Some(item) = lex.lex() {
-    match item {
-      Ok(tok) => {
-        let span = lex.span();
-        out.push_str(&format!(
-          "OK  {}..{}  {}\n",
-          span.start(),
-          span.end(),
-          bytes_token_to_str(tok)
-        ));
-      }
-      Err(errs) => {
-        out.push_str(&normalize_char_field(&format!("ERR {errs:?}\n")));
-      }
-    }
-  }
-  out
-}
+// `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
+// what the `&str`-sourced Logos oracle above was captured from -- so its
+// render is byte-for-byte identical to the golden files. No conversion is
+// needed (contrast the phase 1a version of this test, which could only drive
+// `SimdSyntacticLexer::<[u8]>` and had to paper over the resulting `Char = u8`
+// vs. `Char = char` `Debug` mismatch with a pair of text-rewriting hacks).
 
 #[test]
 fn graphql_syntactic_simd_oracle() {
+  use smear_lexer::graphql::simd::SimdSyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let rendered = render_simd_stream_as_str(src);
+    let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
     check("graphql-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
+}
+
+// ─── SIMD source matrix: `<[u8]>` vs `<str>` (Task 2) ──────────────────────
+//
+// `graphql_syntactic_simd_oracle` above proves `SimdSyntacticLexer::<str>`
+// matches the golden files byte-for-byte. The byte-flavored sources
+// (`Char = u8`) can't be compared against those same golden files with
+// `render_stream!`: `{:?}` renders `Char = u8` differently from `Char = char`
+// even for identical content (e.g. `Identifier([97])` vs. `Identifier("a")`),
+// and re-deriving a text transform to paper over that is exactly the parity
+// hack this task retires (see the git history of this file for the deleted
+// `bytes_token_to_str` / `normalize_char_field` / `render_simd_stream_as_str`
+// helpers).
+//
+// Instead, this section proves *source-agnostic equivalence* directly: for
+// every fixture, the `<[u8]>` token+error stream must carry the same kinds,
+// spans, and decoded content as the `<str>` stream -- transitively proving it
+// matches the golden files too, without ever comparing `Debug` text across
+// `Char` types. The comparators below are structural (they pattern-match each
+// error/token shape down to its `Char` leaf), not textual, so they can't be
+// fooled by formatting coincidences: anything they don't recognize is a hard
+// mismatch (`_ => false`), never a silent pass.
+//
+// NOTE on `bytes::Bytes` / `bstr::BStr` / `hipstr::HipStr` / `hipstr::HipByt`:
+// the task brief asked for `SimdSyntacticLexer::<bytes::Bytes>` here too, but
+// it does not compile, for a reason `AsBytes` cannot fix. `SimdSyntacticLexer`'s
+// `Lexer` impl requires the *delegate* `LogosLexer`'s `Source` associated type
+// to equal `S` exactly (`simd.rs`'s `impl Lexer for SimdSyntacticLexer<S>`
+// where-clause: `LogosLexer<..>: Lexer<.., Source = S, ..>`). For `S = str` or
+// `S = [u8]`, that holds trivially. For every owned/shared source
+// (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt`), the
+// `token!` macro (`graphql/syntactic/token.rs`) always derives the *raw* Logos
+// enum over `&[u8]`/`&str` and converts the matched slice up via
+// `IntoEquivalent` (see `graphql/syntactic/slice.rs`/`str.rs`: every owned-type
+// `token!` invocation passes `&'s [u8]`/`&'s str` as the raw logos slice) --
+// so `<LogosLexer<..> as Lexer>::Source` is always the raw primitive, never
+// the owned wrapper, and the `Source = S` bound can never be satisfied for
+// `S != {str, [u8]}`. `AsBytes` is necessary infrastructure for a future fix
+// (it's what would let `delegate_to_logos` build a byte view of `S` to
+// delegate over), but not sufficient on its own -- `delegate_to_logos` itself
+// would need reworking to delegate over that byte view and convert the result
+// back via `IntoEquivalent`, which is a materially larger change than this
+// task's stated scope (Task 2 report has the full writeup, plus a second,
+// independent bug found for `hipstr` specifically: tokit's `source/mod.rs`
+// and `slice/mod.rs` gate their `hipstr_0_8` support module behind
+// `cfg(feature = "hipstr")`, but smear-lexer's `hipstr` feature only enables
+// `tokit/hipstr_0_8` -- a different, non-implied feature name -- so
+// `tokit::Source`/`tokit::Slice` for `HipByt`/`HipStr` never compile in even
+// before hitting the `Source = S` issue above).
+//
+// The `AsBytes` impls for all four types are still added below (Task 2 Step
+// 1's literal ask) and unit-tested directly against the trait, since they are
+// correct and are exactly the piece a future fix would reuse.
+
+use smear_lexer::{
+  error::{
+    EscapedCharacter, FixedUnicodeEscapeError, InvalidUnicodeHexDigits, InvalidUnicodeSequence,
+    StringError, StringErrors, UnicodeError,
+  },
+  graphql::{
+    error::{DecimalError, FloatError},
+    simd::{AsBytes, SimdSyntacticLexer},
+    syntactic::{
+      SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken,
+    },
+  },
+};
+use tokit::{
+  error::UnexpectedLexeme,
+  utils::{Lexeme, PositionedChar},
+};
+
+/// True if two positioned characters describe the same source position and
+/// (mod `u8` vs `char`) codepoint. Every byte the lexer ever flags this way
+/// is ASCII, so `as u32` is a lossless, direct comparison of the two.
+fn same_positioned_char(byte: &PositionedChar<u8>, str_: &PositionedChar<char>) -> bool {
+  byte.position() == str_.position() && byte.char() as u32 == str_.char() as u32
+}
+
+/// True if two lexemes describe the same character-or-range, allowing the
+/// `Char` leaf to differ in representation (`u8` vs `char`) but not in value.
+fn same_lexeme(byte: &Lexeme<u8>, str_: &Lexeme<char>) -> bool {
+  match (byte, str_) {
+    (Lexeme::Char(b), Lexeme::Char(s)) => same_positioned_char(b, s),
+    (Lexeme::Range(b), Lexeme::Range(s)) => b == s,
+    _ => false,
+  }
+}
+
+/// True if two "unexpected lexeme" errors carry the same lexeme and hint.
+/// `Hint` never depends on `Char`, so it's the same concrete type either
+/// side and compares directly.
+fn same_unexpected_lexeme<Hint: PartialEq>(
+  byte: &UnexpectedLexeme<u8, Hint>,
+  str_: &UnexpectedLexeme<char, Hint>,
+) -> bool {
+  same_lexeme(byte.lexeme(), str_.lexeme()) && byte.hint() == str_.hint()
+}
+
+fn same_float_error(byte: &FloatError<u8>, str_: &FloatError<char>) -> bool {
+  match (byte, str_) {
+    (FloatError::UnexpectedSuffix(b), FloatError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (FloatError::UnexpectedLexeme(b), FloatError::UnexpectedLexeme(s)) => {
+      same_unexpected_lexeme(b, s)
+    }
+    // `UnexpectedEnd<FloatHint>` carries no `Char` at all, so both sides are
+    // literally the same concrete type -- plain equality applies.
+    (FloatError::UnexpectedEnd(b), FloatError::UnexpectedEnd(s)) => b == s,
+    (FloatError::LeadingZeros(b), FloatError::LeadingZeros(s)) => same_lexeme(b, s),
+    (FloatError::MissingIntegerPart, FloatError::MissingIntegerPart) => true,
+    _ => false,
+  }
+}
+
+fn same_decimal_error(byte: &DecimalError<u8>, str_: &DecimalError<char>) -> bool {
+  match (byte, str_) {
+    (DecimalError::UnexpectedSuffix(b), DecimalError::UnexpectedSuffix(s)) => same_lexeme(b, s),
+    (DecimalError::UnexpectedEnd(b), DecimalError::UnexpectedEnd(s)) => b == s,
+    (DecimalError::LeadingZeros(b), DecimalError::LeadingZeros(s)) => same_lexeme(b, s),
+    _ => false,
+  }
+}
+
+fn same_escaped_character(byte: &EscapedCharacter<u8>, str_: &EscapedCharacter<char>) -> bool {
+  byte.span() == str_.span()
+    && byte.position() == str_.position()
+    && byte.char() as u32 == str_.char() as u32
+}
+
+fn same_invalid_unicode_hex_digits(
+  byte: &InvalidUnicodeHexDigits<u8>,
+  str_: &InvalidUnicodeHexDigits<char>,
+) -> bool {
+  byte.len() == str_.len()
+    && byte
+      .iter()
+      .zip(str_.iter())
+      .all(|(b, s)| same_positioned_char(b, s))
+}
+
+fn same_invalid_unicode_sequence(
+  byte: &InvalidUnicodeSequence<u8>,
+  str_: &InvalidUnicodeSequence<char>,
+) -> bool {
+  byte.span() == str_.span()
+    && same_invalid_unicode_hex_digits(byte.digits_ref(), str_.digits_ref())
+}
+
+fn same_fixed_unicode_escape_error(
+  byte: &FixedUnicodeEscapeError<u8>,
+  str_: &FixedUnicodeEscapeError<char>,
+) -> bool {
+  match (byte, str_) {
+    (FixedUnicodeEscapeError::Incomplete(b), FixedUnicodeEscapeError::Incomplete(s)) => {
+      same_lexeme(b, s)
+    }
+    (FixedUnicodeEscapeError::InvalidSequence(b), FixedUnicodeEscapeError::InvalidSequence(s)) => {
+      same_invalid_unicode_sequence(b, s)
+    }
+    (
+      FixedUnicodeEscapeError::UnpairedSurrogate(b),
+      FixedUnicodeEscapeError::UnpairedSurrogate(s),
+    ) => same_unexpected_lexeme(b, s),
+    _ => false,
+  }
+}
+
+fn same_unicode_error(byte: &UnicodeError<u8>, str_: &UnicodeError<char>) -> bool {
+  match (byte, str_) {
+    (UnicodeError::Fixed(b), UnicodeError::Fixed(s)) => same_fixed_unicode_escape_error(b, s),
+    // `BracedUnicodeEscapeError` carries no `Char` at all -- same concrete
+    // type either side.
+    (UnicodeError::Braced(b), UnicodeError::Braced(s)) => b == s,
+    _ => false,
+  }
+}
+
+fn same_string_error(byte: &StringError<u8>, str_: &StringError<char>) -> bool {
+  match (byte, str_) {
+    (StringError::UnsupportedCharacter(b), StringError::UnsupportedCharacter(s)) => {
+      same_lexeme(b, s)
+    }
+    (StringError::UnexpectedLineTerminator(b), StringError::UnexpectedLineTerminator(s)) => {
+      same_unexpected_lexeme(b, s)
+    }
+    (StringError::UnexpectedEscapedCharacter(b), StringError::UnexpectedEscapedCharacter(s)) => {
+      same_escaped_character(b, s)
+    }
+    // `Unterminated`'s payload (`UnexpectedEnd<LitStrDelimiterHint>`) carries
+    // no `Char` -- same concrete type either side.
+    (StringError::Unterminated(b), StringError::Unterminated(s)) => b == s,
+    (StringError::Unicode(b), StringError::Unicode(s)) => same_unicode_error(b, s),
+    (StringError::Other(b), StringError::Other(s)) => b == s,
+    // `Unopened` (`UnexpectedLexeme<Option<Char>, _>`) is structurally
+    // unreachable from `SimdSyntacticLexer::lex()` (the only entry into
+    // string lexing is the `b'"'` dispatch arm) and no fixture exercises it;
+    // falling through to the mismatch case below rather than adding an
+    // `Option<Char>`-flavored comparator for zero coverage.
+    _ => false,
+  }
+}
+
+fn same_string_errors(byte: &StringErrors<u8>, str_: &StringErrors<char>) -> bool {
+  byte.len() == str_.len()
+    && byte
+      .iter()
+      .zip(str_.iter())
+      .all(|(b, s)| same_string_error(b, s))
+}
+
+fn same_error_data(
+  byte: &SyntacticLexerErrorData<u8>,
+  str_: &SyntacticLexerErrorData<char>,
+) -> bool {
+  match (byte, str_) {
+    (SyntacticLexerErrorData::Float(b), SyntacticLexerErrorData::Float(s)) => {
+      same_float_error(b, s)
+    }
+    (SyntacticLexerErrorData::Int(b), SyntacticLexerErrorData::Int(s)) => same_decimal_error(b, s),
+    (SyntacticLexerErrorData::String(b), SyntacticLexerErrorData::String(s)) => {
+      same_string_errors(b, s)
+    }
+    (
+      SyntacticLexerErrorData::UnexpectedLexeme(b),
+      SyntacticLexerErrorData::UnexpectedLexeme(s),
+    ) => same_lexeme(b, s),
+    (SyntacticLexerErrorData::UnknownLexeme(b), SyntacticLexerErrorData::UnknownLexeme(s)) => {
+      same_lexeme(b, s)
+    }
+    (
+      SyntacticLexerErrorData::UnexpectedEndOfInput,
+      SyntacticLexerErrorData::UnexpectedEndOfInput,
+    ) => true,
+    (
+      SyntacticLexerErrorData::UnterminatedSpreadOperator,
+      SyntacticLexerErrorData::UnterminatedSpreadOperator,
+    ) => true,
+    // The recursion-limit state error never depends on `Char`.
+    (SyntacticLexerErrorData::State(b), SyntacticLexerErrorData::State(s)) => b == s,
+    (SyntacticLexerErrorData::InvalidUtf8(b), SyntacticLexerErrorData::InvalidUtf8(s)) => b == s,
+    (SyntacticLexerErrorData::Other(b), SyntacticLexerErrorData::Other(s)) => b == s,
+    _ => false,
+  }
+}
+
+fn same_lexer_error(byte: &SyntacticLexerError<u8>, str_: &SyntacticLexerError<char>) -> bool {
+  byte.span() == str_.span() && same_error_data(byte.data(), str_.data())
+}
+
+fn same_lexer_errors(byte: &SyntacticLexerErrors<u8>, str_: &SyntacticLexerErrors<char>) -> bool {
+  byte.len() == str_.len()
+    && byte
+      .iter()
+      .zip(str_.iter())
+      .all(|(b, s)| same_lexer_error(b, s))
+}
+
+/// True if a byte-sourced token and a `str`-sourced token describe the same
+/// syntactic token: same kind (via `SyntacticToken::kind()`, which drops the
+/// generic source payload -- `kind()` is a bijection over the variant set, so
+/// equal kinds imply the same variant tag on both sides) and, for the five
+/// payload-bearing variants, the same decoded content (the byte slice equals
+/// the UTF-8 encoding of the `str` slice).
+fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>) -> bool {
+  use SyntacticToken as Tok;
+  if byte.kind() != str_.kind() {
+    return false;
+  }
+  match (byte, str_) {
+    (Tok::Identifier(b), Tok::Identifier(s))
+    | (Tok::LitInt(b), Tok::LitInt(s))
+    | (Tok::LitFloat(b), Tok::LitFloat(s)) => b.as_bytes() == s.as_bytes(),
+    (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => {
+      b.source_ref().as_bytes() == s.source_ref().as_bytes()
+    }
+    (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => {
+      b.source_ref().as_bytes() == s.source_ref().as_bytes()
+    }
+    // Every other variant carries no payload; the `kind()` check above
+    // already confirmed they're the same punctuation/spread token.
+    _ => true,
+  }
+}
+
+/// Drives a byte-flavored `SimdSyntacticLexer` (`Char = u8`) and the
+/// reference `<str>`-flavored one over the same fixture text, in lockstep,
+/// asserting every token/error pair is source-agnostically equivalent (see
+/// `same_token` / `same_lexer_errors` above). `$label` identifies the byte
+/// flavor in failure messages (e.g. `"[u8]"`); it's a macro parameter rather
+/// than hard-coded so a future byte-flavored source (once the limitation
+/// documented above is resolved) can reuse this same driver.
+macro_rules! assert_matches_str_stream {
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr) => {{
+    let mut byte_lex = $byte_lexer;
+    let mut str_lex = SimdSyntacticLexer::<str>::new($str_src);
+    let mut idx = 0usize;
+    loop {
+      match (byte_lex.lex(), str_lex.lex()) {
+        (None, None) => break,
+        (Some(Ok(bt)), Some(Ok(st))) => {
+          assert_eq!(
+            byte_lex.span(),
+            str_lex.span(),
+            "{}/{}#{idx}: span mismatch (byte={bt:?} str={st:?})",
+            $label,
+            $fixture
+          );
+          assert!(
+            same_token(&bt, &st),
+            "{}/{}#{idx}: content mismatch: byte={bt:?} str={st:?}",
+            $label,
+            $fixture
+          );
+        }
+        (Some(Err(be)), Some(Err(se))) => {
+          assert!(
+            same_lexer_errors(&be, &se),
+            "{}/{}#{idx}: error mismatch:\n  byte={be:?}\n  str={se:?}",
+            $label,
+            $fixture
+          );
+        }
+        (b, s) => panic!(
+          "{}/{}#{idx}: shape mismatch: byte={b:?} str={s:?}",
+          $label, $fixture
+        ),
+      }
+      idx += 1;
+    }
+  }};
+}
+
+#[test]
+fn graphql_syntactic_simd_source_matrix_u8() {
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    assert_matches_str_stream!(
+      "[u8]",
+      name,
+      SimdSyntacticLexer::<[u8]>::new(src.as_bytes()),
+      src
+    );
+  }
 }
 
 #[test]

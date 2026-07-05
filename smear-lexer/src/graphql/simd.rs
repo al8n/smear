@@ -88,6 +88,50 @@ impl AsBytes for [u8] {
   }
 }
 
+// ───── owned / shared slice types ───────────────────────────────────────
+//
+// Each of these is `tokit::Source::Slice` for an owned or shared source type
+// (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt` — see
+// tokit's `src/source/{bytes_1,bstr_1,hipstr_0_8}.rs`), so implementing
+// `AsBytes` for them is what lets `SimdSyntacticLexer` run over those source
+// types, exactly as it already does for `str`/`[u8]` above. Every impl is a
+// trivial deref to `&[u8]` — no allocation, no copying.
+
+#[cfg(feature = "bytes")]
+impl AsBytes for bytes::Bytes {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn as_bytes(&self) -> &[u8] {
+    self
+  }
+}
+
+#[cfg(feature = "bstr")]
+impl AsBytes for bstr::BStr {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn as_bytes(&self) -> &[u8] {
+    self
+  }
+}
+
+#[cfg(feature = "hipstr")]
+impl AsBytes for hipstr::HipStr<'_> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn as_bytes(&self) -> &[u8] {
+    // `HipStr` derefs to `str`, not `[u8]` directly, so route through
+    // `str::as_bytes` (same call as the `str` impl above; the `&HipStr ->
+    // &str` coercion happens at the argument site).
+    str::as_bytes(self)
+  }
+}
+
+#[cfg(feature = "hipstr")]
+impl AsBytes for hipstr::HipByt<'_> {
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn as_bytes(&self) -> &[u8] {
+    self
+  }
+}
+
 /// Phase-1 SIMD layer. Streaming, single-pass, one token per call.
 ///
 /// Construct with [`SimdSyntacticLexer::new`] or [`SimdSyntacticLexer::with_limit`],
@@ -947,12 +991,24 @@ mod num_arm_tests {
   }
 }
 
-/// Phase 1b Task 1 probe: before this task, the `Lexer` impl's
+/// Phase 1b Task 1 probe: before Task 1, the `Lexer` impl's
 /// `S::Slice<'inp>: Slice<'inp, Char = u8>` bound meant `SimdSyntacticLexer::<str>`
 /// (whose slice is `&str`, `Char = char`) could not satisfy the impl at all, so every
 /// test below was a compile error. Delegating both inline-string error outcomes to
 /// Logos (which builds whatever `Char` type the source needs) let that bound drop,
 /// so `<str>` now compiles and lexes correctly, not just `<[u8]>`.
+///
+/// Task 2 consolidation: this module originally had three probes. Two of them
+/// (a valid-query smoke test asserting the inline string still emits inline,
+/// and a bad-escape test asserting the delegated error is genuinely
+/// `Char = char`) are now strictly subsumed by `graphql_syntactic_simd_oracle`
+/// in `tests/oracle.rs`, which drives `SimdSyntacticLexer::<str>` directly
+/// against the golden files (41 fixtures, byte-for-byte `Debug` comparison,
+/// including `str_bad_escape` and many valid-query/inline-string fixtures) --
+/// so they were deleted rather than moved verbatim. The one kept below covers
+/// a source text (a lone `"` as the *entire* input) that no golden fixture
+/// exercises: it takes the `bytes.get(1) == None` branch in `lex()`'s `b'"'`
+/// arm, distinct from `str_unterminated_inline`'s `Some(_) => Err(_)` branch.
 #[cfg(test)]
 mod generic_source_tests {
   use tokit::Lexer as _;
@@ -977,47 +1033,6 @@ mod generic_source_tests {
   }
 
   #[test]
-  fn str_source_compiles_and_lexes_valid_query_to_completion() {
-    let toks = lex_all("query { a(x: \"hi\") }");
-    assert!(
-      toks.iter().all(Result::is_ok),
-      "expected every token to lex cleanly, got {toks:?}"
-    );
-    // query { a ( x : "hi" ) } -- 9 syntactic tokens.
-    assert_eq!(toks.len(), 9);
-    // The valid inline string still emits inline (generically over `&str`),
-    // it does not delegate.
-    assert!(matches!(
-      &toks[6],
-      Ok(SyntacticToken::LitInlineStr(lit)) if lit.is_plain() && lit.as_str() == "\"hi\""
-    ));
-  }
-
-  #[test]
-  fn str_source_delegates_inline_string_errors_with_char_type() {
-    // Same malformed-escape source text as the `str_bad_escape` oracle golden
-    // file -- confirms the delegated error is genuinely `Char = char`
-    // (`PositionedChar { char: 'q', .. }`), not a leftover `u8`.
-    let toks = lex_all("{ a(x: \"a\\qb\") }");
-    let err = toks
-      .iter()
-      .find_map(|t| t.as_ref().err())
-      .expect("expected a lex error");
-    match err.first().expect("expected at least one error").data() {
-      LexerErrorData::String(errs) => {
-        assert!(
-          matches!(
-            errs.first(),
-            Some(StringError::UnexpectedEscapedCharacter(esc)) if *esc.char_ref() == 'q'
-          ),
-          "expected UnexpectedEscapedCharacter('q'), got {errs:?}"
-        );
-      }
-      other => panic!("expected LexerErrorData::String, got {other:?}"),
-    }
-  }
-
-  #[test]
   fn str_source_lone_quote_at_eof_delegates_to_unterminated_error() {
     let toks = lex_all("\"");
     assert_eq!(toks.len(), 1);
@@ -1030,5 +1045,45 @@ mod generic_source_tests {
       }
       other => panic!("expected LexerErrorData::String, got {other:?}"),
     }
+  }
+}
+
+/// Task 2 Step 1: proves each new `AsBytes` impl actually decodes to the
+/// right bytes. These do NOT drive a `SimdSyntacticLexer` over the type --
+/// see `tests/oracle.rs`'s "SIMD source matrix" section for why
+/// `SimdSyntacticLexer::<bytes::Bytes>` (and `<bstr::BStr>`,
+/// `<hipstr::HipStr>`, `<hipstr::HipByt>`) can't be constructed yet, a
+/// separate, deeper limitation `AsBytes` alone doesn't resolve. This module
+/// only proves the trait impls added here are individually correct.
+#[cfg(test)]
+mod as_bytes_tests {
+  use super::AsBytes;
+
+  #[cfg(feature = "bytes")]
+  #[test]
+  fn bytes_as_bytes() {
+    let b = bytes::Bytes::from_static(b"hello");
+    assert_eq!(AsBytes::as_bytes(&b), b"hello");
+  }
+
+  #[cfg(feature = "bstr")]
+  #[test]
+  fn bstr_as_bytes() {
+    let b = bstr::BStr::new(b"hello");
+    assert_eq!(AsBytes::as_bytes(b), b"hello");
+  }
+
+  #[cfg(feature = "hipstr")]
+  #[test]
+  fn hipstr_as_bytes() {
+    let s = hipstr::HipStr::from("hello");
+    assert_eq!(AsBytes::as_bytes(&s), b"hello");
+  }
+
+  #[cfg(feature = "hipstr")]
+  #[test]
+  fn hipbyt_as_bytes() {
+    let b = hipstr::HipByt::from(b"hello" as &[u8]);
+    assert_eq!(AsBytes::as_bytes(&b), b"hello");
   }
 }
