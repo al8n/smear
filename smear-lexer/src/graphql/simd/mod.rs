@@ -168,13 +168,33 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokit::Token<'inp>>::Error>> {
+    // Post-token recursion gate, mirroring `LogosLexer::lex`: after a token is
+    // scanned it re-checks the limiter and, while the depth is over the limit,
+    // yields the recursion error in the token's place. The conversion is
+    // `RecursionLimitExceeded.into()` (span `0..0`), matching Logos's
+    // `extras.check().map_err(Into::into)` byte-for-byte — deliberately not
+    // `bad_state(span, e)`, which is the *increase-bracket* handler's error
+    // (and stays inside `increase_recursion!`). Below the default limit the
+    // check always passes, so every existing stream is unchanged.
+    macro_rules! finish {
+      ($this:ident, $token:expr) => {
+        match $this.state.check() {
+          Ok(()) => Ok($token),
+          Err(e) => {
+            $this.last_error_span = Some($this.last_span);
+            Err(e.into())
+          }
+        }
+      };
+    }
+
     // Emit a single-byte punctuation token. `token_start` is the loop-local
     // variable captured from the enclosing scope.
     macro_rules! emit_punct {
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         $this.last_span = SimpleSpan::new($token_start, $this.cursor);
-        Ok($expr)
+        finish!($this, $expr)
       }};
     }
 
@@ -183,7 +203,7 @@ where
         $this.cursor += 1;
         $this.last_span = SimpleSpan::new($token_start, $this.cursor);
         $this.state_mut().decrease();
-        Ok($expr)
+        finish!($this, $expr)
       }};
     }
 
@@ -221,10 +241,8 @@ where
           let len = scan_identifier(bytes);
           self.cursor += len;
           self.last_span = SimpleSpan::new(token_start, self.cursor);
-          return self
-            .src
-            .slice(&token_start..&(token_start + len))
-            .map(|ident| Ok(SyntacticToken::Identifier(ident)));
+          let ident = self.src.slice(&token_start..&(token_start + len))?;
+          return Some(finish!(self, SyntacticToken::Identifier(ident)));
         }
         // Valid-number fast path: `scan_number` only ever
         // answers "clean, valid literal of length N" or "anomaly" — it never
@@ -239,18 +257,14 @@ where
             Some((number::NumberKind::Int, len)) => {
               self.cursor += len;
               self.last_span = SimpleSpan::new(token_start, self.cursor);
-              self
-                .src
-                .slice(&token_start..&(token_start + len))
-                .map(|slice| Ok(SyntacticToken::LitInt(slice)))
+              let slice = self.src.slice(&token_start..&(token_start + len))?;
+              Some(finish!(self, SyntacticToken::LitInt(slice)))
             }
             Some((number::NumberKind::Float, len)) => {
               self.cursor += len;
               self.last_span = SimpleSpan::new(token_start, self.cursor);
-              self
-                .src
-                .slice(&token_start..&(token_start + len))
-                .map(|slice| Ok(SyntacticToken::LitFloat(slice)))
+              let slice = self.src.slice(&token_start..&(token_start + len))?;
+              Some(finish!(self, SyntacticToken::LitFloat(slice)))
             }
             None => self.delegate_to_logos(token_start),
           };
@@ -273,7 +287,7 @@ where
           if bytes.starts_with(b"...") {
             self.cursor += 3;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
-            return Some(Ok(SyntacticToken::Spread));
+            return Some(finish!(self, SyntacticToken::Spread));
           }
           if bytes.starts_with(b"..") {
             self.cursor += 2;
@@ -310,9 +324,10 @@ where
               self.cursor += 2;
               self.last_span = SimpleSpan::new(token_start, self.cursor);
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
-              return Some(Ok(SyntacticToken::LitInlineStr(LitInlineStr::Plain(
-                LitPlainStr::new(slice),
-              ))));
+              return Some(finish!(
+                self,
+                SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new(slice)))
+              ));
             }
             None => {
               // Lone `"` at end of input — unterminated. Delegate to Logos
@@ -333,7 +348,7 @@ where
                     LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
                   }
                 };
-                return Some(Ok(SyntacticToken::LitInlineStr(inline)));
+                return Some(finish!(self, SyntacticToken::LitInlineStr(inline)));
               }
               // `skip_inline_str_simd` only ever answers "clean, valid
               // literal" or "byte-indexed anomaly" — like the number fast

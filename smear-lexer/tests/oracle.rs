@@ -227,6 +227,48 @@ fn graphql_syntactic_simd_oracle() {
   assert_no_mismatches(&mismatches);
 }
 
+// ─── Low-recursion-limit SIMD-vs-Logos parity ─────────────────────────────
+//
+// The frozen oracle above runs at the default limit (500), which no fixture
+// approaches, so it cannot catch a fast-path arm that emits a token while the
+// depth is already over the limit. `LogosLexer::lex` re-checks the limiter
+// after every successful token and, while over the limit, returns the
+// recursion error in the token's place; every SIMD fast-path emission must do
+// the same. A limit of 0 puts every token after the first bracket over the
+// limit, and each input keeps lexing past that first error, so the SIMD and
+// Logos streams agree only if every arm re-checks. Comparing the two lexers
+// directly (both `Char = char`) needs no golden file.
+
+#[test]
+fn graphql_syntactic_simd_low_recursion_parity() {
+  use smear_lexer::graphql::syntactic::SyntacticLexer;
+  use tokit::state::recursion_tracker::RecursionLimiter;
+
+  // Each input exercises a different set of gated arms past the first
+  // over-limit bracket: identifier + close-bracket, nested brackets, the
+  // colon/`LitInt`/`LitFloat` arms, both inline-string arms, and spread.
+  for src in [
+    "{a}",
+    "{{a}}",
+    "((x))",
+    "[x]",
+    "{ a(b: 1, c: 1.5) }",
+    r#"{ s: "x" }"#,
+    r#"{ e: "" }"#,
+    "{ ...a }",
+  ] {
+    let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
+      src,
+      RecursionLimiter::with_limitation(0),
+    ));
+    let logos = render_stream!(SyntacticLexer::<&str>::with_state(
+      src,
+      RecursionLimiter::with_limitation(0),
+    ));
+    assert_eq!(simd, logos, "low-limit stream mismatch for {src:?}");
+  }
+}
+
 // ─── SIMD source matrix: `<[u8]>` vs `<str>` (Task 2) ──────────────────────
 //
 // `graphql_syntactic_simd_oracle` above proves `SimdSyntacticLexer::<str>`
@@ -735,6 +777,39 @@ fn graphqlx_syntactic_simd_oracle() {
     check("graphqlx-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
+}
+
+// Low-recursion-limit SIMD-vs-Logos parity for GraphQLx (see the GraphQL
+// counterpart above for the rationale). Angle brackets `<`/`>` count toward
+// the recursion budget here, so the inputs nest them; `::` and `=>`
+// additionally cover the two-byte-punct arm, which GraphQL has no analog for.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_syntactic_simd_low_recursion_parity() {
+  use smear_lexer::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+  use tokit::state::recursion_tracker::RecursionLimiter;
+
+  for src in [
+    "Box<Inner<T>>",
+    "<a::b>",
+    "<x => y>",
+    "<a + b>",
+    "{a}",
+    "((x))",
+    r#"<v: "s">"#,
+    r#"<e: "">"#,
+    "<...a>",
+  ] {
+    let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
+      src,
+      RecursionLimiter::with_limitation(0),
+    ));
+    let logos = render_stream!(SyntacticLexer::<&str>::with_state(
+      src,
+      RecursionLimiter::with_limitation(0),
+    ));
+    assert_eq!(simd, logos, "low-limit stream mismatch for {src:?}");
+  }
 }
 
 // ─── GraphQLx SIMD source matrix: `<str>` vs `<[u8]>`/`<Bytes>` ─────────────
