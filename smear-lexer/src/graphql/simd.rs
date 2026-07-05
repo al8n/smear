@@ -47,6 +47,7 @@ use crate::{
 };
 
 mod bytes_token;
+mod number;
 mod str_token;
 
 /// Maximum byte recursion depth — matches the default in
