@@ -11,7 +11,7 @@ use super::{super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockS
 /// `"""` and count any `\"""` escape sequences along the way.
 ///
 /// This replaces the inner per-byte `BlockStringToken` Logos DFA with a
-/// memchr-style hop: we use `lexsimd::skip::skip_until` to jump straight
+/// memchr-style hop: we use `memspan::skip::skip_until` to jump straight
 /// to the next `"`, then verify the surrounding bytes scalar-side. Most
 /// real description blocks contain only a handful of `"` candidates
 /// (often zero before the closing triple), so this is essentially a
@@ -33,8 +33,8 @@ fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
   while pos < body.len() {
     // Hop to the next `"` candidate. memchr inside lexsimd routes to
     // the platform-optimal SIMD path; on aarch64 this is the NEON
-    // `vceqq + vorrq + shrn-extract` chain seen in `lexsimd::skip::*`.
-    let q_off = match lexsimd::skip::skip_until(&body[pos..], b'"') {
+    // `vceqq + vorrq + shrn-extract` chain seen in `memspan::skip::*`.
+    let q_off = match memspan::skip::skip_until(&body[pos..], b'"') {
       Some(n) => pos + n,
       None => return (None, escaped),
     };

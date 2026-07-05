@@ -1,6 +1,6 @@
 //! SIMD-accelerated inline string scanner.
 //!
-//! Replaces the Logos `StringToken` DFA with `lexsimd::skip::skip_until` for
+//! Replaces the Logos `StringToken` DFA with `memspan::skip::skip_until` for
 //! bulk plain-character runs (the dominant case in real queries), falling back
 //! to a tight scalar loop only for the rare special bytes (`"`, `\`, `\r`, `\n`).
 //!
@@ -34,36 +34,37 @@ type Span = SimpleSpan;
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-#[inline(always)]
-fn hex_val(b: u8) -> Option<u32> {
-  match b {
-    b'0'..=b'9' => Some((b - b'0') as u32),
-    b'a'..=b'f' => Some((b - b'a' + 10) as u32),
-    b'A'..=b'F' => Some((b - b'A' + 10) as u32),
-    _ => None,
-  }
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn hex_val(b: u8) -> Option<u32> {
+  Some(match b {
+    b'0'..=b'9' => (b - b'0') as u32,
+    b'a'..=b'f' => (b - b'a' + 10) as u32,
+    b'A'..=b'F' => (b - b'A' + 10) as u32,
+    _ => return None,
+  })
 }
 
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn parse_u4(hex: &[u8]) -> Option<u32> {
   debug_assert_eq!(hex.len(), 4);
+
   Some(
     (hex_val(hex[0])? << 12) | (hex_val(hex[1])? << 8) | (hex_val(hex[2])? << 4) | hex_val(hex[3])?,
   )
 }
 
-#[inline(always)]
-fn is_high_surrogate(cp: u32) -> bool {
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn is_high_surrogate(cp: u32) -> bool {
   matches!(cp, 0xD800..=0xDBFF)
 }
 
-#[inline(always)]
-fn is_low_surrogate(cp: u32) -> bool {
+#[cfg_attr(not(tarpaulin), inline(always))]
+const fn is_low_surrogate(cp: u32) -> bool {
   matches!(cp, 0xDC00..=0xDFFF)
 }
 
 /// Peek ahead for a `\uXXXX` low-surrogate starting in `remainder`.
-#[inline(always)]
+#[cfg_attr(not(tarpaulin), inline(always))]
 fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
   if remainder.len() < 6 {
     return None;
@@ -93,7 +94,7 @@ fn handle_fixed_unicode(
 
   if available == 0 {
     let span = Span::new(abs_backslash, abs_backslash + 2);
-    errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span.into())).into());
+    errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span)).into());
     return (0, 0);
   }
 
@@ -103,7 +104,7 @@ fn handle_fixed_unicode(
     let all_hex = hex_bytes.iter().all(|&b| hex_val(b).is_some());
     let span = Span::new(abs_backslash, abs_backslash + 2 + available);
     if all_hex {
-      errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span.into())).into());
+      errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span)).into());
     } else {
       let mut invalid = InvalidUnicodeHexDigits::<u8>::default();
       for (i, &b) in hex_bytes.iter().enumerate() {
@@ -111,7 +112,7 @@ fn handle_fixed_unicode(
           invalid.push_fixed(PositionedChar::with_position(b, abs_backslash + 2 + i));
         }
       }
-      errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span.into()).into());
+      errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span).into());
     }
     return (available, 0);
   }
@@ -136,7 +137,7 @@ fn handle_fixed_unicode(
 
   if !invalid.is_empty() {
     let span = Span::new(abs_backslash, abs_backslash + 6);
-    errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span.into()).into());
+    errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span).into());
     return (4, 0);
   }
 
@@ -148,13 +149,13 @@ fn handle_fixed_unicode(
       return (10, utf8_len_for_scalar(combined));
     }
     let span = Span::new(abs_backslash, abs_backslash + 6);
-    errs.push(UnicodeError::unpaired_high_surrogate(Lexeme::Range(span.into())).into());
+    errs.push(UnicodeError::unpaired_high_surrogate(Lexeme::Range(span)).into());
     return (4, 0);
   }
 
   if is_low_surrogate(cp) {
     let span = Span::new(abs_backslash, abs_backslash + 6);
-    errs.push(UnicodeError::unpaired_low_surrogate(Lexeme::Range(span.into())).into());
+    errs.push(UnicodeError::unpaired_low_surrogate(Lexeme::Range(span)).into());
     return (4, 0);
   }
 
@@ -188,26 +189,24 @@ fn handle_braced_unicode(
       let span = Span::new(abs_backslash, abs_end);
 
       if hex_count == 0 && all_hex {
-        errs.push(UnicodeError::empty_braced_unicode_escape(span.into()).into());
+        errs.push(UnicodeError::empty_braced_unicode_escape(span).into());
         return (consumed, 0);
       }
       if !all_hex {
-        errs.push(UnicodeError::invalid_braced_unicode_escape_sequence(span.into()).into());
+        errs.push(UnicodeError::invalid_braced_unicode_escape_sequence(span).into());
         return (consumed, 0);
       }
       if hex_count > 6 {
-        errs.push(
-          UnicodeError::too_many_digits_in_braced_unicode_escape(span.into(), hex_count).into(),
-        );
+        errs.push(UnicodeError::too_many_digits_in_braced_unicode_escape(span, hex_count).into());
         return (consumed, 0);
       }
       // Valid 1-6 hex digits
       if cp > 0x10_FFFF {
-        errs.push(UnicodeError::overflow_braced_unicode_escape(span.into(), cp).into());
+        errs.push(UnicodeError::overflow_braced_unicode_escape(span, cp).into());
         return (consumed, 0);
       }
       if (0xD800..=0xDFFF).contains(&cp) {
-        errs.push(UnicodeError::surrogate_braced_unicode_escape(span.into(), cp).into());
+        errs.push(UnicodeError::surrogate_braced_unicode_escape(span, cp).into());
         return (consumed, 0);
       }
       return (consumed, utf8_len_for_scalar(cp));
@@ -230,7 +229,7 @@ fn handle_braced_unicode(
   let consumed = rest.len();
   let abs_end = abs_backslash + 3 + consumed;
   let span = Span::new(abs_backslash, abs_end);
-  errs.push(UnicodeError::unclosed_braced_unicode_escape(span.into()).into());
+  errs.push(UnicodeError::unclosed_braced_unicode_escape(span).into());
   (consumed, 0)
 }
 
@@ -260,7 +259,7 @@ pub(crate) fn skip_inline_str_simd(
     // ── SIMD bulk plain-character scan ───────────────────────────────────────
     // 4 needles → NEON on aarch64 (≥16 bytes); scalar memchr4 otherwise.
     // Stops at the first `"`, `\`, `\r`, or `\n`.
-    let next = match lexsimd::skip::skip_until(&src[pos..], [b'"', b'\\', b'\r', b'\n']) {
+    let next = match memspan::skip::skip_until(&src[pos..], [b'"', b'\\', b'\r', b'\n']) {
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.
@@ -285,7 +284,6 @@ pub(crate) fn skip_inline_str_simd(
           LitPlainStr::new(pos).into()
         });
       }
-
       // ── escape sequence ────────────────────────────────────────────────────
       b'\\' => {
         let abs_backslash = offset + pos;
@@ -295,7 +293,6 @@ pub(crate) fn skip_inline_str_simd(
           errs.push(StringError::unterminated_inline_string());
           return Err((pos, errs));
         }
-
         match src[pos] {
           b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
             has_escapes = true;
@@ -318,7 +315,7 @@ pub(crate) fn skip_inline_str_simd(
           }
           other => {
             errs.push(StringError::unexpected_escaped_character(
-              Span::new(abs_backslash, offset + pos + 1).into(),
+              Span::new(abs_backslash, offset + pos + 1),
               other,
               offset + pos,
             ));
@@ -326,14 +323,14 @@ pub(crate) fn skip_inline_str_simd(
           }
         }
       }
-
       // ── forbidden line terminators (errors) ────────────────────────────────
       b'\r' => {
         let abs = offset + pos;
         if pos + 1 < src.len() && src[pos + 1] == b'\n' {
-          errs.push(StringError::unexpected_carriage_return_new_line(
-            Span::new(abs, abs + 2).into(),
-          ));
+          errs.push(StringError::unexpected_carriage_return_new_line(Span::new(
+            abs,
+            abs + 2,
+          )));
           pos += 2;
         } else {
           errs.push(StringError::unexpected_carriage_return(b'\r', abs));
@@ -344,7 +341,6 @@ pub(crate) fn skip_inline_str_simd(
         errs.push(StringError::unexpected_new_line(b'\n', offset + pos));
         pos += 1;
       }
-
       _ => unreachable!("skip_until stops only at one of the four needles"),
     }
   }
