@@ -283,6 +283,7 @@ fn graphql_syntactic_simd_oracle() {
 // correct and are exactly the piece a future fix would reuse.
 
 use smear_lexer::{
+  LitBlockStr, LitInlineStr,
   error::{
     EscapedCharacter, FixedUnicodeEscapeError, InvalidUnicodeHexDigits, InvalidUnicodeSequence,
     StringError, StringErrors, UnicodeError,
@@ -485,12 +486,67 @@ fn same_lexer_errors(byte: &SyntacticLexerErrors<u8>, str_: &SyntacticLexerError
       .all(|(b, s)| same_lexer_error(b, s))
 }
 
+/// True if two inline-string tokens describe the same lexical result:
+/// identical raw source bytes, identical `Plain`/`Complex` classification,
+/// and -- when `Complex` -- identical derived normalization metadata
+/// (`required_capacity`). Comparing only the span text would miss a lexer
+/// that classifies the same bytes differently or derives different
+/// metadata for them, so every accessor is checked, not just the source.
+fn same_inline_str<B: AsBytes>(byte: &LitInlineStr<B>, str_: &LitInlineStr<&str>) -> bool {
+  if byte.source_ref().as_bytes() != str_.source_ref().as_bytes() {
+    return false;
+  }
+  if byte.is_plain() != str_.is_plain() || byte.is_complex() != str_.is_complex() {
+    return false;
+  }
+  match (byte, str_) {
+    (LitInlineStr::Complex(b), LitInlineStr::Complex(s)) => {
+      b.required_capacity() == s.required_capacity()
+    }
+    _ => true,
+  }
+}
+
+/// True if two block-string tokens describe the same lexical result: same
+/// raw source bytes, same `Plain`/`Complex` classification, and -- when
+/// `Complex` -- the same derived normalization metadata across every field
+/// (`required_capacity`, CR-terminator flag, leading/trailing blank-line
+/// counts, common indent, total line count, escaped-triple-quote count).
+/// Block strings are produced by two independently hand-written lexers
+/// (`string_lexer/block/str.rs` for `<str>`, `block/u8_slice.rs` for
+/// `<[u8]>` -- the latter has no unit tests of its own), so this is the one
+/// place that proves they agree on more than just the matched span text.
+fn same_block_str<B: AsBytes>(byte: &LitBlockStr<B>, str_: &LitBlockStr<&str>) -> bool {
+  if byte.source_ref().as_bytes() != str_.source_ref().as_bytes() {
+    return false;
+  }
+  if byte.is_plain() != str_.is_plain() || byte.is_complex() != str_.is_complex() {
+    return false;
+  }
+  match (byte, str_) {
+    (LitBlockStr::Complex(b), LitBlockStr::Complex(s)) => {
+      b.required_capacity() == s.required_capacity()
+        && b.has_cr_terminators() == s.has_cr_terminators()
+        && b.leading_blank_lines() == s.leading_blank_lines()
+        && b.trailing_blank_lines() == s.trailing_blank_lines()
+        && b.common_indent() == s.common_indent()
+        && b.total_lines() == s.total_lines()
+        && b.num_escaped_triple_quotes() == s.num_escaped_triple_quotes()
+    }
+    _ => true,
+  }
+}
+
 /// True if a byte-sourced token and a `str`-sourced token describe the same
 /// syntactic token: same kind (via `SyntacticToken::kind()`, which drops the
 /// generic source payload -- `kind()` is a bijection over the variant set, so
 /// equal kinds imply the same variant tag on both sides) and, for the five
-/// payload-bearing variants, the same decoded content (the byte slice equals
-/// the UTF-8 encoding of the `str` slice).
+/// payload-bearing variants, the same decoded content. For `LitInlineStr`/
+/// `LitBlockStr`, "same decoded content" means the same `Plain`/`Complex`
+/// structure and normalization metadata (see `same_inline_str`/
+/// `same_block_str`), not just equal span bytes -- two block strings in
+/// particular can share a span yet disagree on classification or metadata if
+/// the two hand-written lexers (str vs. `[u8]`) diverge.
 fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>) -> bool {
   use SyntacticToken as Tok;
   if byte.kind() != str_.kind() {
@@ -500,12 +556,8 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
     (Tok::Identifier(b), Tok::Identifier(s))
     | (Tok::LitInt(b), Tok::LitInt(s))
     | (Tok::LitFloat(b), Tok::LitFloat(s)) => b.as_bytes() == s.as_bytes(),
-    (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => {
-      b.source_ref().as_bytes() == s.source_ref().as_bytes()
-    }
-    (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => {
-      b.source_ref().as_bytes() == s.source_ref().as_bytes()
-    }
+    (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => same_inline_str(b, s),
+    (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => same_block_str(b, s),
     // Every other variant carries no payload; the `kind()` check above
     // already confirmed they're the same punctuation/spread token.
     _ => true,
