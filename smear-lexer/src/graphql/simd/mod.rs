@@ -70,7 +70,7 @@ pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 /// constructing a fresh `LogosLexer` over the full source and bumping it to
 /// the current cursor, rather than by reusing one lexer across calls — see
 /// `delegate_to_logos`.
-pub struct SimdSyntacticLexer<'inp, S: Source<usize> + ?Sized = str> {
+pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
   src: &'inp S,
   /// Current scan position. Advanced by trivia-skip, comment-skip, and each
   /// token scan. Never exposed directly — callers see `last_span`.
@@ -360,12 +360,15 @@ where
   }
 }
 
-// This block shares the trait impl's exact bound set (verbatim) rather than
-// the weaker one below: `delegate_to_logos`'s return type has to name the
-// concrete `Token`/`Error` types, which requires the `Token<'inp, Error =
-// ..>` bound. Every caller of this method is inside `lex()` above, where
-// those bounds already hold, so this is never more restrictive in practice
-// than the trait impl itself.
+// This block needs almost the trait impl's bound set — everything except
+// `Span = SimpleSpan` and `S::Slice<'inp>: AsBytes`, neither of which
+// `delegate_to_logos` touches (it builds `SimpleSpan` directly and reads the
+// wrapped Logos lexer's own span, never `Self::Span` or `.as_bytes()`) —
+// rather than the far weaker one below: `delegate_to_logos`'s return type has
+// to name the concrete `Token`/`Error` types, which requires the
+// `Token<'inp, Error = ..>` bound. Every caller of this method is inside
+// `lex()` above, where the trait impl's full bound set already holds, so
+// this is never more restrictive in practice than the trait impl itself.
 impl<'inp, S> SimdSyntacticLexer<'inp, S>
 where
   SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
@@ -374,13 +377,11 @@ where
       State = RecursionLimiter,
       Token = SyntacticToken<S::Slice<'inp>>,
       Source = <S as ScanSource>::ScanPrimitive,
-      Span = SimpleSpan,
       Offset = usize,
     >,
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: ScanSource + ?Sized,
-  S::Slice<'inp>: AsBytes,
 {
   /// Delegate the token starting at `token_start` (== `self.cursor`, prior
   /// to any mutation for this token) to the wrapped Logos lexer.
@@ -431,21 +432,19 @@ where
   }
 }
 
-impl<'inp, S: Source<usize> + ?Sized> SimdSyntacticLexer<'inp, S>
-where
-  S::Slice<'inp>: AsBytes,
-{
-  // ───── span accessors ────────────────────────────────────────────────
-
+impl<S: ?Sized> SimdSyntacticLexer<'_, S> {
   /// Span of the most recently returned error token, or `None` if no error
   /// has been returned yet.
   #[cfg_attr(not(tarpaulin), inline(always))]
   pub fn error_span(&self) -> Option<SimpleSpan> {
     self.last_error_span
   }
+}
 
-  // ───── trivia ────────────────────────────────────────────────────────
-
+impl<'inp, S: Source<usize> + ?Sized> SimdSyntacticLexer<'inp, S>
+where
+  S::Slice<'inp>: AsBytes,
+{
   /// Skip the single-byte trivia class (space, tab, CR, LF, comma)
   /// at the cursor. Comment bodies and the UTF-8 BOM are handled in
   /// the dispatch loop so this stays a single SIMD scan with no per-call

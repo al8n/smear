@@ -177,7 +177,14 @@ impl ScanSource for hipstr::HipByt<'_> {
 /// state: on a token, the post-lex recursion state is propagated; on an error,
 /// it deliberately is not (the `Error` variant has no `state` field), matching
 /// the pre-SIMD lexer, which never advances recursion state across an error.
-pub(crate) enum Delegated<'inp, T: FromLogos<'inp>> {
+///
+/// Bounded by `Token<'inp>` rather than `FromLogos<'inp>`: the `Error` variant
+/// is the only field that constrains `T` (it names `<T as Token<'inp>>::Error`),
+/// and `FromLogos<'inp>: Token<'inp>` is strictly stronger than this type
+/// itself needs. `delegate_to_logos` — the sole constructor — still requires
+/// `T: FromLogos<'inp>` to build the `LogosLexer`, so every actual caller
+/// satisfies this bound already.
+pub(crate) enum Delegated<'inp, T: Token<'inp>> {
   Token {
     token: T,
     end: usize,
