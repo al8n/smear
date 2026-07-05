@@ -16,8 +16,8 @@ mod tests;
 mod slice;
 mod str;
 
-// TODO: Lexer type alias needs migration - LogosLexer requires FromLogos trait
-// pub type Lexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
+/// The lexer type for lossless GraphQLx tokenization.
+pub type LosslessLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
 
 /// The error data type for lexing based on lossless token with `char` source.
 pub type LosslessLexerErrorData = error::LexerErrorData<char, LimitExceeded>;
