@@ -54,159 +54,12 @@ mod bytes_token;
 mod number;
 mod str_token;
 
-/// Maximum byte recursion depth — matches the default in
-/// [`tokit::state::recursion_tracker::RecursionLimiter`].
-pub const DEFAULT_RECURSION_LIMIT: usize = 500;
+use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
 
-/// sasd
-pub trait AsBytes {
-  /// a
-  fn as_bytes(&self) -> &[u8];
-}
-
-impl<T: ?Sized> AsBytes for &T
-where
-  T: AsBytes,
-{
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    (*self).as_bytes()
-  }
-}
-
-impl AsBytes for str {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    str::as_bytes(self)
-  }
-}
-
-impl AsBytes for [u8] {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-// ───── owned / shared slice types ───────────────────────────────────────
-//
-// Each of these is `tokit::Source::Slice` for an owned or shared source type
-// (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt` — see
-// tokit's `src/source/{bytes_1,bstr_1,hipstr_0_8}.rs`), so implementing
-// `AsBytes` for them is what lets `SimdSyntacticLexer` run over those source
-// types, exactly as it already does for `str`/`[u8]` above. Every impl is a
-// trivial deref to `&[u8]` — no allocation, no copying.
-
-#[cfg(feature = "bytes")]
-impl AsBytes for bytes::Bytes {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bstr")]
-impl AsBytes for bstr::BStr {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl AsBytes for hipstr::HipStr<'_> {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    // `HipStr` derefs to `str`, not `[u8]` directly, so route through
-    // `str::as_bytes` (same call as the `str` impl above; the `&HipStr ->
-    // &str` coercion happens at the argument site).
-    str::as_bytes(self)
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl AsBytes for hipstr::HipByt<'_> {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-/// The primitive `str`/`[u8]` source that Logos actually scans for a source
-/// `S`, plus how to borrow `S` as it.
-///
-/// The `token!`-generated Logos enums (`graphql/syntactic/{str,slice}.rs`)
-/// always scan `str`/`[u8]` and convert each matched primitive slice up to
-/// `S::Slice` via `IntoEquivalent`, so `LogosLexer`'s `Source` is always the
-/// primitive — never the owned/shared wrapper. `delegate_to_logos` builds its
-/// `LogosLexer` over this primitive view; the tokens it produces are still
-/// `SyntacticToken<S::Slice>` and compare content-equal to the fast path's.
-pub trait ScanSource: Source<usize> {
-  /// The `str`/`[u8]` primitive Logos scans for this source. Identity for
-  /// `str`/`[u8]`; the wrapper's deref target otherwise.
-  type ScanPrimitive: Source<usize> + ?Sized;
-
-  /// Borrow this source as the primitive Logos scans.
-  fn scan_primitive(&self) -> &Self::ScanPrimitive;
-}
-
-impl ScanSource for str {
-  type ScanPrimitive = str;
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &str {
-    self
-  }
-}
-
-impl ScanSource for [u8] {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bytes")]
-impl ScanSource for bytes::Bytes {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bstr")]
-impl ScanSource for bstr::BStr {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl ScanSource for hipstr::HipStr<'_> {
-  type ScanPrimitive = str;
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &str {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl ScanSource for hipstr::HipByt<'_> {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
+// Re-exported so the public `graphql::simd::{AsBytes, ScanSource}` paths and
+// `DEFAULT_RECURSION_LIMIT` stay stable now that these dialect-agnostic items
+// live in `crate::simd_common`.
+pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 
 /// Phase-1 SIMD layer. Streaming, single-pass, one token per call.
 ///
@@ -367,7 +220,8 @@ where
       let b0 = bytes[0];
       match b0 {
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-          let len = self.lex_identifier(bytes);
+          let len = scan_identifier(bytes);
+          self.cursor += len;
           self.last_span = SimpleSpan::new(token_start, self.cursor);
           return self
             .src
@@ -559,21 +413,21 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    let mut logos = LogosLexer::with_state(self.src.scan_primitive(), self.state);
-    logos.bump(&self.cursor);
-    match logos.lex()? {
-      Ok(tok) => {
-        let end = logos.inner().span().end;
+    match crate::simd_common::delegate_to_logos::<SyntacticToken<S::Slice<'inp>>>(
+      self.src.scan_primitive(),
+      self.cursor,
+      self.state,
+    )? {
+      Delegated::Token { token, end, state } => {
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
-        self.state = *logos.state();
-        Some(Ok(tok))
+        self.state = state;
+        Some(Ok(token))
       }
-      Err(res) => {
-        let end = logos.inner().span().end;
+      Delegated::Error { error, end } => {
         self.cursor = end;
         self.last_error_span = Some(SimpleSpan::new(token_start, end));
-        Some(Err(res))
+        Some(Err(error))
       }
     }
   }
@@ -619,66 +473,6 @@ where
     };
     self.cursor += len;
   }
-
-  // ───── identifier fast path ──────────────────────────────────────────
-
-  /// Hot path. The dispatch already proved `bytes[start]` is in
-  /// `[a-zA-Z_]`, so the run is non-empty by construction and we can
-  /// start scanning from `start + 1`. Splitting on the remaining length
-  /// keeps short idents (the common case in GraphQL — most identifiers
-  /// are < 16 bytes) on a tight inlined scalar loop, while long idents
-  /// (e.g. enum value names in schemas) get the SIMD dispatcher.
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn lex_identifier(&mut self, bytes: &[u8]) -> usize {
-    let total = bytes.len();
-    let mut end = 1;
-
-    if total - end >= 32 {
-      // Long-ident path: amortize the SIMD dispatcher across enough
-      // bytes to pay for itself.
-      end += memspan::skip::skip_ident(&bytes[end..]);
-    } else {
-      // Short-ident path: a tight branchy loop with a known-tiny upper
-      // bound. LLVM keeps this in the icache and the per-iteration cost
-      // beats any function call dispatch for ≤ ~24-byte idents.
-      while end < total && is_ident_continue(bytes[end]) {
-        end += 1;
-      }
-    }
-
-    self.cursor += end;
-    end
-  }
-}
-
-// ───── helpers ─────────────────────────────────────────────────────────
-
-#[inline(always)]
-fn is_ident_continue(b: u8) -> bool {
-  matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-}
-
-// Macro-generated SIMD-accelerated skipper for the four whitespace bytes
-// plus comma. BOM and comments are handled separately because they're
-// multi-byte sequences that don't fit a single-byte class.
-memspan::skip_class! {
-  fn skip_ws_and_comma(bytes = [b' ', b'\t', b'\r', b'\n', b',']);
-}
-
-/// Find the position of the next `\n` or `\r` in `input`, used for
-/// terminating `#`-style comments.
-#[inline(always)]
-fn memchr_newline(input: &[u8]) -> Option<usize> {
-  // Trivial scalar fallback first (most comments are short and contain
-  // no special bytes between `#` and EOL). The branchy scalar loop is
-  // hard to beat for short tails.
-  if input.len() < 32 {
-    return input.iter().position(|&b| b == b'\n' || b == b'\r');
-  }
-  // For longer comments we hand off to memchr2 which has the same
-  // SIMD-saturation guarantees as memchr — a single `vceqq + vorrq +
-  // shrn-extract` loop on aarch64.
-  ::memspan::skip::skip_until(input, [b'\n', b'\r'])
 }
 
 // #[cfg(test)]
@@ -1112,45 +906,5 @@ mod generic_source_tests {
       }
       other => panic!("expected LexerErrorData::String, got {other:?}"),
     }
-  }
-}
-
-/// Task 2 Step 1: proves each new `AsBytes` impl actually decodes to the
-/// right bytes. These do NOT drive a `SimdSyntacticLexer` over the type --
-/// see `tests/oracle.rs`'s "SIMD source matrix" section for why
-/// `SimdSyntacticLexer::<bytes::Bytes>` (and `<bstr::BStr>`,
-/// `<hipstr::HipStr>`, `<hipstr::HipByt>`) can't be constructed yet, a
-/// separate, deeper limitation `AsBytes` alone doesn't resolve. This module
-/// only proves the trait impls added here are individually correct.
-#[cfg(test)]
-mod as_bytes_tests {
-  use super::AsBytes;
-
-  #[cfg(feature = "bytes")]
-  #[test]
-  fn bytes_as_bytes() {
-    let b = bytes::Bytes::from_static(b"hello");
-    assert_eq!(AsBytes::as_bytes(&b), b"hello");
-  }
-
-  #[cfg(feature = "bstr")]
-  #[test]
-  fn bstr_as_bytes() {
-    let b = bstr::BStr::new(b"hello");
-    assert_eq!(AsBytes::as_bytes(b), b"hello");
-  }
-
-  #[cfg(feature = "hipstr")]
-  #[test]
-  fn hipstr_as_bytes() {
-    let s = hipstr::HipStr::from("hello");
-    assert_eq!(AsBytes::as_bytes(&s), b"hello");
-  }
-
-  #[cfg(feature = "hipstr")]
-  #[test]
-  fn hipbyt_as_bytes() {
-    let b = hipstr::HipByt::from(b"hello" as &[u8]);
-    assert_eq!(AsBytes::as_bytes(&b), b"hello");
   }
 }
