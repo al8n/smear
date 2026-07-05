@@ -222,43 +222,14 @@ fn graphql_syntactic_oracle() {
 // vs. `Identifier("a")` -- so `render_stream!` cannot be reused verbatim
 // here the way the plan assumed; see the two helpers below for the (test-
 // only, narrowly-scoped) adjustment this test makes instead.
-//
-// TODO(phase-1x): if `LitPlainStr`/`LitComplexInlineStr`/`LitComplexBlockStr`
-// ever grow a public (or test-only) cross-slice conversion, retire
-// `STRING_LITERAL_SKIP` and fold those fixtures back into this test.
-
-/// Fixtures whose golden rendering contains an inline- or block-string
-/// token. `bytes_token_to_str` (below) cannot reconstruct these: unlike the
-/// plain `Identifier`/`LitInt`/`LitFloat` tuple variants (directly
-/// buildable from any `&str`, since `SyntacticToken` is a public enum),
-/// `LitPlainStr`/`LitComplexInlineStr`/`LitComplexBlockStr` only expose a
-/// `pub(crate)` constructor -- this external test crate has no way to
-/// rebuild an equivalent `&str`-flavored value from the `&[u8]`-flavored
-/// one the SIMD lexer actually produced. This is a pre-existing property of
-/// those wrapper types (they predate this task, and this task's fast path
-/// never touches strings), not a number fast-path defect, so it is scoped
-/// out here rather than "fixed" -- see the phase-1a Task 2 report for the
-/// full accounting of which fixtures this excludes and why.
-const STRING_LITERAL_SKIP: &[&str] = &[
-  "blk_blank_lines",
-  "blk_common_indent",
-  "blk_crlf",
-  "blk_escaped_triple",
-  "blk_multiline_plain",
-  "kitchen_sink",
-  "schema_gmx",
-  "str_braced_unicode",
-  "str_fixed_unicode",
-  "str_simple_escapes",
-  "str_surrogate_pair",
-];
 
 /// Rebuild the `&str`-flavored equivalent of a byte-sourced token, so its
 /// `Debug` output matches what the `&str`-sourced Logos oracle renders.
 /// Every fixture byte is valid UTF-8 (they're all Rust string literals), so
-/// the `str::from_utf8` below never fails. Panics on `LitInlineStr`/
-/// `LitBlockStr` -- callers must skip those fixtures first (see
-/// `STRING_LITERAL_SKIP`); non-string-literal variants can't panic since
+/// the `str::from_utf8`/`TryFrom` conversions below never fail.
+/// `LitInlineStr<&[u8]>` -> `LitInlineStr<&str>` goes through the crate's
+/// public `TryFrom` impl; `LitBlockStr<&[u8]>` -> `LitBlockStr<&str>` goes
+/// through its public `map`. Non-string-literal variants can't panic since
 /// `SyntacticToken` is `#[non_exhaustive]` only for *future* variants, and
 /// today's set is matched exhaustively above the fallback arm.
 fn bytes_token_to_str(tok: smear_lexer::graphql::syntactic::SyntacticToken<&[u8]>) -> String {
@@ -284,9 +255,22 @@ fn bytes_token_to_str(tok: smear_lexer::graphql::syntactic::SyntacticToken<&[u8]
     Tok::Identifier(bytes) => format!("{:?}", Tok::Identifier(s(bytes))),
     Tok::LitFloat(bytes) => format!("{:?}", Tok::LitFloat(s(bytes))),
     Tok::LitInt(bytes) => format!("{:?}", Tok::LitInt(s(bytes))),
+    Tok::LitInlineStr(bytes) => format!(
+      "{:?}",
+      Tok::LitInlineStr(
+        smear_lexer::LitInlineStr::<&str>::try_from(bytes)
+          .expect("oracle fixtures are valid UTF-8")
+      )
+    ),
+    Tok::LitBlockStr(bytes) => format!(
+      "{:?}",
+      Tok::LitBlockStr(
+        bytes.map(|b| core::str::from_utf8(b).expect("oracle fixtures are valid UTF-8"))
+      )
+    ),
     other => panic!(
-      "graphql_syntactic_simd_oracle: unexpected string-literal token {other:?} \
-       outside STRING_LITERAL_SKIP -- add its fixture name to the skip list"
+      "graphql_syntactic_simd_oracle: unexpected token variant {other:?} \
+       (SyntacticToken gained a new #[non_exhaustive] variant; teach bytes_token_to_str about it)"
     ),
   }
 }
@@ -358,9 +342,6 @@ fn render_simd_stream_as_str(src: &str) -> String {
 fn graphql_syntactic_simd_oracle() {
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    if STRING_LITERAL_SKIP.contains(name) {
-      continue;
-    }
     let rendered = render_simd_stream_as_str(src);
     check("graphql-syntactic", name, &rendered, &mut mismatches);
   }
