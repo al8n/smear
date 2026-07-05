@@ -19,7 +19,7 @@ fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
   let mut escaped = 0usize;
 
   while pos < body.len() {
-    let q_off = match lexsimd::skip::skip_until(&body[pos..], b'"') {
+    let q_off = match memspan::skip::skip_until(&body[pos..], b'"') {
       Some(n) => pos + n,
       None => return (body.len(), None, escaped),
     };

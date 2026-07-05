@@ -10,6 +10,7 @@ pub(crate) use self::{
   },
 };
 
+mod simd;
 mod str;
 mod u8_slice;
 

@@ -27,3 +27,18 @@ thiserror = { version = "2", default-features = false }
 smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
 smear-scaffold = { path = "smear-scaffold", version = "0.0.0", default-features = false }
 smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
+
+[workspace.lints.rust]
+rust_2018_idioms = "warn"
+single_use_lifetimes = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(all_tests)',
+  'cfg(tarpaulin)',
+  # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
+  # in CI to force the dispatcher down a specific path so lower‑tier
+  # kernels and the scalar fallback get coverage on runners that would
+  # otherwise always pick the top tier.
+  'cfg(smear_lexer_force_scalar)',
+  'cfg(smear_lexer_disable_avx512)',
+  'cfg(smear_lexer_disable_avx2)',
+] }

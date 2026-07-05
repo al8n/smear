@@ -14,9 +14,9 @@
 //! |  cursor, src, limiter   |
 //! |                         |
 //! |  next_token() {         |
-//! |    skip_trivia();       |  <-- lexsimd::skip_class!
+//! |    skip_trivia();       |  <-- memspan::skip_class!
 //! |    match peek() {       |
-//! |      ident-start  ===>  |  <-- lexsimd::skip::skip_ident
+//! |      ident-start  ===>  |  <-- memspan::skip::skip_ident
 //! |      single-byte punct  |  <-- inline match
 //! |      everything else => |  <-- delegate to Logos
 //! |    }                    |
@@ -434,7 +434,7 @@ where
     if total - end >= 32 {
       // Long-ident path: amortize the SIMD dispatcher across enough
       // bytes to pay for itself.
-      end += lexsimd::skip::skip_ident(&bytes[end..]);
+      end += memspan::skip::skip_ident(&bytes[end..]);
     } else {
       // Short-ident path: a tight branchy loop with a known-tiny upper
       // bound. LLVM keeps this in the icache and the per-iteration cost
@@ -459,8 +459,8 @@ fn is_ident_continue(b: u8) -> bool {
 // Macro-generated SIMD-accelerated skipper for the four whitespace bytes
 // plus comma. BOM and comments are handled separately because they're
 // multi-byte sequences that don't fit a single-byte class.
-lexsimd::skip_class! {
-  fn skip_ws_and_comma, bytes = [b' ', b'\t', b'\r', b'\n', b','];
+memspan::skip_class! {
+  fn skip_ws_and_comma(bytes = [b' ', b'\t', b'\r', b'\n', b',']);
 }
 
 /// Find the position of the next `\n` or `\r` in `input`, used for
@@ -476,7 +476,7 @@ fn memchr_newline(input: &[u8]) -> Option<usize> {
   // For longer comments we hand off to memchr2 which has the same
   // SIMD-saturation guarantees as memchr — a single `vceqq + vorrq +
   // shrn-extract` loop on aarch64.
-  ::lexsimd::skip::skip_until(input, [b'\n', b'\r'])
+  ::memspan::skip::skip_until(input, [b'\n', b'\r'])
 }
 
 // #[cfg(test)]
