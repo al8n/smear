@@ -22,14 +22,10 @@
 //! Float          = int (frac exp | frac | exp)
 //! ```
 //!
-//! This module is intentionally self-contained: nothing outside its own
-//! `tests` submodule calls into it yet. The dispatch wiring that turns a
-//! `Some((kind, len))` result into a `SyntacticToken::LitInt`/`LitFloat` in
-//! the main `lex()` match is separate follow-up work, so every item here is
-//! "dead" by `rustc`'s reachability analysis until that wiring lands —
-//! hence the blanket allow below rather than piecemeal per-item ones.
-
-#![allow(dead_code)]
+//! [`scan_number`] is wired into the dispatch `match` in `graphql/simd.rs`:
+//! `Some((kind, len))` becomes an inline `SyntacticToken::LitInt`/`LitFloat`
+//! (no Logos involved), and `None` delegates the whole token to Logos via
+//! `SimdSyntacticLexer::delegate_to_logos`.
 
 /// The two GraphQL numeric literal shapes [`scan_number`] can recognize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,5 +197,46 @@ mod tests {
     ] {
       assert_eq!(scan(s), None, "{s:?} should delegate");
     }
+  }
+
+  /// Below `LONG_DIGIT_RUN` (32 bytes), `digit_run_len` uses the scalar
+  /// loop; Task 1 left the `memspan::skip::skip_digits` branch (a digit run
+  /// at/above that threshold) untested. Exercise it directly for the
+  /// integer part, the fractional part, and with a legal delimiter
+  /// following the long run.
+  #[test]
+  fn long_digit_runs_use_the_simd_scan() {
+    let forty_nines = "9".repeat(40);
+    assert_eq!(scan(forty_nines.as_bytes()), Some((NumberKind::Int, 40)));
+
+    // Long integer part immediately followed by a legal delimiter -- the
+    // SIMD scan must stop exactly at the digit run's end, not consume (or
+    // under-consume) into/around the terminator.
+    let forty_nines_then_paren = format!("{forty_nines})");
+    assert_eq!(
+      scan(forty_nines_then_paren.as_bytes()),
+      Some((NumberKind::Int, 40))
+    );
+
+    // Long fraction: the SIMD path is exercised on the run *after* the
+    // `.`, not just the integer part.
+    let long_frac = format!("1.{}", "3".repeat(40));
+    assert_eq!(
+      scan(long_frac.as_bytes()),
+      Some((NumberKind::Float, long_frac.len()))
+    );
+
+    // Long exponent digit run.
+    let long_exp = format!("1e{}", "2".repeat(40));
+    assert_eq!(
+      scan(long_exp.as_bytes()),
+      Some((NumberKind::Float, long_exp.len()))
+    );
+
+    // A leading-zero violation is still caught even when the (illegal)
+    // digit run is long -- the SIMD scan only measures length; the
+    // leading-zero classification happens after, on `int_len`.
+    let long_leading_zero = format!("0{}", "1".repeat(40));
+    assert_eq!(scan(long_leading_zero.as_bytes()), None);
   }
 }

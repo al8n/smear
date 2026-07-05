@@ -210,6 +210,163 @@ fn graphql_syntactic_oracle() {
   assert_no_mismatches(&mismatches);
 }
 
+// ─── SIMD-vs-golden parity (phase 1a Task 2) ──────────────────────────────
+//
+// `SimdSyntacticLexer` is byte-oriented: `SimdSyntacticLexer::<[u8]>` is the
+// only source type it can actually be driven with (see the report for why
+// the struct's own default type parameter, bare `str`, doesn't satisfy the
+// `Lexer` bound at all). That makes its tokens/errors `Char = u8`, while
+// every `graphql-syntactic` golden file above was captured from the
+// `&str`-sourced (`Char = char`) Logos lexer. `{:?}` renders those two
+// differently even for byte-identical content -- e.g. `Identifier([97])`
+// vs. `Identifier("a")` -- so `render_stream!` cannot be reused verbatim
+// here the way the plan assumed; see the two helpers below for the (test-
+// only, narrowly-scoped) adjustment this test makes instead.
+//
+// TODO(phase-1x): if `LitPlainStr`/`LitComplexInlineStr`/`LitComplexBlockStr`
+// ever grow a public (or test-only) cross-slice conversion, retire
+// `STRING_LITERAL_SKIP` and fold those fixtures back into this test.
+
+/// Fixtures whose golden rendering contains an inline- or block-string
+/// token. `bytes_token_to_str` (below) cannot reconstruct these: unlike the
+/// plain `Identifier`/`LitInt`/`LitFloat` tuple variants (directly
+/// buildable from any `&str`, since `SyntacticToken` is a public enum),
+/// `LitPlainStr`/`LitComplexInlineStr`/`LitComplexBlockStr` only expose a
+/// `pub(crate)` constructor -- this external test crate has no way to
+/// rebuild an equivalent `&str`-flavored value from the `&[u8]`-flavored
+/// one the SIMD lexer actually produced. This is a pre-existing property of
+/// those wrapper types (they predate this task, and this task's fast path
+/// never touches strings), not a number fast-path defect, so it is scoped
+/// out here rather than "fixed" -- see the phase-1a Task 2 report for the
+/// full accounting of which fixtures this excludes and why.
+const STRING_LITERAL_SKIP: &[&str] = &[
+  "blk_blank_lines",
+  "blk_common_indent",
+  "blk_crlf",
+  "blk_escaped_triple",
+  "blk_multiline_plain",
+  "kitchen_sink",
+  "schema_gmx",
+  "str_braced_unicode",
+  "str_fixed_unicode",
+  "str_simple_escapes",
+  "str_surrogate_pair",
+];
+
+/// Rebuild the `&str`-flavored equivalent of a byte-sourced token, so its
+/// `Debug` output matches what the `&str`-sourced Logos oracle renders.
+/// Every fixture byte is valid UTF-8 (they're all Rust string literals), so
+/// the `str::from_utf8` below never fails. Panics on `LitInlineStr`/
+/// `LitBlockStr` -- callers must skip those fixtures first (see
+/// `STRING_LITERAL_SKIP`); non-string-literal variants can't panic since
+/// `SyntacticToken` is `#[non_exhaustive]` only for *future* variants, and
+/// today's set is matched exhaustively above the fallback arm.
+fn bytes_token_to_str(tok: smear_lexer::graphql::syntactic::SyntacticToken<&[u8]>) -> String {
+  use smear_lexer::graphql::syntactic::SyntacticToken as Tok;
+  fn s(bytes: &[u8]) -> &str {
+    core::str::from_utf8(bytes).expect("oracle fixtures are valid UTF-8")
+  }
+  match tok {
+    Tok::Ampersand => format!("{:?}", Tok::<&str>::Ampersand),
+    Tok::At => format!("{:?}", Tok::<&str>::At),
+    Tok::RBrace => format!("{:?}", Tok::<&str>::RBrace),
+    Tok::RBracket => format!("{:?}", Tok::<&str>::RBracket),
+    Tok::RParen => format!("{:?}", Tok::<&str>::RParen),
+    Tok::Colon => format!("{:?}", Tok::<&str>::Colon),
+    Tok::Dollar => format!("{:?}", Tok::<&str>::Dollar),
+    Tok::Equal => format!("{:?}", Tok::<&str>::Equal),
+    Tok::Bang => format!("{:?}", Tok::<&str>::Bang),
+    Tok::LBrace => format!("{:?}", Tok::<&str>::LBrace),
+    Tok::LBracket => format!("{:?}", Tok::<&str>::LBracket),
+    Tok::LParen => format!("{:?}", Tok::<&str>::LParen),
+    Tok::Pipe => format!("{:?}", Tok::<&str>::Pipe),
+    Tok::Spread => format!("{:?}", Tok::<&str>::Spread),
+    Tok::Identifier(bytes) => format!("{:?}", Tok::Identifier(s(bytes))),
+    Tok::LitFloat(bytes) => format!("{:?}", Tok::LitFloat(s(bytes))),
+    Tok::LitInt(bytes) => format!("{:?}", Tok::LitInt(s(bytes))),
+    other => panic!(
+      "graphql_syntactic_simd_oracle: unexpected string-literal token {other:?} \
+       outside STRING_LITERAL_SKIP -- add its fixture name to the skip list"
+    ),
+  }
+}
+
+/// Rewrite every `char: <digits>` occurrence — the textual shape of
+/// `tokit::utils::PositionedChar<u8>`'s `char` field, however deeply nested
+/// — into `char: '<c>'`, the shape `PositionedChar<char>` renders. This is
+/// the *only* place a delegated Logos error's `Debug` text depends on
+/// `Char = u8` vs. `Char = char` (every other field -- spans, offsets,
+/// hints, counts -- is identical either way), so it is also the only
+/// rewrite needed to compare an `ERR` line against the `&str`-sourced
+/// golden text. Every offending byte here is ASCII (GraphQL's own grammar
+/// never flags a non-ASCII byte this way), so `u8 as char` is a lossless,
+/// infallible reconstruction of what the `char`-sourced lexer produced.
+fn normalize_char_field(rendered: &str) -> String {
+  const NEEDLE: &str = "char: ";
+  let mut out = String::with_capacity(rendered.len());
+  let mut rest = rendered;
+  while let Some(idx) = rest.find(NEEDLE) {
+    let after_needle = idx + NEEDLE.len();
+    out.push_str(&rest[..after_needle]);
+    let tail = &rest[after_needle..];
+    let digits_len = tail.bytes().take_while(u8::is_ascii_digit).count();
+    if digits_len == 0 {
+      // Not a numeric `char:` field (e.g. the *outer* `char:
+      // PositionedChar { .. }` wrapper) -- leave untouched.
+      rest = tail;
+      continue;
+    }
+    let byte: u8 = tail[..digits_len]
+      .parse()
+      .expect("PositionedChar<u8>::char is always a valid u8 literal");
+    out.push_str(&format!("{:?}", byte as char));
+    rest = &tail[digits_len..];
+  }
+  out.push_str(rest);
+  out
+}
+
+/// Like `render_stream!`, but for the byte-sourced `SimdSyntacticLexer<[u8]>`:
+/// normalizes each token/error so the rendered text is directly comparable
+/// to the existing `&str`-sourced `graphql-syntactic` golden files. See the
+/// module-level comment above for why `render_stream!` itself can't be
+/// reused as-is for this lexer.
+fn render_simd_stream_as_str(src: &str) -> String {
+  use smear_lexer::graphql::simd::SimdSyntacticLexer;
+  let mut lex = SimdSyntacticLexer::<[u8]>::new(src.as_bytes());
+  let mut out = String::new();
+  while let Some(item) = lex.lex() {
+    match item {
+      Ok(tok) => {
+        let span = lex.span();
+        out.push_str(&format!(
+          "OK  {}..{}  {}\n",
+          span.start(),
+          span.end(),
+          bytes_token_to_str(tok)
+        ));
+      }
+      Err(errs) => {
+        out.push_str(&normalize_char_field(&format!("ERR {errs:?}\n")));
+      }
+    }
+  }
+  out
+}
+
+#[test]
+fn graphql_syntactic_simd_oracle() {
+  let mut mismatches = Vec::new();
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    if STRING_LITERAL_SKIP.contains(name) {
+      continue;
+    }
+    let rendered = render_simd_stream_as_str(src);
+    check("graphql-syntactic", name, &rendered, &mut mismatches);
+  }
+  assert_no_mismatches(&mismatches);
+}
+
 #[test]
 fn graphql_lossless_oracle() {
   use smear_lexer::graphql::lossless::LosslessLexer;

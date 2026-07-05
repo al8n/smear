@@ -250,6 +250,35 @@ where
             .slice(&token_start..&(token_start + len))
             .map(|ident| Ok(SyntacticToken::Identifier(ident)));
         }
+        // Valid-number fast path (Phase 1a hybrid): `scan_number` only ever
+        // answers "clean, valid literal of length N" or "anomaly" — it never
+        // constructs an error. A clean literal is emitted directly (no
+        // Logos involved); any anomaly (leading zeros, empty frac/exponent,
+        // an illegal suffix, a lone `-`, ...) delegates the *whole* token to
+        // Logos, which already knows how to build the exact error. Because
+        // every error still originates from Logos, oracle parity holds
+        // without re-deriving any error logic here.
+        b'0'..=b'9' | b'-' => {
+          return match number::scan_number(bytes) {
+            Some((number::NumberKind::Int, len)) => {
+              self.cursor += len;
+              self.last_span = SimpleSpan::new(token_start, self.cursor);
+              self
+                .src
+                .slice(&token_start..&(token_start + len))
+                .map(|slice| Ok(SyntacticToken::LitInt(slice)))
+            }
+            Some((number::NumberKind::Float, len)) => {
+              self.cursor += len;
+              self.last_span = SimpleSpan::new(token_start, self.cursor);
+              self
+                .src
+                .slice(&token_start..&(token_start + len))
+                .map(|slice| Ok(SyntacticToken::LitFloat(slice)))
+            }
+            None => self.delegate_to_logos(token_start),
+          };
+        }
         b'!' => return Some(emit_punct!(self: token_start, SyntacticToken::Bang)),
         b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
         b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
@@ -276,6 +305,15 @@ where
             self.last_error_span = Some(span);
             let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
             return Some(Err(err));
+          }
+          // `.` immediately followed by a digit (e.g. `.5`) is a Float
+          // literal missing its integer part, not a spread operator —
+          // Logos's Float regex (`-?(frac)(exp)?`) wins the longest-match
+          // race here and reports the exact "missing integer part" error
+          // (plus any chained suffix error), so hand the whole token to it
+          // rather than mis-emitting an unterminated-spread-operator error.
+          if matches!(bytes.get(1), Some(b'0'..=b'9')) {
+            return self.delegate_to_logos(token_start);
           }
           self.cursor += 1;
           let span = SimpleSpan::new(token_start, self.cursor);
@@ -340,25 +378,7 @@ where
           self.cursor += 3;
           continue;
         }
-        _ => {
-          let mut logos = LogosLexer::with_state(self.src, self.state);
-          logos.bump(&self.cursor);
-          match logos.lex()? {
-            Ok(tok) => {
-              let end = logos.inner().span().end;
-              self.cursor = end;
-              self.last_span = SimpleSpan::new(token_start, end);
-              self.state = *logos.state();
-              return Some(Ok(tok));
-            }
-            Err(res) => {
-              let end = logos.inner().span().end;
-              self.cursor = end;
-              self.last_error_span = Some(SimpleSpan::new(token_start, end));
-              return Some(Err(res));
-            }
-          }
-        }
+        _ => return self.delegate_to_logos(token_start),
       }
     }
   }
@@ -366,6 +386,77 @@ where
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn bump(&mut self, n: &Self::Offset) {
     self.cursor += n;
+  }
+}
+
+// This block shares the trait impl's exact bound set (verbatim) rather than
+// the weaker one below: `delegate_to_logos`'s return type has to name the
+// concrete `Token`/`Error` types, which requires the `Token<'inp, Error =
+// ..>` and `Char = u8` bounds. Every caller of this method is inside `lex()`
+// above, where those bounds already hold, so this is never more restrictive
+// in practice than the trait impl itself.
+impl<'inp, S> SimdSyntacticLexer<'inp, S>
+where
+  SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
+  LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
+      'inp,
+      State = RecursionLimiter,
+      Token = SyntacticToken<S::Slice<'inp>>,
+      Source = S,
+      Span = SimpleSpan,
+      Offset = usize,
+    >,
+  SyntacticToken<S::Slice<'inp>>:
+    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
+  S: Source<usize> + ?Sized,
+  S::Slice<'inp>: AsBytes + Slice<'inp, Char = u8>,
+{
+  /// Delegate the token starting at `token_start` (== `self.cursor`, prior
+  /// to any mutation for this token) to the wrapped Logos lexer.
+  ///
+  /// This is the single, permanent slow-path fallback: the `_` arm in
+  /// [`lex`](Lexer::lex) uses it for every byte none of the fast paths
+  /// above claims, and the number/`.` fast paths use it for any anomaly
+  /// they detect (leading zeros, an empty fraction/exponent, an illegal
+  /// suffix, a lone `-`, a `.`-led float missing its integer part, ...).
+  /// Logos re-derives the token — or the exact error — from scratch, so
+  /// parity with the pre-SIMD lexer holds by construction: nothing here
+  /// constructs an error itself.
+  // The return type mirrors `Lexer::lex`'s own `Option<Result<Token,
+  // Error>>` shape (see the trait impl above) — clippy can't see through
+  // the associated-type projections to recognize the two are the same
+  // complexity, so it flags this one as a bare function signature. A type
+  // alias would need its own `?Sized` + `Source<usize>` bounds restating
+  // the impl block's, which is more indirection than the signature it
+  // replaces.
+  #[allow(clippy::type_complexity)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn delegate_to_logos(
+    &mut self,
+    token_start: usize,
+  ) -> Option<
+    Result<
+      SyntacticToken<S::Slice<'inp>>,
+      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+    >,
+  > {
+    let mut logos = LogosLexer::with_state(self.src, self.state);
+    logos.bump(&self.cursor);
+    match logos.lex()? {
+      Ok(tok) => {
+        let end = logos.inner().span().end;
+        self.cursor = end;
+        self.last_span = SimpleSpan::new(token_start, end);
+        self.state = *logos.state();
+        Some(Ok(tok))
+      }
+      Err(res) => {
+        let end = logos.inner().span().end;
+        self.cursor = end;
+        self.last_error_span = Some(SimpleSpan::new(token_start, end));
+        Some(Err(res))
+      }
+    }
   }
 }
 
@@ -751,5 +842,108 @@ mod str_arm_tests {
     // error_span() must reflect the error token (opening " is at byte 6).
     let err_span = lexer.error_span().expect("error_span should be set");
     assert_eq!(err_span, tokit::SimpleSpan::new(6, src.len()));
+  }
+}
+
+#[cfg(test)]
+mod num_arm_tests {
+  use tokit::{Lexer as _, SimpleSpan};
+
+  use crate::graphql::{
+    error::{FloatError, LexerErrorData},
+    simd::SimdSyntacticLexer,
+    syntactic::SyntacticToken,
+  };
+
+  fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+    let mut out = Vec::new();
+    while let Some(tok) = lexer.lex() {
+      out.push(tok.unwrap());
+    }
+    out
+  }
+
+  #[test]
+  fn valid_int_fast_path() {
+    // { a ( x : 10 ) } -- 8 tokens; the number is the 6th.
+    let toks = lex_all(b"{ a(x: 10) }");
+    assert_eq!(toks.len(), 8);
+    assert!(matches!(&toks[5], SyntacticToken::LitInt(s) if *s == b"10"));
+  }
+
+  #[test]
+  fn valid_float_fast_path() {
+    let toks = lex_all(b"{ a(x: 3.14) }");
+    assert_eq!(toks.len(), 8);
+    assert!(matches!(&toks[5], SyntacticToken::LitFloat(s) if *s == b"3.14"));
+  }
+
+  #[test]
+  fn negative_int_and_float_fast_path() {
+    let toks = lex_all(b"{ a(x: -5) }");
+    assert!(matches!(&toks[5], SyntacticToken::LitInt(s) if *s == b"-5"));
+
+    let toks = lex_all(b"{ a(x: -2.5) }");
+    assert!(matches!(&toks[5], SyntacticToken::LitFloat(s) if *s == b"-2.5"));
+  }
+
+  #[test]
+  fn number_anomalies_still_delegate_and_error() {
+    // Leading zeros, an illegal ident suffix, and a lone `-` are all
+    // anomalies `scan_number` refuses to fast-path -- confirm the dispatch
+    // still routes them to Logos and gets back an error (the exact shape
+    // is already covered byte-for-byte by the oracle tests).
+    for src in [b"007" as &[u8], b"123abc", b"-", b"1.5x", b"00.5"] {
+      let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+      let tok = lexer.lex().expect("one token").expect_err("should error");
+      let _ = tok; // shape is oracle-verified; here we only need "it errors".
+    }
+  }
+
+  #[test]
+  fn dot_led_float_delegates_to_missing_integer_part_not_spread_error() {
+    // `.5` must NOT be treated as a lone `.` (unterminated spread operator)
+    // -- it's a Float literal missing its integer part, and Logos must be
+    // the one to say so.
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(b".5");
+    let err = lexer.lex().unwrap().unwrap_err();
+    assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 2)));
+    assert!(
+      matches!(
+        err.first().map(|e| e.data()),
+        Some(LexerErrorData::Float(FloatError::MissingIntegerPart))
+      ),
+      "expected Float(MissingIntegerPart), got {err:?}"
+    );
+  }
+
+  #[test]
+  fn dot_dot_and_lone_dot_are_unaffected_by_the_digit_check() {
+    // `..` (not `...`) is still the pre-existing unterminated-spread error,
+    // and lexing resumes correctly on whatever follows it (the digit `5`
+    // is not part of the `..` error -- it's the *next* token).
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"..5");
+    let first = lexer.lex().unwrap();
+    assert!(first.is_err());
+    assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 2)));
+
+    let second = lexer.lex().unwrap();
+    assert!(matches!(second, Ok(SyntacticToken::LitInt(s)) if s == b"5"));
+
+    // A lone `.` followed by a non-digit is still the same error too.
+    let mut lexer = SimdSyntacticLexer::<[u8]>::new(b".x");
+    let first = lexer.lex().unwrap();
+    assert!(first.is_err());
+    assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 1)));
+
+    let second = lexer.lex().unwrap();
+    assert!(matches!(second, Ok(SyntacticToken::Identifier(s)) if s == b"x"));
+  }
+
+  #[test]
+  fn spread_operator_still_fast_paths() {
+    let toks = lex_all(b"{ ...Frag }");
+    assert!(toks.contains(&SyntacticToken::Spread));
   }
 }
