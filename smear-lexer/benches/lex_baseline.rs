@@ -253,19 +253,29 @@ fn bench_graphqlx(c: &mut Criterion) {
   group.sample_size(30);
   for (label, input) in INPUTS {
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_with_input(BenchmarkId::new("syntactic_count", label), input, |b, input| {
-      b.iter(|| black_box(gx_syntactic_count(black_box(input))))
-    });
-    group.bench_with_input(BenchmarkId::new("lossless_count", label), input, |b, input| {
-      b.iter(|| black_box(gx_lossless_count(black_box(input))))
-    });
+    group.bench_with_input(
+      BenchmarkId::new("syntactic_count", label),
+      input,
+      |b, input| b.iter(|| black_box(gx_syntactic_count(black_box(input)))),
+    );
+    group.bench_with_input(
+      BenchmarkId::new("lossless_count", label),
+      input,
+      |b, input| b.iter(|| black_box(gx_lossless_count(black_box(input)))),
+    );
   }
   group.finish();
 }
 
 // ---- registration --------------------------------------------------------
 
-criterion_group!(benches, bench_syntactic, bench_lossless, bench_simd, bench_graphqlx);
+criterion_group!(
+  benches,
+  bench_syntactic,
+  bench_lossless,
+  bench_simd,
+  bench_graphqlx
+);
 criterion_main!(benches);
 
 // Compile-time touch on the fixture roots so reorganising those dirs gives
