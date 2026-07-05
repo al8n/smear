@@ -288,7 +288,7 @@ pub(crate) fn memchr_newline(input: &[u8]) -> Option<usize> {
   // For longer comments we hand off to memchr2 which has the same
   // SIMD-saturation guarantees as memchr — a single `vceqq + vorrq +
   // shrn-extract` loop on aarch64.
-  ::memspan::skip::skip_until(input, [b'\n', b'\r'])
+  ::memspan::skip::skip_until(input, b"\n\r")
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
-use tokit::{Lexer as _, lexer::Lexer};
+use tokit::lexer::Lexer;
 
 use crate::{
-  LitComplexInlineStr, LitInlineStr, LitPlainStr,
+  LitInlineStr,
   graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken},
 };
 

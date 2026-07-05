@@ -38,7 +38,7 @@ pub mod lossless;
 /// lexer. Trivia + identifier scanning are SIMD-fast-pathed; numbers,
 /// strings, the spread operator, and error reporting are delegated one
 /// token at a time to a fresh Logos lexer. See
-/// [`syntactic_simd::SimdSyntacticLexer`] for the architecture.
+/// [`simd::SimdSyntacticLexer`](simd::SimdSyntacticLexer) for the architecture.
 pub mod simd;
 
 pub(crate) mod handlers;

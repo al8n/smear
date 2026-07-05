@@ -1,7 +1,7 @@
-//! SIMD-accelerated layer over the Logos-driven GraphQLx [`SyntacticLexer`].
+//! SIMD-accelerated layer over the Logos-driven GraphQLx `SyntacticLexer`.
 //!
 //! This mirrors the GraphQL SIMD lexer (`crate::graphql::simd`) and shares its
-//! dialect-agnostic primitives through [`crate::simd_common`]: trivia and
+//! dialect-agnostic primitives through `crate::simd_common`: trivia and
 //! identifier scanning are SIMD-fast-pathed, while numbers, strings, the spread
 //! operator, and every error are delegated one token at a time to a fresh Logos
 //! lexer. Because the fast path never constructs a source-typed error itself,
@@ -57,7 +57,7 @@ pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 ///
 /// Every slow-path token (numbers, strings, the spread operator, and errors)
 /// re-uses a fresh Logos lexer over the *full* source via
-/// [`crate::simd_common::delegate_to_logos`] rather than constructing a bespoke
+/// `crate::simd_common::delegate_to_logos` rather than constructing a bespoke
 /// scanner per call.
 pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
   src: &'inp S,

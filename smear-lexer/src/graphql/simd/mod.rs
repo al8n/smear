@@ -1,5 +1,5 @@
 //! SIMD-accelerated layer over the existing Logos-driven
-//! [`SyntacticLexer`].
+//! `SyntacticLexer`.
 //!
 //! The architecture is **wrap-and-dispatch**: every byte still flows
 //! through Logos for the complex tokens (numbers, strings, spread,
