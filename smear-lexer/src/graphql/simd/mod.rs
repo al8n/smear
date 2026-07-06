@@ -188,42 +188,22 @@ where
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokit::Token<'inp>>::Error>> {
-    // Post-token recursion gate, mirroring `LogosLexer::lex`: after a token is
-    // scanned it re-checks the limiter and, while the depth is over the limit,
-    // yields the recursion error in the token's place. The conversion is
-    // `RecursionLimitExceeded.into()` (span `0..0`), matching Logos's
-    // `extras.check().map_err(Into::into)` byte-for-byte — deliberately not
-    // `bad_state(span, e)`, which is the *increase-bracket* handler's error
-    // (and stays inside `increase_recursion!`). Below the default limit the
-    // check always passes, so every existing stream is unchanged.
-    macro_rules! finish {
-      ($this:ident, $token:expr) => {
-        match $this.state.check() {
-          Ok(()) => Ok($token),
-          Err(e) => {
-            $this.last_error_span = Some($this.last_span);
-            Err(e.into())
-          }
-        }
-      };
-    }
-
-    // Emit a single-byte punctuation token. `token_start` is the loop-local
-    // variable captured from the enclosing scope.
-    macro_rules! emit_punct {
-      ($this:ident: $token_start:expr, $expr:expr) => {{
-        $this.cursor += 1;
-        $this.last_span = SimpleSpan::new($token_start, $this.cursor);
-        finish!($this, $expr)
-      }};
-    }
-
+    // Bracket-close: decrement the depth, then re-check the limit *post-decrease*
+    // (a decrease can bring an over-limit stream back under the limit). Because
+    // it changes depth it cannot share the once-per-token entry-depth `recheck`
+    // that the non-bracket emitters use below — it checks its own post-decrease
+    // depth, mirroring `LogosLexer::lex`'s post-token `extras.check()`. The error
+    // is `RecursionLimitExceeded.into()` (built out-of-line in
+    // `over_recursion_limit`), matching Logos's `extras.check().map_err(Into::into)`.
     macro_rules! decrease_recursion {
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         $this.last_span = SimpleSpan::new($token_start, $this.cursor);
         $this.state_mut().decrease();
-        finish!($this, $expr)
+        match $this.state.check() {
+          Ok(()) => Ok($expr),
+          Err(e) => Err($this.over_recursion_limit(e)),
+        }
       }};
     }
 
@@ -239,8 +219,7 @@ where
           }
           Err(e) => {
             $this.last_span = span;
-            $this.last_error_span = Some(span);
-            Err(LexerError::bad_state(span, e).into())
+            Err($this.bad_state_error(span, e))
           }
         }
       }};
@@ -266,13 +245,38 @@ where
 
       let bytes = src.as_bytes();
       let b0 = bytes[0];
-      match b0 {
+      // Once-per-token entry-depth recursion check, shared by every non-bracket
+      // emitter: the `match b0` below evaluates to the emitted `SyntacticToken`
+      // (or diverges via `return`/`continue`), and a single tail check gates it —
+      // collapsing the former ~8 per-emission checks into one, off the emission
+      // critical path. Non-bracket tokens never change depth, so their post-token
+      // depth equals this entry depth (Logos re-checks after every token; one
+      // shared check is byte-for-byte equivalent for them). Bracket arms mutate
+      // depth and re-check themselves in `increase_recursion!`/`decrease_recursion!`.
+      let recheck = self.state.check();
+      // Emit a single-byte punctuation token: advance past it and yield the token
+      // as the `match` value; the shared tail check gates it.
+      macro_rules! emit_punct {
+        ($this:ident: $token_start:expr, $expr:expr) => {{
+          $this.cursor += 1;
+          $this.last_span = SimpleSpan::new($token_start, $this.cursor);
+          $expr
+        }};
+      }
+      let token = match b0 {
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
           let len = scan_identifier(bytes);
           self.cursor += len;
           self.last_span = SimpleSpan::new(token_start, self.cursor);
           let ident = self.src.slice(&token_start..&(token_start + len))?;
-          return Some(finish!(self, SyntacticToken::Identifier(ident)));
+          // Direct return (no shared-tail token move): identifiers are the most
+          // common token and carry only a slice, so returning here — rather than
+          // materializing the large `SyntacticToken` enum for the tail — avoids a
+          // per-ident wide move. Still gated by the same shared `recheck`.
+          return Some(match recheck {
+            Ok(()) => Ok(SyntacticToken::Identifier(ident)),
+            Err(e) => Err(self.over_recursion_limit(e)),
+          });
         }
         // Valid-number fast path: `scan_number` only ever
         // answers "clean, valid literal of length N" or "anomaly" — it never
@@ -289,66 +293,63 @@ where
         // `UnexpectedLexeme`, matching the pre-SIMD lexer — rather than the
         // hand-rolled `_` arm's `UnknownLexeme`. (`scan_number` still returns
         // `None` for a leading `+`: it is not a valid number start.)
-        b'0'..=b'9' | b'-' | b'+' => {
-          return match number::scan_number(bytes) {
-            Some((number::NumberKind::Int, len)) => {
-              self.cursor += len;
-              self.last_span = SimpleSpan::new(token_start, self.cursor);
-              let slice = self.src.slice(&token_start..&(token_start + len))?;
-              Some(finish!(self, SyntacticToken::LitInt(slice)))
-            }
-            Some((number::NumberKind::Float, len)) => {
-              self.cursor += len;
-              self.last_span = SimpleSpan::new(token_start, self.cursor);
-              let slice = self.src.slice(&token_start..&(token_start + len))?;
-              Some(finish!(self, SyntacticToken::LitFloat(slice)))
-            }
-            None => self.delegate_number_to_logos(token_start),
-          };
-        }
-        b'!' => return Some(emit_punct!(self: token_start, SyntacticToken::Bang)),
-        b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
+        b'0'..=b'9' | b'-' | b'+' => match number::scan_number(bytes) {
+          Some((number::NumberKind::Int, len)) => {
+            self.cursor += len;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            let slice = self.src.slice(&token_start..&(token_start + len))?;
+            SyntacticToken::LitInt(slice)
+          }
+          Some((number::NumberKind::Float, len)) => {
+            self.cursor += len;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            let slice = self.src.slice(&token_start..&(token_start + len))?;
+            SyntacticToken::LitFloat(slice)
+          }
+          None => return self.delegate_number_to_logos(token_start),
+        },
+        b'!' => emit_punct!(self: token_start, SyntacticToken::Bang),
+        b'&' => emit_punct!(self: token_start, SyntacticToken::Ampersand),
         b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
         b')' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RParen)),
-        b':' => return Some(emit_punct!(self: token_start, SyntacticToken::Colon)),
-        b'=' => return Some(emit_punct!(self: token_start, SyntacticToken::Equal)),
-        b'@' => return Some(emit_punct!(self: token_start, SyntacticToken::At)),
-        b'$' => return Some(emit_punct!(self: token_start, SyntacticToken::Dollar)),
+        b':' => emit_punct!(self: token_start, SyntacticToken::Colon),
+        b'=' => emit_punct!(self: token_start, SyntacticToken::Equal),
+        b'@' => emit_punct!(self: token_start, SyntacticToken::At),
+        b'$' => emit_punct!(self: token_start, SyntacticToken::Dollar),
         b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
         b']' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBracket)),
         b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
         b'}' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace)),
-        b'|' => return Some(emit_punct!(self: token_start, SyntacticToken::Pipe)),
+        b'|' => emit_punct!(self: token_start, SyntacticToken::Pipe),
         // Spread / unterminated-spread: load b1/b2 lazily — only paid when b0 == b'.'.
         b'.' => {
           if bytes.starts_with(b"...") {
             self.cursor += 3;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
-            return Some(finish!(self, SyntacticToken::Spread));
-          }
-          if bytes.starts_with(b"..") {
+            SyntacticToken::Spread
+          } else if bytes.starts_with(b"..") {
             self.cursor += 2;
             let span = SimpleSpan::new(token_start, self.cursor);
             self.last_span = span;
             self.last_error_span = Some(span);
             let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
             return Some(Err(err));
-          }
-          // `.` immediately followed by a digit (e.g. `.5`) is a Float
-          // literal missing its integer part, not a spread operator —
-          // `NumberToken`'s Float regex (`-?(frac)(exp)?`) matches it and
-          // reports the exact "missing integer part" error (plus any chained
-          // suffix error), so hand the whole token to it rather than
-          // mis-emitting an unterminated-spread-operator error.
-          if matches!(bytes.get(1), Some(b'0'..=b'9')) {
+          } else if matches!(bytes.get(1), Some(b'0'..=b'9')) {
+            // `.` immediately followed by a digit (e.g. `.5`) is a Float
+            // literal missing its integer part, not a spread operator —
+            // `NumberToken`'s Float regex (`-?(frac)(exp)?`) matches it and
+            // reports the exact "missing integer part" error (plus any chained
+            // suffix error), so hand the whole token to it rather than
+            // mis-emitting an unterminated-spread-operator error.
             return self.delegate_number_to_logos(token_start);
+          } else {
+            self.cursor += 1;
+            let span = SimpleSpan::new(token_start, self.cursor);
+            self.last_span = span;
+            self.last_error_span = Some(span);
+            let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
+            return Some(Err(err));
           }
-          self.cursor += 1;
-          let span = SimpleSpan::new(token_start, self.cursor);
-          self.last_span = span;
-          self.last_error_span = Some(span);
-          let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
-          return Some(Err(err));
         }
         b'#' => {
           self.skip_comment();
@@ -380,7 +381,7 @@ where
                   c.required_capacity(),
                 )),
               };
-              return Some(finish!(self, SyntacticToken::LitBlockStr(block)));
+              SyntacticToken::LitBlockStr(block)
             }
             Err(_) => return self.delegate_string_error(token_start, true),
           }
@@ -392,10 +393,7 @@ where
               self.cursor += 2;
               self.last_span = SimpleSpan::new(token_start, self.cursor);
               let slice = self.src.slice(&token_start..&self.cursor).unwrap();
-              return Some(finish!(
-                self,
-                SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new(slice)))
-              ));
+              SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new(slice)))
             }
             None => {
               // Lone `"` at end of input — an unterminated inline string.
@@ -419,7 +417,7 @@ where
                     LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
                   }
                 };
-                return Some(finish!(self, SyntacticToken::LitInlineStr(inline)));
+                SyntacticToken::LitInlineStr(inline)
               }
               // `skip_inline_str_simd` only ever answers "clean, valid
               // literal" or "byte-indexed anomaly" — like the number fast
@@ -458,7 +456,15 @@ where
             token_start,
           ))));
         }
-      }
+      };
+      // Single shared post-token recursion check for the just-produced
+      // non-bracket token (see `recheck` above): equal to Logos's
+      // post-every-token `extras.check()` for these depth-preserving tokens,
+      // paid once here instead of at each emission site.
+      return Some(match recheck {
+        Ok(()) => Ok(token),
+        Err(e) => Err(self.over_recursion_limit(e)),
+      });
     }
   }
 
@@ -510,6 +516,41 @@ where
   SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
   S: ScanSource + ?Sized,
 {
+  /// Cold, out-of-line constructor for the recursion-limit error a token
+  /// emission yields when the depth is over the limit (the `finish!` gate's
+  /// error arm). Marked `#[cold]` + `#[inline(never)]` so the never-taken
+  /// (under-the-limit) error construction does not get inlined into the hot
+  /// `lex()` at every one of its ~8 emission sites — the fast path is then just
+  /// the inlined `state.check()` branch, restoring the pre-hardening throughput
+  /// while keeping the post-token recursion parity `finish!` guarantees.
+  #[cold]
+  #[inline(never)]
+  fn over_recursion_limit(
+    &mut self,
+    e: RecursionLimitExceeded,
+  ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
+    self.last_error_span = Some(self.last_span);
+    e.into()
+  }
+
+  /// Cold, out-of-line constructor for the over-limit error emitted by the
+  /// *increase-bracket* path (`increase_recursion!`). Its error shape is
+  /// `LexerError::bad_state(span, e)` — the bracket handler's own error, not the
+  /// plain `RecursionLimitExceeded.into()` the post-token `finish!` gate uses.
+  /// Kept `#[cold]` + `#[inline(never)]` for the same reason as
+  /// [`Self::over_recursion_limit`]: the never-taken construction must not bloat
+  /// the hot `lex()` at each of the three bracket-open sites.
+  #[cold]
+  #[inline(never)]
+  fn bad_state_error(
+    &mut self,
+    span: SimpleSpan,
+    e: RecursionLimitExceeded,
+  ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
+    self.last_error_span = Some(span);
+    LexerError::bad_state(span, e).into()
+  }
+
   /// Delegate the malformed number opening at `token_start` (== `self.cursor`,
   /// prior to any mutation for this token) to the focused [`NumberToken`]
   /// grammar — the number-only slice of the full grammar's `#[regex]`/`#[token]`

@@ -207,10 +207,7 @@ where
       ($this:ident, $token:expr) => {
         match $this.state.check() {
           Ok(()) => Ok($token),
-          Err(e) => {
-            $this.last_error_span = Some($this.last_span);
-            Err(e.into())
-          }
+          Err(e) => Err($this.over_recursion_limit(e)),
         }
       };
     }
@@ -255,8 +252,7 @@ where
           }
           Err(e) => {
             $this.last_span = span;
-            $this.last_error_span = Some(span);
-            Err(LexerError::bad_state(span, e).into())
+            Err($this.bad_state_error(span, e))
           }
         }
       }};
@@ -516,6 +512,39 @@ where
   SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
   S: ScanSource + ?Sized,
 {
+  /// Cold, out-of-line constructor for the recursion-limit error a token
+  /// emission yields when the depth is over the limit (the `finish!` gate's
+  /// error arm). Marked `#[cold]` + `#[inline(never)]` so the never-taken
+  /// (under-the-limit) error construction is not inlined into the hot `lex()`
+  /// at each of its emission sites — the fast path is then just the inlined
+  /// `state.check()` branch. Mirrors the GraphQL lexer's helper of the same name.
+  #[cold]
+  #[inline(never)]
+  fn over_recursion_limit(
+    &mut self,
+    e: RecursionLimitExceeded,
+  ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
+    self.last_error_span = Some(self.last_span);
+    e.into()
+  }
+
+  /// Cold, out-of-line constructor for the over-limit error emitted by the
+  /// increase-bracket path (`increase_recursion!`): `LexerError::bad_state(span,
+  /// e)`, the bracket handler's own error shape, rather than the plain
+  /// `RecursionLimitExceeded.into()` the post-token `finish!` gate uses. Kept
+  /// `#[cold]` + `#[inline(never)]` for the same reason as
+  /// [`Self::over_recursion_limit`].
+  #[cold]
+  #[inline(never)]
+  fn bad_state_error(
+    &mut self,
+    span: SimpleSpan,
+    e: RecursionLimitExceeded,
+  ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
+    self.last_error_span = Some(span);
+    LexerError::bad_state(span, e).into()
+  }
+
   /// Delegate the malformed / sign-ambiguous number opening at `token_start`
   /// (== `self.cursor`, prior to any mutation for this token) to the focused
   /// [`NumberToken`] grammar — the number-only slice of the full grammar's
