@@ -19,6 +19,15 @@ type GraphqlLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
   smear_lexer::graphql::syntactic::SyntacticToken<&'a str>,
 >;
 
+// Live Logos lexer for GraphQLx differential tests — named directly (no
+// public alias). This is exactly what `SyntacticLexer<'a, &'a str>` used to
+// resolve to.
+#[cfg(feature = "graphqlx")]
+type GraphqlxLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
+  'a,
+  smear_lexer::graphqlx::syntactic::SyntacticToken<&'a str>,
+>;
+
 /// Render a lexer's full stream to a stable, diffable string.
 ///
 /// `Ok`  → `OK  <start>..<end>  <Debug of token>`
@@ -783,10 +792,9 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_oracle() {
-  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let rendered = render_stream!(SyntacticLexer::<&str>::new(src));
+    let rendered = render_stream!(GraphqlxLogos::new(src));
     check("graphqlx-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
@@ -814,7 +822,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear_lexer::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+  use smear_lexer::graphqlx::simd::SimdSyntacticLexer;
   use tokit::state::recursion_tracker::RecursionLimiter;
 
   for src in [
@@ -837,7 +845,7 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
       src,
       RecursionLimiter::with_limitation(0),
     ));
-    let logos = render_stream!(SyntacticLexer::<&str>::with_state(
+    let logos = render_stream!(GraphqlxLogos::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));

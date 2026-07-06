@@ -1,6 +1,7 @@
 //! After-error `Lexer`-trait parity between the GraphQLx SIMD lexer and the
-//! Logos `SyntacticLexer` it drop-in replaces (the GraphQLx counterpart of
-//! `graphql/simd/error_parity_tests.rs`).
+//! Logos lexer it drop-in replaces (`GraphqlxLogos` below — no public alias
+//! anymore now that `SyntacticLexer` names the SIMD lexer; the GraphQLx
+//! counterpart of `graphql/simd/error_parity_tests.rs`).
 //!
 //! The frozen oracle renders each error by its own `Debug` and only reads
 //! `lexer.span()` on the *Ok* arm, so it never exercised the lexer-level
@@ -8,9 +9,13 @@
 //! lexers over the same error-producing inputs in lockstep and assert those
 //! three methods agree token-for-token, including every error token.
 
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokit::{Lexer, lexer::LogosLexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+
+// Live Logos lexer for parity tests — named directly (no public alias). This
+// is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
+type GraphqlxLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 /// Drive the Logos and SIMD lexers in lockstep over the same input, asserting
 /// at every token that `span()` and `slice()` agree, and — for every error
@@ -86,7 +91,7 @@ fn error_path_span_slice_check_match_logos() {
   ] {
     assert_error_path_parity!(
       src,
-      SyntacticLexer::<&str>::new(src),
+      GraphqlxLogos::new(src),
       SimdSyntacticLexer::<str>::new(src)
     );
   }
@@ -103,7 +108,7 @@ fn recursion_limit_region_matches_logos() {
   let limit = 3;
   assert_error_path_parity!(
     src.as_str(),
-    SyntacticLexer::<&str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit)),
+    GraphqlxLogos::with_state(src.as_str(), RecursionLimiter::with_limitation(limit)),
     SimdSyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit))
   );
 }

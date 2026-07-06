@@ -161,8 +161,8 @@ fn lossless_collect(input: &str) -> Vec<LosslessItem<'_>> {
 /// against the GraphQLx grammar (generics, imports, type paths, etc.).
 #[inline(always)]
 fn gx_syntactic_count(input: &str) -> usize {
-  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-  let mut lexer = SyntacticLexer::<&str>::new(input);
+  use smear_lexer::graphqlx::syntactic::SyntacticToken as GxSyntacticToken;
+  let mut lexer = LogosLexer::<GxSyntacticToken<&str>>::new(input);
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {
     let _ = black_box(result);

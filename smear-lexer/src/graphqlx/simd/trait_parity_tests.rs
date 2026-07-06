@@ -1,7 +1,8 @@
 //! End-to-end `Lexer`-trait parity between the GraphQLx SIMD lexer and the
-//! Logos `SyntacticLexer` it drop-in replaces (the GraphQLx counterpart of
-//! `graphql/simd/trait_parity_tests.rs`), driven in lockstep over a diverse
-//! input set.
+//! Logos lexer it drop-in replaces (`GraphqlxLogos` below — no public alias
+//! anymore now that `SyntacticLexer` names the SIMD lexer; the GraphQLx
+//! counterpart of `graphql/simd/trait_parity_tests.rs`), driven in lockstep
+//! over a diverse input set.
 //!
 //! The narrower `error_parity_tests`/`bump_parity_tests` each pin one surface;
 //! this harness asserts *every* observable agrees at *every* step of a full
@@ -14,9 +15,13 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokit::{Lexer, lexer::LogosLexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+
+// Live Logos lexer for parity tests — named directly (no public alias). This
+// is exactly what `SyntacticLexer<'a, S>` used to resolve to.
+type GraphqlxLogos<'a, S = &'a str> = LogosLexer<'a, SyntacticToken<S>>;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
@@ -120,7 +125,7 @@ fn full_trait_parity_str() {
   for &src in INPUTS {
     assert_full_parity!(
       src,
-      SyntacticLexer::<&str>::new(src),
+      GraphqlxLogos::<&str>::new(src),
       SimdSyntacticLexer::<str>::new(src)
     );
   }
@@ -133,7 +138,7 @@ fn full_trait_parity_bytes() {
   for &src in INPUTS {
     assert_full_parity!(
       src,
-      SyntacticLexer::<&[u8]>::new(src.as_bytes()),
+      GraphqlxLogos::<&[u8]>::new(src.as_bytes()),
       SimdSyntacticLexer::<[u8]>::new(src.as_bytes())
     );
   }
@@ -149,7 +154,7 @@ fn full_trait_parity_low_recursion_limit() {
   let limit = 3;
   assert_full_parity!(
     src,
-    SyntacticLexer::<&str>::with_state(src, RecursionLimiter::with_limitation(limit)),
+    GraphqlxLogos::<&str>::with_state(src, RecursionLimiter::with_limitation(limit)),
     SimdSyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit))
   );
 }
