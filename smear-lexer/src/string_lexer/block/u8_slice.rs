@@ -141,6 +141,76 @@ where
   }
 }
 
+/// `&[u8]` block-string scanner for the SIMD syntactic fast path.
+///
+/// `src` is the block-string body **after** the opening `"""`. Mirrors
+/// [`skip_inline_str_simd`](crate::skip_inline_str_simd)'s convention: on a
+/// valid literal the `usize` carried by the returned [`LitBlockStr`] is the
+/// number of bytes consumed **after** the opening delimiter — the content plus
+/// the always-3-byte closing `"""` — so the caller recovers the full token by
+/// adding the 3 opening bytes. The facts (`num_escaped_triple_quotes`, CR
+/// flag, blank-line counts, indent, line count, capacity) come from the exact
+/// same `find_block_close_simd` + `BlockLineTok` + `compute_block_normalization_plan`
+/// pipeline that [`lex_block_str_from_bytes`] uses, so the emitted token is
+/// byte-identical to the Logos-delegated one.
+///
+/// An unterminated body returns the bytes scanned plus the error; the SIMD
+/// lexer discards both and delegates the whole token to Logos rather than
+/// constructing a source-typed error on the fast path.
+#[inline]
+pub(crate) fn skip_block_str_from_bytes(
+  src: &[u8],
+) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
+  // Phase-2 SIMD scan, identical shape to the str-side variant.
+  let (read, close_off, num_escaped_triple_quotes) = find_block_close_simd(src);
+
+  match close_off {
+    Some(start) => {
+      let content = &src[..start];
+
+      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+      while lines.next().is_some() {
+        // callbacks already updated `lines.extras`
+      }
+
+      let plan = super::compute_block_normalization_plan(
+        &lines.extras,
+        !content.is_empty(),
+        num_escaped_triple_quotes,
+      );
+
+      // Bytes consumed AFTER the opening `"""`: the content length (`start`, the
+      // close offset) plus the always-3-byte closing `"""`. This mirrors the
+      // Logos path's `lexer.bump(start + 3)` verbatim, so the token span covers
+      // the full `"""…"""` including both delimiters.
+      let consumed = start + 3;
+
+      if plan.is_clean {
+        return Ok(LitPlainStr::new(consumed).into());
+      }
+
+      Ok(
+        LitComplexBlockStr::new(
+          consumed,
+          num_escaped_triple_quotes,
+          lines.extras.has_cr_terminators,
+          lines.extras.leading_blank_lines,
+          plan.effective_trailing,
+          plan.common_indent,
+          plan.total_lines,
+          plan.required_capacity,
+        )
+        .into(),
+      )
+    }
+    None => {
+      let mut errs = StringErrors::default();
+      errs.push(StringError::unterminated_block_string());
+      Err((read, errs))
+    }
+  }
+}
+
 // ---- sub-lexer over inner block-string content ----
 #[derive(Logos, Debug)]
 #[logos(crate = tokit::logos, utf8 = false, extras = BlockLineExtras)]

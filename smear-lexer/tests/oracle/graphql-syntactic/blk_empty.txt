@@ -1,0 +1,8 @@
+OK  0..1  LBrace
+OK  2..3  Identifier("a")
+OK  3..4  LParen
+OK  4..5  Identifier("x")
+OK  5..6  Colon
+OK  7..13  LitBlockStr(Plain(LitPlainStr { source: "\"\"\"\"\"\"" }))
+OK  13..14  RParen
+OK  15..16  RBrace

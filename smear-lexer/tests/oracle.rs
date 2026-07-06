@@ -156,6 +156,13 @@ const EDGES: &[(&str, &str)] = &[
     "blk_multiline_plain",
     "{ a(x: \"\"\"line one\nline two\nline three\"\"\") }",
   ),
+  // single-line plain block string: the simplest valid SIMD-emitted block
+  // token (Plain, content between the delimiters, no normalization).
+  ("blk_single_line_plain", "{ a(x: \"\"\"hello\"\"\") }"),
+  // empty block string `""""""`: the content between the delimiters is
+  // empty, so the SIMD scan sees `start == 0` — exercises the offset math at
+  // its degenerate lower bound (consumed == 0 + 3 closing).
+  ("blk_empty", "{ a(x: \"\"\"\"\"\") }"),
   // inline strings (valid escapes: \" \\ \/ \b \f \n \r \t, \uXXXX, and
   // per this crate \u{...} braced)
   //
@@ -255,6 +262,11 @@ fn graphql_syntactic_simd_low_recursion_parity() {
     "{ a(b: 1, c: 1.5) }",
     r#"{ s: "x" }"#,
     r#"{ e: "" }"#,
+    // block strings on the SIMD fast path must re-check the limiter through
+    // `finish!` too: plain, empty, and complex (common-indent) bodies.
+    r#"{ s: """x""" }"#,
+    r#"{ e: """""" }"#,
+    "{ s: \"\"\"foo\n  bar\"\"\" }",
     "{ ...a }",
   ] {
     let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
@@ -750,6 +762,17 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
     "gx_negative_literals",
     "type T { f(x: Int = -5, y: Float = -2.5, z: Int = -0xFF): Int }",
   ),
+  // Block strings: GRAPHQLX_EXTRA only reaches the single-line Plain path
+  // (`gx_string_and_block`). These add the Complex path (common indent →
+  // every normalization fact), the empty-body edge, and the unterminated
+  // (Logos-delegate) path, so the GraphQLx SIMD block-string hook is proven
+  // across all three outcomes.
+  (
+    "gx_blk_common_indent",
+    "type T { f: String = \"\"\"foo\n    bar\n    baz\"\"\" }",
+  ),
+  ("gx_blk_empty", "type T { f: String = \"\"\"\"\"\" }"),
+  ("gx_blk_unterminated", "type T { f: String = \"\"\"oops }"),
 ];
 
 #[cfg(feature = "graphqlx")]
@@ -798,6 +821,11 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
     "((x))",
     r#"<v: "s">"#,
     r#"<e: "">"#,
+    // block strings on the SIMD fast path must re-check the limiter through
+    // `finish!` too: plain, empty, and complex (common-indent) bodies.
+    r#"<v: """x""">"#,
+    r#"<e: """""">"#,
+    "<v: \"\"\"foo\n  bar\"\"\">",
     "<...a>",
   ] {
     let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(

@@ -29,13 +29,13 @@ use tokit::{
 };
 
 use crate::{
-  LitComplexInlineStr, LitInlineStr, LitPlainStr,
+  LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitPlainStr,
   error::BadStateError,
   graphqlx::{
     error::{LexerError, LexerErrors},
     syntactic::SyntacticToken,
   },
-  skip_inline_str_simd,
+  skip_block_str_from_bytes, skip_inline_str_simd,
 };
 
 #[cfg(test)]
@@ -312,7 +312,36 @@ where
           self.skip_comment();
           continue;
         }
-        // Block strings (""") fall through to the _ arm (Logos delegate).
+        // Block strings (`"""…"""`): valid literals emit via the SIMD
+        // scanner (structural twin of the inline-string arm below, with `3`
+        // for the opening `"""` where inline uses `1`); an unterminated body
+        // delegates the whole token to Logos so the error is built for
+        // whatever `Char` this source uses.
+        b'"' if bytes.starts_with(b"\"\"\"") => {
+          match skip_block_str_from_bytes(&bytes[3..]) {
+            Ok(lit) => {
+              let consumed = *lit.source_ref(); // content + closing `"""`
+              self.cursor += 3 + consumed; // 3 = opening `"""`
+              self.last_span = SimpleSpan::new(token_start, self.cursor);
+              let slice = self.src.slice(&token_start..&self.cursor).unwrap();
+              let block = match lit {
+                LitBlockStr::Plain(_) => LitBlockStr::Plain(LitPlainStr::new(slice)),
+                LitBlockStr::Complex(c) => LitBlockStr::Complex(LitComplexBlockStr::new(
+                  slice,
+                  c.num_escaped_triple_quotes(),
+                  c.has_cr_terminators(),
+                  c.leading_blank_lines(),
+                  c.trailing_blank_lines(),
+                  c.common_indent(),
+                  c.total_lines(),
+                  c.required_capacity(),
+                )),
+              };
+              return Some(finish!(self, SyntacticToken::LitBlockStr(block)));
+            }
+            Err(_) => return self.delegate_to_logos(token_start),
+          }
+        }
         b'"' if !bytes.starts_with(b"\"\"\"") => {
           match bytes.get(1).copied() {
             Some(b'"') => {

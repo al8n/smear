@@ -9,6 +9,7 @@ use tokit::{
 
 use crate::error::{StringError, StringErrors};
 
+pub(crate) use block::skip_block_str_from_bytes;
 pub use block::{LitBlockStr, LitComplexBlockStr};
 pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};

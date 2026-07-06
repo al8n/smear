@@ -5,7 +5,9 @@ use tokit::utils::human_display::DisplayHuman;
 
 pub(crate) use self::{
   str::{BlockStringToken, lex_block_str_from_str},
-  u8_slice::{BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes},
+  u8_slice::{
+    BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes, skip_block_str_from_bytes,
+  },
 };
 
 mod str;

@@ -1,0 +1,9 @@
+OK  0..4  Identifier("type")
+OK  5..6  Identifier("T")
+OK  7..8  LBrace
+OK  9..10  Identifier("f")
+OK  10..11  Colon
+OK  12..18  Identifier("String")
+OK  19..20  Equal
+OK  21..46  LitBlockStr(Complex(LitComplexBlockStr { source: "\"\"\"foo\n    bar\n    baz\"\"\"", num_escaped_triple_quotes: 0, has_cr_terminators: false, leading_blank_lines: 0, trailing_blank_lines: 0, common_indent: 4, total_lines: 3, required_capacity: 11 }))
+OK  47..48  RBrace
