@@ -24,8 +24,8 @@
 //!
 //! [`scan_number`] is wired into the dispatch `match` in `graphql/simd/mod.rs`:
 //! `Some((kind, len))` becomes an inline `SyntacticToken::LitInt`/`LitFloat`
-//! (no Logos involved), and `None` delegates the whole token to Logos via
-//! `SimdSyntacticLexer::delegate_to_logos`.
+//! (no Logos involved), and `None` delegates the whole token to the focused
+//! `NumberToken` Logos grammar via `SimdSyntacticLexer::delegate_number_to_logos`.
 
 /// The two GraphQL numeric literal shapes [`scan_number`] can recognize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

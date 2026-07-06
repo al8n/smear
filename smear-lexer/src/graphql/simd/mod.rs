@@ -39,6 +39,7 @@ use tokit::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  utils::CharLen,
 };
 
 use crate::{
@@ -46,7 +47,7 @@ use crate::{
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::{
     error::{LexerError, LexerErrorData, LexerErrors},
-    syntactic::SyntacticToken,
+    syntactic::{SyntacticToken, number::NumberToken},
   },
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::DelegateStringError,
@@ -68,10 +69,11 @@ pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 /// [`SimdSyntacticLexer::with_state`], then call [`lex`](Lexer::lex) in a
 /// loop until it returns `None`.
 ///
-/// Every slow-path token (numbers, strings, spread, errors) is handled by
-/// constructing a fresh `LogosLexer` over the full source and bumping it to
-/// the current cursor, rather than by reusing one lexer across calls — see
-/// `delegate_to_logos`.
+/// Malformed numbers delegate to the focused `NumberToken` grammar (see
+/// `delegate_number_to_logos`) and malformed strings to `string_lexer` (see
+/// `delegate_string_error`), each by constructing a fresh sub-lexer over the
+/// full source and bumping it to the current cursor rather than reusing one
+/// across calls; the unknown-byte error is hand-rolled inline in [`lex`](Lexer::lex).
 pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
   src: &'inp S,
   /// Current scan position. Advanced by trivia-skip, comment-skip, and each
@@ -107,6 +109,24 @@ where
   // `DelegateStringError`, and its `Char` is this lexer's `Slice::Char`.
   <S as ScanSource>::ScanPrimitive:
     DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
+  // The number slow path (`delegate_number_to_logos`) delegates malformed
+  // numbers to the focused `NumberToken` grammar, driven over this source's
+  // scan primitive; its `Error` is this lexer's error type, so the delegated
+  // error needs no conversion, and its `Int`/`Float` map to `SyntacticToken`.
+  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
+      'inp,
+      State = RecursionLimiter,
+      Token = NumberToken<S::Slice<'inp>>,
+      Source = <S as ScanSource>::ScanPrimitive,
+      Offset = usize,
+    >,
+  NumberToken<S::Slice<'inp>>:
+    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
+  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
+  // The hand-rolled unknown-byte `_` arm decodes the first char at the cursor
+  // and needs its UTF-8 byte length to size the error span exactly like Logos.
+  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
   type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
 
@@ -265,10 +285,17 @@ where
         // constructs an error. A clean literal is emitted directly (no
         // Logos involved); any anomaly (leading zeros, empty frac/exponent,
         // an illegal suffix, a lone `-`, ...) delegates the *whole* token to
-        // Logos, which already knows how to build the exact error. Because
-        // every error still originates from Logos, oracle parity holds
-        // without re-deriving any error logic here.
-        b'0'..=b'9' | b'-' => {
+        // the focused `NumberToken` grammar, which already knows how to build
+        // the exact error. Because every error still originates from the same
+        // reused handlers, oracle parity holds without re-deriving any error
+        // logic here.
+        //
+        // A bare `+` is in this arm (not the `_` arm) purely so `scan_number`'s
+        // `None` routes it to `NumberToken`'s `#[token("+")]` — an
+        // `UnexpectedLexeme`, matching the pre-SIMD lexer — rather than the
+        // hand-rolled `_` arm's `UnknownLexeme`. (`scan_number` still returns
+        // `None` for a leading `+`: it is not a valid number start.)
+        b'0'..=b'9' | b'-' | b'+' => {
           return match number::scan_number(bytes) {
             Some((number::NumberKind::Int, len)) => {
               self.cursor += len;
@@ -282,7 +309,7 @@ where
               let slice = self.src.slice(&token_start..&(token_start + len))?;
               Some(finish!(self, SyntacticToken::LitFloat(slice)))
             }
-            None => self.delegate_to_logos(token_start),
+            None => self.delegate_number_to_logos(token_start),
           };
         }
         b'!' => return Some(emit_punct!(self: token_start, SyntacticToken::Bang)),
@@ -315,12 +342,12 @@ where
           }
           // `.` immediately followed by a digit (e.g. `.5`) is a Float
           // literal missing its integer part, not a spread operator —
-          // Logos's Float regex (`-?(frac)(exp)?`) wins the longest-match
-          // race here and reports the exact "missing integer part" error
-          // (plus any chained suffix error), so hand the whole token to it
-          // rather than mis-emitting an unterminated-spread-operator error.
+          // `NumberToken`'s Float regex (`-?(frac)(exp)?`) matches it and
+          // reports the exact "missing integer part" error (plus any chained
+          // suffix error), so hand the whole token to it rather than
+          // mis-emitting an unterminated-spread-operator error.
           if matches!(bytes.get(1), Some(b'0'..=b'9')) {
-            return self.delegate_to_logos(token_start);
+            return self.delegate_number_to_logos(token_start);
           }
           self.cursor += 1;
           let span = SimpleSpan::new(token_start, self.cursor);
@@ -415,7 +442,28 @@ where
           self.cursor += 3;
           continue;
         }
-        _ => return self.delegate_to_logos(token_start),
+        // Unknown byte: no fast path claims it, and no slow-path grammar
+        // (numbers, strings) applies. Decode the first char at the cursor and
+        // emit an `UnknownLexeme` error byte-identical to the full grammar's
+        // Logos `default_error` (`graphql/handlers/{str,slice}.rs`): the char,
+        // a `token_start..token_start + char_len` span, and `token_start` as
+        // the position. The `unexpected_eoi` branch of `default_error` is
+        // unreachable here — the loop's empty-source check above already
+        // returned `None` for an empty slice, so `iter().next()` is always
+        // `Some`.
+        _ => {
+          let ch = self.src.slice(&token_start..)?.iter().next()?;
+          let len = ch.char_len();
+          let span = SimpleSpan::new(token_start, token_start + len);
+          self.cursor = token_start + len;
+          self.last_span = span;
+          self.last_error_span = Some(span);
+          return Some(Err(LexerErrors::from(LexerError::unknown_char(
+            span,
+            ch,
+            token_start,
+          ))));
+        }
       }
     }
   }
@@ -442,48 +490,52 @@ where
 
 // This block needs almost the trait impl's bound set — everything except
 // `Span = SimpleSpan` and `S::Slice<'inp>: AsBytes`, neither of which
-// `delegate_to_logos` touches (it builds `SimpleSpan` directly and reads the
-// wrapped Logos lexer's own span, never `Self::Span` or `.as_bytes()`) —
-// rather than the far weaker one below: `delegate_to_logos`'s return type has
-// to name the concrete `Token`/`Error` types, which requires the
-// `Token<'inp, Error = ..>` bound. Every caller of this method is inside
-// `lex()` above, where the trait impl's full bound set already holds, so
-// this is never more restrictive in practice than the trait impl itself.
+// `delegate_number_to_logos` touches (it builds `SimpleSpan` directly and reads
+// the wrapped Logos lexer's own span, never `Self::Span` or `.as_bytes()`).
+// Its return type names the concrete `SyntacticToken`/`Error` types, which
+// requires the `Token<'inp, Error = ..>` + `From<NumberToken>` bounds. Every
+// caller is inside `lex()` above, where the trait impl's full bound set already
+// holds, so this is never more restrictive in practice than the trait impl.
+//
+// `NumberToken` is a crate-internal delegation carrier (`pub(crate)`); it
+// appears here only as a bound on a private method, never as nameable API, so
+// silence `private_bounds` rather than widen the type's visibility.
+#[allow(private_bounds)]
 impl<'inp, S> SimdSyntacticLexer<'inp, S>
 where
-  SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
+  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
       'inp,
       State = RecursionLimiter,
-      Token = SyntacticToken<S::Slice<'inp>>,
+      Token = NumberToken<S::Slice<'inp>>,
       Source = <S as ScanSource>::ScanPrimitive,
       Offset = usize,
     >,
-  SyntacticToken<S::Slice<'inp>>:
+  NumberToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
+  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
   S: ScanSource + ?Sized,
 {
-  /// Delegate the token starting at `token_start` (== `self.cursor`, prior
-  /// to any mutation for this token) to the wrapped Logos lexer.
+  /// Delegate the malformed number opening at `token_start` (== `self.cursor`,
+  /// prior to any mutation for this token) to the focused [`NumberToken`]
+  /// grammar — the number-only slice of the full grammar's `#[regex]`/`#[token]`
+  /// arms, calling the same frozen handlers — rather than rebuilding the whole
+  /// `SyntacticToken` grammar.
   ///
-  /// This is the single, permanent slow-path fallback: the `_` arm in
-  /// [`lex`](Lexer::lex) uses it for every byte none of the fast paths
-  /// above claims, and the number/`.` fast paths use it for any anomaly
-  /// they detect (leading zeros, an empty fraction/exponent, an illegal
-  /// suffix, a lone `-`, a `.`-led float missing its integer part, ...).
-  /// Logos re-derives the token — or the exact error — from scratch, so
-  /// parity with the pre-SIMD lexer holds by construction: nothing here
-  /// constructs an error itself.
-  // The return type mirrors `Lexer::lex`'s own `Option<Result<Token,
-  // Error>>` shape (see the trait impl above) — clippy can't see through
-  // the associated-type projections to recognize the two are the same
-  // complexity, so it flags this one as a bare function signature. A type
-  // alias would need its own `?Sized` + `Source<usize>` bounds restating
-  // the impl block's, which is more indirection than the signature it
-  // replaces.
+  /// The number and `.`-led-float fast paths route here for any anomaly they
+  /// detect (leading zeros, an empty fraction/exponent, an illegal suffix, a
+  /// lone `-`/`+`, a `.`-led float missing its integer part, ...). Valid
+  /// numbers are emitted directly by the SIMD fast path and never reach here,
+  /// so the delegated grammar effectively only ever yields errors; the
+  /// [`Delegated::Token`] arm — mapped through [`SyntacticToken::from`] — is
+  /// kept for type-completeness. `NumberToken`'s `Error` is this lexer's error
+  /// type, so the [`Delegated::Error`] arm needs no conversion.
+  // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
+  // shape; as with the former `delegate_to_logos`, clippy can't see through the
+  // associated-type projections, so silence its type-complexity lint here.
   #[allow(clippy::type_complexity)]
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn delegate_to_logos(
+  fn delegate_number_to_logos(
     &mut self,
     token_start: usize,
   ) -> Option<
@@ -492,7 +544,7 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    match crate::simd_common::delegate_to_logos::<SyntacticToken<S::Slice<'inp>>>(
+    match crate::simd_common::delegate_to_logos::<NumberToken<S::Slice<'inp>>>(
       self.src.scan_primitive(),
       self.cursor,
       self.state,
@@ -501,7 +553,7 @@ where
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
         self.state = state;
-        Some(Ok(token))
+        Some(Ok(SyntacticToken::from(token)))
       }
       Delegated::Error { error, span } => {
         self.cursor = span.end();
@@ -516,9 +568,9 @@ where
 // Bounds mirror the trait impl's, minus the Logos machinery this path never
 // touches (it never builds a `LogosLexer`), plus the `DelegateStringError`
 // predicate the string sub-lexer delegation needs — always satisfiable, since
-// `ScanPrimitive` is `str`/`[u8]`. As with `delegate_to_logos`, every caller is
-// inside `lex()`, where the trait impl's full bound set (which now includes this
-// predicate) already holds.
+// `ScanPrimitive` is `str`/`[u8]`. As with `delegate_number_to_logos`, every
+// caller is inside `lex()`, where the trait impl's full bound set (which now
+// includes this predicate) already holds.
 //
 // `DelegateStringError` is a crate-internal delegation detail (`pub(crate)`);
 // it appears here only as a bound on a private method, never as nameable API,
@@ -533,16 +585,16 @@ where
   /// Delegate the malformed string literal opening at `token_start` directly to
   /// the `string_lexer` `lex_*` code — the same path the full grammar reaches
   /// through its `#[token("\"")]` / `#[token("\"\"\"")]` arms — instead of
-  /// rebuilding the whole `SyntacticToken` grammar via [`delegate_to_logos`].
+  /// rebuilding the whole `SyntacticToken` grammar.
   ///
   /// `block` picks the `"""` (block) vs `"` (inline) carrier. Valid strings are
   /// emitted by the SIMD fast path and never reach here, so the delegated lexer
   /// always yields errors; each is wrapped in a `String` [`LexerErrorData`] with
   /// span `token_start..end` — byte-identical to the error token the full
   /// grammar produced — and `cursor`/`last_span`/`last_error_span` are folded
-  /// exactly as `delegate_to_logos`'s [`Delegated::Error`] arm does.
+  /// exactly as [`delegate_number_to_logos`]'s [`Delegated::Error`] arm does.
   ///
-  /// [`delegate_to_logos`]: Self::delegate_to_logos
+  /// [`delegate_number_to_logos`]: Self::delegate_number_to_logos
   #[allow(clippy::type_complexity)]
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn delegate_string_error(
