@@ -16,6 +16,9 @@ mod str;
 /// The syntactic GraphQLx lexer — the SIMD-accelerated lexer. Generic over the
 /// *source* type `S` (defaulting to `str`); Logos survives only as an internal
 /// slow-path delegate of the SIMD lexer.
+// ?Sized is required for the default `str` (and `[u8]`) source; the bound is
+// enforced on SimdSyntacticLexer itself.
+#[allow(type_alias_bounds)]
 pub type SyntacticLexer<'a, S: ?Sized = str> = crate::graphqlx::simd::SimdSyntacticLexer<'a, S>;
 
 /// The error data type for lexing based on syntactic token with `char` source.
@@ -61,15 +64,18 @@ pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>
 /// # Example
 ///
 /// ```rust,ignore
-/// use smear::lexer::graphqlx::ast::SyntacticToken;
-/// use tokit::lexer::LogosLexer;
+/// use smear::lexer::graphqlx::ast::{SyntacticLexer, SyntacticToken};
+/// use tokit::Lexer;
 ///
 /// let source = "query { user { id } }";
-/// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
+/// let mut lexer = SyntacticLexer::new(source);
 ///
 /// // Only syntactically significant tokens appear in the stream:
 /// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
 /// // (whitespace is automatically skipped)
+/// while let Some(token) = lexer.lex() {
+///   // ...
+/// }
 /// ```
 ///
 /// # Generic Over Source Type

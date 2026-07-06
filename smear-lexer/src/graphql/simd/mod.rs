@@ -1,11 +1,10 @@
-//! SIMD-accelerated layer over the existing Logos-driven
-//! `SyntacticLexer`.
-//!
-//! The architecture is **wrap-and-dispatch**: every byte still flows
-//! through Logos for the complex tokens (numbers, strings, spread,
-//! errors), but the layer fast-paths the two byte categories that
-//! dominate real GraphQL input — trivia and identifiers — through
-//! `lexsimd` primitives.
+//! The GraphQL syntactic lexer: a SIMD-accelerated, streaming, single-pass
+//! lexer. It fast-paths the byte categories that dominate real input — trivia,
+//! identifiers, valid numbers, and valid strings (inline AND block, including
+//! block-string normalization) — and delegates only the cold error/anomaly
+//! paths (malformed numbers, string-error diagnostics, unterminated literals)
+//! to an internal Logos lexer (the hybrid design). This is the `SyntacticLexer`
+//! the rest of the workspace uses.
 //!
 //! ```text
 //! +-------------------------+
@@ -17,8 +16,10 @@
 //! |    skip_trivia();       |  <-- memspan::skip_class!
 //! |    match peek() {       |
 //! |      ident-start  ===>  |  <-- memspan::skip::skip_ident
+//! |      digit / '-'  ===>  |  <-- number::scan_number (valid => fast; else delegate)
+//! |      '"' / '"""'  ===>  |  <-- SIMD string/block scan (valid => fast; else delegate)
 //! |      single-byte punct  |  <-- inline match
-//! |      everything else => |  <-- delegate to Logos
+//! |      anomaly/error ===> |  <-- delegate to Logos
 //! |    }                    |
 //! |  }                      |
 //! +-------------------------+

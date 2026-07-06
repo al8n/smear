@@ -3,6 +3,7 @@
 //! `tests/oracle.rs`'s SIMD source matrix; here we only check the trait impls
 //! are individually correct.
 
+#[cfg(any(feature = "bytes", feature = "bstr", feature = "hipstr"))]
 use super::AsBytes;
 
 #[cfg(feature = "bytes")]

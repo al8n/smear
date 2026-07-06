@@ -1,5 +1,5 @@
-//! Baseline lexer throughput benchmarks for the existing Logos-driven
-//! `SyntacticLexer` and `LosslessLexer`.
+//! Baseline lexer throughput benchmarks for `SyntacticLexer` (the
+//! SIMD-accelerated lexer) and `LosslessLexer`.
 //!
 //! Goal: get a stable, comparable number for the *current* lexer across a
 //! representative set of GraphQL inputs, so that any future SIMD layer can
@@ -26,7 +26,6 @@ use smear_lexer::{
   tokit::lexer::{Lexer as _, LogosLexer},
 };
 use std::hint::black_box;
-use tokit::Lexer;
 
 // Live Logos lexer for the baseline benches — named directly (no public
 // alias). This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve

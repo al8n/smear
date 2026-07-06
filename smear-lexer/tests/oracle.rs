@@ -8,12 +8,19 @@
 //! Regenerate after an *intended* change:  BLESS=1 cargo test -p smear-lexer --test oracle
 //! Verify (CI default):                     cargo test -p smear-lexer --test oracle
 
+// Every fixture, helper, and test below exercises the `graphql` and/or
+// `graphqlx` dialect lexers; with both features off there is nothing left to
+// test, and leaving the file ungated would turn every helper into dead code
+// under that build.
+#![cfg(any(feature = "graphql", feature = "graphqlx"))]
+
 use std::{fs, path::PathBuf};
 
 use tokit::lexer::Lexer as _;
 
 // Live Logos lexer for differential tests — named directly (no public alias).
 // This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
+#[cfg(feature = "graphql")]
 type GraphqlLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
   'a,
   smear_lexer::graphql::syntactic::SyntacticToken<&'a str>,
@@ -97,6 +104,7 @@ fn assert_no_mismatches(mismatches: &[String]) {
 }
 
 /// Valid fixtures spanning query + schema shapes and sizes.
+#[cfg(feature = "graphql")]
 const CORPUS: &[(&str, &str)] = &[
   (
     "tiny",
@@ -125,6 +133,7 @@ const CORPUS: &[(&str, &str)] = &[
 ];
 
 /// Malformed inputs — one per Spec §6 number-error case + string edge cases.
+#[cfg(feature = "graphql")]
 const MALFORMED: &[(&str, &str)] = &[
   // number errors
   ("num_leading_zero_int", "{ a(x: 007) }"),
@@ -159,6 +168,7 @@ const MALFORMED: &[(&str, &str)] = &[
 /// rustc does not itself interpret the escape before the lexer ever sees
 /// it. `bom_prefixed` is the deliberate exception: there we *want* rustc
 /// to decode `\u{FEFF}` into the real BOM byte sequence.
+#[cfg(feature = "graphql")]
 const EDGES: &[(&str, &str)] = &[
   // block strings (GraphQL block string = """..."""; only escape is \""")
   (
@@ -219,6 +229,7 @@ const EDGES: &[(&str, &str)] = &[
   ),
 ];
 
+#[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_oracle() {
   let mut mismatches = Vec::new();
@@ -238,6 +249,7 @@ fn graphql_syntactic_oracle() {
 // `SimdSyntacticLexer::<[u8]>` and had to paper over the resulting `Char = u8`
 // vs. `Char = char` `Debug` mismatch with a pair of text-rewriting hacks).
 
+#[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_oracle() {
   use smear_lexer::graphql::simd::SimdSyntacticLexer;
@@ -261,6 +273,7 @@ fn graphql_syntactic_simd_oracle() {
 // Logos streams agree only if every arm re-checks. Comparing the two lexers
 // directly (both `Char = char`) needs no golden file.
 
+#[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_low_recursion_parity() {
   use tokit::state::recursion_tracker::RecursionLimiter;
@@ -325,20 +338,34 @@ fn graphql_syntactic_simd_low_recursion_parity() {
 // Tokens compare via `same_token` for all of them — it is generic over any
 // `AsBytes` slice, so it handles `Bytes`, `&[u8]`, and `HipStr`/`HipByt` alike.
 
+// Dialect-agnostic: shared by the GraphQL comparators below and the GraphQLx
+// ones further down, so this stays ungated (needed whenever either dialect
+// feature is on).
 use smear_lexer::{
   LitBlockStr, LitInlineStr,
   error::{
     EscapedCharacter, FixedUnicodeEscapeError, InvalidUnicodeHexDigits, InvalidUnicodeSequence,
     StringError, StringErrors, UnicodeError,
   },
-  graphql::{
-    error::{DecimalError, FloatError},
-    simd::{AsBytes, SimdSyntacticLexer},
-    syntactic::{
-      SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken,
-    },
-  },
 };
+// GraphQL-only: the token/error types themselves, plus the GraphQL-flavored
+// `SimdSyntacticLexer` used as the `<str>` reference lexer in the matrix
+// tests below.
+#[cfg(feature = "graphql")]
+use smear_lexer::graphql::{
+  error::{DecimalError, FloatError},
+  simd::SimdSyntacticLexer,
+  syntactic::{SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken},
+};
+// `AsBytes` is dialect-agnostic (it's `crate::simd_common::AsBytes` under the
+// hood) but only re-exported publicly through each dialect's `simd` module;
+// `same_inline_str`/`same_block_str` below need it regardless of which
+// dialect is active, so pick it up from whichever is available, preferring
+// `graphql` when both are on (the two paths name the same type).
+#[cfg(feature = "graphql")]
+use smear_lexer::graphql::simd::AsBytes;
+#[cfg(all(feature = "graphqlx", not(feature = "graphql")))]
+use smear_lexer::graphqlx::simd::AsBytes;
 use tokit::{
   error::UnexpectedLexeme,
   utils::{Lexeme, PositionedChar},
@@ -371,6 +398,7 @@ fn same_unexpected_lexeme<Hint: PartialEq>(
   same_lexeme(byte.lexeme(), str_.lexeme()) && byte.hint() == str_.hint()
 }
 
+#[cfg(feature = "graphql")]
 fn same_float_error(byte: &FloatError<u8>, str_: &FloatError<char>) -> bool {
   match (byte, str_) {
     (FloatError::UnexpectedSuffix(b), FloatError::UnexpectedSuffix(s)) => same_lexeme(b, s),
@@ -386,6 +414,7 @@ fn same_float_error(byte: &FloatError<u8>, str_: &FloatError<char>) -> bool {
   }
 }
 
+#[cfg(feature = "graphql")]
 fn same_decimal_error(byte: &DecimalError<u8>, str_: &DecimalError<char>) -> bool {
   match (byte, str_) {
     (DecimalError::UnexpectedSuffix(b), DecimalError::UnexpectedSuffix(s)) => same_lexeme(b, s),
@@ -482,6 +511,7 @@ fn same_string_errors(byte: &StringErrors<u8>, str_: &StringErrors<char>) -> boo
       .all(|(b, s)| same_string_error(b, s))
 }
 
+#[cfg(feature = "graphql")]
 fn same_error_data(
   byte: &SyntacticLexerErrorData<u8>,
   str_: &SyntacticLexerErrorData<char>,
@@ -517,10 +547,12 @@ fn same_error_data(
   }
 }
 
+#[cfg(feature = "graphql")]
 fn same_lexer_error(byte: &SyntacticLexerError<u8>, str_: &SyntacticLexerError<char>) -> bool {
   byte.span() == str_.span() && same_error_data(byte.data(), str_.data())
 }
 
+#[cfg(feature = "graphql")]
 fn same_lexer_errors(byte: &SyntacticLexerErrors<u8>, str_: &SyntacticLexerErrors<char>) -> bool {
   byte.len() == str_.len()
     && byte
@@ -590,6 +622,7 @@ fn same_block_str<B: AsBytes>(byte: &LitBlockStr<B>, str_: &LitBlockStr<&str>) -
 /// `same_block_str`), not just equal span bytes -- two block strings in
 /// particular can share a span yet disagree on classification or metadata if
 /// the two hand-written lexers (str vs. `[u8]`) diverge.
+#[cfg(feature = "graphql")]
 fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>) -> bool {
   use SyntacticToken as Tok;
   if byte.kind() != str_.kind() {
@@ -614,6 +647,7 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
 /// messages (e.g. `"[u8]"`, `"Bytes"`). `$err_eq` is the error comparator:
 /// `same_lexer_errors` for the `[u8]`-primitive sources (`Char = u8`), or
 /// plain `==` for `HipStr` (`Char = char`, same error type as `<str>`).
+#[cfg(feature = "graphql")]
 macro_rules! assert_matches_str_stream {
   ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {{
     let mut byte_lex = $byte_lexer;
@@ -655,6 +689,7 @@ macro_rules! assert_matches_str_stream {
   }};
 }
 
+#[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_source_matrix_u8() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
@@ -668,7 +703,7 @@ fn graphql_syntactic_simd_source_matrix_u8() {
   }
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(all(feature = "graphql", feature = "bytes"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_bytes() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
@@ -683,7 +718,7 @@ fn graphql_syntactic_simd_source_matrix_bytes() {
   }
 }
 
-#[cfg(feature = "bstr")]
+#[cfg(all(feature = "graphql", feature = "bstr"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_bstr() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
@@ -697,7 +732,7 @@ fn graphql_syntactic_simd_source_matrix_bstr() {
   }
 }
 
-#[cfg(feature = "hipstr")]
+#[cfg(all(feature = "graphql", feature = "hipstr"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_hipstr() {
   // `HipStr` scans `str`, so its errors are `SyntacticLexerErrors<char>` —
@@ -717,7 +752,7 @@ fn graphql_syntactic_simd_source_matrix_hipstr() {
   }
 }
 
-#[cfg(feature = "hipstr")]
+#[cfg(all(feature = "graphql", feature = "hipstr"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_hipbyt() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
@@ -732,6 +767,7 @@ fn graphql_syntactic_simd_source_matrix_hipbyt() {
   }
 }
 
+#[cfg(feature = "graphql")]
 #[test]
 fn graphql_lossless_oracle() {
   use smear_lexer::graphql::lossless::LosslessLexer;
