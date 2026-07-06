@@ -23,14 +23,9 @@ use smear_lexer::{
     simd::SimdSyntacticLexer,
     syntactic::{SyntacticLexerErrors, SyntacticToken},
   },
-  tokit::lexer::{Lexer as _, LogosLexer},
+  tokit::lexer::Lexer as _,
 };
 use std::hint::black_box;
-
-// Live Logos lexer for the baseline benches — named directly (no public
-// alias). This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve
-// to.
-type GraphqlLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 // ---- inputs --------------------------------------------------------------
 //
@@ -87,19 +82,6 @@ const INPUTS: &[(&str, &str)] = &[
 // ---- driving the lexers --------------------------------------------------
 
 #[inline(always)]
-fn syntactic_count(input: &str) -> usize {
-  let mut lexer = GraphqlLogos::new(input);
-  let mut count = 0usize;
-  while let Some(result) = lexer.lex() {
-    // black_box on the result so the compiler can't elide the per-token
-    // work (e.g., dropping `Identifier(slice)` without reading the slice).
-    let _ = black_box(result);
-    count = count.wrapping_add(1);
-  }
-  count
-}
-
-#[inline(always)]
 fn lossless_count(input: &str) -> usize {
   let mut lexer = LosslessLexer::<&str>::new(input);
   let mut count = 0usize;
@@ -133,18 +115,7 @@ fn simd_collect(input: &str) -> Vec<Result<SyntacticToken<&[u8]>, SyntacticLexer
   tokens
 }
 
-type SyntacticItem<'a> = Result<SyntacticToken<&'a str>, SyntacticLexerErrors>;
 type LosslessItem<'a> = Result<LosslessToken<&'a str>, LosslessLexerErrors>;
-
-#[inline(always)]
-fn syntactic_collect(input: &str) -> Vec<SyntacticItem<'_>> {
-  let mut lexer = GraphqlLogos::new(input);
-  let mut tokens: Vec<SyntacticItem<'_>> = Vec::new();
-  while let Some(result) = lexer.lex() {
-    tokens.push(result);
-  }
-  tokens
-}
 
 #[inline(always)]
 fn lossless_collect(input: &str) -> Vec<LosslessItem<'_>> {
@@ -154,20 +125,6 @@ fn lossless_collect(input: &str) -> Vec<LosslessItem<'_>> {
     tokens.push(result);
   }
   tokens
-}
-
-/// GraphQLx syntactic-mode token count, mirroring `syntactic_count` above but
-/// against the GraphQLx grammar (generics, imports, type paths, etc.).
-#[inline(always)]
-fn gx_syntactic_count(input: &str) -> usize {
-  use smear_lexer::graphqlx::syntactic::SyntacticToken as GxSyntacticToken;
-  let mut lexer = LogosLexer::<GxSyntacticToken<&str>>::new(input);
-  let mut count = 0usize;
-  while let Some(result) = lexer.lex() {
-    let _ = black_box(result);
-    count = count.wrapping_add(1);
-  }
-  count
 }
 
 /// GraphQLx lossless-mode token count, mirroring `lossless_count` above.
@@ -184,29 +141,6 @@ fn gx_lossless_count(input: &str) -> usize {
 }
 
 // ---- groups --------------------------------------------------------------
-
-/// Lexer-only throughput, syntactic mode (skips trivia).
-fn bench_syntactic(c: &mut Criterion) {
-  let mut group = c.benchmark_group("graphql/lex/syntactic");
-  // Schemas in the MB range take a while at criterion's default sample
-  // count; cap the time budget so the full suite finishes in minutes
-  // rather than tens of minutes. Per-iteration measurement remains stable.
-  group.sample_size(30);
-
-  for (label, input) in INPUTS {
-    group.throughput(Throughput::Bytes(input.len() as u64));
-
-    group.bench_with_input(BenchmarkId::new("count", label), input, |b, input| {
-      b.iter(|| black_box(syntactic_count(black_box(input))))
-    });
-
-    group.bench_with_input(BenchmarkId::new("collect", label), input, |b, input| {
-      b.iter(|| black_box(syntactic_collect(black_box(input))))
-    });
-  }
-
-  group.finish();
-}
 
 /// Lexer-only throughput, lossless mode (preserves trivia as tokens).
 fn bench_lossless(c: &mut Criterion) {
@@ -228,7 +162,7 @@ fn bench_lossless(c: &mut Criterion) {
   group.finish();
 }
 
-/// Phase-1 SIMD layer throughput, same fixtures as the syntactic baseline.
+/// Phase-1 SIMD layer throughput, same fixtures as the lossless baseline.
 fn bench_simd(c: &mut Criterion) {
   let mut group = c.benchmark_group("graphql/lex/simd_phase1");
   group.sample_size(30);
@@ -248,20 +182,17 @@ fn bench_simd(c: &mut Criterion) {
   group.finish();
 }
 
-/// GraphQLx baseline throughput (Logos-driven), same fixtures as the GraphQL
-/// baselines above. Gives every one of the four lexers (graphql/syntactic,
-/// graphql/lossless, graphqlx/syntactic, graphqlx/lossless) a recorded
-/// number to compare future SIMD work against.
+/// GraphQLx lossless-mode baseline throughput, same fixtures as the GraphQL
+/// baselines above. This group used to also carry a Logos-driven
+/// `graphqlx/syntactic` baseline (mirroring the GraphQL `bench_syntactic`
+/// group above); that baseline was removed in Task 4 of the Logos-slimming
+/// plan — the full `SyntacticToken` grammar it depended on is deleted in
+/// Task 5 — leaving GraphQLx's lossless-mode number here.
 fn bench_graphqlx(c: &mut Criterion) {
   let mut group = c.benchmark_group("graphqlx/lex/baseline");
   group.sample_size(30);
   for (label, input) in INPUTS {
     group.throughput(Throughput::Bytes(input.len() as u64));
-    group.bench_with_input(
-      BenchmarkId::new("syntactic_count", label),
-      input,
-      |b, input| b.iter(|| black_box(gx_syntactic_count(black_box(input)))),
-    );
     group.bench_with_input(
       BenchmarkId::new("lossless_count", label),
       input,
@@ -273,13 +204,7 @@ fn bench_graphqlx(c: &mut Criterion) {
 
 // ---- registration --------------------------------------------------------
 
-criterion_group!(
-  benches,
-  bench_syntactic,
-  bench_lossless,
-  bench_simd,
-  bench_graphqlx
-);
+criterion_group!(benches, bench_lossless, bench_simd, bench_graphqlx);
 criterion_main!(benches);
 
 // Compile-time touch on the fixture roots so reorganising those dirs gives

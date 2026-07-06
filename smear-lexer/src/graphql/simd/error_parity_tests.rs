@@ -1,74 +1,58 @@
-//! After-error `Lexer`-trait parity between the SIMD lexer and the Logos
-//! lexer it drop-in replaces (`GraphqlLogos` below — no public alias anymore
-//! now that `SyntacticLexer` names the SIMD lexer).
+//! After-error `Lexer`-trait parity between the SIMD lexer and
+//! `logos::Lexer` (the Logos-driven lexer over the full `SyntacticToken`
+//! grammar `SyntacticLexer` used to run on, before the Logos-slimming phase
+//! rerouted it to focused sub-lexers).
+//!
+//! Historically these tests drove a live Logos-backed lexer over the full
+//! `SyntacticToken` grammar (a local type alias this file used to declare)
+//! side by side with the SIMD lexer over the same error-producing inputs,
+//! asserting `span()`/`slice()`/`check()` agreed
+//! token-for-token. Task 4 of the Logos-slimming plan severs that live
+//! comparator — the full `SyntacticToken` grammar it depended on is deleted
+//! in Task 5 — so the values it used to produce are frozen below as hardcoded
+//! per-input constants, captured from that live comparator immediately before
+//! deletion (see `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`,
+//! Task 4).
 //!
 //! The frozen oracle (`tests/oracle.rs`) renders each error by its own `Debug`
 //! and only reads `lexer.span()` on the *Ok* arm, so it never exercised the
 //! lexer-level `span()`/`slice()`/`check()` on the error path. These tests
-//! drive both lexers over the same error-producing inputs in lockstep and
-//! assert those three methods agree token-for-token, including every error
-//! token, across each distinct error path (inline string, block string,
-//! delegated number, unknown byte, inline spread, and the recursion limit).
+//! drive the SIMD lexer over the same error-producing inputs and assert those
+//! three methods, at every token (error or not), against the frozen render —
+//! preserving the original per-token, post-error coverage without a live
+//! Logos comparator.
 
-use tokit::{Lexer, lexer::LogosLexer, state::recursion_tracker::RecursionLimiter};
+use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+use crate::graphql::simd::SimdSyntacticLexer;
 
-// Live Logos lexer for parity tests — named directly (no public alias). This
-// is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
-type GraphqlLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
-
-/// Drive the Logos and SIMD lexers in lockstep over the same input, asserting
-/// at every token that `span()` and `slice()` agree, and — for every error
-/// token — that `check()` agrees too. Requires at least one error to appear.
-macro_rules! assert_error_path_parity {
-  ($src:expr, $logos:expr, $simd:expr) => {{
-    let src: &str = $src;
-    let mut logos = $logos;
-    let mut simd = $simd;
-    let mut saw_error = false;
-    let mut idx = 0usize;
-    loop {
-      match (logos.lex(), simd.lex()) {
-        (None, None) => break,
-        (Some(l), Some(s)) => {
-          assert_eq!(
-            l.is_err(),
-            s.is_err(),
-            "#{idx}: Ok/Err shape diverged for {src:?} (logos_span={:?} simd_span={:?})",
-            logos.span(),
-            simd.span(),
-          );
-          // span()/slice() must match on every token — valid OR error.
-          assert_eq!(
-            simd.span(),
-            logos.span(),
-            "#{idx}: span() mismatch for {src:?}"
-          );
-          assert_eq!(
-            simd.slice(),
-            logos.slice(),
-            "#{idx}: slice() mismatch for {src:?}"
-          );
-          if l.is_err() {
-            saw_error = true;
-            assert_eq!(
-              format!("{:?}", simd.check()),
-              format!("{:?}", logos.check()),
-              "#{idx}: check() mismatch after error for {src:?}",
-            );
-          }
-        }
-        (l, s) => panic!(
-          "#{idx}: stream length diverged for {src:?}: logos={} simd={}",
-          l.is_some(),
-          s.is_some(),
-        ),
-      }
-      idx += 1;
+/// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
+/// plus `check()` whenever that step is an error. Together these are exactly
+/// the observables the deleted `assert_error_path_parity!` macro used to
+/// compare token-for-token against a live Logos lexer (see the module doc).
+/// Panics if the drive never produces an error, preserving the original
+/// macro's invariant.
+fn render_error_path(mut lex: SimdSyntacticLexer<'_, str>, src: &str) -> String {
+  use std::fmt::Write as _;
+  let mut out = String::new();
+  let mut saw_error = false;
+  let mut idx = 0usize;
+  while let Some(item) = lex.lex() {
+    let is_err = item.is_err();
+    saw_error |= is_err;
+    let _ = writeln!(
+      out,
+      "#{idx} is_err={is_err} span={:?} slice={:?}",
+      lex.span(),
+      lex.slice()
+    );
+    if is_err {
+      let _ = writeln!(out, "#{idx} check={:?}", lex.check());
     }
-    assert!(saw_error, "expected at least one error for {src:?}");
-  }};
+    idx += 1;
+  }
+  assert!(saw_error, "expected at least one error for {src:?}");
+  out
 }
 
 #[test]
@@ -81,20 +65,48 @@ fn error_path_span_slice_check_match_logos() {
   //   - empty exponent              (delegated number)
   //   - unknown byte                (delegated `_` arm)
   //   - `..`                        (inline spread error arm)
-  for src in [
-    r#""unterminated"#,
-    r#""a\qb""#,
-    r#""""oops"#,
-    "007",
-    "1e",
-    "?",
-    "..x",
-  ] {
-    assert_error_path_parity!(
-      src,
-      GraphqlLogos::new(src),
-      SimdSyntacticLexer::<str>::new(src)
-    );
+  //
+  // Expected renders are frozen from a live Logos-backed lexer over the full
+  // `SyntacticToken<&str>` grammar, run in lockstep with the SIMD lexer
+  // immediately before Task 4 deleted that comparator. Every one of these
+  // non-recursion cases' `check()` comes
+  // back `Ok(())`: none of these errors perturb the recursion limiter — see
+  // `recursion_limit_region_matches_logos` below for the one path that does.
+  const CASES: &[(&str, &str)] = &[
+    (
+      r#""unterminated"#,
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 13 } slice=\"\\\"unterminated\"\n#0 check=Ok(())\n",
+    ),
+    (
+      r#""a\qb""#,
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 6 } slice=\"\\\"a\\\\qb\\\"\"\n#0 check=Ok(())\n",
+    ),
+    (
+      r#""""oops"#,
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 7 } slice=\"\\\"\\\"\\\"oops\"\n#0 check=Ok(())\n",
+    ),
+    (
+      "007",
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 3 } slice=\"007\"\n#0 check=Ok(())\n",
+    ),
+    (
+      "1e",
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 2 } slice=\"1e\"\n#0 check=Ok(())\n",
+    ),
+    (
+      "?",
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 1 } slice=\"?\"\n#0 check=Ok(())\n",
+    ),
+    (
+      "..x",
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 2 } slice=\"..\"\n#0 check=Ok(())\n\
+       #1 is_err=false span=SimpleSpan { start: 2, end: 3 } slice=\"x\"\n",
+    ),
+  ];
+
+  for (src, expected) in CASES {
+    let simd = SimdSyntacticLexer::<str>::new(src);
+    assert_eq!(&render_error_path(simd, src), expected, "mismatch for {src:?}");
   }
 }
 
@@ -102,14 +114,53 @@ fn error_path_span_slice_check_match_logos() {
 fn recursion_limit_region_matches_logos() {
   // At a low limit, every bracket past the limit yields the recursion error in
   // the token's place, and the region also drives the `finish!` (ident) and
-  // decrease-bracket paths while over the limit. Both lexers must agree on
-  // span()/slice()/check() across the entire depth-exceeded region.
+  // decrease-bracket paths while over the limit. Expected render frozen the
+  // same way as above: `check()` carries the *current* depth at each step (it
+  // reads live `RecursionLimiter` state, not a snapshot from when the error
+  // token was produced), so it changes token-to-token as brackets close.
   let depth = 10;
   let src = "(".repeat(depth) + "x" + &")".repeat(depth);
   let limit = 3;
-  assert_error_path_parity!(
+  let expected = "\
+#0 is_err=false span=SimpleSpan { start: 0, end: 1 } slice=\"(\"
+#1 is_err=false span=SimpleSpan { start: 1, end: 2 } slice=\"(\"
+#2 is_err=false span=SimpleSpan { start: 2, end: 3 } slice=\"(\"
+#3 is_err=true span=SimpleSpan { start: 3, end: 4 } slice=\"(\"
+#3 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 4 })) }]))
+#4 is_err=true span=SimpleSpan { start: 4, end: 5 } slice=\"(\"
+#4 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 5 })) }]))
+#5 is_err=true span=SimpleSpan { start: 5, end: 6 } slice=\"(\"
+#5 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 6 })) }]))
+#6 is_err=true span=SimpleSpan { start: 6, end: 7 } slice=\"(\"
+#6 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 7 })) }]))
+#7 is_err=true span=SimpleSpan { start: 7, end: 8 } slice=\"(\"
+#7 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 8 })) }]))
+#8 is_err=true span=SimpleSpan { start: 8, end: 9 } slice=\"(\"
+#8 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 9 })) }]))
+#9 is_err=true span=SimpleSpan { start: 9, end: 10 } slice=\"(\"
+#9 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 10 })) }]))
+#10 is_err=true span=SimpleSpan { start: 10, end: 11 } slice=\"x\"
+#10 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 10 })) }]))
+#11 is_err=true span=SimpleSpan { start: 11, end: 12 } slice=\")\"
+#11 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 9 })) }]))
+#12 is_err=true span=SimpleSpan { start: 12, end: 13 } slice=\")\"
+#12 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 8 })) }]))
+#13 is_err=true span=SimpleSpan { start: 13, end: 14 } slice=\")\"
+#13 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 7 })) }]))
+#14 is_err=true span=SimpleSpan { start: 14, end: 15 } slice=\")\"
+#14 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 6 })) }]))
+#15 is_err=true span=SimpleSpan { start: 15, end: 16 } slice=\")\"
+#15 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 5 })) }]))
+#16 is_err=true span=SimpleSpan { start: 16, end: 17 } slice=\")\"
+#16 check=Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 4 })) }]))
+#17 is_err=false span=SimpleSpan { start: 17, end: 18 } slice=\")\"
+#18 is_err=false span=SimpleSpan { start: 18, end: 19 } slice=\")\"
+#19 is_err=false span=SimpleSpan { start: 19, end: 20 } slice=\")\"
+#20 is_err=false span=SimpleSpan { start: 20, end: 21 } slice=\")\"
+";
+  let simd = SimdSyntacticLexer::<str>::with_state(
     src.as_str(),
-    GraphqlLogos::with_state(src.as_str(), RecursionLimiter::with_limitation(limit)),
-    SimdSyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit))
+    RecursionLimiter::with_limitation(limit),
   );
+  assert_eq!(render_error_path(simd, &src), expected);
 }

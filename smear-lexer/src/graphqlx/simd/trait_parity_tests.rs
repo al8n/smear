@@ -1,27 +1,30 @@
-//! End-to-end `Lexer`-trait parity between the GraphQLx SIMD lexer and the
-//! Logos lexer it drop-in replaces (`GraphqlxLogos` below — no public alias
-//! anymore now that `SyntacticLexer` names the SIMD lexer; the GraphQLx
-//! counterpart of `graphql/simd/trait_parity_tests.rs`), driven in lockstep
-//! over a diverse input set.
+//! End-to-end `Lexer`-trait parity between the GraphQLx SIMD lexer and
+//! `logos::Lexer` (the GraphQLx counterpart of
+//! `graphql/simd/trait_parity_tests.rs`), driven over a diverse input set.
 //!
-//! The narrower `error_parity_tests`/`bump_parity_tests` each pin one surface;
-//! this harness asserts *every* observable agrees at *every* step of a full
-//! drive: the `lex()` result, `span()`, and `slice()` at each token, then — the
-//! step those tests skip — `span()`/`slice()` after both lexers reach EOF, and
-//! whether a post-EOF `bump` panics. Logos resets its span to `cursor..cursor`
-//! (EOF..EOF) once `next()` returns `None`, including after trailing
-//! trivia/comments, so the SIMD layer must too — otherwise its stale span keeps
-//! reporting the last token and a post-EOF `bump` grows from the wrong base.
+//! Historically this harness drove a live Logos-backed lexer over the full
+//! `SyntacticToken<S>` grammar (a local type alias this file used to declare)
+//! side by side with the SIMD lexer, asserting *every*
+//! observable agreed at *every* step of a full drive: the `lex()` result,
+//! `span()`, and `slice()` at each token, then — the step the narrower
+//! `error_parity_tests`/`bump_parity_tests` skip — `span()`/`slice()` after
+//! both lexers reach EOF, and whether a post-EOF `bump` panics. Task 4 of the
+//! Logos-slimming plan severs that live comparator — the full `SyntacticToken`
+//! grammar it depended on is deleted in Task 5 — so the values it used to
+//! produce are frozen below as hardcoded per-input renders, captured from
+//! that live comparator immediately before deletion (see
+//! `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`, Task 4).
+//! Logos resets its span to `cursor..cursor` (EOF..EOF) once `next()` returns
+//! `None`, including after trailing trivia/comments, so the frozen renders
+//! capture that reset explicitly — it is the reason the SIMD layer must do
+//! the same, and a stale span there would make its own post-EOF `bump` grow
+//! from the wrong base (see the panic check in each test below).
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::{Lexer, lexer::LogosLexer, state::recursion_tracker::RecursionLimiter};
+use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
-
-// Live Logos lexer for parity tests — named directly (no public alias). This
-// is exactly what `SyntacticLexer<'a, S>` used to resolve to.
-type GraphqlxLogos<'a, S = &'a str> = LogosLexer<'a, SyntacticToken<S>>;
+use crate::graphqlx::simd::SimdSyntacticLexer;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
@@ -33,128 +36,298 @@ fn panics<F: FnOnce()>(f: F) -> bool {
   caught.is_err()
 }
 
-/// Drive the Logos and SIMD lexers built by the two constructor expressions in
-/// lockstep to EOF, asserting `lex()` (by `Debug`), `span()`, and `slice()`
-/// agree at every step — including the terminal step where both return `None`,
-/// which is where the EOF span/slice reset is observed — then assert a post-EOF
-/// `bump(1)` panics on both or on neither.
-///
-/// The constructor expressions are re-evaluated for the bump phase, so they must
-/// be pure (a `new`/`with_state` call), not stateful handles.
-macro_rules! assert_full_parity {
-  ($src:expr, $make_logos:expr, $make_simd:expr) => {{
-    let src: &str = $src;
-
-    {
-      let mut logos = $make_logos;
-      let mut simd = $make_simd;
-      let mut idx = 0usize;
-      loop {
-        let l = logos.lex();
-        let s = simd.lex();
-        // Debug-equal covers the Ok token and every error variant without
-        // requiring the error type be `PartialEq`.
-        assert_eq!(
-          format!("{s:?}"),
-          format!("{l:?}"),
-          "#{idx}: lex() result diverged for {src:?}"
-        );
-        // span()/slice() reflect the token just returned, or — once both return
-        // None — the EOF reset. Both must agree at every step, EOF included.
-        assert_eq!(
-          simd.span(),
-          logos.span(),
-          "#{idx}: span() diverged for {src:?}"
-        );
-        assert_eq!(
-          simd.slice(),
-          logos.slice(),
-          "#{idx}: slice() diverged for {src:?}"
-        );
-        if l.is_none() {
-          break;
-        }
-        idx += 1;
+/// Render a full drive: `lex()` (Debug), `span()`, and `slice()` at every
+/// step — including the terminal step where `lex()` returns `None`, which is
+/// where the EOF span/slice reset is observed. Exactly the per-step
+/// observables the deleted `assert_full_parity!` macro used to compare
+/// against a live Logos lexer (see the module doc).
+macro_rules! render_full {
+  ($lexer:expr) => {{
+    let mut lex = $lexer;
+    let mut out = String::new();
+    let mut idx = 0usize;
+    loop {
+      let item = lex.lex();
+      out.push_str(&format!(
+        "#{idx} lex={:?} span={:?} slice={:?}\n",
+        item,
+        lex.span(),
+        lex.slice()
+      ));
+      if item.is_none() {
+        break;
       }
+      idx += 1;
     }
-
-    // A drained lexer sits at span EOF..EOF, so its end equals the source length
-    // and `bump(1)` lands past the last byte: logos asserts the boundary and
-    // panics, so the SIMD layer must panic at the same point. Before the EOF
-    // span reset the SIMD span was stale (the last token, whose end can be below
-    // the length after trailing trivia), so its `bump` stayed in bounds and
-    // silently skipped the panic.
-    let logos_bump_panics = panics(|| {
-      let mut logos = $make_logos;
-      while logos.lex().is_some() {}
-      logos.bump(&1usize);
-    });
-    let simd_bump_panics = panics(|| {
-      let mut simd = $make_simd;
-      while simd.lex().is_some() {}
-      simd.bump(&1usize);
-    });
-    assert_eq!(
-      simd_bump_panics, logos_bump_panics,
-      "post-EOF bump(1) panic parity diverged for {src:?}"
-    );
+    out
   }};
 }
 
-/// Inputs spanning every dispatch path: fast-path identifiers and punctuation
-/// (including the GraphQLx-only `::`/`=>`/`<>`), delegated numbers/strings/block
-/// strings, comments, a leading BOM, trailing trivia, whitespace-only, empty,
-/// and each malformed shape — the cases whose EOF or post-error span most easily
-/// diverges.
-const INPUTS: &[&str] = &[
-  "a::b<K => V>(x: 1, y: \"s\") { z }",
-  "\"\"\"doc\"\"\" type T { f(a: Int = -1): [U!]! }",
-  "foo , \t\r\n  ",
-  "foo # trailing comment",
-  "\u{feff}foo",
-  "  \t\n , ",
-  "",
-  "\"unterminated",
-  "0xZZ",
-  "1e",
-  "foo ? bar",
+/// Inputs spanning every dispatch path — fast-path identifiers and
+/// punctuation (including the GraphQLx-only `::`/`=>`/`<>`), delegated
+/// numbers/strings/block strings, comments, a leading BOM, trailing trivia,
+/// whitespace-only, empty, and each malformed shape — paired with their
+/// frozen `<str>`- and `<[u8]>`-sourced renders (captured from the live
+/// Logos-backed comparator before Task 4 deleted it).
+const INPUTS: &[(&str, &str, &str)] = &[
+  (
+    "a::b<K => V>(x: 1, y: \"s\") { z }",
+    r#"#0 lex=Some(Ok(Identifier("a"))) span=SimpleSpan { start: 0, end: 1 } slice="a"
+#1 lex=Some(Ok(PathSeparator)) span=SimpleSpan { start: 1, end: 3 } slice="::"
+#2 lex=Some(Ok(Identifier("b"))) span=SimpleSpan { start: 3, end: 4 } slice="b"
+#3 lex=Some(Ok(LAngle)) span=SimpleSpan { start: 4, end: 5 } slice="<"
+#4 lex=Some(Ok(Identifier("K"))) span=SimpleSpan { start: 5, end: 6 } slice="K"
+#5 lex=Some(Ok(FatArrow)) span=SimpleSpan { start: 7, end: 9 } slice="=>"
+#6 lex=Some(Ok(Identifier("V"))) span=SimpleSpan { start: 10, end: 11 } slice="V"
+#7 lex=Some(Ok(RAngle)) span=SimpleSpan { start: 11, end: 12 } slice=">"
+#8 lex=Some(Ok(LParen)) span=SimpleSpan { start: 12, end: 13 } slice="("
+#9 lex=Some(Ok(Identifier("x"))) span=SimpleSpan { start: 13, end: 14 } slice="x"
+#10 lex=Some(Ok(Colon)) span=SimpleSpan { start: 14, end: 15 } slice=":"
+#11 lex=Some(Ok(LitInt(Decimal("1")))) span=SimpleSpan { start: 16, end: 17 } slice="1"
+#12 lex=Some(Ok(Identifier("y"))) span=SimpleSpan { start: 19, end: 20 } slice="y"
+#13 lex=Some(Ok(Colon)) span=SimpleSpan { start: 20, end: 21 } slice=":"
+#14 lex=Some(Ok(LitInlineStr(Plain(LitPlainStr { source: "\"s\"" })))) span=SimpleSpan { start: 22, end: 25 } slice="\"s\""
+#15 lex=Some(Ok(RParen)) span=SimpleSpan { start: 25, end: 26 } slice=")"
+#16 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 27, end: 28 } slice="{"
+#17 lex=Some(Ok(Identifier("z"))) span=SimpleSpan { start: 29, end: 30 } slice="z"
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 31, end: 32 } slice="}"
+#19 lex=None span=SimpleSpan { start: 32, end: 32 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(Identifier([97]))) span=SimpleSpan { start: 0, end: 1 } slice=[97]
+#1 lex=Some(Ok(PathSeparator)) span=SimpleSpan { start: 1, end: 3 } slice=[58, 58]
+#2 lex=Some(Ok(Identifier([98]))) span=SimpleSpan { start: 3, end: 4 } slice=[98]
+#3 lex=Some(Ok(LAngle)) span=SimpleSpan { start: 4, end: 5 } slice=[60]
+#4 lex=Some(Ok(Identifier([75]))) span=SimpleSpan { start: 5, end: 6 } slice=[75]
+#5 lex=Some(Ok(FatArrow)) span=SimpleSpan { start: 7, end: 9 } slice=[61, 62]
+#6 lex=Some(Ok(Identifier([86]))) span=SimpleSpan { start: 10, end: 11 } slice=[86]
+#7 lex=Some(Ok(RAngle)) span=SimpleSpan { start: 11, end: 12 } slice=[62]
+#8 lex=Some(Ok(LParen)) span=SimpleSpan { start: 12, end: 13 } slice=[40]
+#9 lex=Some(Ok(Identifier([120]))) span=SimpleSpan { start: 13, end: 14 } slice=[120]
+#10 lex=Some(Ok(Colon)) span=SimpleSpan { start: 14, end: 15 } slice=[58]
+#11 lex=Some(Ok(LitInt(Decimal([49])))) span=SimpleSpan { start: 16, end: 17 } slice=[49]
+#12 lex=Some(Ok(Identifier([121]))) span=SimpleSpan { start: 19, end: 20 } slice=[121]
+#13 lex=Some(Ok(Colon)) span=SimpleSpan { start: 20, end: 21 } slice=[58]
+#14 lex=Some(Ok(LitInlineStr(Plain(LitPlainStr { source: [34, 115, 34] })))) span=SimpleSpan { start: 22, end: 25 } slice=[34, 115, 34]
+#15 lex=Some(Ok(RParen)) span=SimpleSpan { start: 25, end: 26 } slice=[41]
+#16 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 27, end: 28 } slice=[123]
+#17 lex=Some(Ok(Identifier([122]))) span=SimpleSpan { start: 29, end: 30 } slice=[122]
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 31, end: 32 } slice=[125]
+#19 lex=None span=SimpleSpan { start: 32, end: 32 } slice=[]
+"#,
+  ),
+  (
+    "\"\"\"doc\"\"\" type T { f(a: Int = -1): [U!]! }",
+    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: "\"\"\"doc\"\"\"" })))) span=SimpleSpan { start: 0, end: 9 } slice="\"\"\"doc\"\"\""
+#1 lex=Some(Ok(Identifier("type"))) span=SimpleSpan { start: 10, end: 14 } slice="type"
+#2 lex=Some(Ok(Identifier("T"))) span=SimpleSpan { start: 15, end: 16 } slice="T"
+#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 17, end: 18 } slice="{"
+#4 lex=Some(Ok(Identifier("f"))) span=SimpleSpan { start: 19, end: 20 } slice="f"
+#5 lex=Some(Ok(LParen)) span=SimpleSpan { start: 20, end: 21 } slice="("
+#6 lex=Some(Ok(Identifier("a"))) span=SimpleSpan { start: 21, end: 22 } slice="a"
+#7 lex=Some(Ok(Colon)) span=SimpleSpan { start: 22, end: 23 } slice=":"
+#8 lex=Some(Ok(Identifier("Int"))) span=SimpleSpan { start: 24, end: 27 } slice="Int"
+#9 lex=Some(Ok(Equal)) span=SimpleSpan { start: 28, end: 29 } slice="="
+#10 lex=Some(Ok(LitInt(Decimal("-1")))) span=SimpleSpan { start: 30, end: 32 } slice="-1"
+#11 lex=Some(Ok(RParen)) span=SimpleSpan { start: 32, end: 33 } slice=")"
+#12 lex=Some(Ok(Colon)) span=SimpleSpan { start: 33, end: 34 } slice=":"
+#13 lex=Some(Ok(LBracket)) span=SimpleSpan { start: 35, end: 36 } slice="["
+#14 lex=Some(Ok(Identifier("U"))) span=SimpleSpan { start: 36, end: 37 } slice="U"
+#15 lex=Some(Ok(Bang)) span=SimpleSpan { start: 37, end: 38 } slice="!"
+#16 lex=Some(Ok(RBracket)) span=SimpleSpan { start: 38, end: 39 } slice="]"
+#17 lex=Some(Ok(Bang)) span=SimpleSpan { start: 39, end: 40 } slice="!"
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 41, end: 42 } slice="}"
+#19 lex=None span=SimpleSpan { start: 42, end: 42 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: [34, 34, 34, 100, 111, 99, 34, 34, 34] })))) span=SimpleSpan { start: 0, end: 9 } slice=[34, 34, 34, 100, 111, 99, 34, 34, 34]
+#1 lex=Some(Ok(Identifier([116, 121, 112, 101]))) span=SimpleSpan { start: 10, end: 14 } slice=[116, 121, 112, 101]
+#2 lex=Some(Ok(Identifier([84]))) span=SimpleSpan { start: 15, end: 16 } slice=[84]
+#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 17, end: 18 } slice=[123]
+#4 lex=Some(Ok(Identifier([102]))) span=SimpleSpan { start: 19, end: 20 } slice=[102]
+#5 lex=Some(Ok(LParen)) span=SimpleSpan { start: 20, end: 21 } slice=[40]
+#6 lex=Some(Ok(Identifier([97]))) span=SimpleSpan { start: 21, end: 22 } slice=[97]
+#7 lex=Some(Ok(Colon)) span=SimpleSpan { start: 22, end: 23 } slice=[58]
+#8 lex=Some(Ok(Identifier([73, 110, 116]))) span=SimpleSpan { start: 24, end: 27 } slice=[73, 110, 116]
+#9 lex=Some(Ok(Equal)) span=SimpleSpan { start: 28, end: 29 } slice=[61]
+#10 lex=Some(Ok(LitInt(Decimal([45, 49])))) span=SimpleSpan { start: 30, end: 32 } slice=[45, 49]
+#11 lex=Some(Ok(RParen)) span=SimpleSpan { start: 32, end: 33 } slice=[41]
+#12 lex=Some(Ok(Colon)) span=SimpleSpan { start: 33, end: 34 } slice=[58]
+#13 lex=Some(Ok(LBracket)) span=SimpleSpan { start: 35, end: 36 } slice=[91]
+#14 lex=Some(Ok(Identifier([85]))) span=SimpleSpan { start: 36, end: 37 } slice=[85]
+#15 lex=Some(Ok(Bang)) span=SimpleSpan { start: 37, end: 38 } slice=[33]
+#16 lex=Some(Ok(RBracket)) span=SimpleSpan { start: 38, end: 39 } slice=[93]
+#17 lex=Some(Ok(Bang)) span=SimpleSpan { start: 39, end: 40 } slice=[33]
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 41, end: 42 } slice=[125]
+#19 lex=None span=SimpleSpan { start: 42, end: 42 } slice=[]
+"#,
+  ),
+  (
+    "foo , \t\r\n  ",
+    r#"#0 lex=Some(Ok(Identifier("foo"))) span=SimpleSpan { start: 0, end: 3 } slice="foo"
+#1 lex=None span=SimpleSpan { start: 11, end: 11 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(Identifier([102, 111, 111]))) span=SimpleSpan { start: 0, end: 3 } slice=[102, 111, 111]
+#1 lex=None span=SimpleSpan { start: 11, end: 11 } slice=[]
+"#,
+  ),
+  (
+    "foo # trailing comment",
+    r#"#0 lex=Some(Ok(Identifier("foo"))) span=SimpleSpan { start: 0, end: 3 } slice="foo"
+#1 lex=None span=SimpleSpan { start: 22, end: 22 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(Identifier([102, 111, 111]))) span=SimpleSpan { start: 0, end: 3 } slice=[102, 111, 111]
+#1 lex=None span=SimpleSpan { start: 22, end: 22 } slice=[]
+"#,
+  ),
+  (
+    "\u{feff}foo",
+    r#"#0 lex=Some(Ok(Identifier("foo"))) span=SimpleSpan { start: 3, end: 6 } slice="foo"
+#1 lex=None span=SimpleSpan { start: 6, end: 6 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(Identifier([102, 111, 111]))) span=SimpleSpan { start: 3, end: 6 } slice=[102, 111, 111]
+#1 lex=None span=SimpleSpan { start: 6, end: 6 } slice=[]
+"#,
+  ),
+  (
+    "  \t\n , ",
+    "#0 lex=None span=SimpleSpan { start: 7, end: 7 } slice=\"\"\n",
+    "#0 lex=None span=SimpleSpan { start: 7, end: 7 } slice=[]\n",
+  ),
+  (
+    "",
+    "#0 lex=None span=SimpleSpan { start: 0, end: 0 } slice=\"\"\n",
+    "#0 lex=None span=SimpleSpan { start: 0, end: 0 } slice=[]\n",
+  ),
+  (
+    "\"unterminated",
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: Quote, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice="\"unterminated"
+#1 lex=None span=SimpleSpan { start: 13, end: 13 } slice=""
+"#,
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: Quote, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice=[34, 117, 110, 116, 101, 114, 109, 105, 110, 97, 116, 101, 100]
+#1 lex=None span=SimpleSpan { start: 13, end: 13 } slice=[]
+"#,
+  ),
+  (
+    "0xZZ",
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: Hex(UnexpectedSuffix(Range(SimpleSpan { start: 2, end: 4 }))) }]))) span=SimpleSpan { start: 0, end: 4 } slice="0xZZ"
+#1 lex=None span=SimpleSpan { start: 4, end: 4 } slice=""
+"#,
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: Hex(UnexpectedSuffix(Range(SimpleSpan { start: 2, end: 4 }))) }]))) span=SimpleSpan { start: 0, end: 4 } slice=[48, 120, 90, 90]
+#1 lex=None span=SimpleSpan { start: 4, end: 4 } slice=[]
+"#,
+  ),
+  (
+    "1e",
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "float" }), hint: Exponent(SignOrDigit), _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice="1e"
+#1 lex=None span=SimpleSpan { start: 2, end: 2 } slice=""
+"#,
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "float" }), hint: Exponent(SignOrDigit), _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice=[49, 101]
+#1 lex=None span=SimpleSpan { start: 2, end: 2 } slice=[]
+"#,
+  ),
+  (
+    "foo ? bar",
+    r#"#0 lex=Some(Ok(Identifier("foo"))) span=SimpleSpan { start: 0, end: 3 } slice="foo"
+#1 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 4, end: 5 }, data: UnknownLexeme(Char(PositionedChar { char: '?', position: 4 })) }]))) span=SimpleSpan { start: 4, end: 5 } slice="?"
+#2 lex=Some(Ok(Identifier("bar"))) span=SimpleSpan { start: 6, end: 9 } slice="bar"
+#3 lex=None span=SimpleSpan { start: 9, end: 9 } slice=""
+"#,
+    r#"#0 lex=Some(Ok(Identifier([102, 111, 111]))) span=SimpleSpan { start: 0, end: 3 } slice=[102, 111, 111]
+#1 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 4, end: 5 }, data: UnknownLexeme(Char(PositionedChar { char: 63, position: 4 })) }]))) span=SimpleSpan { start: 4, end: 5 } slice=[63]
+#2 lex=Some(Ok(Identifier([98, 97, 114]))) span=SimpleSpan { start: 6, end: 9 } slice=[98, 97, 114]
+#3 lex=None span=SimpleSpan { start: 9, end: 9 } slice=[]
+"#,
+  ),
 ];
 
 #[test]
 fn full_trait_parity_str() {
-  for &src in INPUTS {
-    assert_full_parity!(
-      src,
-      GraphqlxLogos::<&str>::new(src),
-      SimdSyntacticLexer::<str>::new(src)
+  for (src, expected, _) in INPUTS {
+    assert_eq!(
+      &render_full!(SimdSyntacticLexer::<str>::new(src)),
+      expected,
+      "mismatch for {src:?}"
     );
+
+    // Frozen reference: a drained lexer sits at span EOF..EOF (see the render
+    // above), so its end equals the source length and a post-EOF `bump(1)`
+    // always lands past the last byte — logos always panicked on this
+    // boundary check, for every input, when this ran against a live
+    // comparator.
+    let simd_panicked = panics(|| {
+      let mut simd = SimdSyntacticLexer::<str>::new(src);
+      while simd.lex().is_some() {}
+      simd.bump(&1usize);
+    });
+    assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
   }
 }
 
 #[test]
 fn full_trait_parity_bytes() {
   // The same drive over `<[u8]>` (SIMD) vs `<&[u8]>` (Logos): they share the
-  // `SyntacticToken<&[u8]>` token, so every observable is directly comparable.
-  for &src in INPUTS {
-    assert_full_parity!(
-      src,
-      GraphqlxLogos::<&[u8]>::new(src.as_bytes()),
-      SimdSyntacticLexer::<[u8]>::new(src.as_bytes())
+  // `SyntacticToken<&[u8]>` token, so every observable was directly
+  // comparable, and the frozen renders below are captured from that byte
+  // side.
+  for (src, _, expected) in INPUTS {
+    assert_eq!(
+      &render_full!(SimdSyntacticLexer::<[u8]>::new(src.as_bytes())),
+      expected,
+      "mismatch for {src:?}"
     );
+
+    let simd_panicked = panics(|| {
+      let mut simd = SimdSyntacticLexer::<[u8]>::new(src.as_bytes());
+      while simd.lex().is_some() {}
+      simd.bump(&1usize);
+    });
+    assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
   }
 }
 
 #[test]
 fn full_trait_parity_low_recursion_limit() {
-  // Deep nesting past a low limit drives the over-limit region (recursion errors
-  // in the token's place, plus the finish!/decrease paths) all the way to EOF.
+  // Deep nesting past a low limit drives the over-limit region (recursion
+  // errors in the token's place, plus the finish!/decrease paths) all the way
+  // to EOF. Frozen reference captured the same way as `INPUTS` above (this
+  // region is `(`/`)`-only, so it renders identically to the GraphQL
+  // counterpart's; GraphQLx-specific recursion coverage over `<`/`>` lives in
+  // `tests/oracle.rs`'s low-recursion parity test).
   let depth = 8;
   let big = "(".repeat(depth) + "x" + &")".repeat(depth);
   let src: &str = &big;
   let limit = 3;
-  assert_full_parity!(
-    src,
-    GraphqlxLogos::<&str>::with_state(src, RecursionLimiter::with_limitation(limit)),
-    SimdSyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit))
+  let expected = r#"#0 lex=Some(Ok(LParen)) span=SimpleSpan { start: 0, end: 1 } slice="("
+#1 lex=Some(Ok(LParen)) span=SimpleSpan { start: 1, end: 2 } slice="("
+#2 lex=Some(Ok(LParen)) span=SimpleSpan { start: 2, end: 3 } slice="("
+#3 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 3, end: 4 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 4 })) }]))) span=SimpleSpan { start: 3, end: 4 } slice="("
+#4 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 4, end: 5 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 5 })) }]))) span=SimpleSpan { start: 4, end: 5 } slice="("
+#5 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 5, end: 6 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 6 })) }]))) span=SimpleSpan { start: 5, end: 6 } slice="("
+#6 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 6, end: 7 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 7 })) }]))) span=SimpleSpan { start: 6, end: 7 } slice="("
+#7 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 7, end: 8 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 8 })) }]))) span=SimpleSpan { start: 7, end: 8 } slice="("
+#8 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 8 })) }]))) span=SimpleSpan { start: 8, end: 9 } slice="x"
+#9 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 7 })) }]))) span=SimpleSpan { start: 9, end: 10 } slice=")"
+#10 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 6 })) }]))) span=SimpleSpan { start: 10, end: 11 } slice=")"
+#11 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 5 })) }]))) span=SimpleSpan { start: 11, end: 12 } slice=")"
+#12 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 3, current: 4 })) }]))) span=SimpleSpan { start: 12, end: 13 } slice=")"
+#13 lex=Some(Ok(RParen)) span=SimpleSpan { start: 13, end: 14 } slice=")"
+#14 lex=Some(Ok(RParen)) span=SimpleSpan { start: 14, end: 15 } slice=")"
+#15 lex=Some(Ok(RParen)) span=SimpleSpan { start: 15, end: 16 } slice=")"
+#16 lex=Some(Ok(RParen)) span=SimpleSpan { start: 16, end: 17 } slice=")"
+#17 lex=None span=SimpleSpan { start: 17, end: 17 } slice=""
+"#;
+  assert_eq!(
+    render_full!(SimdSyntacticLexer::<str>::with_state(
+      src,
+      RecursionLimiter::with_limitation(limit)
+    )),
+    expected
   );
+
+  let simd_panicked = panics(|| {
+    let mut simd =
+      SimdSyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
+    while simd.lex().is_some() {}
+    simd.bump(&1usize);
+  });
+  assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
 }

@@ -1,24 +1,30 @@
-//! `Lexer::bump` parity between the SIMD lexer and the Logos lexer it
-//! drop-in replaces (`GraphqlxLogos` below — no public alias anymore now that
-//! `SyntacticLexer` names the SIMD lexer; the GraphQLx counterpart of the
-//! GraphQL bump tests).
+//! `Lexer::bump` parity between the GraphQLx SIMD lexer and
+//! `logos::Lexer::bump` (the GraphQLx counterpart of
+//! `graphql/simd/bump_parity_tests.rs`).
+//!
+//! Historically these tests drove a live Logos-backed lexer over the full
+//! `SyntacticToken` grammar (a local type alias this file used to declare)
+//! side by side with the SIMD lexer over identical inputs and `bump` calls,
+//! asserting every observable agreed. Task 4 of the Logos-slimming plan
+//! severs that live comparator — the full `SyntacticToken` grammar it
+//! depended on is deleted in Task 5 — so the values it used to produce are
+//! frozen below as hardcoded constants, captured from that live comparator
+//! immediately before deletion (see
+//! `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`, Task 4).
 //!
 //! `bump` must mirror `logos::Lexer::bump`: it extends the current token's end
 //! (so `span()`/`slice()` grow to include the bumped bytes) and validates the
 //! new end as a source boundary, panicking (`"Invalid Lexer bump"`) when it
 //! isn't — past the byte length, or mid-UTF-8 for a `str` source. These tests
-//! drive both lexers over identical inputs and `bump` calls and assert every
-//! observable agrees: `span()`, `slice()`, the next `lex()`, and panic-vs-not.
+//! drive the SIMD lexer over inputs + `bump` calls and assert every observable
+//! against its frozen reference: `span()`, `slice()`, the next `lex()`, and
+//! panic-vs-not.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::{Lexer, lexer::LogosLexer};
+use tokit::{Lexer, SimpleSpan};
 
 use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
-
-// Live Logos lexer for parity tests — named directly (no public alias). This
-// is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
-type GraphqlxLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;
@@ -34,109 +40,99 @@ fn panics<F: FnOnce()>(f: F) -> bool {
 #[test]
 fn valid_bump_grows_span_and_next_lex_matches_logos() {
   // `foo   bar`: lex `foo`, bump past two of the three trivia bytes, then let
-  // the dispatch loop skip the third. Both lexers must report the grown
-  // span/slice and the same next token.
+  // the dispatch loop skip the third. Frozen reference (captured from the
+  // live Logos-backed comparator before Task 4 deleted it): token 0 is
+  // `Identifier("foo")` at 0..3; after `bump(2)` span/slice grow to 0..5 /
+  // "foo  "; the next token is `Identifier("bar")` at 6..9; the stream ends
+  // (`None`) immediately after.
   let src = "foo   bar";
-  let mut logos = GraphqlxLogos::new(src);
   let mut simd = SimdSyntacticLexer::<str>::new(src);
 
-  // Token 0 — identical.
-  assert_eq!(simd.lex(), logos.lex(), "token 0");
-  assert_eq!(simd.span(), logos.span(), "token 0 span");
-  assert_eq!(simd.slice(), logos.slice(), "token 0 slice");
+  // Token 0.
+  assert_eq!(
+    simd.lex(),
+    Some(Ok(SyntacticToken::Identifier("foo"))),
+    "token 0"
+  );
+  assert_eq!(simd.span(), SimpleSpan::new(0, 3), "token 0 span");
+  assert_eq!(simd.slice(), "foo", "token 0 slice");
 
-  // Bump by 2 (into the run of spaces): span/slice must grow identically.
+  // Bump by 2 (into the run of spaces): span/slice must grow to match.
   let n = 2usize;
-  logos.bump(&n);
   simd.bump(&n);
-  assert_eq!(simd.span(), logos.span(), "span after bump");
-  assert_eq!(simd.slice(), logos.slice(), "slice after bump");
+  assert_eq!(simd.span(), SimpleSpan::new(0, 5), "span after bump");
+  assert_eq!(simd.slice(), "foo  ", "slice after bump");
 
-  // Next token — the loop skips remaining trivia; both must agree, span/slice
-  // included.
-  assert_eq!(simd.lex(), logos.lex(), "next lex after bump");
-  assert_eq!(simd.span(), logos.span(), "next token span");
-  assert_eq!(simd.slice(), logos.slice(), "next token slice");
+  // Next token — the loop skips remaining trivia.
+  assert_eq!(
+    simd.lex(),
+    Some(Ok(SyntacticToken::Identifier("bar"))),
+    "next lex after bump"
+  );
+  assert_eq!(simd.span(), SimpleSpan::new(6, 9), "next token span");
+  assert_eq!(simd.slice(), "bar", "next token slice");
 
-  // Drain — full-stream parity through EOF.
-  loop {
-    let (l, s) = (logos.lex(), simd.lex());
-    assert_eq!(s, l, "tail lex");
-    if l.is_none() {
-      break;
-    }
-  }
+  // Drain — the stream ends right after `bar`.
+  assert_eq!(simd.lex(), None, "tail lex");
 }
 
 #[test]
 fn bump_after_error_token_matches_logos() {
   // `..x`: `..` is an unterminated-spread error token spanning `0..2`
-  // (delegated to Logos in GraphQLx), and `x` follows so a one-byte bump stays
-  // a valid boundary. Both lexers track the error token's span, so `bump` grows
-  // both identically.
+  // (delegated to Logos in GraphQLx), and `x` follows so a one-byte bump
+  // stays a valid boundary. Frozen reference (captured the same way as
+  // above): the error token's `Debug` text is exactly the constant below;
+  // after `bump(1)` the span grows to 0..3 and the slice becomes "..x".
   let src = "..x";
-  let mut logos = GraphqlxLogos::new(src);
   let mut simd = SimdSyntacticLexer::<str>::new(src);
 
-  let l0 = logos.lex();
   let s0 = simd.lex();
-  assert_eq!(s0, l0, "error token");
   assert!(
-    matches!(l0, Some(Err(_))),
-    "expected an error token, got {l0:?}"
+    matches!(s0, Some(Err(_))),
+    "expected an error token, got {s0:?}"
   );
-  assert_eq!(simd.span(), logos.span(), "error token span");
+  assert_eq!(
+    format!("{s0:?}"),
+    "Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, \
+     data: UnterminatedSpreadOperator }])))",
+    "error token"
+  );
+  assert_eq!(simd.span(), SimpleSpan::new(0, 2), "error token span");
 
   let n = 1usize;
-  logos.bump(&n);
   simd.bump(&n);
-  assert_eq!(simd.span(), logos.span(), "span after bump past error");
-  assert_eq!(simd.slice(), logos.slice(), "slice after bump past error");
+  assert_eq!(simd.span(), SimpleSpan::new(0, 3), "span after bump past error");
+  assert_eq!(simd.slice(), "..x", "slice after bump past error");
 }
 
 #[test]
 fn bump_past_end_panics_like_logos() {
-  // Whole source consumed, then a one-byte bump lands past the end. logos'
-  // `bump` asserts `is_boundary(token_end)` (`index <= len` for a `str`'s byte
-  // length), so it panics; the SIMD lexer must panic at the same point.
+  // Whole source consumed, then a one-byte bump lands past the end. Frozen
+  // reference: `logos::Lexer::bump` asserts `is_boundary(token_end)` (`index
+  // <= len` for a `str`'s byte length), which fails unconditionally here, so
+  // it panicked every time this was checked against a live comparator; the
+  // SIMD lexer must panic at the same point.
   let src = "ab";
-  let logos_panicked = panics(|| {
-    let mut logos = GraphqlxLogos::new(src);
-    let _ = logos.lex(); // `ab`, span 0..2
-    logos.bump(&1usize); // -> 3, past end
-  });
   let simd_panicked = panics(|| {
     let mut simd = SimdSyntacticLexer::<str>::new(src);
-    let _ = simd.lex();
-    simd.bump(&1usize);
+    let _ = simd.lex(); // `ab`, span 0..2
+    simd.bump(&1usize); // -> 3, past end
   });
-  assert!(logos_panicked, "logos should panic bumping past end");
-  assert_eq!(
-    simd_panicked, logos_panicked,
-    "SIMD must panic exactly when logos does"
-  );
+  assert!(simd_panicked, "SIMD must panic bumping past end, like logos");
 }
 
 #[test]
 fn bump_into_multibyte_char_panics_like_logos() {
   // `aé`: `a` at byte 0, `é` at bytes 1..3 (0xC3 0xA9). After lexing `a` the
-  // cursor sits at 1; a one-byte bump lands at byte 2 — the middle of `é`. For
-  // `str`, logos asserts `is_char_boundary`, so it panics; the SIMD lexer must
+  // cursor sits at 1; a one-byte bump lands at byte 2 — the middle of `é`.
+  // Frozen reference: for `str`, `logos::Lexer::bump` asserts
+  // `is_char_boundary` and panics unconditionally here; the SIMD lexer must
   // too.
   let src = "aé";
-  let logos_panicked = panics(|| {
-    let mut logos = GraphqlxLogos::new(src);
-    let _ = logos.lex(); // `a`, span 0..1
-    logos.bump(&1usize); // -> 2, mid-`é`
-  });
   let simd_panicked = panics(|| {
     let mut simd = SimdSyntacticLexer::<str>::new(src);
     let _ = simd.lex();
     simd.bump(&1usize);
   });
-  assert!(logos_panicked, "logos should panic bumping mid-UTF-8");
-  assert_eq!(
-    simd_panicked, logos_panicked,
-    "SIMD must panic exactly when logos does"
-  );
+  assert!(simd_panicked, "SIMD must panic bumping mid-UTF-8, like logos");
 }

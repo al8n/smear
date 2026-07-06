@@ -18,23 +18,6 @@ use std::{fs, path::PathBuf};
 
 use tokit::lexer::Lexer as _;
 
-// Live Logos lexer for differential tests — named directly (no public alias).
-// This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
-#[cfg(feature = "graphql")]
-type GraphqlLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
-  'a,
-  smear_lexer::graphql::syntactic::SyntacticToken<&'a str>,
->;
-
-// Live Logos lexer for GraphQLx differential tests — named directly (no
-// public alias). This is exactly what `SyntacticLexer<'a, &'a str>` used to
-// resolve to.
-#[cfg(feature = "graphqlx")]
-type GraphqlxLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
-  'a,
-  smear_lexer::graphqlx::syntactic::SyntacticToken<&'a str>,
->;
-
 /// Render a lexer's full stream to a stable, diffable string.
 ///
 /// `Ok`  → `OK  <start>..<end>  <Debug of token>`
@@ -229,23 +212,16 @@ const EDGES: &[(&str, &str)] = &[
   ),
 ];
 
-#[cfg(feature = "graphql")]
-#[test]
-fn graphql_syntactic_oracle() {
-  let mut mismatches = Vec::new();
-  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let rendered = render_stream!(GraphqlLogos::new(src));
-    check("graphql-syntactic", name, &rendered, &mut mismatches);
-  }
-  assert_no_mismatches(&mismatches);
-}
-
 // ─── SIMD-vs-golden parity (phase 1b Task 2) ──────────────────────────────
 //
 // `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
-// what the `&str`-sourced Logos oracle above was captured from -- so its
-// render is byte-for-byte identical to the golden files. No conversion is
-// needed (contrast the phase 1a version of this test, which could only drive
+// what these golden files were originally captured from via a live
+// Logos-backed lexer over the full `SyntacticToken` grammar (that
+// differential test, `graphql_syntactic_oracle`, was deleted in Task 4 of the
+// Logos-slimming plan once this SIMD-vs-golden test below had proven the same
+// thing more directly; see git history for the deleted test) -- so its render
+// is byte-for-byte identical to the golden files. No conversion is needed
+// (contrast the phase 1a version of this test, which could only drive
 // `SimdSyntacticLexer::<[u8]>` and had to paper over the resulting `Char = u8`
 // vs. `Char = char` `Debug` mismatch with a pair of text-rewriting hacks).
 
@@ -261,7 +237,7 @@ fn graphql_syntactic_simd_oracle() {
   assert_no_mismatches(&mismatches);
 }
 
-// ─── Low-recursion-limit SIMD-vs-Logos parity ─────────────────────────────
+// ─── Low-recursion-limit SIMD parity ───────────────────────────────────────
 //
 // The frozen oracle above runs at the default limit (500), which no fixture
 // approaches, so it cannot catch a fast-path arm that emits a token while the
@@ -269,9 +245,16 @@ fn graphql_syntactic_simd_oracle() {
 // after every successful token and, while over the limit, returns the
 // recursion error in the token's place; every SIMD fast-path emission must do
 // the same. A limit of 0 puts every token after the first bracket over the
-// limit, and each input keeps lexing past that first error, so the SIMD and
-// Logos streams agree only if every arm re-checks. Comparing the two lexers
-// directly (both `Char = char`) needs no golden file.
+// limit, and each input keeps lexing past that first error, so the SIMD
+// stream only matches the frozen expectation below if every arm re-checks.
+//
+// This used to compare the SIMD render directly against a live Logos-backed
+// lexer (both `Char = char`, so no golden file was needed). Task 4 of the
+// Logos-slimming plan severed that live comparator — the full `SyntacticToken`
+// grammar it depended on is deleted in Task 5 — so each expected render below
+// is frozen from that comparator's output, captured immediately before
+// deletion (see `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`,
+// Task 4).
 
 #[cfg(feature = "graphql")]
 #[test]
@@ -281,30 +264,106 @@ fn graphql_syntactic_simd_low_recursion_parity() {
   // Each input exercises a different set of gated arms past the first
   // over-limit bracket: identifier + close-bracket, nested brackets, the
   // colon/`LitInt`/`LitFloat` arms, both inline-string arms, and spread.
-  for src in [
-    "{a}",
-    "{{a}}",
-    "((x))",
-    "[x]",
-    "{ a(b: 1, c: 1.5) }",
-    r#"{ s: "x" }"#,
-    r#"{ e: "" }"#,
+  const CASES: &[(&str, &str)] = &[
+    (
+      "{a}",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  2..3  RBrace\n",
+    ),
+    (
+      "{{a}}",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 1, end: 2 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  4..5  RBrace\n",
+    ),
+    (
+      "((x))",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 1, end: 2 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  4..5  RParen\n",
+    ),
+    (
+      "[x]",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  2..3  RBracket\n",
+    ),
+    (
+      "{ a(b: 1, c: 1.5) }",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 3, end: 4 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  18..19  RBrace\n",
+    ),
+    (
+      r#"{ s: "x" }"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  9..10  RBrace\n",
+    ),
+    (
+      r#"{ e: "" }"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  8..9  RBrace\n",
+    ),
     // block strings on the SIMD fast path must re-check the limiter through
     // `finish!` too: plain, empty, and complex (common-indent) bodies.
-    r#"{ s: """x""" }"#,
-    r#"{ e: """""" }"#,
-    "{ s: \"\"\"foo\n  bar\"\"\" }",
-    "{ ...a }",
-  ] {
+    (
+      r#"{ s: """x""" }"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  13..14  RBrace\n",
+    ),
+    (
+      r#"{ e: """""" }"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  12..13  RBrace\n",
+    ),
+    (
+      "{ s: \"\"\"foo\n  bar\"\"\" }",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  21..22  RBrace\n",
+    ),
+    (
+      "{ ...a }",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  7..8  RBrace\n",
+    ),
+  ];
+
+  for (src, expected) in CASES {
     let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));
-    let logos = render_stream!(GraphqlLogos::with_state(
-      src,
-      RecursionLimiter::with_limitation(0),
-    ));
-    assert_eq!(simd, logos, "low-limit stream mismatch for {src:?}");
+    assert_eq!(&simd, expected, "low-limit stream mismatch for {src:?}");
   }
 }
 
@@ -831,20 +890,14 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
   ("gx_unknown_byte", "{ a ? b }"),
 ];
 
-#[cfg(feature = "graphqlx")]
-#[test]
-fn graphqlx_syntactic_oracle() {
-  let mut mismatches = Vec::new();
-  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let rendered = render_stream!(GraphqlxLogos::new(src));
-    check("graphqlx-syntactic", name, &rendered, &mut mismatches);
-  }
-  assert_no_mismatches(&mismatches);
-}
-
 // `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
-// what the `&str`-sourced Logos oracle above was captured from -- so its render
-// is byte-for-byte identical to the golden files, no conversion needed.
+// what these golden files were originally captured from via a live
+// Logos-backed lexer over the full `SyntacticToken` grammar (that
+// differential test, `graphqlx_syntactic_oracle`, was deleted in Task 4 of
+// the Logos-slimming plan once this SIMD-vs-golden test below had proven the
+// same thing more directly; see git history for the deleted test) -- so its
+// render is byte-for-byte identical to the golden files, no conversion
+// needed.
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_oracle() {
@@ -857,41 +910,130 @@ fn graphqlx_syntactic_simd_oracle() {
   assert_no_mismatches(&mismatches);
 }
 
-// Low-recursion-limit SIMD-vs-Logos parity for GraphQLx (see the GraphQL
-// counterpart above for the rationale). Angle brackets `<`/`>` count toward
-// the recursion budget here, so the inputs nest them; `::` and `=>`
-// additionally cover the two-byte-punct arm, which GraphQL has no analog for.
+// Low-recursion-limit SIMD parity for GraphQLx (see the GraphQL counterpart
+// above for the rationale). Angle brackets `<`/`>` count toward the
+// recursion budget here, so the inputs nest them; `::` and `=>` additionally
+// cover the two-byte-punct arm, which GraphQL has no analog for.
+//
+// This used to compare the SIMD render directly against a live Logos-backed
+// lexer (both `Char = char`, so no golden file was needed). Task 4 of the
+// Logos-slimming plan severed that live comparator — the full `SyntacticToken`
+// grammar it depended on is deleted in Task 5 — so each expected render below
+// is frozen from that comparator's output, captured immediately before
+// deletion (see `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`,
+// Task 4).
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
   use smear_lexer::graphqlx::simd::SimdSyntacticLexer;
   use tokit::state::recursion_tracker::RecursionLimiter;
 
-  for src in [
-    "Box<Inner<T>>",
-    "<a::b>",
-    "<x => y>",
-    "<a + b>",
-    "{a}",
-    "((x))",
-    r#"<v: "s">"#,
-    r#"<e: "">"#,
+  const CASES: &[(&str, &str)] = &[
+    (
+      "Box<Inner<T>>",
+      "OK  0..3  Identifier(\"Box\")\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 3, end: 4 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 9, end: 10 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  12..13  RAngle\n",
+    ),
+    (
+      "<a::b>",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  5..6  RAngle\n",
+    ),
+    (
+      "<x => y>",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  7..8  RAngle\n",
+    ),
+    (
+      "<a + b>",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  6..7  RAngle\n",
+    ),
+    (
+      "{a}",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  2..3  RBrace\n",
+    ),
+    (
+      "((x))",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 1, end: 2 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 2 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  4..5  RParen\n",
+    ),
+    (
+      r#"<v: "s">"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  7..8  RAngle\n",
+    ),
+    (
+      r#"<e: "">"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  6..7  RAngle\n",
+    ),
     // block strings on the SIMD fast path must re-check the limiter through
     // `finish!` too: plain, empty, and complex (common-indent) bodies.
-    r#"<v: """x""">"#,
-    r#"<e: """""">"#,
-    "<v: \"\"\"foo\n  bar\"\"\">",
-    "<...a>",
-  ] {
+    (
+      r#"<v: """x""">"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  11..12  RAngle\n",
+    ),
+    (
+      r#"<e: """""">"#,
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  10..11  RAngle\n",
+    ),
+    (
+      "<v: \"\"\"foo\n  bar\"\"\">",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  19..20  RAngle\n",
+    ),
+    (
+      "<...a>",
+      "ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 0 }, data: State(RecursionLimitExceeded(RecursionLimiter { max: 0, current: 1 })) }])\n\
+       OK  5..6  RAngle\n",
+    ),
+  ];
+
+  for (src, expected) in CASES {
     let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));
-    let logos = render_stream!(GraphqlxLogos::with_state(
-      src,
-      RecursionLimiter::with_limitation(0),
-    ));
-    assert_eq!(simd, logos, "low-limit stream mismatch for {src:?}");
+    assert_eq!(&simd, expected, "low-limit stream mismatch for {src:?}");
   }
 }
 
