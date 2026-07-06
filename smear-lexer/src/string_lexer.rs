@@ -358,3 +358,85 @@ impl<'de: 'a, 'a> TryFrom<&'de [u8]> for LitStr<&'a [u8]> {
     }
   }
 }
+
+/// Panic message for the (statically unreachable) case where a string the SIMD
+/// fast path routed to error delegation turns out to lex cleanly.
+const VALID_STRING_UNREACHABLE: &str =
+  "SIMD string fast path emits every valid string literal; only errors reach delegation";
+
+/// Delegate a malformed string literal — whose opener the SIMD fast path could
+/// not resolve — straight to the `string_lexer` sub-lexer, i.e. the very same
+/// `lex_*` code the full grammar reaches through its `#[token("\"")]` /
+/// `#[token("\"\"\"")]` arms, but *without* paying to build the whole grammar.
+///
+/// Implemented for the two Logos scan primitives (`str`, `[u8]`). Both dialects'
+/// SIMD lexers call this on the string-error arms of their dispatch loop; it is
+/// the string twin of `simd_common::delegate_to_logos`.
+///
+/// The seek combines the position-0 `TryFrom` idiom above (construct a carrier,
+/// `bump` past the opener) with `delegate_to_logos`'s mid-stream positioning
+/// (start from the whole source and advance to `token_start`): the carrier is
+/// built over the entire source, then bumped to `token_start + opener_len` so
+/// the sub-lexer's base offset lands exactly where the full grammar's did. The
+/// returned end offset is `carrier.span().end` after lexing — equal to the end
+/// of the error-token span the full grammar reports — so the caller can build a
+/// byte-for-byte-identical error span of `token_start..end`.
+///
+/// Only ever invoked on the error path: the SIMD fast path emits every *valid*
+/// string itself, so the delegated `lex_*` here always returns `Err` (hence the
+/// [`VALID_STRING_UNREACHABLE`] `expect_err`).
+pub(crate) trait DelegateStringError {
+  /// The `StringErrors` character type this primitive lexes into: `char` for
+  /// `str`, `u8` for `[u8]` — matching the SIMD lexer's own `Slice::Char`.
+  type Char;
+
+  /// Lex the malformed string literal opening at `token_start`, returning its
+  /// collected errors and the absolute byte offset where lexing stopped.
+  ///
+  /// `block` selects the block (`"""`, 3-byte opener) carrier over the inline
+  /// (`"`, 1-byte opener) one. See the trait docs for the seek/span contract.
+  fn delegate_string_error(&self, token_start: usize, block: bool)
+  -> (StringErrors<Self::Char>, usize);
+}
+
+impl DelegateStringError for str {
+  type Char = char;
+
+  #[inline]
+  fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<char>, usize) {
+    if block {
+      let mut lexer = Lexer::<block::BlockStringToken>::new(self);
+      lexer.bump(token_start + 3);
+      let errs = block::lex_block_str_from_str(SealedWrapper::from_mut(&mut lexer))
+        .expect_err(VALID_STRING_UNREACHABLE);
+      (errs, lexer.span().end)
+    } else {
+      let mut lexer = Lexer::<inline::StringToken>::new(self);
+      lexer.bump(token_start + 1);
+      let errs = inline::lex_inline_str_from_str(SealedWrapper::from_mut(&mut lexer))
+        .expect_err(VALID_STRING_UNREACHABLE);
+      (errs, lexer.span().end)
+    }
+  }
+}
+
+impl DelegateStringError for [u8] {
+  type Char = u8;
+
+  #[inline]
+  fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    if block {
+      let mut lexer = Lexer::<block::BytesBlockStringToken>::new(self);
+      lexer.bump(token_start + 3);
+      let errs = block::lex_block_str_from_bytes(SealedWrapper::from_mut(&mut lexer))
+        .expect_err(VALID_STRING_UNREACHABLE);
+      (errs, lexer.span().end)
+    } else {
+      let mut lexer = Lexer::<inline::BytesStringToken>::new(self);
+      lexer.bump(token_start + 1);
+      let errs = inline::lex_inline_str_from_bytes(SealedWrapper::from_mut(&mut lexer))
+        .expect_err(VALID_STRING_UNREACHABLE);
+      (errs, lexer.span().end)
+    }
+  }
+}

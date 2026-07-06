@@ -45,10 +45,11 @@ use crate::{
   LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitPlainStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphql::{
-    error::{LexerError, LexerErrors},
+    error::{LexerError, LexerErrorData, LexerErrors},
     syntactic::SyntacticToken,
   },
   skip_block_str_from_bytes, skip_inline_str_simd,
+  string_lexer::DelegateStringError,
 };
 
 mod number;
@@ -100,6 +101,12 @@ where
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: ScanSource + ?Sized,
   S::Slice<'inp>: AsBytes,
+  // The string-error slow path (`delegate_string_error`) hands the malformed
+  // literal straight to `string_lexer`'s `lex_*` over this source's scan
+  // primitive; that primitive is always `str`/`[u8]`, both of which impl
+  // `DelegateStringError`, and its `Char` is this lexer's `Slice::Char`.
+  <S as ScanSource>::ScanPrimitive:
+    DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
 {
   type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
 
@@ -354,7 +361,7 @@ where
               };
               return Some(finish!(self, SyntacticToken::LitBlockStr(block)));
             }
-            Err(_) => return self.delegate_to_logos(token_start),
+            Err(_) => return self.delegate_string_error(token_start, true),
           }
         }
         b'"' if !bytes.starts_with(b"\"\"\"") => {
@@ -370,11 +377,14 @@ where
               ));
             }
             None => {
-              // Lone `"` at end of input — unterminated. Delegate to Logos
-              // so the error is built generically for whatever `Char` this
-              // source uses, instead of hand-rolling it here (hybrid: the
-              // fast path never constructs source-typed errors itself).
-              return self.delegate_to_logos(token_start);
+              // Lone `"` at end of input — an unterminated inline string.
+              // Route it through the inline string sub-lexer (via the same
+              // error-delegation path as any other inline-string error) so the
+              // `unterminated_inline_string` error is built generically for
+              // whatever `Char` this source uses, instead of hand-rolling it
+              // here (hybrid: the fast path never constructs source-typed
+              // errors itself).
+              return self.delegate_string_error(token_start, false);
             }
             Some(_) => match skip_inline_str_simd(token_start + 1, &bytes[1..]) {
               Ok(lit) => {
@@ -392,11 +402,12 @@ where
               }
               // `skip_inline_str_simd` only ever answers "clean, valid
               // literal" or "byte-indexed anomaly" — like the number fast
-              // path, any anomaly delegates the *whole* token to
-              // Logos rather than re-deriving the error here. This is also
-              // what drops the `Char = u8` requirement: the only place that
-              // ever built a `StringErrors<u8>` inline is gone.
-              Err(_) => return self.delegate_to_logos(token_start),
+              // path, any anomaly delegates the *whole* token to the inline
+              // string sub-lexer (`string_lexer::inline`) rather than
+              // re-deriving the error here. This is also what drops the
+              // `Char = u8` requirement: the only place that ever built a
+              // `StringErrors<u8>` inline is gone.
+              Err(_) => return self.delegate_string_error(token_start, false),
             },
           }
         }
@@ -499,6 +510,63 @@ where
         Some(Err(error))
       }
     }
+  }
+}
+
+// Bounds mirror the trait impl's, minus the Logos machinery this path never
+// touches (it never builds a `LogosLexer`), plus the `DelegateStringError`
+// predicate the string sub-lexer delegation needs — always satisfiable, since
+// `ScanPrimitive` is `str`/`[u8]`. As with `delegate_to_logos`, every caller is
+// inside `lex()`, where the trait impl's full bound set (which now includes this
+// predicate) already holds.
+//
+// `DelegateStringError` is a crate-internal delegation detail (`pub(crate)`);
+// it appears here only as a bound on a private method, never as nameable API,
+// so silence `private_bounds` rather than widen the trait's visibility.
+#[allow(private_bounds)]
+impl<'inp, S> SimdSyntacticLexer<'inp, S>
+where
+  S: ScanSource + ?Sized,
+  <S as ScanSource>::ScanPrimitive:
+    DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
+{
+  /// Delegate the malformed string literal opening at `token_start` directly to
+  /// the `string_lexer` `lex_*` code — the same path the full grammar reaches
+  /// through its `#[token("\"")]` / `#[token("\"\"\"")]` arms — instead of
+  /// rebuilding the whole `SyntacticToken` grammar via [`delegate_to_logos`].
+  ///
+  /// `block` picks the `"""` (block) vs `"` (inline) carrier. Valid strings are
+  /// emitted by the SIMD fast path and never reach here, so the delegated lexer
+  /// always yields errors; each is wrapped in a `String` [`LexerErrorData`] with
+  /// span `token_start..end` — byte-identical to the error token the full
+  /// grammar produced — and `cursor`/`last_span`/`last_error_span` are folded
+  /// exactly as `delegate_to_logos`'s [`Delegated::Error`] arm does.
+  ///
+  /// [`delegate_to_logos`]: Self::delegate_to_logos
+  #[allow(clippy::type_complexity)]
+  #[cfg_attr(not(tarpaulin), inline(always))]
+  fn delegate_string_error(
+    &mut self,
+    token_start: usize,
+    block: bool,
+  ) -> Option<
+    Result<
+      SyntacticToken<S::Slice<'inp>>,
+      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+    >,
+  > {
+    let (errors, end) = self
+      .src
+      .scan_primitive()
+      .delegate_string_error(token_start, block);
+    let span = SimpleSpan::new(token_start, end);
+    self.cursor = end;
+    self.last_span = span;
+    self.last_error_span = Some(span);
+    Some(Err(LexerErrors::from(LexerError::new(
+      span,
+      LexerErrorData::String(errors),
+    ))))
   }
 }
 
