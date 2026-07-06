@@ -254,7 +254,16 @@ pub(crate) fn skip_inline_str_simd(
   let mut pos = 0usize;
   let mut capacity = 0usize;
   let mut has_escapes = false;
-  let mut errs = StringErrors::default();
+  // Lazily materialised: the overwhelmingly common case is a valid string that
+  // never pushes an error, so `errs` stays `None` and the error container is
+  // neither built nor dropped on the hot path (it showed up as ~2% self-time in
+  // `drop_glue::<StringErrors>` when built eagerly per string).
+  let mut errs: Option<StringErrors<u8>> = None;
+  macro_rules! errs_mut {
+    () => {
+      errs.get_or_insert_with(StringErrors::default)
+    };
+  }
 
   loop {
     // ── SIMD bulk plain-character scan ───────────────────────────────────────
@@ -264,8 +273,8 @@ pub(crate) fn skip_inline_str_simd(
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.
-        errs.push(StringError::unterminated_inline_string());
-        return Err((src.len(), errs));
+        errs_mut!().push(StringError::unterminated_inline_string());
+        return Err((src.len(), errs.unwrap_or_default()));
       }
     };
 
@@ -276,7 +285,7 @@ pub(crate) fn skip_inline_str_simd(
       // ── end of string ──────────────────────────────────────────────────────
       b'"' => {
         pos += 1;
-        if !errs.is_empty() {
+        if let Some(errs) = errs.filter(|e| !e.is_empty()) {
           return Err((pos, errs));
         }
         return Ok(if has_escapes {
@@ -291,8 +300,8 @@ pub(crate) fn skip_inline_str_simd(
         pos += 1; // consume '\'
 
         if pos >= src.len() {
-          errs.push(StringError::unterminated_inline_string());
-          return Err((pos, errs));
+          errs_mut!().push(StringError::unterminated_inline_string());
+          return Err((pos, errs.unwrap_or_default()));
         }
         match src[pos] {
           b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
@@ -304,9 +313,9 @@ pub(crate) fn skip_inline_str_simd(
             pos += 1; // consume 'u'
             let (consumed, cap_delta) = if pos < src.len() && src[pos] == b'{' {
               pos += 1; // consume '{'
-              handle_braced_unicode(src, pos, abs_backslash, &mut errs)
+              handle_braced_unicode(src, pos, abs_backslash, errs_mut!())
             } else {
-              handle_fixed_unicode(src, pos, abs_backslash, &mut errs)
+              handle_fixed_unicode(src, pos, abs_backslash, errs_mut!())
             };
             if cap_delta > 0 {
               has_escapes = true;
@@ -315,7 +324,7 @@ pub(crate) fn skip_inline_str_simd(
             pos += consumed;
           }
           other => {
-            errs.push(StringError::unexpected_escaped_character(
+            errs_mut!().push(StringError::unexpected_escaped_character(
               Span::new(abs_backslash, offset + pos + 1),
               other,
               offset + pos,
@@ -328,18 +337,18 @@ pub(crate) fn skip_inline_str_simd(
       b'\r' => {
         let abs = offset + pos;
         if pos + 1 < src.len() && src[pos + 1] == b'\n' {
-          errs.push(StringError::unexpected_carriage_return_new_line(Span::new(
+          errs_mut!().push(StringError::unexpected_carriage_return_new_line(Span::new(
             abs,
             abs + 2,
           )));
           pos += 2;
         } else {
-          errs.push(StringError::unexpected_carriage_return(b'\r', abs));
+          errs_mut!().push(StringError::unexpected_carriage_return(b'\r', abs));
           pos += 1;
         }
       }
       b'\n' => {
-        errs.push(StringError::unexpected_new_line(b'\n', offset + pos));
+        errs_mut!().push(StringError::unexpected_new_line(b'\n', offset + pos));
         pos += 1;
       }
       _ => unreachable!("skip_until stops only at one of the four needles"),
