@@ -6,10 +6,6 @@ use super::{
   error,
 };
 
-use token::{token, token_impl};
-
-mod token;
-
 /// All GraphQL reserved keywords.
 const GRAPHQL_KEYWORDS: &[&str] = &[
   "type",
@@ -50,9 +46,6 @@ where
 
 #[cfg(test)]
 mod tests;
-
-mod slice;
-mod str;
 
 /// The focused GraphQL number sub-lexer the SIMD lexer delegates malformed
 /// numbers to; see [`number::NumberToken`].
@@ -215,6 +208,88 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
   fn from(token: &SyntacticToken<S>) -> Self {
     token.kind()
+  }
+}
+
+// ─── SyntacticToken trait surface ───────────────────────────────────────────
+// `SyntacticToken`'s public token/keyword/punctuator surface — the SIMD lexer's
+// `Token` associated type and the parser's keyword/punctuator queries — NOT
+// Logos-derive machinery. Relocated (un-macro'd) from the deleted `token!`
+// grammar: one generic impl per trait replaces the former per-source-flavor
+// macro expansions. `S: Slice<'a>` supplies the `Char` for the frozen `Error`
+// type, and `S::Char`/`Clone` reproduce each flavor's bounds exactly (str/HipStr
+// -> char, &[u8]/Bytes/HipByt -> u8).
+
+impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  type Kind = SyntacticTokenKind;
+  type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
+
+  #[inline(always)]
+  fn kind(&self) -> Self::Kind {
+    self.kind()
+  }
+
+  #[inline(always)]
+  fn is_trivia(&self) -> bool {
+    false
+  }
+}
+
+impl<'a, S> tokit::token::KeywordToken<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+  str: Equivalent<S>,
+{
+  fn keyword(&self) -> Option<&'static str> {
+    graphql_keyword(self)
+  }
+}
+
+impl<'a, S> tokit::token::PunctuatorToken<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  fn pipe() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Pipe)
+  }
+  fn ampersand() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Ampersand)
+  }
+  fn at() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::At)
+  }
+  fn colon() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Colon)
+  }
+  fn open_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LParen)
+  }
+  fn close_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RParen)
+  }
+  fn open_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBrace)
+  }
+  fn close_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBrace)
+  }
+  fn open_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBracket)
+  }
+  fn close_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBracket)
+  }
+  fn equal() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Equal)
+  }
+  fn exclamation() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Bang)
+  }
+  fn dollar() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Dollar)
   }
 }
 

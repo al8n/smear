@@ -6,13 +6,6 @@ use super::{
   LitFloat, LitInt, error,
 };
 
-use token::{token, token_impl};
-
-mod token;
-
-mod slice;
-mod str;
-
 /// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
 /// sign-ambiguous numbers to; see [`number::NumberToken`].
 pub(crate) mod number;
@@ -195,6 +188,31 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   #[inline]
   fn from(token: &SyntacticToken<S>) -> Self {
     token.kind()
+  }
+}
+
+// ─── SyntacticToken trait surface ───────────────────────────────────────────
+// `SyntacticToken`'s public `Token` surface — the SIMD lexer's `Token`
+// associated type — NOT Logos-derive machinery. Relocated (un-macro'd) from the
+// deleted `token!` grammar as one generic impl replacing the former per-source-
+// flavor macro expansions. `S: Slice<'a>` supplies the `Char` for the frozen
+// `Error` type (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
+
+impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  type Kind = SyntacticTokenKind;
+  type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
+
+  #[inline(always)]
+  fn kind(&self) -> Self::Kind {
+    self.kind()
+  }
+
+  #[inline(always)]
+  fn is_trivia(&self) -> bool {
+    false
   }
 }
 

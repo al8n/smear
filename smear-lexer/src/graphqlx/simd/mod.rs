@@ -10,7 +10,7 @@
 //! `NumberToken` grammar (see `delegate_number_to_logos`), malformed strings to
 //! `string_lexer` (see `delegate_string_error`), the unterminated-spread error
 //! is emitted inline, and the unknown-byte error is hand-rolled inline in
-//! [`lex`](Lexer::lex). Because the fast path never constructs a source-typed
+//! [`lex`](tokit::Lexer::lex). Because the fast path never constructs a source-typed
 //! error itself, parity with the pre-SIMD lexer holds by construction.
 //!
 //! GraphQLx differs from GraphQL in the *dispatch*, not the architecture:
@@ -96,15 +96,6 @@ pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
 
 impl<'inp, S> Lexer<'inp> for SimdSyntacticLexer<'inp, S>
 where
-  SyntacticToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>>: Lexer<
-      'inp,
-      State = RecursionLimiter,
-      Token = SyntacticToken<S::Slice<'inp>>,
-      Source = <S as ScanSource>::ScanPrimitive,
-      Span = SimpleSpan,
-      Offset = usize,
-    >,
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: ScanSource + ?Sized,
@@ -135,15 +126,18 @@ where
   // and needs its UTF-8 byte length to size the error span exactly like Logos.
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
-  type State = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::State;
+  // Concrete associated types (formerly projected through
+  // `LogosLexer<SyntacticToken>`, now deleted). These are exactly what those
+  // projections resolved to under the old `LogosLexer<..>: Lexer<..>` bound.
+  type State = RecursionLimiter;
 
   type Source = S;
 
-  type Token = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::Token;
+  type Token = SyntacticToken<S::Slice<'inp>>;
 
-  type Span = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::Span;
+  type Span = SimpleSpan;
 
-  type Offset = <LogosLexer<'inp, SyntacticToken<S::Slice<'inp>>> as Lexer<'inp>>::Offset;
+  type Offset = usize;
 
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn new(src: &'inp Self::Source) -> Self {

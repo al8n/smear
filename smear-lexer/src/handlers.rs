@@ -2,10 +2,7 @@ use tokit::{
   SimpleSpan,
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::{Lexer, Logos, Source},
-  state::{
-    recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-    tracker::{LimitExceeded, Limiter},
-  },
+  state::tracker::{LimitExceeded, Limiter},
   utils::{CharLen, Lexeme, PositionedChar},
 };
 
@@ -19,20 +16,6 @@ where
   T: Logos<'a, Extras = Limiter>,
 {
   lexer.extras.increase_token();
-}
-
-#[inline(always)]
-pub(super) fn increase_recursion_depth<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
-where
-  T: Logos<'a, Extras = RecursionLimiter>,
-  E: BadStateError<StateError = RecursionLimitExceeded>,
-{
-  lexer.extras.increase();
-
-  lexer
-    .extras
-    .check()
-    .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
 #[inline(always)]
@@ -147,14 +130,6 @@ where
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
   lexer.extras.increase_token();
-}
-
-#[inline(always)]
-pub(super) fn decrease_recursion_depth<'a, T>(lexer: &mut Lexer<'a, T>)
-where
-  T: Logos<'a, Extras = RecursionLimiter>,
-{
-  lexer.extras.decrease();
 }
 
 #[inline]

@@ -1,10 +1,7 @@
 use tokit::{
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::{Lexer, Logos, Source},
-  state::{
-    recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-    tracker::{LimitExceeded, Limiter},
-  },
+  state::tracker::{LimitExceeded, Limiter},
   utils::Lexeme,
 };
 
@@ -70,16 +67,6 @@ where
   T: Logos<'a, Extras = Limiter>,
 {
   handlers::tt_hook(lexer)
-}
-
-#[inline(always)]
-pub(super) fn increase_recursion_depth<'a, C, T>(
-  lexer: &mut Lexer<'a, T>,
-) -> Result<(), error::LexerError<C, RecursionLimitExceeded>>
-where
-  T: Logos<'a, Extras = RecursionLimiter>,
-{
-  handlers::increase_recursion_depth(lexer)
 }
 
 #[allow(clippy::result_large_err)]
