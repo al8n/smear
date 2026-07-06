@@ -13,6 +13,10 @@ mod token;
 mod slice;
 mod str;
 
+/// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
+/// sign-ambiguous numbers to; see [`number::NumberToken`].
+pub(crate) mod number;
+
 /// The syntactic GraphQLx lexer — the SIMD-accelerated lexer. Generic over the
 /// *source* type `S` (defaulting to `str`); Logos survives only as an internal
 /// slow-path delegate of the SIMD lexer.

@@ -823,6 +823,12 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
   ),
   ("gx_blk_empty", "type T { f: String = \"\"\"\"\"\" }"),
   ("gx_blk_unterminated", "type T { f: String = \"\"\"oops }"),
+  // Unknown byte: `?` is claimed by no GraphQLx token, so the SIMD lexer's
+  // hand-rolled `_` arm emits an `UnknownLexeme` error byte-identical to the
+  // full grammar's Logos `default_error`. (The GraphQL twin, `unknown_byte`,
+  // lives in `MALFORMED`; GraphQLx has no equivalent malformed set, so this
+  // SIMD-added fixture is its home.)
+  ("gx_unknown_byte", "{ a ? b }"),
 ];
 
 #[cfg(feature = "graphqlx")]
