@@ -1,5 +1,6 @@
-//! `Lexer::bump` parity between the SIMD lexer and the Logos `SyntacticLexer`
-//! it drop-in replaces.
+//! `Lexer::bump` parity between the SIMD lexer and the Logos lexer it
+//! drop-in replaces (`GraphqlLogos` below — no public alias anymore now that
+//! `SyntacticLexer` names the SIMD lexer).
 //!
 //! `bump` must mirror `logos::Lexer::bump`: it extends the current token's end
 //! (so `span()`/`slice()` grow to include the bumped bytes) and validates the
@@ -10,9 +11,13 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::Lexer;
+use tokit::{Lexer, lexer::LogosLexer};
 
-use crate::graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+use crate::graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+
+// Live Logos lexer for parity tests — named directly (no public alias). This
+// is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
+type GraphqlLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;
@@ -31,7 +36,7 @@ fn valid_bump_grows_span_and_next_lex_matches_logos() {
   // the dispatch loop skip the third. Both lexers must report the grown
   // span/slice and the same next token.
   let src = "foo   bar";
-  let mut logos = SyntacticLexer::<&str>::new(src);
+  let mut logos = GraphqlLogos::new(src);
   let mut simd = SimdSyntacticLexer::<str>::new(src);
 
   // Token 0 — identical.
@@ -68,7 +73,7 @@ fn bump_after_error_token_matches_logos() {
   // follows so a one-byte bump stays a valid boundary. Both lexers track the
   // error token's span, so `bump` grows both identically.
   let src = "..x";
-  let mut logos = SyntacticLexer::<&str>::new(src);
+  let mut logos = GraphqlLogos::new(src);
   let mut simd = SimdSyntacticLexer::<str>::new(src);
 
   let l0 = logos.lex();
@@ -94,7 +99,7 @@ fn bump_past_end_panics_like_logos() {
   // length), so it panics; the SIMD lexer must panic at the same point.
   let src = "ab";
   let logos_panicked = panics(|| {
-    let mut logos = SyntacticLexer::<&str>::new(src);
+    let mut logos = GraphqlLogos::new(src);
     let _ = logos.lex(); // `ab`, span 0..2
     logos.bump(&1usize); // -> 3, past end
   });
@@ -118,7 +123,7 @@ fn bump_into_multibyte_char_panics_like_logos() {
   // too.
   let src = "aé";
   let logos_panicked = panics(|| {
-    let mut logos = SyntacticLexer::<&str>::new(src);
+    let mut logos = GraphqlLogos::new(src);
     let _ = logos.lex(); // `a`, span 0..1
     logos.bump(&1usize); // -> 2, mid-`é`
   });

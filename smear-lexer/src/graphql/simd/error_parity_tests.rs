@@ -1,5 +1,6 @@
 //! After-error `Lexer`-trait parity between the SIMD lexer and the Logos
-//! `SyntacticLexer` it drop-in replaces.
+//! lexer it drop-in replaces (`GraphqlLogos` below — no public alias anymore
+//! now that `SyntacticLexer` names the SIMD lexer).
 //!
 //! The frozen oracle (`tests/oracle.rs`) renders each error by its own `Debug`
 //! and only reads `lexer.span()` on the *Ok* arm, so it never exercised the
@@ -9,9 +10,13 @@
 //! token, across each distinct error path (inline string, block string,
 //! delegated number, unknown byte, inline spread, and the recursion limit).
 
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokit::{Lexer, lexer::LogosLexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticLexer};
+use crate::graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+
+// Live Logos lexer for parity tests — named directly (no public alias). This
+// is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
+type GraphqlLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 /// Drive the Logos and SIMD lexers in lockstep over the same input, asserting
 /// at every token that `span()` and `slice()` agree, and — for every error
@@ -87,7 +92,7 @@ fn error_path_span_slice_check_match_logos() {
   ] {
     assert_error_path_parity!(
       src,
-      SyntacticLexer::<&str>::new(src),
+      GraphqlLogos::new(src),
       SimdSyntacticLexer::<str>::new(src)
     );
   }
@@ -104,7 +109,7 @@ fn recursion_limit_region_matches_logos() {
   let limit = 3;
   assert_error_path_parity!(
     src.as_str(),
-    SyntacticLexer::<&str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit)),
+    GraphqlLogos::with_state(src.as_str(), RecursionLimiter::with_limitation(limit)),
     SimdSyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit))
   );
 }

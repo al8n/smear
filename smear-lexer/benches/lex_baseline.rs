@@ -21,12 +21,17 @@ use smear_lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
     simd::SimdSyntacticLexer,
-    syntactic::{SyntacticLexer, SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SyntacticLexerErrors, SyntacticToken},
   },
-  tokit::lexer::Lexer as _,
+  tokit::lexer::{Lexer as _, LogosLexer},
 };
 use std::hint::black_box;
 use tokit::Lexer;
+
+// Live Logos lexer for the baseline benches — named directly (no public
+// alias). This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve
+// to.
+type GraphqlLogos<'a> = LogosLexer<'a, SyntacticToken<&'a str>>;
 
 // ---- inputs --------------------------------------------------------------
 //
@@ -84,7 +89,7 @@ const INPUTS: &[(&str, &str)] = &[
 
 #[inline(always)]
 fn syntactic_count(input: &str) -> usize {
-  let mut lexer = SyntacticLexer::<&str>::new(input);
+  let mut lexer = GraphqlLogos::new(input);
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {
     // black_box on the result so the compiler can't elide the per-token
@@ -134,7 +139,7 @@ type LosslessItem<'a> = Result<LosslessToken<&'a str>, LosslessLexerErrors>;
 
 #[inline(always)]
 fn syntactic_collect(input: &str) -> Vec<SyntacticItem<'_>> {
-  let mut lexer = SyntacticLexer::<&str>::new(input);
+  let mut lexer = GraphqlLogos::new(input);
   let mut tokens: Vec<SyntacticItem<'_>> = Vec::new();
   while let Some(result) = lexer.lex() {
     tokens.push(result);

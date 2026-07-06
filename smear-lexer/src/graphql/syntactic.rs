@@ -54,8 +54,10 @@ mod tests;
 mod slice;
 mod str;
 
-/// The lexer type for syntactic GraphQL tokens.
-pub type SyntacticLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, SyntacticToken<S>>;
+/// The syntactic GraphQL lexer — the SIMD-accelerated lexer. Generic over the
+/// *source* type `S` (defaulting to `str`); Logos survives only as an internal
+/// slow-path delegate of the SIMD lexer.
+pub type SyntacticLexer<'a, S: ?Sized = str> = crate::graphql::simd::SimdSyntacticLexer<'a, S>;
 
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData<Char = char> = error::LexerErrorData<Char, RecursionLimitExceeded>;

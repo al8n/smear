@@ -12,6 +12,13 @@ use std::{fs, path::PathBuf};
 
 use tokit::lexer::Lexer as _;
 
+// Live Logos lexer for differential tests — named directly (no public alias).
+// This is exactly what `SyntacticLexer<'a, &'a str>` used to resolve to.
+type GraphqlLogos<'a> = smear_lexer::tokit::lexer::LogosLexer<
+  'a,
+  smear_lexer::graphql::syntactic::SyntacticToken<&'a str>,
+>;
+
 /// Render a lexer's full stream to a stable, diffable string.
 ///
 /// `Ok`  → `OK  <start>..<end>  <Debug of token>`
@@ -205,10 +212,9 @@ const EDGES: &[(&str, &str)] = &[
 
 #[test]
 fn graphql_syntactic_oracle() {
-  use smear_lexer::graphql::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let rendered = render_stream!(SyntacticLexer::<&str>::new(src));
+    let rendered = render_stream!(GraphqlLogos::new(src));
     check("graphql-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
@@ -248,7 +254,6 @@ fn graphql_syntactic_simd_oracle() {
 
 #[test]
 fn graphql_syntactic_simd_low_recursion_parity() {
-  use smear_lexer::graphql::syntactic::SyntacticLexer;
   use tokit::state::recursion_tracker::RecursionLimiter;
 
   // Each input exercises a different set of gated arms past the first
@@ -273,7 +278,7 @@ fn graphql_syntactic_simd_low_recursion_parity() {
       src,
       RecursionLimiter::with_limitation(0),
     ));
-    let logos = render_stream!(SyntacticLexer::<&str>::with_state(
+    let logos = render_stream!(GraphqlLogos::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));
