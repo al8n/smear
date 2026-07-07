@@ -20,8 +20,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use smear_lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
-    syntactic::SimdSyntacticLexer,
-    syntactic::{SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
   tokit::lexer::Lexer as _,
 };
@@ -140,6 +139,46 @@ fn gx_lossless_count(input: &str) -> usize {
   count
 }
 
+/// GraphQLx Phase-1 SIMD syntactic lexer token count, mirroring `simd_count`.
+#[inline(always)]
+fn gx_simd_count(input: &str) -> usize {
+  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
+  let mut lexer = SimdSyntacticLexer::<[u8]>::new(input.as_bytes());
+  let mut count = 0usize;
+  while let Some(result) = lexer.lex() {
+    let _ = black_box(result);
+    count = count.wrapping_add(1);
+  }
+  count
+}
+
+/// A decimal-number-dense GraphQLx input (~500 ints/floats in a list literal)
+/// that stresses the decimal fast-path scanner. Built at runtime so the build
+/// cost stays outside the measured `iter` closure.
+fn number_heavy_input() -> String {
+  use std::fmt::Write as _;
+  let mut s = String::with_capacity(4096);
+  s.push_str("query { metrics(samples: [");
+  for i in 0..500u32 {
+    if i > 0 {
+      s.push(',');
+    }
+    match i % 3 {
+      0 => {
+        let _ = write!(s, "{i}");
+      }
+      1 => {
+        let _ = write!(s, "{i}.{}", i % 100);
+      }
+      _ => {
+        let _ = write!(s, "-{i}.{}e{}", i % 10, i % 5);
+      }
+    }
+  }
+  s.push_str("]) }");
+  s
+}
+
 // ---- groups --------------------------------------------------------------
 
 /// Lexer-only throughput, lossless mode (preserves trivia as tokens).
@@ -198,7 +237,20 @@ fn bench_graphqlx(c: &mut Criterion) {
       input,
       |b, input| b.iter(|| black_box(gx_lossless_count(black_box(input)))),
     );
+    group.bench_with_input(BenchmarkId::new("simd_count", label), input, |b, input| {
+      b.iter(|| black_box(gx_simd_count(black_box(input))))
+    });
   }
+
+  // Decimal-dense synthetic input: exercises the decimal fast-path scanner.
+  let num_heavy = number_heavy_input();
+  group.throughput(Throughput::Bytes(num_heavy.len() as u64));
+  group.bench_with_input(
+    BenchmarkId::new("simd_count", "num_heavy"),
+    num_heavy.as_str(),
+    |b, input| b.iter(|| black_box(gx_simd_count(black_box(input)))),
+  );
+
   group.finish();
 }
 

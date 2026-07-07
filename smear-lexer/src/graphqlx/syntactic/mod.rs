@@ -348,7 +348,9 @@ mod bump_parity_tests;
 #[cfg(test)]
 mod trait_parity_tests;
 
-use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
+use crate::simd_common::{
+  Delegated, NumberKind, memchr_newline, scan_identifier, scan_number, skip_ws_and_comma,
+};
 
 // Re-exported so the public `graphqlx::simd::{AsBytes, ScanSource}` paths and
 // `DEFAULT_RECURSION_LIMIT` stay stable, matching `graphql::simd`, now that
@@ -583,7 +585,35 @@ where
         // re-deriving the number grammar, so `-` always delegates and
         // `NumberToken` returns the correct single token either way (its
         // `#[token("-")] Minus` arm covers the bare operator).
-        b'0'..=b'9' | b'-' => return self.delegate_number_to_logos(token_start),
+        b'0'..=b'9' | b'-' => match scan_number(bytes) {
+          // Valid *decimal* int/float: emit inline, byte-identical to what the
+          // delegated grammar produces (`NumberToken::Decimal`/`Float` map to
+          // `LitInt`/`LitFloat::Decimal`), skipping the Logos round-trip.
+          // `finish!` applies the same per-token recursion check the ident fast
+          // path uses, so deep-nesting behaviour matches. Everything the scanner
+          // refuses — radix `0x`/`0b`/`0o`, hex floats, a bare `-` (`Minus`), a
+          // `.`-led / empty-integer float, leading zeros, illegal suffixes —
+          // returns `None` and delegates, preserving parity for those cases.
+          Some((NumberKind::Int, len)) => {
+            self.cursor += len;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            let slice = self.src.slice(&token_start..&(token_start + len))?;
+            return Some(finish!(
+              self,
+              SyntacticToken::LitInt(LitInt::Decimal(slice))
+            ));
+          }
+          Some((NumberKind::Float, len)) => {
+            self.cursor += len;
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            let slice = self.src.slice(&token_start..&(token_start + len))?;
+            return Some(finish!(
+              self,
+              SyntacticToken::LitFloat(LitFloat::Decimal(slice))
+            ));
+          }
+          None => return self.delegate_number_to_logos(token_start),
+        },
         b'*' => return Some(emit_punct!(self: token_start, SyntacticToken::Asterisk)),
         b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
         b'@' => return Some(emit_punct!(self: token_start, SyntacticToken::At)),
