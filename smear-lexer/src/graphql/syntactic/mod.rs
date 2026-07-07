@@ -484,9 +484,9 @@ use crate::{
 
 use self::number::NumberToken;
 
-mod scan;
-
-use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
+use crate::simd_common::{
+  Delegated, NumberKind, memchr_newline, scan_identifier, scan_number, skip_ws_and_comma,
+};
 
 // Re-exported so the public `graphql::simd::{AsBytes, ScanSource}` paths and
 // `DEFAULT_RECURSION_LIMIT` stay stable now that these dialect-agnostic items
@@ -724,14 +724,14 @@ where
         // `UnexpectedLexeme`, matching the pre-SIMD lexer — rather than the
         // hand-rolled `_` arm's `UnknownLexeme`. (`scan_number` still returns
         // `None` for a leading `+`: it is not a valid number start.)
-        b'0'..=b'9' | b'-' | b'+' => match scan::scan_number(bytes) {
-          Some((scan::NumberKind::Int, len)) => {
+        b'0'..=b'9' | b'-' | b'+' => match scan_number(bytes) {
+          Some((NumberKind::Int, len)) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;
             SyntacticToken::LitInt(slice)
           }
-          Some((scan::NumberKind::Float, len)) => {
+          Some((NumberKind::Float, len)) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;
