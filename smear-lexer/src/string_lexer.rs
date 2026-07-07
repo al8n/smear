@@ -395,8 +395,11 @@ pub(crate) trait DelegateStringError {
   ///
   /// `block` selects the block (`"""`, 3-byte opener) carrier over the inline
   /// (`"`, 1-byte opener) one. See the trait docs for the seek/span contract.
-  fn delegate_string_error(&self, token_start: usize, block: bool)
-  -> (StringErrors<Self::Char>, usize);
+  fn delegate_string_error(
+    &self,
+    token_start: usize,
+    block: bool,
+  ) -> (StringErrors<Self::Char>, usize);
 }
 
 impl DelegateStringError for str {

@@ -1,6 +1,7 @@
-//! End-to-end `Lexer`-trait parity between the GraphQLx SIMD lexer and
-//! `logos::Lexer` (the GraphQLx counterpart of
-//! `graphql/simd/trait_parity_tests.rs`), driven over a diverse input set.
+//! End-to-end `Lexer`-trait parity between the SIMD lexer and `logos::Lexer`
+//! (the Logos-driven lexer over the full `SyntacticToken` grammar
+//! `SyntacticLexer` used to run on, before the Logos-slimming phase rerouted
+//! it to focused sub-lexers), driven over a diverse input set.
 //!
 //! Historically this harness drove a live Logos-backed lexer over the full
 //! `SyntacticToken<S>` grammar (a local type alias this file used to declare)
@@ -24,7 +25,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::simd::SimdSyntacticLexer;
+use crate::graphql::syntactic::SimdSyntacticLexer;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
@@ -64,100 +65,87 @@ macro_rules! render_full {
 }
 
 /// Inputs spanning every dispatch path — fast-path identifiers and
-/// punctuation (including the GraphQLx-only `::`/`=>`/`<>`), delegated
-/// numbers/strings/block strings, comments, a leading BOM, trailing trivia,
-/// whitespace-only, empty, and each malformed shape — paired with their
-/// frozen `<str>`- and `<[u8]>`-sourced renders (captured from the live
-/// Logos-backed comparator before Task 4 deleted it).
+/// punctuation, delegated numbers/strings/block strings, comments, a leading
+/// BOM, trailing trivia, whitespace-only, empty, and each malformed shape —
+/// paired with their frozen `<str>`- and `<[u8]>`-sourced renders (captured
+/// from the live Logos-backed comparator before Task 4 deleted it).
 const INPUTS: &[(&str, &str, &str)] = &[
   (
-    "a::b<K => V>(x: 1, y: \"s\") { z }",
-    r#"#0 lex=Some(Ok(Identifier("a"))) span=SimpleSpan { start: 0, end: 1 } slice="a"
-#1 lex=Some(Ok(PathSeparator)) span=SimpleSpan { start: 1, end: 3 } slice="::"
-#2 lex=Some(Ok(Identifier("b"))) span=SimpleSpan { start: 3, end: 4 } slice="b"
-#3 lex=Some(Ok(LAngle)) span=SimpleSpan { start: 4, end: 5 } slice="<"
-#4 lex=Some(Ok(Identifier("K"))) span=SimpleSpan { start: 5, end: 6 } slice="K"
-#5 lex=Some(Ok(FatArrow)) span=SimpleSpan { start: 7, end: 9 } slice="=>"
-#6 lex=Some(Ok(Identifier("V"))) span=SimpleSpan { start: 10, end: 11 } slice="V"
-#7 lex=Some(Ok(RAngle)) span=SimpleSpan { start: 11, end: 12 } slice=">"
-#8 lex=Some(Ok(LParen)) span=SimpleSpan { start: 12, end: 13 } slice="("
-#9 lex=Some(Ok(Identifier("x"))) span=SimpleSpan { start: 13, end: 14 } slice="x"
-#10 lex=Some(Ok(Colon)) span=SimpleSpan { start: 14, end: 15 } slice=":"
-#11 lex=Some(Ok(LitInt(Decimal("1")))) span=SimpleSpan { start: 16, end: 17 } slice="1"
-#12 lex=Some(Ok(Identifier("y"))) span=SimpleSpan { start: 19, end: 20 } slice="y"
-#13 lex=Some(Ok(Colon)) span=SimpleSpan { start: 20, end: 21 } slice=":"
-#14 lex=Some(Ok(LitInlineStr(Plain(LitPlainStr { source: "\"s\"" })))) span=SimpleSpan { start: 22, end: 25 } slice="\"s\""
-#15 lex=Some(Ok(RParen)) span=SimpleSpan { start: 25, end: 26 } slice=")"
-#16 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 27, end: 28 } slice="{"
-#17 lex=Some(Ok(Identifier("z"))) span=SimpleSpan { start: 29, end: 30 } slice="z"
-#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 31, end: 32 } slice="}"
-#19 lex=None span=SimpleSpan { start: 32, end: 32 } slice=""
+    "{ user(id: 4) { name, ...Frag @skip(if: true) } }",
+    r#"#0 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 0, end: 1 } slice="{"
+#1 lex=Some(Ok(Identifier("user"))) span=SimpleSpan { start: 2, end: 6 } slice="user"
+#2 lex=Some(Ok(LParen)) span=SimpleSpan { start: 6, end: 7 } slice="("
+#3 lex=Some(Ok(Identifier("id"))) span=SimpleSpan { start: 7, end: 9 } slice="id"
+#4 lex=Some(Ok(Colon)) span=SimpleSpan { start: 9, end: 10 } slice=":"
+#5 lex=Some(Ok(LitInt("4"))) span=SimpleSpan { start: 11, end: 12 } slice="4"
+#6 lex=Some(Ok(RParen)) span=SimpleSpan { start: 12, end: 13 } slice=")"
+#7 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 14, end: 15 } slice="{"
+#8 lex=Some(Ok(Identifier("name"))) span=SimpleSpan { start: 16, end: 20 } slice="name"
+#9 lex=Some(Ok(Spread)) span=SimpleSpan { start: 22, end: 25 } slice="..."
+#10 lex=Some(Ok(Identifier("Frag"))) span=SimpleSpan { start: 25, end: 29 } slice="Frag"
+#11 lex=Some(Ok(At)) span=SimpleSpan { start: 30, end: 31 } slice="@"
+#12 lex=Some(Ok(Identifier("skip"))) span=SimpleSpan { start: 31, end: 35 } slice="skip"
+#13 lex=Some(Ok(LParen)) span=SimpleSpan { start: 35, end: 36 } slice="("
+#14 lex=Some(Ok(Identifier("if"))) span=SimpleSpan { start: 36, end: 38 } slice="if"
+#15 lex=Some(Ok(Colon)) span=SimpleSpan { start: 38, end: 39 } slice=":"
+#16 lex=Some(Ok(Identifier("true"))) span=SimpleSpan { start: 40, end: 44 } slice="true"
+#17 lex=Some(Ok(RParen)) span=SimpleSpan { start: 44, end: 45 } slice=")"
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 46, end: 47 } slice="}"
+#19 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 48, end: 49 } slice="}"
+#20 lex=None span=SimpleSpan { start: 49, end: 49 } slice=""
 "#,
-    r#"#0 lex=Some(Ok(Identifier([97]))) span=SimpleSpan { start: 0, end: 1 } slice=[97]
-#1 lex=Some(Ok(PathSeparator)) span=SimpleSpan { start: 1, end: 3 } slice=[58, 58]
-#2 lex=Some(Ok(Identifier([98]))) span=SimpleSpan { start: 3, end: 4 } slice=[98]
-#3 lex=Some(Ok(LAngle)) span=SimpleSpan { start: 4, end: 5 } slice=[60]
-#4 lex=Some(Ok(Identifier([75]))) span=SimpleSpan { start: 5, end: 6 } slice=[75]
-#5 lex=Some(Ok(FatArrow)) span=SimpleSpan { start: 7, end: 9 } slice=[61, 62]
-#6 lex=Some(Ok(Identifier([86]))) span=SimpleSpan { start: 10, end: 11 } slice=[86]
-#7 lex=Some(Ok(RAngle)) span=SimpleSpan { start: 11, end: 12 } slice=[62]
-#8 lex=Some(Ok(LParen)) span=SimpleSpan { start: 12, end: 13 } slice=[40]
-#9 lex=Some(Ok(Identifier([120]))) span=SimpleSpan { start: 13, end: 14 } slice=[120]
-#10 lex=Some(Ok(Colon)) span=SimpleSpan { start: 14, end: 15 } slice=[58]
-#11 lex=Some(Ok(LitInt(Decimal([49])))) span=SimpleSpan { start: 16, end: 17 } slice=[49]
-#12 lex=Some(Ok(Identifier([121]))) span=SimpleSpan { start: 19, end: 20 } slice=[121]
-#13 lex=Some(Ok(Colon)) span=SimpleSpan { start: 20, end: 21 } slice=[58]
-#14 lex=Some(Ok(LitInlineStr(Plain(LitPlainStr { source: [34, 115, 34] })))) span=SimpleSpan { start: 22, end: 25 } slice=[34, 115, 34]
-#15 lex=Some(Ok(RParen)) span=SimpleSpan { start: 25, end: 26 } slice=[41]
-#16 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 27, end: 28 } slice=[123]
-#17 lex=Some(Ok(Identifier([122]))) span=SimpleSpan { start: 29, end: 30 } slice=[122]
-#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 31, end: 32 } slice=[125]
-#19 lex=None span=SimpleSpan { start: 32, end: 32 } slice=[]
+    r#"#0 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 0, end: 1 } slice=[123]
+#1 lex=Some(Ok(Identifier([117, 115, 101, 114]))) span=SimpleSpan { start: 2, end: 6 } slice=[117, 115, 101, 114]
+#2 lex=Some(Ok(LParen)) span=SimpleSpan { start: 6, end: 7 } slice=[40]
+#3 lex=Some(Ok(Identifier([105, 100]))) span=SimpleSpan { start: 7, end: 9 } slice=[105, 100]
+#4 lex=Some(Ok(Colon)) span=SimpleSpan { start: 9, end: 10 } slice=[58]
+#5 lex=Some(Ok(LitInt([52]))) span=SimpleSpan { start: 11, end: 12 } slice=[52]
+#6 lex=Some(Ok(RParen)) span=SimpleSpan { start: 12, end: 13 } slice=[41]
+#7 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 14, end: 15 } slice=[123]
+#8 lex=Some(Ok(Identifier([110, 97, 109, 101]))) span=SimpleSpan { start: 16, end: 20 } slice=[110, 97, 109, 101]
+#9 lex=Some(Ok(Spread)) span=SimpleSpan { start: 22, end: 25 } slice=[46, 46, 46]
+#10 lex=Some(Ok(Identifier([70, 114, 97, 103]))) span=SimpleSpan { start: 25, end: 29 } slice=[70, 114, 97, 103]
+#11 lex=Some(Ok(At)) span=SimpleSpan { start: 30, end: 31 } slice=[64]
+#12 lex=Some(Ok(Identifier([115, 107, 105, 112]))) span=SimpleSpan { start: 31, end: 35 } slice=[115, 107, 105, 112]
+#13 lex=Some(Ok(LParen)) span=SimpleSpan { start: 35, end: 36 } slice=[40]
+#14 lex=Some(Ok(Identifier([105, 102]))) span=SimpleSpan { start: 36, end: 38 } slice=[105, 102]
+#15 lex=Some(Ok(Colon)) span=SimpleSpan { start: 38, end: 39 } slice=[58]
+#16 lex=Some(Ok(Identifier([116, 114, 117, 101]))) span=SimpleSpan { start: 40, end: 44 } slice=[116, 114, 117, 101]
+#17 lex=Some(Ok(RParen)) span=SimpleSpan { start: 44, end: 45 } slice=[41]
+#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 46, end: 47 } slice=[125]
+#19 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 48, end: 49 } slice=[125]
+#20 lex=None span=SimpleSpan { start: 49, end: 49 } slice=[]
 "#,
   ),
   (
-    "\"\"\"doc\"\"\" type T { f(a: Int = -1): [U!]! }",
-    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: "\"\"\"doc\"\"\"" })))) span=SimpleSpan { start: 0, end: 9 } slice="\"\"\"doc\"\"\""
-#1 lex=Some(Ok(Identifier("type"))) span=SimpleSpan { start: 10, end: 14 } slice="type"
-#2 lex=Some(Ok(Identifier("T"))) span=SimpleSpan { start: 15, end: 16 } slice="T"
-#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 17, end: 18 } slice="{"
-#4 lex=Some(Ok(Identifier("f"))) span=SimpleSpan { start: 19, end: 20 } slice="f"
-#5 lex=Some(Ok(LParen)) span=SimpleSpan { start: 20, end: 21 } slice="("
-#6 lex=Some(Ok(Identifier("a"))) span=SimpleSpan { start: 21, end: 22 } slice="a"
-#7 lex=Some(Ok(Colon)) span=SimpleSpan { start: 22, end: 23 } slice=":"
-#8 lex=Some(Ok(Identifier("Int"))) span=SimpleSpan { start: 24, end: 27 } slice="Int"
-#9 lex=Some(Ok(Equal)) span=SimpleSpan { start: 28, end: 29 } slice="="
-#10 lex=Some(Ok(LitInt(Decimal("-1")))) span=SimpleSpan { start: 30, end: 32 } slice="-1"
-#11 lex=Some(Ok(RParen)) span=SimpleSpan { start: 32, end: 33 } slice=")"
-#12 lex=Some(Ok(Colon)) span=SimpleSpan { start: 33, end: 34 } slice=":"
-#13 lex=Some(Ok(LBracket)) span=SimpleSpan { start: 35, end: 36 } slice="["
-#14 lex=Some(Ok(Identifier("U"))) span=SimpleSpan { start: 36, end: 37 } slice="U"
-#15 lex=Some(Ok(Bang)) span=SimpleSpan { start: 37, end: 38 } slice="!"
-#16 lex=Some(Ok(RBracket)) span=SimpleSpan { start: 38, end: 39 } slice="]"
-#17 lex=Some(Ok(Bang)) span=SimpleSpan { start: 39, end: 40 } slice="!"
-#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 41, end: 42 } slice="}"
-#19 lex=None span=SimpleSpan { start: 42, end: 42 } slice=""
+    "\"\"\"desc\"\"\" type Query { id: ID! name: String }",
+    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: "\"\"\"desc\"\"\"" })))) span=SimpleSpan { start: 0, end: 10 } slice="\"\"\"desc\"\"\""
+#1 lex=Some(Ok(Identifier("type"))) span=SimpleSpan { start: 11, end: 15 } slice="type"
+#2 lex=Some(Ok(Identifier("Query"))) span=SimpleSpan { start: 16, end: 21 } slice="Query"
+#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 22, end: 23 } slice="{"
+#4 lex=Some(Ok(Identifier("id"))) span=SimpleSpan { start: 24, end: 26 } slice="id"
+#5 lex=Some(Ok(Colon)) span=SimpleSpan { start: 26, end: 27 } slice=":"
+#6 lex=Some(Ok(Identifier("ID"))) span=SimpleSpan { start: 28, end: 30 } slice="ID"
+#7 lex=Some(Ok(Bang)) span=SimpleSpan { start: 30, end: 31 } slice="!"
+#8 lex=Some(Ok(Identifier("name"))) span=SimpleSpan { start: 32, end: 36 } slice="name"
+#9 lex=Some(Ok(Colon)) span=SimpleSpan { start: 36, end: 37 } slice=":"
+#10 lex=Some(Ok(Identifier("String"))) span=SimpleSpan { start: 38, end: 44 } slice="String"
+#11 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 45, end: 46 } slice="}"
+#12 lex=None span=SimpleSpan { start: 46, end: 46 } slice=""
 "#,
-    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: [34, 34, 34, 100, 111, 99, 34, 34, 34] })))) span=SimpleSpan { start: 0, end: 9 } slice=[34, 34, 34, 100, 111, 99, 34, 34, 34]
-#1 lex=Some(Ok(Identifier([116, 121, 112, 101]))) span=SimpleSpan { start: 10, end: 14 } slice=[116, 121, 112, 101]
-#2 lex=Some(Ok(Identifier([84]))) span=SimpleSpan { start: 15, end: 16 } slice=[84]
-#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 17, end: 18 } slice=[123]
-#4 lex=Some(Ok(Identifier([102]))) span=SimpleSpan { start: 19, end: 20 } slice=[102]
-#5 lex=Some(Ok(LParen)) span=SimpleSpan { start: 20, end: 21 } slice=[40]
-#6 lex=Some(Ok(Identifier([97]))) span=SimpleSpan { start: 21, end: 22 } slice=[97]
-#7 lex=Some(Ok(Colon)) span=SimpleSpan { start: 22, end: 23 } slice=[58]
-#8 lex=Some(Ok(Identifier([73, 110, 116]))) span=SimpleSpan { start: 24, end: 27 } slice=[73, 110, 116]
-#9 lex=Some(Ok(Equal)) span=SimpleSpan { start: 28, end: 29 } slice=[61]
-#10 lex=Some(Ok(LitInt(Decimal([45, 49])))) span=SimpleSpan { start: 30, end: 32 } slice=[45, 49]
-#11 lex=Some(Ok(RParen)) span=SimpleSpan { start: 32, end: 33 } slice=[41]
-#12 lex=Some(Ok(Colon)) span=SimpleSpan { start: 33, end: 34 } slice=[58]
-#13 lex=Some(Ok(LBracket)) span=SimpleSpan { start: 35, end: 36 } slice=[91]
-#14 lex=Some(Ok(Identifier([85]))) span=SimpleSpan { start: 36, end: 37 } slice=[85]
-#15 lex=Some(Ok(Bang)) span=SimpleSpan { start: 37, end: 38 } slice=[33]
-#16 lex=Some(Ok(RBracket)) span=SimpleSpan { start: 38, end: 39 } slice=[93]
-#17 lex=Some(Ok(Bang)) span=SimpleSpan { start: 39, end: 40 } slice=[33]
-#18 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 41, end: 42 } slice=[125]
-#19 lex=None span=SimpleSpan { start: 42, end: 42 } slice=[]
+    r#"#0 lex=Some(Ok(LitBlockStr(Plain(LitPlainStr { source: [34, 34, 34, 100, 101, 115, 99, 34, 34, 34] })))) span=SimpleSpan { start: 0, end: 10 } slice=[34, 34, 34, 100, 101, 115, 99, 34, 34, 34]
+#1 lex=Some(Ok(Identifier([116, 121, 112, 101]))) span=SimpleSpan { start: 11, end: 15 } slice=[116, 121, 112, 101]
+#2 lex=Some(Ok(Identifier([81, 117, 101, 114, 121]))) span=SimpleSpan { start: 16, end: 21 } slice=[81, 117, 101, 114, 121]
+#3 lex=Some(Ok(LBrace)) span=SimpleSpan { start: 22, end: 23 } slice=[123]
+#4 lex=Some(Ok(Identifier([105, 100]))) span=SimpleSpan { start: 24, end: 26 } slice=[105, 100]
+#5 lex=Some(Ok(Colon)) span=SimpleSpan { start: 26, end: 27 } slice=[58]
+#6 lex=Some(Ok(Identifier([73, 68]))) span=SimpleSpan { start: 28, end: 30 } slice=[73, 68]
+#7 lex=Some(Ok(Bang)) span=SimpleSpan { start: 30, end: 31 } slice=[33]
+#8 lex=Some(Ok(Identifier([110, 97, 109, 101]))) span=SimpleSpan { start: 32, end: 36 } slice=[110, 97, 109, 101]
+#9 lex=Some(Ok(Colon)) span=SimpleSpan { start: 36, end: 37 } slice=[58]
+#10 lex=Some(Ok(Identifier([83, 116, 114, 105, 110, 103]))) span=SimpleSpan { start: 38, end: 44 } slice=[83, 116, 114, 105, 110, 103]
+#11 lex=Some(Ok(RBrace)) span=SimpleSpan { start: 45, end: 46 } slice=[125]
+#12 lex=None span=SimpleSpan { start: 46, end: 46 } slice=[]
 "#,
   ),
   (
@@ -207,12 +195,12 @@ const INPUTS: &[(&str, &str, &str)] = &[
 "#,
   ),
   (
-    "0xZZ",
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: Hex(UnexpectedSuffix(Range(SimpleSpan { start: 2, end: 4 }))) }]))) span=SimpleSpan { start: 0, end: 4 } slice="0xZZ"
-#1 lex=None span=SimpleSpan { start: 4, end: 4 } slice=""
+    "007",
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 3 }, data: Int(LeadingZeros(Range(SimpleSpan { start: 0, end: 2 }))) }]))) span=SimpleSpan { start: 0, end: 3 } slice="007"
+#1 lex=None span=SimpleSpan { start: 3, end: 3 } slice=""
 "#,
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: Hex(UnexpectedSuffix(Range(SimpleSpan { start: 2, end: 4 }))) }]))) span=SimpleSpan { start: 0, end: 4 } slice=[48, 120, 90, 90]
-#1 lex=None span=SimpleSpan { start: 4, end: 4 } slice=[]
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 3 }, data: Int(LeadingZeros(Range(SimpleSpan { start: 0, end: 2 }))) }]))) span=SimpleSpan { start: 0, end: 3 } slice=[48, 48, 55]
+#1 lex=None span=SimpleSpan { start: 3, end: 3 } slice=[]
 "#,
   ),
   (
@@ -288,10 +276,7 @@ fn full_trait_parity_bytes() {
 fn full_trait_parity_low_recursion_limit() {
   // Deep nesting past a low limit drives the over-limit region (recursion
   // errors in the token's place, plus the finish!/decrease paths) all the way
-  // to EOF. Frozen reference captured the same way as `INPUTS` above (this
-  // region is `(`/`)`-only, so it renders identically to the GraphQL
-  // counterpart's; GraphQLx-specific recursion coverage over `<`/`>` lives in
-  // `tests/oracle.rs`'s low-recursion parity test).
+  // to EOF. Frozen reference captured the same way as `INPUTS` above.
   let depth = 8;
   let big = "(".repeat(depth) + "x" + &")".repeat(depth);
   let src: &str = &big;

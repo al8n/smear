@@ -32,7 +32,7 @@
 
 use crate::graphqlx::{
   LitFloat, LitInt,
-  ast::{SyntacticToken, SyntacticTokenKind},
+  syntactic::{SyntacticToken, SyntacticTokenKind},
 };
 
 /// A focused numeric token, parameterized over the slice type `S` exactly like
@@ -85,7 +85,7 @@ impl<S> From<NumberToken<S>> for SyntacticToken<S> {
 }
 
 /// Internal implementation macro — the number-only twin of
-/// `graphqlx::ast::token_impl!`.
+/// `graphqlx::syntactic::token_impl!`.
 ///
 /// `$logos_lt` is the lifetime for the internal Logos `Token` enum (always
 /// present). `$slice_lt` is empty (owned types) or the lifetime that binds the
@@ -109,7 +109,7 @@ macro_rules! number_token_impl {
           BinaryError, DecimalError, FloatError, HexError, HexFloatError, LexerErrors, OctalError,
         },
         handlers,
-        ast::{SyntacticTokenKind, number::NumberToken},
+        syntactic::{SyntacticTokenKind, number::NumberToken},
       };
 
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
@@ -240,7 +240,7 @@ macro_rules! number_token_impl {
           BinaryError, DecimalError, FloatError, HexError, HexFloatError, LexerErrors, OctalError,
         },
         handlers,
-        ast::{SyntacticTokenKind, number::NumberToken},
+        syntactic::{SyntacticTokenKind, number::NumberToken},
       };
 
       type TokenErrors = LexerErrors<$char, RecursionLimitExceeded>;
@@ -355,7 +355,7 @@ macro_rules! number_token_impl {
   };
 }
 
-/// The number-only twin of `graphqlx::ast::token!`: dispatches each source
+/// The number-only twin of `graphqlx::syntactic::token!`: dispatches each source
 /// flavor to [`number_token_impl!`] with the matching raw-inner / converted-outer
 /// split.
 macro_rules! number_token {

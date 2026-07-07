@@ -20,7 +20,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use smear_lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
-    simd::SimdSyntacticLexer,
+    syntactic::SimdSyntacticLexer,
     syntactic::{SyntacticLexerErrors, SyntacticToken},
   },
   tokit::lexer::Lexer as _,

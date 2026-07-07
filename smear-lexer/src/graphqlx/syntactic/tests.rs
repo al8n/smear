@@ -1,6 +1,9 @@
 use tokit::Lexer as _;
 
-use crate::graphqlx::{LitFloat, LitInt, simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+use crate::graphqlx::{
+  LitFloat, LitInt,
+  syntactic::{SimdSyntacticLexer, SyntacticToken},
+};
 
 /// Drive a `<str>`-sourced lexer to completion, unwrapping every result.
 fn lex_all(src: &str) -> Vec<SyntacticToken<&str>> {

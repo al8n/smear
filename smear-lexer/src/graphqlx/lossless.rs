@@ -31,7 +31,7 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 ///
 /// # Preserved Trivia Tokens
 ///
-/// Unlike [`SyntacticToken`](super::ast::SyntacticToken), `LosslessToken` includes variants for all trivia:
+/// Unlike [`SyntacticToken`](super::syntactic::SyntacticToken), `LosslessToken` includes variants for all trivia:
 /// - **Whitespace**: [`Space`](LosslessToken::Space), [`Tab`](LosslessToken::Tab), [`Newline`](LosslessToken::Newline), [`CarriageReturn`](LosslessToken::CarriageReturn), [`CarriageReturnAndNewline`](LosslessToken::CarriageReturnAndNewline)
 /// - **Comments**: [`Comment`](LosslessToken::Comment) - preserves `# ...` comments with their content
 /// - **Commas**: [`Comma`](LosslessToken::Comma)
@@ -46,9 +46,9 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 /// - **Source-to-source transformations**: Modify code while preserving unrelated formatting
 /// - **Syntax highlighters**: Distinguish between code and comments for visual presentation
 ///
-/// # Comparison with [`SyntacticToken`](super::ast::SyntacticToken)
+/// # Comparison with [`SyntacticToken`](super::syntactic::SyntacticToken)
 ///
-/// | Feature | [`SyntacticToken`](super::ast::SyntacticToken) | `LosslessToken` |
+/// | Feature | [`SyntacticToken`](super::syntactic::SyntacticToken) | `LosslessToken` |
 /// |---------|------------------|-----------------|
 /// | Whitespace | ❌ Skipped | ✅ Preserved |
 /// | Comments | ❌ Skipped | ✅ Preserved |

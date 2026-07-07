@@ -2,7 +2,7 @@ use tokit::lexer::Lexer;
 
 use crate::{
   LitInlineStr,
-  graphql::{simd::SimdSyntacticLexer, syntactic::SyntacticToken},
+  graphql::syntactic::{SimdSyntacticLexer, SyntacticToken},
 };
 
 fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {

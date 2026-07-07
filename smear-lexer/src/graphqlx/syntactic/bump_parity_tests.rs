@@ -24,7 +24,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokit::{Lexer, SimpleSpan};
 
-use crate::graphqlx::{simd::SimdSyntacticLexer, syntactic::SyntacticToken};
+use crate::graphqlx::syntactic::{SimdSyntacticLexer, SyntacticToken};
 
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;
@@ -101,7 +101,11 @@ fn bump_after_error_token_matches_logos() {
 
   let n = 1usize;
   simd.bump(&n);
-  assert_eq!(simd.span(), SimpleSpan::new(0, 3), "span after bump past error");
+  assert_eq!(
+    simd.span(),
+    SimpleSpan::new(0, 3),
+    "span after bump past error"
+  );
   assert_eq!(simd.slice(), "..x", "slice after bump past error");
 }
 
@@ -118,7 +122,10 @@ fn bump_past_end_panics_like_logos() {
     let _ = simd.lex(); // `ab`, span 0..2
     simd.bump(&1usize); // -> 3, past end
   });
-  assert!(simd_panicked, "SIMD must panic bumping past end, like logos");
+  assert!(
+    simd_panicked,
+    "SIMD must panic bumping past end, like logos"
+  );
 }
 
 #[test]
@@ -134,5 +141,8 @@ fn bump_into_multibyte_char_panics_like_logos() {
     let _ = simd.lex();
     simd.bump(&1usize);
   });
-  assert!(simd_panicked, "SIMD must panic bumping mid-UTF-8, like logos");
+  assert!(
+    simd_panicked,
+    "SIMD must panic bumping mid-UTF-8, like logos"
+  );
 }

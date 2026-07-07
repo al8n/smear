@@ -2,8 +2,7 @@ use tokit::{Lexer as _, SimpleSpan};
 
 use crate::graphql::{
   error::{FloatError, LexerErrorData},
-  simd::SimdSyntacticLexer,
-  syntactic::SyntacticToken,
+  syntactic::{SimdSyntacticLexer, SyntacticToken},
 };
 
 fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {

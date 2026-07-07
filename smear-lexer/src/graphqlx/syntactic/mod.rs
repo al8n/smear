@@ -1,52 +1,340 @@
-//! The GraphQLx syntactic lexer: a SIMD-accelerated, streaming, single-pass
-//! lexer (hybrid — SIMD fast paths + internal Logos slow-path delegation).
-//! This is the GraphQLx `SyntacticLexer`.
-//!
-//! This mirrors the GraphQL SIMD lexer (`crate::graphql::simd`) and shares its
-//! dialect-agnostic primitives through `crate::simd_common`: trivia, identifier,
-//! and valid-string scanning (inline and block, including block-string
-//! normalization) are SIMD-fast-pathed. The cold paths are handled without the
-//! full grammar: malformed / sign-ambiguous numbers delegate to the focused
-//! `NumberToken` grammar (see `delegate_number_to_logos`), malformed strings to
-//! `string_lexer` (see `delegate_string_error`), the unterminated-spread error
-//! is emitted inline, and the unknown-byte error is hand-rolled inline in
-//! [`lex`](tokit::Lexer::lex). Because the fast path never constructs a source-typed
-//! error itself, parity with the pre-SIMD lexer holds by construction.
-//!
-//! GraphQLx differs from GraphQL in the *dispatch*, not the architecture:
-//!
-//! - Angle brackets `<`/`>` are `LAngle`/`RAngle` and nest recursion (generics
-//!   like `Box<T>`), so they join `{}`/`[]`/`()` as recursion-affecting
-//!   punctuation.
-//! - `::` (`PathSeparator`) and `=>` (`FatArrow`) are two-byte tokens, peeled
-//!   apart from the single-byte `:` (`Colon`) and `=` (`Equal`) by peeking one
-//!   byte — the same longest match Logos performs.
-//! - `+` is always `Plus`, but `-` is a number *sign* whenever a digit or `.`
-//!   directly follows it (`-5` lexes as `Decimal("-5")`, `-.5` as a float), so
-//!   `-` is delegated to `NumberToken` alongside the digits rather than
-//!   fast-pathed as a bare `Minus` — `NumberToken`'s `#[token("-")] Minus` arm
-//!   resolves a `-` before any other byte back to the operator by longest match.
-//! - Numbers are radix-prefixed (decimal / hex / binary / octal, plus decimal
-//!   and hex floats) and always delegated to `NumberToken` — never hand-rolled.
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+use tokit::state::recursion_tracker::RecursionLimitExceeded;
+
+use super::{
+  super::{LitBlockStr, LitInlineStr},
+  LitFloat, LitInt, error,
+};
+
+/// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
+/// sign-ambiguous numbers to; see [`number::NumberToken`].
+pub(crate) mod number;
+
+/// The syntactic GraphQLx lexer — the SIMD-accelerated lexer. Generic over the
+/// *source* type `S` (defaulting to `str`); Logos survives only as an internal
+/// slow-path delegate of the SIMD lexer.
+// ?Sized is required for the default `str` (and `[u8]`) source; the bound is
+// enforced on SimdSyntacticLexer itself.
+#[allow(type_alias_bounds)]
+pub type SyntacticLexer<'a, S: ?Sized = str> = SimdSyntacticLexer<'a, S>;
+
+/// The error data type for lexing based on syntactic token with `char` source.
+pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
+/// The error type for lexing based on syntactic token with `char` source.
+pub type SyntacticLexerError = error::LexerError<char, RecursionLimitExceeded>;
+/// A collection of errors for syntactic token with `char` source.
+pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>;
+
+/// A syntactic token for GraphQLx lexing that only includes syntactically significant tokens.
+///
+/// This token type is optimized for high-performance parsing by **excluding trivia** (whitespace,
+/// comments, and commas). It provides minimal memory footprint and fast lexing, making it ideal
+/// for GraphQL servers, query execution, and other performance-critical applications.
+///
+/// # Ignored Tokens (Trivia)
+///
+/// The following tokens are automatically skipped during lexing and will NOT appear in the token stream:
+/// - **Whitespace**: spaces, tabs, newlines, carriage returns
+/// - **Comments**: `# ...` (from `#` to end of line)
+/// - **Commas**: `,`
+/// - **Byte Order Mark (BOM)**: `\u{FEFF}`
+///
+/// These trivia tokens are defined by the lexer's skip pattern and are discarded during tokenization.
+///
+/// # Use Cases
+///
+/// - **GraphQL servers**: Fast query parsing without formatting overhead
+/// - **Query execution**: Minimal token stream for performance-critical paths
+/// - **Schema compilation**: Efficient type system parsing
+/// - **Production systems**: Where formatting preservation is not required
+///
+/// # Comparison with [`LosslessToken`](super::lossless::LosslessToken)
+///
+/// | Feature | `SyntacticToken` | [`LosslessToken`](super::lossless::LosslessToken) |
+/// |---------|------------------|----------------------------------------------|
+/// | Whitespace | ❌ Skipped | ✅ Preserved |
+/// | Comments | ❌ Skipped | ✅ Preserved |
+/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Performance | ⚡ Fast | 🐢 Slower |
+/// | Use case | Servers, execution | Formatters, linters, IDEs |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use smear::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
+/// use tokit::Lexer;
+///
+/// let source = "query { user { id } }";
+/// let mut lexer = SyntacticLexer::new(source);
+///
+/// // Only syntactically significant tokens appear in the stream:
+/// // Identifier("query"), LBrace, Identifier("user"), LBrace, Identifier("id"), RBrace, RBrace
+/// // (whitespace is automatically skipped)
+/// while let Some(token) = lexer.lex() {
+///   // ...
+/// }
+/// ```
+///
+/// # Generic Over Source Type
+///
+/// `SyntacticToken<S>` is generic over the source type `S`, allowing zero-copy parsing:
+/// - `SyntacticToken<&str>` - For borrowed string sources
+/// - `SyntacticToken<&[u8]>` - For byte slice sources
+/// - `SyntacticToken<bytes::Bytes>` - For shared ownership with cheap cloning
+#[derive(
+  Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, IsVariant, Unwrap, TryUnwrap,
+)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum SyntacticToken<S> {
+  /// Asterisk `*` token
+  Asterisk,
+  /// Ampersand `&` token
+  Ampersand,
+  /// At `@` token
+  At,
+  /// Right angle bracket `>` token
+  RAngle,
+  /// Right curly brace `}` token
+  RBrace,
+  /// Right square bracket `]` token
+  RBracket,
+  /// Right parenthesis `)` token
+  RParen,
+  /// Dot `.` token
+  Colon,
+  /// Dollar `$` token
+  Dollar,
+  /// Equal `=` token
+  Equal,
+  /// Exclamation mark `!` token
+  Bang,
+  /// Left angle bracket `<` token
+  LAngle,
+  /// Left curly brace `{` token
+  LBrace,
+  /// Left square bracket `[` token
+  LBracket,
+  /// Left parenthesis `(` token
+  LParen,
+  /// Pipe `|` token
+  Pipe,
+  /// Fat arrow `=>` token
+  FatArrow,
+  /// Spread operator `...` token
+  Spread,
+  /// Plus `+` token
+  Plus,
+  /// Minus `-` token
+  Minus,
+  /// Path separator `::` token
+  PathSeparator,
+  /// Identifier token
+  Identifier(S),
+  /// Float literal token
+  LitFloat(LitFloat<S>),
+  /// Int literal token
+  LitInt(LitInt<S>),
+  /// Inline string token
+  LitInlineStr(LitInlineStr<S>),
+  /// Block string token
+  LitBlockStr(LitBlockStr<S>),
+}
+
+impl<S> SyntacticToken<S> {
+  /// Returns the kind of the token.
+  #[inline]
+  pub const fn kind(&self) -> SyntacticTokenKind {
+    match self {
+      Self::Identifier(_) => SyntacticTokenKind::Identifier,
+      Self::LitInt(_) => SyntacticTokenKind::Int,
+      Self::LitFloat(_) => SyntacticTokenKind::Float,
+      Self::LitInlineStr(_) => SyntacticTokenKind::InlineString,
+      Self::LitBlockStr(_) => SyntacticTokenKind::BlockString,
+      Self::Dollar => SyntacticTokenKind::Dollar,
+      Self::LParen => SyntacticTokenKind::LParen,
+      Self::RParen => SyntacticTokenKind::RParen,
+      Self::Spread => SyntacticTokenKind::Spread,
+      Self::Colon => SyntacticTokenKind::Colon,
+      Self::Equal => SyntacticTokenKind::Equal,
+      Self::At => SyntacticTokenKind::At,
+      Self::LBracket => SyntacticTokenKind::LBracket,
+      Self::RBracket => SyntacticTokenKind::RBracket,
+      Self::LBrace => SyntacticTokenKind::LBrace,
+      Self::RBrace => SyntacticTokenKind::RBrace,
+      Self::Pipe => SyntacticTokenKind::Pipe,
+      Self::Bang => SyntacticTokenKind::Bang,
+      Self::Ampersand => SyntacticTokenKind::Ampersand,
+      Self::LAngle => SyntacticTokenKind::LAngle,
+      Self::RAngle => SyntacticTokenKind::RAngle,
+      Self::FatArrow => SyntacticTokenKind::FatArrow,
+      Self::Plus => SyntacticTokenKind::Plus,
+      Self::Minus => SyntacticTokenKind::Minus,
+      Self::PathSeparator => SyntacticTokenKind::PathSeparator,
+      Self::Asterisk => SyntacticTokenKind::Asterisk,
+    }
+  }
+}
+
+impl<S> From<SyntacticToken<S>> for SyntacticTokenKind {
+  #[inline]
+  fn from(token: SyntacticToken<S>) -> Self {
+    SyntacticTokenKind::from(&token)
+  }
+}
+
+impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
+  #[inline]
+  fn from(token: &SyntacticToken<S>) -> Self {
+    token.kind()
+  }
+}
+
+// ─── SyntacticToken trait surface ───────────────────────────────────────────
+// `SyntacticToken`'s public `Token` surface — the SIMD lexer's `Token`
+// associated type — NOT Logos-derive machinery. Relocated (un-macro'd) from the
+// deleted `token!` grammar as one generic impl replacing the former per-source-
+// flavor macro expansions. `S: Slice<'a>` supplies the `Char` for the frozen
+// `Error` type (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
+
+impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  type Kind = SyntacticTokenKind;
+  type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
+
+  #[inline(always)]
+  fn kind(&self) -> Self::Kind {
+    self.kind()
+  }
+
+  #[inline(always)]
+  fn is_trivia(&self) -> bool {
+    false
+  }
+}
+
+/// The kind of a [`SyntacticToken`], without the associated source data.
+///
+/// This enum represents the type of a token without carrying the actual source slice,
+/// making it useful for pattern matching and token classification without dealing with
+/// the generic source type parameter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(u16)]
+#[non_exhaustive]
+pub enum SyntacticTokenKind {
+  /// Identifier token
+  Identifier,
+  /// Int literal token
+  Int,
+  /// Float literal token
+  Float,
+  /// Inline string token
+  InlineString,
+  /// Block string token
+  BlockString,
+  /// Dollar `$` token
+  Dollar,
+  /// Fat arrow `=>` token
+  FatArrow,
+  /// Left angle bracket `<` token
+  LAngle,
+  /// Right angle bracket `>` token
+  RAngle,
+  /// Left parenthesis `(` token
+  LParen,
+  /// Right parenthesis `)` token
+  RParen,
+  /// Spread operator `...` token
+  Spread,
+  /// Colon `:` token
+  Colon,
+  /// Equal `=` token
+  Equal,
+  /// Asterisk `*` token
+  Asterisk,
+  /// At `@` token
+  At,
+  /// Left square bracket `[` token
+  LBracket,
+  /// Right square bracket `]` token
+  RBracket,
+  /// Left curly brace `{` token
+  LBrace,
+  /// Right curly brace `}` token
+  RBrace,
+  /// Pipe `|` token
+  Pipe,
+  /// Bang `!` token
+  Bang,
+  /// Ampersand `&` token
+  Ampersand,
+  /// Plus `+` token
+  Plus,
+  /// Minus `-` token
+  Minus,
+  /// Path separator `::` token
+  PathSeparator,
+}
+
+impl core::fmt::Display for SyntacticTokenKind {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    core::fmt::Debug::fmt(self, f)
+  }
+}
+
+// ============================================================================
+// SIMD syntactic lexer — merged from the former graphqlx::simd module.
+// ============================================================================
+// The GraphQLx syntactic lexer: a SIMD-accelerated, streaming, single-pass
+// lexer (hybrid — SIMD fast paths + internal Logos slow-path delegation).
+// This is the GraphQLx `SyntacticLexer`.
+//
+// This mirrors the GraphQL SIMD lexer (`crate::graphql::simd`) and shares its
+// dialect-agnostic primitives through `crate::simd_common`: trivia, identifier,
+// and valid-string scanning (inline and block, including block-string
+// normalization) are SIMD-fast-pathed. The cold paths are handled without the
+// full grammar: malformed / sign-ambiguous numbers delegate to the focused
+// `NumberToken` grammar (see `delegate_number_to_logos`), malformed strings to
+// `string_lexer` (see `delegate_string_error`), the unterminated-spread error
+// is emitted inline, and the unknown-byte error is hand-rolled inline in
+// [`lex`](tokit::Lexer::lex). Because the fast path never constructs a source-typed
+// error itself, parity with the pre-SIMD lexer holds by construction.
+//
+// GraphQLx differs from GraphQL in the *dispatch*, not the architecture:
+//
+// - Angle brackets `<`/`>` are `LAngle`/`RAngle` and nest recursion (generics
+//   like `Box<T>`), so they join `{}`/`[]`/`()` as recursion-affecting
+//   punctuation.
+// - `::` (`PathSeparator`) and `=>` (`FatArrow`) are two-byte tokens, peeled
+//   apart from the single-byte `:` (`Colon`) and `=` (`Equal`) by peeking one
+//   byte — the same longest match Logos performs.
+// - `+` is always `Plus`, but `-` is a number *sign* whenever a digit or `.`
+//   directly follows it (`-5` lexes as `Decimal("-5")`, `-.5` as a float), so
+//   `-` is delegated to `NumberToken` alongside the digits rather than
+//   fast-pathed as a bare `Minus` — `NumberToken`'s `#[token("-")] Minus` arm
+//   resolves a `-` before any other byte back to the operator by longest match.
+// - Numbers are radix-prefixed (decimal / hex / binary / octal, plus decimal
+//   and hex floats) and always delegated to `NumberToken` — never hand-rolled.
 
 use tokit::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
-  state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  state::recursion_tracker::RecursionLimiter,
   utils::CharLen,
 };
 
 use crate::{
-  LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitPlainStr,
+  LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
-  graphqlx::{
-    ast::number::NumberToken,
-    error::{LexerError, LexerErrorData, LexerErrors},
-    syntactic::SyntacticToken,
-  },
+  graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::DelegateStringError,
 };
+
+use self::number::NumberToken;
 
 #[cfg(test)]
 mod tests;

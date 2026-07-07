@@ -22,7 +22,7 @@
 
 use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::simd::SimdSyntacticLexer;
+use crate::graphqlx::syntactic::SimdSyntacticLexer;
 
 /// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
 /// plus `check()` whenever that step is an error. Together these are exactly
@@ -101,7 +101,11 @@ fn error_path_span_slice_check_match_logos() {
 
   for (src, expected) in CASES {
     let simd = SimdSyntacticLexer::<str>::new(src);
-    assert_eq!(&render_error_path(simd, src), expected, "mismatch for {src:?}");
+    assert_eq!(
+      &render_error_path(simd, src),
+      expected,
+      "mismatch for {src:?}"
+    );
   }
 }
 
@@ -156,9 +160,7 @@ fn recursion_limit_region_matches_logos() {
 #19 is_err=false span=SimpleSpan { start: 19, end: 20 } slice=\")\"
 #20 is_err=false span=SimpleSpan { start: 20, end: 21 } slice=\")\"
 ";
-  let simd = SimdSyntacticLexer::<str>::with_state(
-    src.as_str(),
-    RecursionLimiter::with_limitation(limit),
-  );
+  let simd =
+    SimdSyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit));
   assert_eq!(render_error_path(simd, &src), expected);
 }

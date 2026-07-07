@@ -19,9 +19,7 @@ pub mod error;
 /// - Supports GraphQLx extensions (generics, imports, type paths, etc.)
 ///
 /// See [`SyntacticToken`](syntactic::SyntacticToken) for detailed documentation.
-pub mod syntactic {
-  pub use super::ast::*;
-}
+pub mod syntactic;
 
 /// Lossless tokens for GraphQLx - complete source preservation.
 ///
@@ -41,17 +39,6 @@ pub mod syntactic {
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
-/// The GraphQLx syntactic lexer — the SIMD-accelerated lexer (hybrid: SIMD fast
-/// paths + internal Logos slow-path delegation).
-///
-/// Trivia, identifier, and valid-string scanning are SIMD-fast-pathed; numbers,
-/// the spread operator, and error reporting are delegated one token at a time to
-/// a fresh Logos lexer. Mirrors [`crate::graphql::simd`] and shares its
-/// primitives via `crate::simd_common`. See
-/// [`simd::SimdSyntacticLexer`] for the architecture.
-pub mod simd;
-
-mod ast;
 mod handlers;
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.

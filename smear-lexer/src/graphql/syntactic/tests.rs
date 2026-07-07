@@ -5,7 +5,7 @@ use super::*;
 use crate::{
   LitInlineStr,
   graphql::{
-    simd::SimdSyntacticLexer,
+    syntactic::SimdSyntacticLexer,
     tests::{self, TestToken},
   },
 };

@@ -23,8 +23,7 @@ use crate::{
   error::StringError,
   graphql::{
     error::LexerErrorData,
-    simd::SimdSyntacticLexer,
-    syntactic::{SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
 };
 

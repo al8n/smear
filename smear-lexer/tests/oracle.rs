@@ -228,7 +228,7 @@ const EDGES: &[(&str, &str)] = &[
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_oracle() {
-  use smear_lexer::graphql::simd::SimdSyntacticLexer;
+  use smear_lexer::graphql::syntactic::SimdSyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
     let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
@@ -413,7 +413,7 @@ use smear_lexer::{
 #[cfg(feature = "graphql")]
 use smear_lexer::graphql::{
   error::{DecimalError, FloatError},
-  simd::SimdSyntacticLexer,
+  syntactic::SimdSyntacticLexer,
   syntactic::{SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken},
 };
 // `AsBytes` is dialect-agnostic (it's `crate::simd_common::AsBytes` under the
@@ -422,9 +422,9 @@ use smear_lexer::graphql::{
 // dialect is active, so pick it up from whichever is available, preferring
 // `graphql` when both are on (the two paths name the same type).
 #[cfg(feature = "graphql")]
-use smear_lexer::graphql::simd::AsBytes;
+use smear_lexer::graphql::syntactic::AsBytes;
 #[cfg(all(feature = "graphqlx", not(feature = "graphql")))]
-use smear_lexer::graphqlx::simd::AsBytes;
+use smear_lexer::graphqlx::syntactic::AsBytes;
 use tokit::{
   error::UnexpectedLexeme,
   utils::{Lexeme, PositionedChar},
@@ -901,7 +901,7 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_oracle() {
-  use smear_lexer::graphqlx::simd::SimdSyntacticLexer;
+  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
     let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
@@ -925,7 +925,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear_lexer::graphqlx::simd::SimdSyntacticLexer;
+  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
   use tokit::state::recursion_tracker::RecursionLimiter;
 
   const CASES: &[(&str, &str)] = &[
@@ -1057,7 +1057,7 @@ use smear_lexer::graphqlx::{
     HexFloatError, LexerError as GxLexerError, LexerErrorData as GxErrorData,
     LexerErrors as GxLexerErrors, OctalError,
   },
-  simd::SimdSyntacticLexer as GxSimd,
+  syntactic::SimdSyntacticLexer as GxSimd,
   syntactic::SyntacticToken as GxToken,
 };
 #[cfg(feature = "graphqlx")]

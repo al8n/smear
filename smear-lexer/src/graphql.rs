@@ -34,13 +34,6 @@ pub mod syntactic;
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
-/// SIMD-accelerated wrapper over the existing Logos-driven syntactic
-/// lexer. Trivia + identifier scanning are SIMD-fast-pathed; numbers,
-/// strings, the spread operator, and error reporting are delegated one
-/// token at a time to a fresh Logos lexer. See
-/// [`simd::SimdSyntacticLexer`](simd::SimdSyntacticLexer) for the architecture.
-pub mod simd;
-
 pub(crate) mod handlers;
 
 #[cfg(test)]
