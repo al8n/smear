@@ -11,7 +11,7 @@ use super::{
 pub(crate) mod number;
 
 /// The syntactic GraphQLx lexer — the SIMD-accelerated lexer. Generic over the
-/// *source* type `S` (defaulting to `str`); Logos survives only as an internal
+/// *source* type `S` (defaulting to `str`); Logos is used only as an internal
 /// slow-path delegate of the SIMD lexer.
 // ?Sized is required for the default `str` (and `[u8]`) source; the bound is
 // enforced on SimdSyntacticLexer itself.
@@ -191,12 +191,10 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
-// ─── SyntacticToken trait surface ───────────────────────────────────────────
 // `SyntacticToken`'s public `Token` surface — the SIMD lexer's `Token`
-// associated type — NOT Logos-derive machinery. Relocated (un-macro'd) from the
-// deleted `token!` grammar as one generic impl replacing the former per-source-
-// flavor macro expansions. `S: Slice<'a>` supplies the `Char` for the frozen
-// `Error` type (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
+// associated type, one generic impl over every source flavor. `S: Slice<'a>`
+// supplies the `Char` for the frozen `Error` type (str/HipStr -> char,
+// &[u8]/Bytes/HipByt -> u8).
 
 impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
 where
@@ -285,14 +283,11 @@ impl core::fmt::Display for SyntacticTokenKind {
   }
 }
 
-// ============================================================================
-// SIMD syntactic lexer — merged from the former graphqlx::simd module.
-// ============================================================================
 // The GraphQLx syntactic lexer: a SIMD-accelerated, streaming, single-pass
 // lexer (hybrid — SIMD fast paths + internal Logos slow-path delegation).
 // This is the GraphQLx `SyntacticLexer`.
 //
-// This mirrors the GraphQL SIMD lexer (`crate::graphql::simd`) and shares its
+// This mirrors the GraphQL SIMD lexer (`crate::graphql::syntactic`) and shares its
 // dialect-agnostic primitives through `crate::simd_common`: trivia, identifier,
 // and valid-string scanning (inline and block, including block-string
 // normalization) are SIMD-fast-pathed. The cold paths are handled without the
@@ -350,9 +345,9 @@ mod trait_parity_tests;
 
 use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
 
-// Re-exported so the public `graphqlx::simd::{AsBytes, ScanSource}` paths and
-// `DEFAULT_RECURSION_LIMIT` stay stable, matching `graphql::simd`, now that
-// these dialect-agnostic items live in `crate::simd_common`.
+// Re-exported so the public `graphqlx::syntactic::{AsBytes, ScanSource}` paths
+// and `DEFAULT_RECURSION_LIMIT` stay stable, matching `graphql::syntactic`, now
+// that these dialect-agnostic items live in `crate::simd_common`.
 pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 
 /// SIMD layer over the GraphQLx syntactic lexer. Streaming, single-pass, one
@@ -414,9 +409,6 @@ where
   // and needs its UTF-8 byte length to size the error span exactly like Logos.
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
-  // Concrete associated types (formerly projected through
-  // `LogosLexer<SyntacticToken>`, now deleted). These are exactly what those
-  // projections resolved to under the old `LogosLexer<..>: Lexer<..>` bound.
   type State = RecursionLimiter;
 
   type Source = S;
@@ -848,8 +840,8 @@ where
   /// the exact error. `NumberToken`'s `Error` is this lexer's error type, so the
   /// [`Delegated::Error`] arm needs no conversion.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
-  // shape; as with the former `delegate_to_logos`, clippy can't see through the
-  // associated-type projections, so silence its type-complexity lint here.
+  // shape; clippy can't see through the associated-type projections, so silence
+  // its type-complexity lint here.
   #[allow(clippy::type_complexity)]
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn delegate_number_to_logos(

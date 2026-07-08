@@ -6,7 +6,7 @@
 //! over `str`, `[u8]`, and the owned/shared source wrappers alike, and the
 //! [`delegate_to_logos`] slow-path fallback that hands an unrecognized token to
 //! a per-dialect Logos lexer. The dialect-specific dispatch loop (punctuation,
-//! numbers, strings) lives in each dialect's own `simd` module and calls into
+//! numbers, strings) lives in each dialect's own `syntactic` module and calls into
 //! these.
 
 use tokit::{

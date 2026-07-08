@@ -1,24 +1,19 @@
-//! End-to-end `Lexer`-trait parity between the GraphQLx SIMD lexer and
-//! `logos::Lexer` (the GraphQLx counterpart of
-//! `graphql/simd/trait_parity_tests.rs`), driven over a diverse input set.
+//! End-to-end `Lexer`-trait parity for the GraphQLx SIMD lexer, mirroring
+//! `graphql/syntactic/trait_parity_tests.rs`, driven over a diverse input set.
 //!
-//! Historically this harness drove a live Logos-backed lexer over the full
-//! `SyntacticToken<S>` grammar (a local type alias this file used to declare)
-//! side by side with the SIMD lexer, asserting *every*
-//! observable agreed at *every* step of a full drive: the `lex()` result,
-//! `span()`, and `slice()` at each token, then — the step the narrower
-//! `error_parity_tests`/`bump_parity_tests` skip — `span()`/`slice()` after
-//! both lexers reach EOF, and whether a post-EOF `bump` panics. Task 4 of the
-//! Logos-slimming plan severs that live comparator — the full `SyntacticToken`
-//! grammar it depended on is deleted in Task 5 — so the values it used to
-//! produce are frozen below as hardcoded per-input renders, captured from
-//! that live comparator immediately before deletion (see
-//! `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`, Task 4).
+//! Each input freezes the full-drive render a `logos::Lexer` over the
+//! `SyntacticToken<S>` grammar yields — *every* observable at *every* step: the
+//! `lex()` result, `span()`, and `slice()` at each token, then — the step the
+//! narrower `error_parity_tests`/`bump_parity_tests` skip — `span()`/`slice()`
+//! after EOF, and whether a post-EOF `bump` panics. The tests drive the SIMD
+//! lexer over the same inputs and assert every observable against the frozen
+//! render.
+//!
 //! Logos resets its span to `cursor..cursor` (EOF..EOF) once `next()` returns
 //! `None`, including after trailing trivia/comments, so the frozen renders
-//! capture that reset explicitly — it is the reason the SIMD layer must do
-//! the same, and a stale span there would make its own post-EOF `bump` grow
-//! from the wrong base (see the panic check in each test below).
+//! capture that reset explicitly — it is the reason the SIMD layer must do the
+//! same, and a stale span there would make its own post-EOF `bump` grow from
+//! the wrong base (see the panic check in each test below).
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -38,9 +33,7 @@ fn panics<F: FnOnce()>(f: F) -> bool {
 
 /// Render a full drive: `lex()` (Debug), `span()`, and `slice()` at every
 /// step — including the terminal step where `lex()` returns `None`, which is
-/// where the EOF span/slice reset is observed. Exactly the per-step
-/// observables the deleted `assert_full_parity!` macro used to compare
-/// against a live Logos lexer (see the module doc).
+/// where the EOF span/slice reset is observed.
 macro_rules! render_full {
   ($lexer:expr) => {{
     let mut lex = $lexer;
@@ -67,8 +60,7 @@ macro_rules! render_full {
 /// punctuation (including the GraphQLx-only `::`/`=>`/`<>`), delegated
 /// numbers/strings/block strings, comments, a leading BOM, trailing trivia,
 /// whitespace-only, empty, and each malformed shape — paired with their
-/// frozen `<str>`- and `<[u8]>`-sourced renders (captured from the live
-/// Logos-backed comparator before Task 4 deleted it).
+/// frozen `<str>`- and `<[u8]>`-sourced renders.
 const INPUTS: &[(&str, &str, &str)] = &[
   (
     "a::b<K => V>(x: 1, y: \"s\") { z }",
@@ -248,11 +240,9 @@ fn full_trait_parity_str() {
       "mismatch for {src:?}"
     );
 
-    // Frozen reference: a drained lexer sits at span EOF..EOF (see the render
-    // above), so its end equals the source length and a post-EOF `bump(1)`
-    // always lands past the last byte — logos always panicked on this
-    // boundary check, for every input, when this ran against a live
-    // comparator.
+    // A drained lexer sits at span EOF..EOF (see the render above), so its end
+    // equals the source length and a post-EOF `bump(1)` always lands past the
+    // last byte — the boundary check must panic, for every input.
     let simd_panicked = panics(|| {
       let mut simd = SimdSyntacticLexer::<str>::new(src);
       while simd.lex().is_some() {}
@@ -264,10 +254,8 @@ fn full_trait_parity_str() {
 
 #[test]
 fn full_trait_parity_bytes() {
-  // The same drive over `<[u8]>` (SIMD) vs `<&[u8]>` (Logos): they share the
-  // `SyntacticToken<&[u8]>` token, so every observable was directly
-  // comparable, and the frozen renders below are captured from that byte
-  // side.
+  // The same drive over the `<[u8]>` source, asserted against the
+  // byte-flavored frozen renders.
   for (src, _, expected) in INPUTS {
     assert_eq!(
       &render_full!(SimdSyntacticLexer::<[u8]>::new(src.as_bytes())),
@@ -288,10 +276,9 @@ fn full_trait_parity_bytes() {
 fn full_trait_parity_low_recursion_limit() {
   // Deep nesting past a low limit drives the over-limit region (recursion
   // errors in the token's place, plus the finish!/decrease paths) all the way
-  // to EOF. Frozen reference captured the same way as `INPUTS` above (this
-  // region is `(`/`)`-only, so it renders identically to the GraphQL
-  // counterpart's; GraphQLx-specific recursion coverage over `<`/`>` lives in
-  // `tests/oracle.rs`'s low-recursion parity test).
+  // to EOF. This region is `(`/`)`-only, so it renders identically to the
+  // GraphQL counterpart's; GraphQLx-specific recursion coverage over `<`/`>`
+  // lives in `tests/oracle.rs`'s low-recursion parity test.
   let depth = 8;
   let big = "(".repeat(depth) + "x" + &")".repeat(depth);
   let src: &str = &big;

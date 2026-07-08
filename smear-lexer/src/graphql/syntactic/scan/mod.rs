@@ -11,7 +11,7 @@
 //! accelerates the hot, unambiguous path; Logos remains the permanent
 //! source of truth for every anomaly.
 //!
-//! Grammar mirrored from `graphql/syntactic/token.rs`'s Logos subpatterns:
+//! Grammar mirrored from `graphql/syntactic/number.rs`'s Logos subpatterns:
 //! ```text
 //! digit          = [0-9]
 //! non_zero_digit = [1-9]
@@ -22,7 +22,7 @@
 //! Float          = int (frac exp | frac | exp)
 //! ```
 //!
-//! [`scan_number`] is wired into the dispatch `match` in `graphql/simd/mod.rs`:
+//! [`scan_number`] is wired into the dispatch `match` in `graphql/syntactic/mod.rs`:
 //! `Some((kind, len))` becomes an inline `SyntacticToken::LitInt`/`LitFloat`
 //! (no Logos involved), and `None` delegates the whole token to the focused
 //! `NumberToken` Logos grammar via `SimdSyntacticLexer::delegate_number_to_logos`.

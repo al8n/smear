@@ -20,15 +20,12 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use smear_lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
-    syntactic::SimdSyntacticLexer,
-    syntactic::{SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
   tokit::lexer::Lexer as _,
 };
 use std::hint::black_box;
 
-// ---- inputs --------------------------------------------------------------
-//
 // A range of sizes spanning ~5 orders of magnitude (8 B → 2.3 MB) plus
 // stylistic variety:
 //   * tiny / small / medium / large / huge executable queries — exercise
@@ -79,8 +76,6 @@ const INPUTS: &[(&str, &str)] = &[
   ("schema/gitlab_2.2MB", S_GITLAB),
 ];
 
-// ---- driving the lexers --------------------------------------------------
-
 #[inline(always)]
 fn lossless_count(input: &str) -> usize {
   let mut lexer = LosslessLexer::<&str>::new(input);
@@ -92,7 +87,7 @@ fn lossless_count(input: &str) -> usize {
   count
 }
 
-/// Phase-1 SIMD-layered syntactic lexer: SIMD trivia skip + SIMD ident
+/// SIMD-layered syntactic lexer: SIMD trivia skip + SIMD ident
 /// + inline punct + Logos delegation for everything else.
 #[inline(always)]
 fn simd_count(input: &str) -> usize {
@@ -140,8 +135,6 @@ fn gx_lossless_count(input: &str) -> usize {
   count
 }
 
-// ---- groups --------------------------------------------------------------
-
 /// Lexer-only throughput, lossless mode (preserves trivia as tokens).
 fn bench_lossless(c: &mut Criterion) {
   let mut group = c.benchmark_group("graphql/lex/lossless");
@@ -162,7 +155,7 @@ fn bench_lossless(c: &mut Criterion) {
   group.finish();
 }
 
-/// Phase-1 SIMD layer throughput, same fixtures as the lossless baseline.
+/// SIMD layer throughput, same fixtures as the lossless baseline.
 fn bench_simd(c: &mut Criterion) {
   let mut group = c.benchmark_group("graphql/lex/simd_phase1");
   group.sample_size(30);
@@ -183,11 +176,7 @@ fn bench_simd(c: &mut Criterion) {
 }
 
 /// GraphQLx lossless-mode baseline throughput, same fixtures as the GraphQL
-/// baselines above. This group used to also carry a Logos-driven
-/// `graphqlx/syntactic` baseline (mirroring the GraphQL `bench_syntactic`
-/// group above); that baseline was removed in Task 4 of the Logos-slimming
-/// plan — the full `SyntacticToken` grammar it depended on is deleted in
-/// Task 5 — leaving GraphQLx's lossless-mode number here.
+/// baselines above.
 fn bench_graphqlx(c: &mut Criterion) {
   let mut group = c.benchmark_group("graphqlx/lex/baseline");
   group.sample_size(30);
@@ -201,8 +190,6 @@ fn bench_graphqlx(c: &mut Criterion) {
   }
   group.finish();
 }
-
-// ---- registration --------------------------------------------------------
 
 criterion_group!(benches, bench_lossless, bench_simd, bench_graphqlx);
 criterion_main!(benches);

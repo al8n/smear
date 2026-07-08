@@ -1,37 +1,23 @@
-//! After-error `Lexer`-trait parity between the SIMD lexer and
-//! `logos::Lexer` (the Logos-driven lexer over the full `SyntacticToken`
-//! grammar `SyntacticLexer` used to run on, before the Logos-slimming phase
-//! rerouted it to focused sub-lexers).
+//! After-error `Lexer`-trait parity for the SIMD lexer.
 //!
-//! Historically these tests drove a live Logos-backed lexer over the full
-//! `SyntacticToken` grammar (a local type alias this file used to declare)
-//! side by side with the SIMD lexer over the same error-producing inputs,
-//! asserting `span()`/`slice()`/`check()` agreed
-//! token-for-token. Task 4 of the Logos-slimming plan severs that live
-//! comparator — the full `SyntacticToken` grammar it depended on is deleted
-//! in Task 5 — so the values it used to produce are frozen below as hardcoded
-//! per-input constants, captured from that live comparator immediately before
-//! deletion (see `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`,
-//! Task 4).
+//! Each case freezes the exact `span()`/`slice()`/`check()` render a
+//! `logos::Lexer` over the full `SyntacticToken` grammar yields for an
+//! error-producing input, as a hardcoded per-input constant.
 //!
 //! The frozen oracle (`tests/oracle.rs`) renders each error by its own `Debug`
-//! and only reads `lexer.span()` on the *Ok* arm, so it never exercised the
+//! and only reads `lexer.span()` on the *Ok* arm, so it never exercises the
 //! lexer-level `span()`/`slice()`/`check()` on the error path. These tests
 //! drive the SIMD lexer over the same error-producing inputs and assert those
-//! three methods, at every token (error or not), against the frozen render —
-//! preserving the original per-token, post-error coverage without a live
-//! Logos comparator.
+//! three methods, at every token (error or not), against the frozen render,
+//! giving per-token, post-error coverage.
 
 use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphql::syntactic::SimdSyntacticLexer;
 
 /// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
-/// plus `check()` whenever that step is an error. Together these are exactly
-/// the observables the deleted `assert_error_path_parity!` macro used to
-/// compare token-for-token against a live Logos lexer (see the module doc).
-/// Panics if the drive never produces an error, preserving the original
-/// macro's invariant.
+/// plus `check()` whenever that step is an error. Panics if the drive never
+/// produces an error.
 fn render_error_path(mut lex: SimdSyntacticLexer<'_, str>, src: &str) -> String {
   use std::fmt::Write as _;
   let mut out = String::new();
@@ -66,12 +52,11 @@ fn error_path_span_slice_check_match_logos() {
   //   - unknown byte                (delegated `_` arm)
   //   - `..`                        (inline spread error arm)
   //
-  // Expected renders are frozen from a live Logos-backed lexer over the full
-  // `SyntacticToken<&str>` grammar, run in lockstep with the SIMD lexer
-  // immediately before Task 4 deleted that comparator. Every one of these
-  // non-recursion cases' `check()` comes
-  // back `Ok(())`: none of these errors perturb the recursion limiter — see
-  // `recursion_limit_region_matches_logos` below for the one path that does.
+  // Expected renders are frozen from a `logos::Lexer` over the full
+  // `SyntacticToken<&str>` grammar. Every one of these non-recursion cases'
+  // `check()` comes back `Ok(())`: none of these errors perturb the recursion
+  // limiter — see `recursion_limit_region_matches_logos` below for the one
+  // path that does.
   const CASES: &[(&str, &str)] = &[
     (
       r#""unterminated"#,

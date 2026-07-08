@@ -123,10 +123,6 @@ where
   let remainder_str = remainder.as_ref();
   let body_bytes = remainder_str.as_bytes();
 
-  // Phase-2 SIMD scan: hop quote-to-quote via memchr-style search in
-  // place of the byte-by-byte BlockStringToken DFA. Same return shape
-  // (`(end_offset, escaped_count)`) so the rest of this function is
-  // unchanged.
   let (close_off, escaped_triple_count) = find_block_close_simd(body_bytes);
 
   match close_off {
@@ -140,7 +136,7 @@ where
 
       // Sub-lex inner content to gather normalization facts + capacity.
       // This pass is per-line (terminator-driven state machine) and
-      // stays scalar — Phase 2 only attacks the outer quote-find loop.
+      // stays scalar.
       let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
       while lines.next().is_some() {
         // callbacks update lines.extras
@@ -267,10 +263,9 @@ mod tests {
   //! GraphQL §2.9.5 block-string compliance tests for the SIMD scanner.
   //!
   //! These tests pin the *behavior* of `find_block_close_simd` against
-  //! the reference Logos-DFA implementation that previously lived in
-  //! `lex_block_str_from_str`. We keep the reference impl below as
-  //! `find_block_close_logos_reference` and assert byte-for-byte parity
-  //! across every spec edge case identified during the audit.
+  //! the reference Logos-DFA implementation. We keep the reference impl
+  //! below as `find_block_close_logos_reference` and assert byte-for-byte
+  //! parity across every spec edge case.
   //!
   //! Spec summary:
   //!   BlockStringCharacter ::
@@ -284,10 +279,9 @@ mod tests {
 
   use super::*;
 
-  /// Reference impl: byte-for-byte equivalent to the original
-  /// `lex_block_str_from_str` inner loop, but as a pure
-  /// `(Option<usize>, usize)` function so we can compare directly to
-  /// `find_block_close_simd`.
+  /// Reference impl: byte-for-byte equivalent to the `BlockStringToken`
+  /// Logos DFA, as a pure `(Option<usize>, usize)` function so we can
+  /// compare directly to `find_block_close_simd`.
   fn find_block_close_logos_reference(body: &str) -> (Option<usize>, usize) {
     let mut lexer = BlockStringToken::lexer(body);
     let mut escaped = 0usize;
@@ -315,8 +309,6 @@ mod tests {
     );
   }
 
-  // ── §2.9.5 happy path ────────────────────────────────────────────
-
   #[test]
   fn empty_body_means_unterminated() {
     // After the opening `"""`, an empty remaining slice = no closing.
@@ -334,8 +326,6 @@ mod tests {
   fn ascii_payload_then_closing() {
     parity("hello world\"\"\"", "ascii_payload");
   }
-
-  // ── single quotes inside body must NOT close ─────────────────────
 
   #[test]
   fn single_quote_in_body() {
@@ -355,8 +345,6 @@ mod tests {
     // outer lexer will see *after* this token.
     parity("abc\"\"\"\"\"\"\"", "long_quote_run");
   }
-
-  // ── escape sequences ────────────────────────────────────────────
 
   #[test]
   fn single_escape() {
@@ -388,8 +376,6 @@ mod tests {
     let body = "\\\"\"\"".repeat(10) + "\"\"\"";
     parity(&body, "many_escapes");
   }
-
-  // ── backslash-as-content edge cases ──────────────────────────────
 
   #[test]
   fn backslash_then_double_quote_only() {
@@ -427,8 +413,6 @@ mod tests {
     parity("foo\\\\bar\\\\baz\"\"\"", "lone_backslashes");
   }
 
-  // ── unterminated cases ───────────────────────────────────────────
-
   #[test]
   fn unterminated_no_quotes() {
     parity("hello world", "unterminated_no_quotes");
@@ -455,8 +439,6 @@ mod tests {
     parity("\"a\"b\"c", "unterminated_orphan_quotes");
   }
 
-  // ── multi-byte / UTF-8 / control bytes ───────────────────────────
-
   #[test]
   fn utf8_payload() {
     parity("héllo wörld 世界 🦀\"\"\"", "utf8_payload");
@@ -473,8 +455,6 @@ mod tests {
     // treated as content (validity is enforced elsewhere).
     parity("low\x01\x02high\"\"\"", "control_bytes");
   }
-
-  // ── adversarial: many false candidates ───────────────────────────
 
   #[test]
   fn many_singletons_then_close() {
@@ -503,8 +483,6 @@ mod tests {
     let body = "x".repeat(10_000) + "y\"z\"\"\"";
     parity(&body, "very_long_one_quote");
   }
-
-  // ── sanity: known fixtures from upstream ─────────────────────────
 
   #[test]
   fn parity_kitchen_sink_block_strings() {

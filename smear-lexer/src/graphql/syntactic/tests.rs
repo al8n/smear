@@ -166,9 +166,7 @@ fn test_escape_triple_quote_block_string() {
 fn test_bom_lexing() {
   let input = "\u{feff}";
 
-  // The SIMD lexer skips the BOM as trivia and reaches EOF immediately — the
-  // full `SyntacticToken` Logos grammar (whose `skip` pattern once handled this)
-  // is gone, so this drives the surviving `SimdSyntacticLexer` directly.
+  // The SIMD lexer skips the BOM as trivia and reaches EOF immediately.
   let mut lexer = SimdSyntacticLexer::<str>::new(input);
 
   assert!(lexer.lex().is_none());

@@ -317,7 +317,7 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
   }
 }
 
-// ---- extras that accumulate line-level facts during the sub-lex ----
+// extras that accumulate line-level facts during the sub-lex
 #[derive(Default, Debug, Clone, Copy)]
 struct BlockLineExtras {
   has_cr_terminators: bool,

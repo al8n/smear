@@ -13,11 +13,10 @@ use crate::{
   },
 };
 
-/// The frozen syntactic error type these tests assert against. The full
-/// `SyntacticToken` Logos grammar these tests once drove is gone; the SIMD
-/// [`SyntacticLexer`] (the only engine now) produces byte-identical
-/// tokens/errors, guarded by the golden oracle, so these standalone structural
-/// assertions (`char`/`position`/`depth`/... on the error) still hold.
+/// The frozen syntactic error type these tests assert against. The SIMD
+/// [`SyntacticLexer`] produces byte-identical tokens/errors, guarded by the
+/// golden oracle, so these standalone structural assertions
+/// (`char`/`position`/`depth`/... on the error) still hold.
 type TestErrors = LexerErrors<char, RecursionLimitExceeded>;
 
 fn assert_token<'a, Token>(source: &'a str, kind: Token, length: usize)
@@ -61,9 +60,8 @@ pub(super) trait TestToken<'a>:
 }
 
 /// Drives the SIMD [`SyntacticLexer`] and maps each emitted `SyntacticToken<&str>`
-/// into the `TestToken` under test, skipping trivia exactly as the former
-/// Logos-backed harness did (`SyntacticToken` carries no trivia, so `is_ignored`
-/// is always `false` and this simply forwards each token).
+/// into the `TestToken` under test. `SyntacticToken` carries no trivia, so
+/// `is_ignored` is always `false` and this simply forwards each token.
 pub(super) struct TestLexer<'a, T> {
   inner: SyntacticLexer<'a, str>,
   _marker: PhantomData<T>,
@@ -79,7 +77,6 @@ impl<'a, T: TestToken<'a>> Iterator for TestLexer<'a, T> {
         Some(Ok(tok)) => {
           let tok = T::from(tok);
           if tok.is_ignored() {
-            // continue lexing
             continue;
           } else {
             return Some(Ok(tok));
@@ -1616,7 +1613,6 @@ pub(super) fn test_unexpected_escaped<'a, Token>()
 where
   Token: TestToken<'a> + core::fmt::Debug,
 {
-  // "This is \"\"a test \a\d\q description"
   let mut lexer = Token::test_lexer(r#""This is \"\"a test \a\d\q description""#);
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);

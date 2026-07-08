@@ -1,35 +1,20 @@
-//! After-error `Lexer`-trait parity between the GraphQLx SIMD lexer and
-//! `logos::Lexer` (the GraphQLx counterpart of
-//! `graphql/simd/error_parity_tests.rs`).
+//! After-error `Lexer`-trait parity for the GraphQLx SIMD lexer, mirroring
+//! `graphql/syntactic/error_parity_tests.rs`.
 //!
-//! Historically these tests drove a live Logos-backed lexer over the full
-//! `SyntacticToken` grammar (a local type alias this file used to declare)
-//! side by side with the SIMD lexer over the same error-producing inputs,
-//! asserting `span()`/`slice()`/`check()` agreed
-//! token-for-token. Task 4 of the Logos-slimming plan severs that live
-//! comparator — the full `SyntacticToken` grammar it depended on is deleted
-//! in Task 5 — so the values it used to produce are frozen below as hardcoded
-//! per-input constants, captured from that live comparator immediately before
-//! deletion (see `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`,
-//! Task 4).
-//!
-//! The frozen oracle renders each error by its own `Debug` and only reads
-//! `lexer.span()` on the *Ok* arm, so it never exercised the lexer-level
-//! `span()`/`slice()`/`check()` on the error path. These tests drive the SIMD
-//! lexer over the same error-producing inputs and assert those three methods,
-//! at every token (error or not), against the frozen render — preserving the
-//! original per-token, post-error coverage without a live Logos comparator.
+//! Each case freezes the exact `span()`/`slice()`/`check()` render a
+//! `logos::Lexer` over the full `SyntacticToken` grammar yields for an
+//! error-producing input, as a hardcoded per-input constant. These tests drive
+//! the SIMD lexer over the same inputs and assert those three methods at every
+//! token (error or not) against the frozen render, giving per-token, post-error
+//! coverage.
 
 use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphqlx::syntactic::SimdSyntacticLexer;
 
 /// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
-/// plus `check()` whenever that step is an error. Together these are exactly
-/// the observables the deleted `assert_error_path_parity!` macro used to
-/// compare token-for-token against a live Logos lexer (see the module doc).
-/// Panics if the drive never produces an error, preserving the original
-/// macro's invariant.
+/// plus `check()` whenever that step is an error. Panics if the drive never
+/// produces an error.
 fn render_error_path(mut lex: SimdSyntacticLexer<'_, str>, src: &str) -> String {
   use std::fmt::Write as _;
   let mut out = String::new();
@@ -56,7 +41,7 @@ fn render_error_path(mut lex: SimdSyntacticLexer<'_, str>, src: &str) -> String 
 #[test]
 fn error_path_span_slice_check_match_logos() {
   // GraphQLx delegates numbers, strings, and `.` whole to Logos, so every
-  // error below flowed through `delegate_to_logos` except the recursion arm
+  // error below flows through `delegate_to_logos` except the recursion arm
   // (covered separately):
   //   - unterminated inline string
   //   - bad escape
@@ -65,11 +50,8 @@ fn error_path_span_slice_check_match_logos() {
   //   - unknown byte
   //   - `..` (unterminated spread, delegated)
   //
-  // Expected renders are frozen from a live Logos-backed lexer over the full
-  // `SyntacticToken<&str>` grammar, run in lockstep with the SIMD lexer
-  // immediately before Task 4 deleted that comparator. Every one of these
-  // non-recursion cases' `check()` comes
-  // back `Ok(())`: none of these errors perturb the recursion limiter — see
+  // Every one of these non-recursion cases' `check()` comes back `Ok(())`:
+  // none of these errors perturb the recursion limiter — see
   // `recursion_limit_region_matches_logos` below for the one path that does.
   const CASES: &[(&str, &str)] = &[
     (
@@ -113,13 +95,13 @@ fn error_path_span_slice_check_match_logos() {
 fn recursion_limit_region_matches_logos() {
   // At a low limit, every bracket past the limit yields the recursion error in
   // the token's place, and the region also drives the `finish!` (ident) and
-  // decrease-bracket paths while over the limit. Expected render frozen the
-  // same way as above: `check()` carries the *current* depth at each step (it
-  // reads live `RecursionLimiter` state, not a snapshot from when the error
-  // token was produced), so it changes token-to-token as brackets close. This
-  // GraphQLx region is `(`/`)`-only (like GraphQL's) and produces the same
-  // sequence — GraphQLx-specific recursion coverage over `<`/`>` lives in
-  // `tests/oracle.rs`'s low-recursion parity test.
+  // decrease-bracket paths while over the limit. `check()` carries the
+  // *current* depth at each step (it reads live `RecursionLimiter` state, not a
+  // snapshot from when the error token was produced), so it changes
+  // token-to-token as brackets close. This GraphQLx region is `(`/`)`-only
+  // (like GraphQL's) and produces the same sequence — GraphQLx-specific
+  // recursion coverage over `<`/`>` lives in `tests/oracle.rs`'s low-recursion
+  // parity test.
   let depth = 10;
   let src = "(".repeat(depth) + "x" + &")".repeat(depth);
   let limit = 3;

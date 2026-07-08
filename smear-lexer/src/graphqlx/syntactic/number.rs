@@ -3,11 +3,9 @@
 //! [`NumberToken`] is a scoped Logos grammar that recognizes ONLY the numeric
 //! literals (decimal / hex / binary / octal ints, plus decimal and hex floats)
 //! and the bare `-` (`Minus`) operator — the exact slow paths the SIMD lexer's
-//! number / `-` / `.`-digit arms refuse to hand-roll. It is extracted verbatim
-//! from the number portion of the full `SyntacticToken` `token!` grammar
-//! (`graphqlx/ast/token.rs`), calling the **same frozen number handlers**
-//! (`graphqlx/handlers/{str,slice}.rs`) unchanged, so every number error is
-//! byte-identical to the pre-SIMD lexer's without re-deriving any diagnostic.
+//! number / `-` / `.`-digit arms refuse to hand-roll. It calls the **same frozen
+//! number handlers** (`graphqlx/handlers/{str,slice}.rs`), so every number error
+//! is byte-identical to the pre-SIMD lexer's without re-deriving any diagnostic.
 //!
 //! Unlike GraphQL, GraphQLx has NO valid-number SIMD fast path: every number
 //! delegates here. The bare `-` operator delegates too — a `-` directly
@@ -84,8 +82,8 @@ impl<S> From<NumberToken<S>> for SyntacticToken<S> {
   }
 }
 
-/// Internal implementation macro — the number-only twin of
-/// `graphqlx::syntactic::token_impl!`.
+/// Internal implementation macro: emits, for one source flavor, the
+/// Logos-derived `Token` enum and its conversions to [`NumberToken`].
 ///
 /// `$logos_lt` is the lifetime for the internal Logos `Token` enum (always
 /// present). `$slice_lt` is empty (owned types) or the lifetime that binds the
@@ -355,9 +353,8 @@ macro_rules! number_token_impl {
   };
 }
 
-/// The number-only twin of `graphqlx::syntactic::token!`: dispatches each source
-/// flavor to [`number_token_impl!`] with the matching raw-inner / converted-outer
-/// split.
+/// Dispatches each source flavor to [`number_token_impl!`] with the matching
+/// raw-inner / converted-outer split.
 macro_rules! number_token {
   // Borrowed slice: $slice uses lifetime $lt and IS the logos slice type (no conversion).
   ($mod:ident <$lt:lifetime>($slice:ty, $char:ty, $handlers:ident, $utf8:tt $(,)?)) => {

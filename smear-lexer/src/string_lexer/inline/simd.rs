@@ -33,8 +33,6 @@ use super::{LitComplexInlineStr, LitInlineStr, LitPlainStr, utf8_len_for_scalar}
 
 type Span = SimpleSpan;
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
 #[cfg_attr(not(tarpaulin), inline(always))]
 const fn hex_val(b: u8) -> Option<u32> {
   Some(match b {
@@ -76,8 +74,6 @@ fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
   let cp = parse_u4(&remainder[2..6])?;
   if is_low_surrogate(cp) { Some(cp) } else { None }
 }
-
-// ─── unicode escape handlers ───────────────────────────────────────────────────
 
 /// Handle `\uXXXX` (fixed-width) at `src_pos` (first hex char after `u`).
 ///
@@ -234,8 +230,6 @@ fn handle_braced_unicode(
   (consumed, 0)
 }
 
-// ─── public interface ─────────────────────────────────────────────────────────
-
 /// SIMD-accelerated inline string scanner.
 ///
 /// `src`    — bytes starting **after** the opening `"` (the string body).
@@ -266,7 +260,6 @@ pub(crate) fn skip_inline_str_simd(
   }
 
   loop {
-    // ── SIMD bulk plain-character scan ───────────────────────────────────────
     // 4 needles → NEON on aarch64 (≥16 bytes); scalar memchr4 otherwise.
     // Stops at the first `"`, `\`, `\r`, or `\n`.
     let next = match memspan::skip::skip_until(&src[pos..], *b"\"\\\r\n") {
@@ -282,7 +275,6 @@ pub(crate) fn skip_inline_str_simd(
     pos = next;
 
     match src[pos] {
-      // ── end of string ──────────────────────────────────────────────────────
       b'"' => {
         pos += 1;
         if let Some(errs) = errs.filter(|e| !e.is_empty()) {
@@ -294,7 +286,6 @@ pub(crate) fn skip_inline_str_simd(
           LitPlainStr::new(pos).into()
         });
       }
-      // ── escape sequence ────────────────────────────────────────────────────
       b'\\' => {
         let abs_backslash = offset + pos;
         pos += 1; // consume '\'
@@ -333,7 +324,6 @@ pub(crate) fn skip_inline_str_simd(
           }
         }
       }
-      // ── forbidden line terminators (errors) ────────────────────────────────
       b'\r' => {
         let abs = offset + pos;
         if pos + 1 < src.len() && src[pos + 1] == b'\n' {

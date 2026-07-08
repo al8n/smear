@@ -2,12 +2,10 @@
 //!
 //! [`NumberToken`] is a scoped Logos grammar that recognizes ONLY the numeric
 //! literals (`Int` / `Float`) plus the bare `+`/`-` error tokens — the exact
-//! slow paths the SIMD lexer's `scan_number` fast path refuses. It is extracted
-//! verbatim from the number portion of the full `SyntacticToken` `token!`
-//! grammar (`graphql/syntactic/token.rs`), calling the **same frozen number
-//! handlers** (`graphql/handlers/{str,slice}.rs`) unchanged, so every number
-//! error is byte-identical to the pre-SIMD lexer's without re-deriving any
-//! diagnostic.
+//! slow paths the SIMD lexer's `scan_number` fast path refuses. It calls the
+//! **same frozen number handlers** (`graphql/handlers/{str,slice}.rs`), so every
+//! number error is byte-identical to the pre-SIMD lexer's without re-deriving
+//! any diagnostic.
 //!
 //! The SIMD lexer delegates a malformed number to this grammar via
 //! `SimdSyntacticLexer::delegate_number_to_logos` (instantiating
@@ -16,11 +14,11 @@
 //! `LexerErrors<Char, RecursionLimitExceeded>` `SyntacticToken` uses, so the
 //! `Delegated::Error` arm needs zero conversion.
 //!
-//! Like the full grammar, the enum needs a raw-inner / `S`-converted-outer
-//! split for each source flavor (`&str`, `HipStr`, `&[u8]`, `Bytes`, `HipByt`):
-//! the inner `Token<'a>` is the Logos-derived enum whose slices are always the
-//! primitive `&'a str`/`&'a [u8]`, and the outer `NumberToken<S>` carries the
-//! source's own slice type, converted via `IntoEquivalent` where they differ.
+//! The enum needs a raw-inner / `S`-converted-outer split for each source
+//! flavor (`&str`, `HipStr`, `&[u8]`, `Bytes`, `HipByt`): the inner `Token<'a>`
+//! is the Logos-derived enum whose slices are always the primitive
+//! `&'a str`/`&'a [u8]`, and the outer `NumberToken<S>` carries the source's own
+//! slice type, converted via `IntoEquivalent` where they differ.
 
 use crate::graphql::syntactic::SyntacticTokenKind;
 
@@ -59,8 +57,7 @@ impl<S> From<NumberToken<S>> for SyntacticToken<S> {
   }
 }
 
-/// Internal implementation macro — the number-only twin of
-/// `graphql::syntactic::token_impl!`.
+/// Internal implementation macro for [`NumberToken`].
 ///
 /// `$logos_lt` is the lifetime for the internal Logos `Token` enum (always
 /// present). `$slice_lt` is empty (owned types) or the lifetime that binds the
@@ -252,9 +249,8 @@ macro_rules! number_token_impl {
   };
 }
 
-/// The number-only twin of `graphql::syntactic::token!`: dispatches each source
-/// flavor to [`number_token_impl!`] with the matching raw-inner / converted-outer
-/// split.
+/// Dispatches each source flavor to [`number_token_impl!`] with the matching
+/// raw-inner / converted-outer split.
 macro_rules! number_token {
   // Borrowed slice: $slice uses lifetime $lt and IS the logos slice type (no conversion).
   ($mod:ident <$lt:lifetime>($slice:ty, $char:ty, $handlers:ident, $utf8:tt $(,)?)) => {

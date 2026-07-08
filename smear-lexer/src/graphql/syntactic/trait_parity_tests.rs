@@ -1,20 +1,14 @@
-//! End-to-end `Lexer`-trait parity between the SIMD lexer and `logos::Lexer`
-//! (the Logos-driven lexer over the full `SyntacticToken` grammar
-//! `SyntacticLexer` used to run on, before the Logos-slimming phase rerouted
-//! it to focused sub-lexers), driven over a diverse input set.
+//! End-to-end `Lexer`-trait parity for the SIMD lexer, driven over a diverse
+//! input set.
 //!
-//! Historically this harness drove a live Logos-backed lexer over the full
-//! `SyntacticToken<S>` grammar (a local type alias this file used to declare)
-//! side by side with the SIMD lexer, asserting *every*
-//! observable agreed at *every* step of a full drive: the `lex()` result,
-//! `span()`, and `slice()` at each token, then — the step the narrower
-//! `error_parity_tests`/`bump_parity_tests` skip — `span()`/`slice()` after
-//! both lexers reach EOF, and whether a post-EOF `bump` panics. Task 4 of the
-//! Logos-slimming plan severs that live comparator — the full `SyntacticToken`
-//! grammar it depended on is deleted in Task 5 — so the values it used to
-//! produce are frozen below as hardcoded per-input renders, captured from
-//! that live comparator immediately before deletion (see
-//! `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`, Task 4).
+//! Each input freezes the full-drive render a `logos::Lexer` over the full
+//! `SyntacticToken<S>` grammar yields — *every* observable at *every* step: the
+//! `lex()` result, `span()`, and `slice()` at each token, then — the step the
+//! narrower `error_parity_tests`/`bump_parity_tests` skip — `span()`/`slice()`
+//! after EOF, and whether a post-EOF `bump` panics. The tests drive the SIMD
+//! lexer over the same inputs and assert every observable against the frozen
+//! render.
+//!
 //! Logos resets its span to `cursor..cursor` (EOF..EOF) once `next()` returns
 //! `None`, including after trailing trivia/comments, so the frozen renders
 //! capture that reset explicitly — it is the reason the SIMD layer must do
@@ -39,9 +33,7 @@ fn panics<F: FnOnce()>(f: F) -> bool {
 
 /// Render a full drive: `lex()` (Debug), `span()`, and `slice()` at every
 /// step — including the terminal step where `lex()` returns `None`, which is
-/// where the EOF span/slice reset is observed. Exactly the per-step
-/// observables the deleted `assert_full_parity!` macro used to compare
-/// against a live Logos lexer (see the module doc).
+/// where the EOF span/slice reset is observed.
 macro_rules! render_full {
   ($lexer:expr) => {{
     let mut lex = $lexer;
@@ -67,8 +59,7 @@ macro_rules! render_full {
 /// Inputs spanning every dispatch path — fast-path identifiers and
 /// punctuation, delegated numbers/strings/block strings, comments, a leading
 /// BOM, trailing trivia, whitespace-only, empty, and each malformed shape —
-/// paired with their frozen `<str>`- and `<[u8]>`-sourced renders (captured
-/// from the live Logos-backed comparator before Task 4 deleted it).
+/// paired with their frozen `<str>`- and `<[u8]>`-sourced renders.
 const INPUTS: &[(&str, &str, &str)] = &[
   (
     "{ user(id: 4) { name, ...Frag @skip(if: true) } }",
@@ -253,9 +244,8 @@ fn full_trait_parity_str() {
 #[test]
 fn full_trait_parity_bytes() {
   // The same drive over `<[u8]>` (SIMD) vs `<&[u8]>` (Logos): they share the
-  // `SyntacticToken<&[u8]>` token, so every observable was directly
-  // comparable, and the frozen renders below are captured from that byte
-  // side.
+  // `SyntacticToken<&[u8]>` token, so every observable is directly comparable,
+  // and the frozen renders below are the byte-side ones.
   for (src, _, expected) in INPUTS {
     assert_eq!(
       &render_full!(SimdSyntacticLexer::<[u8]>::new(src.as_bytes())),

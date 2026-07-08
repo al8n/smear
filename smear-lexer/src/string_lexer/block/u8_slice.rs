@@ -94,7 +94,7 @@ where
   let remainder = lexer.remainder();
   let remainder_bytes = remainder.as_ref();
 
-  // Phase-2 SIMD scan, identical shape to the str-side variant.
+  // SIMD scan, identical shape to the str-side variant.
   let (_, close_off, num_escaped_triple_quotes) = find_block_close_simd(remainder_bytes);
 
   match close_off {
@@ -161,7 +161,7 @@ where
 pub(crate) fn skip_block_str_from_bytes(
   src: &[u8],
 ) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
-  // Phase-2 SIMD scan, identical shape to the str-side variant.
+  // SIMD scan, identical shape to the str-side variant.
   let (read, close_off, num_escaped_triple_quotes) = find_block_close_simd(src);
 
   match close_off {
@@ -211,7 +211,7 @@ pub(crate) fn skip_block_str_from_bytes(
   }
 }
 
-// ---- sub-lexer over inner block-string content ----
+// sub-lexer over inner block-string content
 #[derive(Logos, Debug)]
 #[logos(crate = tokit::logos, utf8 = false, extras = BlockLineExtras)]
 enum BlockLineTok {

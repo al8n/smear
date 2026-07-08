@@ -1,15 +1,5 @@
 //! `Lexer::bump` parity between the SIMD lexer and `logos::Lexer::bump`.
 //!
-//! Historically these tests drove a live Logos-backed lexer over the full
-//! `SyntacticToken` grammar (a local type alias this file used to declare)
-//! side by side with the SIMD lexer over identical inputs and `bump` calls,
-//! asserting every observable agreed. Task 4 of the Logos-slimming plan
-//! severs that live comparator — the full `SyntacticToken` grammar it
-//! depended on is deleted in Task 5 — so the values it used to produce are
-//! frozen below as hardcoded constants, captured from that live comparator
-//! immediately before deletion (see
-//! `docs/superpowers/plans/2026-07-06-logos-slimming-phase2.md`, Task 4).
-//!
 //! `bump` must mirror `logos::Lexer::bump`: it extends the current token's end
 //! (so `span()`/`slice()` grow to include the bumped bytes) and validates the
 //! new end as a source boundary, panicking (`"Invalid Lexer bump"`) when it
@@ -38,8 +28,7 @@ fn panics<F: FnOnce()>(f: F) -> bool {
 #[test]
 fn valid_bump_grows_span_and_next_lex_matches_logos() {
   // `foo   bar`: lex `foo`, bump past two of the three trivia bytes, then let
-  // the dispatch loop skip the third. Frozen reference (captured from the
-  // live Logos-backed comparator before Task 4 deleted it): token 0 is
+  // the dispatch loop skip the third. Frozen reference: token 0 is
   // `Identifier("foo")` at 0..3; after `bump(2)` span/slice grow to 0..5 /
   // "foo  "; the next token is `Identifier("bar")` at 6..9; the stream ends
   // (`None`) immediately after.
@@ -77,10 +66,9 @@ fn valid_bump_grows_span_and_next_lex_matches_logos() {
 #[test]
 fn bump_after_error_token_matches_logos() {
   // `..x`: `..` is an unterminated-spread error token spanning `0..2`, and `x`
-  // follows so a one-byte bump stays a valid boundary. Frozen reference
-  // (captured the same way as above): the error token's `Debug` text is
-  // exactly the constant below; after `bump(1)` the span grows to 0..3 and
-  // the slice becomes "..x".
+  // follows so a one-byte bump stays a valid boundary. Frozen reference: the
+  // error token's `Debug` text is exactly the constant below; after `bump(1)`
+  // the span grows to 0..3 and the slice becomes "..x".
   let src = "..x";
   let mut simd = SimdSyntacticLexer::<str>::new(src);
 
@@ -112,8 +100,7 @@ fn bump_past_end_panics_like_logos() {
   // Whole source consumed, then a one-byte bump lands past the end. Frozen
   // reference: `logos::Lexer::bump` asserts `is_boundary(token_end)` (`index
   // <= len` for a `str`'s byte length), which fails unconditionally here, so
-  // it panicked every time this was checked against a live comparator; the
-  // SIMD lexer must panic at the same point.
+  // logos panics; the SIMD lexer must panic at the same point.
   let src = "ab";
   let simd_panicked = panics(|| {
     let mut simd = SimdSyntacticLexer::<str>::new(src);

@@ -211,14 +211,11 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
-// ─── SyntacticToken trait surface ───────────────────────────────────────────
 // `SyntacticToken`'s public token/keyword/punctuator surface — the SIMD lexer's
 // `Token` associated type and the parser's keyword/punctuator queries — NOT
-// Logos-derive machinery. Relocated (un-macro'd) from the deleted `token!`
-// grammar: one generic impl per trait replaces the former per-source-flavor
-// macro expansions. `S: Slice<'a>` supplies the `Char` for the frozen `Error`
-// type, and `S::Char`/`Clone` reproduce each flavor's bounds exactly (str/HipStr
-// -> char, &[u8]/Bytes/HipByt -> u8).
+// Logos-derive machinery. `S: Slice<'a>` supplies the `Char` for the frozen
+// `Error` type, and `S::Char`/`Clone` reproduce each flavor's bounds exactly
+// (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
 
 impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
 where
@@ -293,7 +290,6 @@ where
   }
 }
 
-// ─── From<punct::*> for SyntacticTokenKind ──────────────────────────────────
 // Required by the `Punctuator` trait impls on tokit's punctuator structs
 // (e.g. `tokit::punct::Pipe`), which are used as the `Sep` type parameter
 // in `SeparatedWhile`.
@@ -464,9 +460,6 @@ impl core::fmt::Display for SyntacticTokenKind {
   }
 }
 
-// ============================================================================
-// SIMD syntactic lexer — merged from the former `graphql::simd` module.
-// ============================================================================
 use tokit::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
@@ -488,9 +481,9 @@ mod scan;
 
 use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
 
-// Re-exported so the public `graphql::simd::{AsBytes, ScanSource}` paths and
-// `DEFAULT_RECURSION_LIMIT` stay stable now that these dialect-agnostic items
-// live in `crate::simd_common`.
+// Re-exported so the public `graphql::syntactic::{AsBytes, ScanSource}` paths
+// and `DEFAULT_RECURSION_LIMIT` stay stable now that these dialect-agnostic
+// items live in `crate::simd_common`.
 pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 
 /// SIMD layer over the GraphQL syntactic lexer. Streaming, single-pass, one
@@ -550,9 +543,6 @@ where
   // and needs its UTF-8 byte length to size the error span exactly like Logos.
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
-  // Concrete associated types (formerly projected through
-  // `LogosLexer<SyntacticToken>`, now deleted). These are exactly what those
-  // projections resolved to under the old `LogosLexer<..>: Lexer<..>` bound.
   type State = RecursionLimiter;
 
   type Source = S;
@@ -855,8 +845,7 @@ where
               // path, any anomaly delegates the *whole* token to the inline
               // string sub-lexer (`string_lexer::inline`) rather than
               // re-deriving the error here. This is also what drops the
-              // `Char = u8` requirement: the only place that ever built a
-              // `StringErrors<u8>` inline is gone.
+              // `Char = u8` requirement.
               Err(_) => return self.delegate_string_error(token_start, false),
             },
           }
@@ -997,8 +986,8 @@ where
   /// kept for type-completeness. `NumberToken`'s `Error` is this lexer's error
   /// type, so the [`Delegated::Error`] arm needs no conversion.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
-  // shape; as with the former `delegate_to_logos`, clippy can't see through the
-  // associated-type projections, so silence its type-complexity lint here.
+  // shape; clippy can't see through the associated-type projections, so silence
+  // its type-complexity lint here.
   #[allow(clippy::type_complexity)]
   #[cfg_attr(not(tarpaulin), inline(always))]
   fn delegate_number_to_logos(
