@@ -294,5 +294,13 @@ pub(crate) fn memchr_newline(input: &[u8]) -> Option<usize> {
   ::memspan::skip::skip_until(input, b"\n\r")
 }
 
+/// The dialect-agnostic validity-only fast scanner for **decimal** numeric
+/// literals (`Int` / `Float`), shared by both dialects' SIMD lexers. Radix and
+/// hex-float forms (GraphQLx) are never fast-pathed here — they return `None`
+/// and delegate to the per-dialect `NumberToken` grammar.
+pub(crate) mod scan;
+
+pub(crate) use scan::{NumberKind, scan_number};
+
 #[cfg(test)]
 mod tests;

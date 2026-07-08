@@ -477,9 +477,9 @@ use crate::{
 
 use self::number::NumberToken;
 
-mod scan;
-
-use crate::simd_common::{Delegated, memchr_newline, scan_identifier, skip_ws_and_comma};
+use crate::simd_common::{
+  Delegated, NumberKind, memchr_newline, scan_identifier, scan_number, skip_ws_and_comma,
+};
 
 // Re-exported so the public `graphql::syntactic::{AsBytes, ScanSource}` paths
 // and `DEFAULT_RECURSION_LIMIT` stay stable now that these dialect-agnostic
@@ -668,12 +668,12 @@ where
       let b0 = bytes[0];
       // Once-per-token entry-depth recursion check, shared by every non-bracket
       // emitter: the `match b0` below evaluates to the emitted `SyntacticToken`
-      // (or diverges via `return`/`continue`), and a single tail check gates it —
-      // collapsing the former ~8 per-emission checks into one, off the emission
-      // critical path. Non-bracket tokens never change depth, so their post-token
-      // depth equals this entry depth (Logos re-checks after every token; one
-      // shared check is byte-for-byte equivalent for them). Bracket arms mutate
-      // depth and re-check themselves in `increase_recursion!`/`decrease_recursion!`.
+      // (or diverges via `return`/`continue`), and a single tail check gates it,
+      // off the emission critical path (one check rather than one per emitter).
+      // Non-bracket tokens never change depth, so their post-token depth equals
+      // this entry depth (Logos re-checks after every token; one shared check is
+      // byte-for-byte equivalent for them). Bracket arms mutate depth and
+      // re-check themselves in `increase_recursion!`/`decrease_recursion!`.
       let recheck = self.state.check();
       // Emit a single-byte punctuation token: advance past it and yield the token
       // as the `match` value; the shared tail check gates it.
@@ -714,14 +714,14 @@ where
         // `UnexpectedLexeme`, matching the pre-SIMD lexer — rather than the
         // hand-rolled `_` arm's `UnknownLexeme`. (`scan_number` still returns
         // `None` for a leading `+`: it is not a valid number start.)
-        b'0'..=b'9' | b'-' | b'+' => match scan::scan_number(bytes) {
-          Some((scan::NumberKind::Int, len)) => {
+        b'0'..=b'9' | b'-' | b'+' => match scan_number(bytes) {
+          Some((NumberKind::Int, len)) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;
             SyntacticToken::LitInt(slice)
           }
-          Some((scan::NumberKind::Float, len)) => {
+          Some((NumberKind::Float, len)) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;

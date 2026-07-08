@@ -1,7 +1,8 @@
-//! Validity-only fast scan for GraphQL numeric literals (`Int` / `Float`).
+//! Validity-only fast scan for **decimal** numeric literals (`Int` / `Float`),
+//! shared by both dialects' SIMD lexers.
 //!
 //! [`scan_number`] answers exactly one question: "starting at `src[0]`, is
-//! this a clean, valid GraphQL number, and how many bytes does it span?" It
+//! this a clean, valid decimal number, and how many bytes does it span?" It
 //! is pure validity + measurement — it never constructs an error. The
 //! instant the grammar is violated, or the number is followed by a byte
 //! GraphQL treats as an illegal suffix, it returns `None` so the caller can
@@ -11,7 +12,8 @@
 //! accelerates the hot, unambiguous path; Logos remains the permanent
 //! source of truth for every anomaly.
 //!
-//! Grammar mirrored from `graphql/syntactic/number.rs`'s Logos subpatterns:
+//! Decimal grammar (identical in both dialects; GraphQLx radix / hex-float
+//! forms are delegated, never scanned here):
 //! ```text
 //! digit          = [0-9]
 //! non_zero_digit = [1-9]
@@ -22,10 +24,11 @@
 //! Float          = int (frac exp | frac | exp)
 //! ```
 //!
-//! [`scan_number`] is wired into the dispatch `match` in `graphql/syntactic/mod.rs`:
-//! `Some((kind, len))` becomes an inline `SyntacticToken::LitInt`/`LitFloat`
-//! (no Logos involved), and `None` delegates the whole token to the focused
-//! `NumberToken` Logos grammar via `SimdSyntacticLexer::delegate_number_to_logos`.
+//! [`scan_number`] is wired into the dispatch `match` in each dialect's
+//! `syntactic/mod.rs`: `Some((kind, len))` becomes an inline decimal
+//! `LitInt`/`LitFloat` (no Logos involved), and `None` delegates the whole
+//! token to that dialect's focused `NumberToken` Logos grammar via
+//! `SimdSyntacticLexer::delegate_number_to_logos`.
 
 /// The two GraphQL numeric literal shapes [`scan_number`] can recognize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
