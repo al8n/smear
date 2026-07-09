@@ -1,0 +1,34 @@
+[package]
+name = "smear-parser-next"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme = "README.md"
+description = "Atomic parser-combinators for GraphQL and GraphQL-like DSLs"
+
+[features]
+default = ["std", "graphql", "graphqlx"]
+alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
+std = ["smear-scaffold/std", "smear-lexer/std"]
+
+unstable = ["smear-lexer/unstable"]
+
+graphql = ["smear-lexer/graphql"]
+graphqlx = ["unstable", "smear-lexer/graphqlx"]
+
+bytes = ["dep:bytes", "smear-lexer/bytes", "tokit/bytes_1"]
+bstr = ["smear-lexer/bstr", "tokit/bstr_1"]
+hipstr = ["smear-lexer/hipstr", "tokit/hipstr_0_8"]
+smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
+
+[dependencies]
+derive_more.workspace = true
+tokit.workspace = true
+smear-scaffold.workspace = true
+smear-lexer.workspace = true
+paste = "1"
+
+bytes = { workspace = true, optional = true }
+smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }

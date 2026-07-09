@@ -4,6 +4,7 @@ members = [
   "smear-lexer",
   "smear-scaffold",
   "smear-parser",
+  "smear-parser-next",
 ]
 resolver = "3"
 
