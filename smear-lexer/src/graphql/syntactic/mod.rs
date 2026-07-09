@@ -245,6 +245,36 @@ where
   }
 }
 
+impl<'a, S> tokit::token::IdentifierToken<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  #[inline(always)]
+  fn is_identifier(&self) -> bool {
+    matches!(self, Self::Identifier(_))
+  }
+}
+
+impl<'a, S> tokit::token::LitToken<'a> for SyntacticToken<S>
+where
+  S: tokit::Slice<'a> + Clone + 'a,
+{
+  #[inline(always)]
+  fn is_decimal_literal(&self) -> bool {
+    matches!(self, Self::LitInt(_))
+  }
+
+  #[inline(always)]
+  fn is_float_literal(&self) -> bool {
+    matches!(self, Self::LitFloat(_))
+  }
+
+  #[inline(always)]
+  fn is_string_literal(&self) -> bool {
+    matches!(self, Self::LitInlineStr(_) | Self::LitBlockStr(_))
+  }
+}
+
 impl<'a, S> tokit::token::PunctuatorToken<'a> for SyntacticToken<S>
 where
   S: tokit::Slice<'a> + Clone + 'a,
@@ -287,6 +317,9 @@ where
   }
   fn dollar() -> Option<Self::Kind> {
     Some(SyntacticTokenKind::Dollar)
+  }
+  fn spread() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Spread)
   }
 }
 

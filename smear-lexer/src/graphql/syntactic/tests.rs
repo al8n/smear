@@ -198,3 +198,22 @@ fn test_recursion_limit() {
 
   panic!("expected recursion limit exceeded error");
 }
+
+#[test]
+fn capability_traits_classify_tokens() {
+  use tokit::token::{IdentifierToken, LitToken as _, PunctuatorToken};
+  // UFCS on `IdentifierToken`: the `IsVariant` derive also generates an inherent
+  // `is_identifier`, so method-call syntax would resolve to that instead of the trait.
+  assert!(IdentifierToken::is_identifier(
+    &SyntacticToken::<&str>::Identifier("x")
+  ));
+  assert!(!IdentifierToken::is_identifier(
+    &SyntacticToken::<&str>::LitInt("1")
+  ));
+  assert!(SyntacticToken::<&str>::LitInt("1").is_integer_literal());
+  assert!(SyntacticToken::<&str>::LitFloat("1.5").is_float_literal());
+  assert_eq!(
+    <SyntacticToken<&str> as PunctuatorToken<'_>>::spread(),
+    Some(SyntacticTokenKind::Spread)
+  );
+}
