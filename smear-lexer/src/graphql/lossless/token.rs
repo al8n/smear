@@ -80,6 +80,13 @@ macro_rules! token_impl {
         }
       }
 
+      impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::IdentifierToken<'b> for LosslessToken<$slice> {
+        #[inline(always)]
+        fn is_identifier(&self) -> bool {
+          matches!(self, Self::Identifier(_))
+        }
+      }
+
       #[derive(
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
@@ -292,6 +299,13 @@ macro_rules! token_impl {
         #[inline(always)]
         fn is_trivia(&self) -> bool {
           self.is_trivia()
+        }
+      }
+
+      impl tokit::token::IdentifierToken<'_> for LosslessToken<$slice> {
+        #[inline(always)]
+        fn is_identifier(&self) -> bool {
+          matches!(self, Self::Identifier(_))
         }
       }
 

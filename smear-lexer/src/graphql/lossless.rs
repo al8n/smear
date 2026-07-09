@@ -310,3 +310,21 @@ impl core::fmt::Display for LosslessTokenKind {
     }
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use tokit::token::IdentifierToken;
+
+  #[test]
+  fn identifier_capability_classifies_tokens() {
+    // UFCS on `IdentifierToken`: the `IsVariant` derive also generates an inherent
+    // `is_identifier`, so method-call syntax would resolve to that instead of the trait.
+    assert!(IdentifierToken::is_identifier(
+      &LosslessToken::<&str>::Identifier("x")
+    ));
+    assert!(!IdentifierToken::is_identifier(
+      &LosslessToken::<&str>::LitInt("1")
+    ));
+  }
+}
