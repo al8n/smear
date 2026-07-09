@@ -15,3 +15,5 @@ pub use smear_lexer as lexer;
 
 /// Re-exported scaffold crate.
 pub use smear_scaffold as scaffold;
+
+pub mod combinator;
