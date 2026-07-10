@@ -17,9 +17,9 @@ use smear_lexer::tokora::{
 use super::{enum_value, ident, try_enum_value, try_ident};
 
 #[cfg(feature = "graphql")]
-use super::{at, colon, lbrace, spread, try_at};
+use super::{at, colon, keyword_exact, lbrace, spread, try_at, try_keyword_exact};
 #[cfg(feature = "graphql")]
-use smear_lexer::graphql::syntactic::SyntacticLexer;
+use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 #[cfg(feature = "graphqlx")]
 use smear_lexer::graphqlx::syntactic::SyntacticLexer as GxLexer;
@@ -928,5 +928,248 @@ fn try_enum_value_declines_on_empty_input_graphqlx() {
     |inp| Ok::<_, TestError>(try_enum_value(inp)?.is_decline()),
     "",
     |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+// Keyword atoms need `KeywordToken`, which among the dialect lexers only
+// GraphQL's `SyntacticToken` supplies today, so the keyword tests drive GraphQL
+// alone. Every test runs over the full source matrix (`str`, `[u8]`, and
+// `Bytes`) via `drive_all!`, which exercises keyword equivalence over byte
+// sources as well as `str`. Accept paths assert the matched keyword's span and,
+// for the untyped atoms, the identifier text carried by the token; error paths
+// run under both emitter modes.
+
+/// Reads the identifier text out of a keyword atom's token payload, so accept
+/// paths can assert the matched slice across every source representation.
+#[cfg(feature = "graphql")]
+fn keyword_text<S: AsRef<[u8]>>(kw: &SyntacticToken<S>) -> &[u8] {
+  match kw {
+    SyntacticToken::Identifier(s) => as_bytes(s),
+    _ => panic!("keyword atom yielded a non-identifier token"),
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn keyword_exact_commits_on_on() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let kw = keyword_exact(inp, "on")?;
+      assert_eq!(kw.span(), SimpleSpan::new(0, 2));
+      assert_eq!(keyword_text(kw.source_ref()), b"on");
+      Ok::<_, TestError>(())
+    },
+    "on",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn keyword_exact_errors_on_wrong_keyword() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "type",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "type",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn keyword_exact_errors_on_non_keyword() {
+  // A brace is not a keyword, so `keyword()` yields `None` and the committed
+  // atom reports an unexpected token rather than a keyword mismatch.
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn keyword_exact_errors_on_empty_input() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| keyword_exact(inp, "on").map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_keyword_exact_accepts_on() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let attempt = try_keyword_exact(inp, "on")?;
+      assert!(attempt.is_accept());
+      let kw = attempt.unwrap_accept();
+      assert_eq!(kw.span(), SimpleSpan::new(0, 2));
+      assert_eq!(keyword_text(kw.source_ref()), b"on");
+      Ok::<_, TestError>(())
+    },
+    "on",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_keyword_exact_declines_on_type_and_leaves_it() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let declined = try_keyword_exact(inp, "on")?.is_decline();
+      // The declined `type` keyword is untouched, so the committed atom pulls it
+      // straight off the input; its span proves the leftover is the `type`
+      // keyword and that the decline consumed nothing.
+      let leftover = keyword_exact(inp, "type")?;
+      assert_eq!(leftover.span(), SimpleSpan::new(0, 4));
+      assert_eq!(keyword_text(leftover.source_ref()), b"type");
+      Ok::<_, TestError>(declined)
+    },
+    "type",
+    |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_keyword_exact_declines_on_empty_input() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| Ok::<_, TestError>(try_keyword_exact(inp, "on")?.is_decline()),
+    "",
+    |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+// The typed-keyword mapping macro is a consumer surface: the test module invokes
+// it (naming dialect keyword nodes is allowed for tests) to prove the generated
+// atoms commit, decline, and map onto the concrete `On`/`Type` nodes.
+#[cfg(feature = "graphql")]
+typed_keyword_atom!(
+  kw_on / try_kw_on => "on" => smear_lexer::keywords::On,
+  kw_type / try_kw_type => "type" => smear_lexer::keywords::Type,
+);
+
+#[cfg(feature = "graphql")]
+#[test]
+fn kw_on_commits_on_on() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let on = kw_on(inp)?;
+      assert_eq!(on.span(), &SimpleSpan::new(0, 2));
+      Ok::<_, TestError>(())
+    },
+    "on",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn kw_on_errors_on_wrong_keyword() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| kw_on(inp).map(|_| ()),
+    "type",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| kw_on(inp).map(|_| ()),
+    "type",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn kw_on_errors_on_empty_input() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| kw_on(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| kw_on(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_kw_on_accepts_on() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let attempt = try_kw_on(inp)?;
+      assert!(attempt.is_accept());
+      assert_eq!(attempt.unwrap_accept().span(), &SimpleSpan::new(0, 2));
+      Ok::<_, TestError>(())
+    },
+    "on",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_kw_on_declines_on_type_and_leaves_it() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let declined = try_kw_on(inp)?.is_decline();
+      // The untouched `type` keyword is accepted by its own typed declining atom,
+      // asserting the leftover's type rather than mere presence.
+      let leftover = try_kw_type(inp)?;
+      let accepted_type = leftover.is_accept();
+      Ok::<_, TestError>((declined, accepted_type))
+    },
+    "type",
+    |out: Result<(bool, bool), TestError>| assert!(matches!(out, Ok((true, true))))
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn kw_type_commits_on_type() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let ty = kw_type(inp)?;
+      assert_eq!(ty.span(), &SimpleSpan::new(0, 4));
+      Ok::<_, TestError>(())
+    },
+    "type",
+    |out: Result<(), TestError>| assert!(out.is_ok())
   );
 }
