@@ -36,7 +36,7 @@
 
 use std::vec::Vec;
 
-use tokora::{InputRef, Lexer, ParseInput, Token, error::UnexpectedEot, span::Spanned};
+use tokora::{InputRef, Lexer, ParseInput, Token, span::Spanned};
 
 use super::{ErrorOf, LiteralValueToken, ParseCtx, StringOf, try_string};
 
@@ -90,7 +90,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   opt(try_string)(inp)
 }
