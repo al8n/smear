@@ -3,7 +3,7 @@ use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 use super::*;
 
 use crate::{
-  LitInlineStr,
+  LitInlineStr, LitPlainStr,
   graphql::{
     syntactic::SimdSyntacticLexer,
     tests::{self, TestToken},
@@ -212,6 +212,16 @@ fn capability_traits_classify_tokens() {
   ));
   assert!(SyntacticToken::<&str>::LitInt("1").is_integer_literal());
   assert!(SyntacticToken::<&str>::LitFloat("1.5").is_float_literal());
+
+  let inline = SyntacticToken::LitInlineStr(LitPlainStr::new("\"hi\"").into());
+  let block = SyntacticToken::LitBlockStr(LitPlainStr::new("\"\"\"b\"\"\"").into());
+  assert!(inline.is_inline_string_literal());
+  assert!(!inline.is_multiline_string_literal());
+  assert!(block.is_multiline_string_literal());
+  assert!(!block.is_inline_string_literal());
+  assert!(inline.is_string_literal());
+  assert!(block.is_string_literal());
+
   assert_eq!(
     <SyntacticToken<&str> as PunctuatorToken<'_>>::spread(),
     Some(SyntacticTokenKind::Spread)
