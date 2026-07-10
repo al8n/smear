@@ -214,6 +214,16 @@ where
   }
 }
 
+impl<'a, S> tokora::token::IdentifierToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+{
+  #[inline(always)]
+  fn is_identifier(&self) -> bool {
+    matches!(self, Self::Identifier(_))
+  }
+}
+
 /// The kind of a [`SyntacticToken`], without the associated source data.
 ///
 /// This enum represents the type of a token without carrying the actual source slice,

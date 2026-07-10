@@ -205,3 +205,16 @@ fn byte_source_matches_str_shapes() {
     ]
   );
 }
+
+#[test]
+fn identifier_capability_classifies_tokens() {
+  use tokora::token::IdentifierToken;
+  // UFCS on `IdentifierToken`: the `IsVariant` derive also generates an inherent
+  // `is_identifier`, so method-call syntax would resolve to that instead of the trait.
+  assert!(IdentifierToken::is_identifier(
+    &SyntacticToken::<&str>::Identifier("x")
+  ));
+  assert!(!IdentifierToken::is_identifier(
+    &SyntacticToken::<&str>::LBrace
+  ));
+}
