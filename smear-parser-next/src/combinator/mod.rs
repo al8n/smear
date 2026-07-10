@@ -26,9 +26,11 @@
 //! ladder.
 
 mod literal;
+mod shape;
 mod token;
 
 pub use literal::*;
+pub use shape::*;
 pub use token::*;
 pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf};
 
