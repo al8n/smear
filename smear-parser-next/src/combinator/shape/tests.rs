@@ -1,27 +1,33 @@
 // The shape atoms exercise here need a concrete lexer supplying `PunctuatorToken`
-// (for `at`/`colon`/`spread`) and `LiteralValueToken` (for `try_description`),
-// which among the dialect lexers only GraphQL's `SyntacticToken` supplies today,
-// so these tests drive GraphQL alone. Every atom runs over the full source matrix
-// (`str`, `[u8]`, and `Bytes`). The declining and peeking atoms never emit, so
-// their paths need a single emitter mode; `spanned` propagates a committed
-// sub-parser's error, so that one path runs under both a fail-fast and a
-// collecting emitter. The harness stays emitter-parametrized to match the token
-// and literal atoms' harnesses.
+// (for `at`/`colon`/`spread` and the delimiters) and `LiteralValueToken` (for
+// `try_description`), which among the dialect lexers only GraphQL's
+// `SyntacticToken` supplies today, so these tests drive GraphQL alone. Every atom
+// runs over the full source matrix (`str`, `[u8]`, and `Bytes`). The declining
+// and peeking atoms never emit, so their paths need a single emitter mode;
+// `spanned` and the delimited atoms (`braces`/`parens`/`brackets`) propagate a
+// committed sub-parser's or closer's error, so those paths run under both a
+// fail-fast and a collecting emitter. A missing closer is a hard error under
+// either mode; a separate delimited test drives an inner sub-parser that emits a
+// non-fatal diagnostic to exercise the collecting-mode recovery continuation —
+// where the atom threads on to commit its closer and returns the delimited
+// construct. The harness stays emitter-parametrized to match the token and
+// literal atoms' harnesses.
 #![cfg(feature = "graphql")]
 
 use smear_lexer::tokora::{
-  Emitter, InputRef, Parse, Parser, ParserContext, SimpleSpan,
+  Emitter, InputRef, Lexer, Parse, Parser, ParserContext, SimpleSpan,
   emitter::{Fatal, Verbose},
   error::{
     UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken},
   },
+  span::Spanned,
 };
 
-use super::{opt, peek_kind, spanned, try_description};
+use super::{braces, brackets, opt, parens, peek_kind, spanned, try_description};
 
-use crate::combinator::{StringLiteral, at, colon, ident, spread, try_at};
+use crate::combinator::{StringLiteral, at, colon, ident, spread, try_at, try_ident};
 
 use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticTokenKind};
 
@@ -165,6 +171,25 @@ macro_rules! drive_all {
 /// assertion body reads a payload's text across every source representation.
 fn as_bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
   slice.as_ref()
+}
+
+/// An inner sub-parser that records one non-fatal diagnostic and then yields
+/// `()`. Under a fail-fast emitter the emit is fatal and this errors; under a
+/// collecting emitter the diagnostic is recorded, the emit recovers, and this
+/// returns `Ok` — so an enclosing delimited atom threads on to commit its closer.
+/// It is a bare `fn` (not a closure) so the delimited atom's higher-order bound
+/// pins the lexer for the emitter call, the way the atom fns compose.
+fn emit_then_recover<'inp, L, Em>(
+  inp: &mut InputRef<'inp, '_, L, ParserContext<'inp, L, Em>>,
+) -> Result<(), TestError>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Em: Emitter<'inp, L, Error = TestError>,
+{
+  inp
+    .emitter()
+    .emit_error(Spanned::new(SimpleSpan::new(0, 0), TestError))?;
+  Ok(())
 }
 
 // `peek_kind`: reports the next kind without consuming, so the same peek repeats
@@ -332,5 +357,167 @@ fn try_description_declines_on_ident_and_leaves_it() {
     },
     "x",
     |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+// `braces`/`parens`/`brackets`: commit the opener, run the inner sub-parser,
+// commit the closer, and wrap the three in a `Delimited` spanning the whole
+// construct. The accept paths assert the wrapped data (slice and span), each
+// delimiter's span, and the construct span; the unterminated paths run under
+// both emitter modes.
+
+#[test]
+fn braces_wrap_ident() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let delimited = braces(inp, ident)?;
+      assert_eq!(as_bytes(delimited.data().source_ref()), b"x");
+      assert_eq!(delimited.data().span(), SimpleSpan::new(1, 2));
+      assert_eq!(delimited.span(), SimpleSpan::new(0, 3));
+      assert_eq!(delimited.open_ref().span(), &SimpleSpan::new(0, 1));
+      assert_eq!(delimited.close_ref().span(), &SimpleSpan::new(2, 3));
+      Ok::<_, TestError>(())
+    },
+    "{x}",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[test]
+fn parens_wrap_ident() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let delimited = parens(inp, ident)?;
+      assert_eq!(as_bytes(delimited.data().source_ref()), b"x");
+      assert_eq!(delimited.data().span(), SimpleSpan::new(1, 2));
+      assert_eq!(delimited.span(), SimpleSpan::new(0, 3));
+      assert_eq!(delimited.open_ref().span(), &SimpleSpan::new(0, 1));
+      assert_eq!(delimited.close_ref().span(), &SimpleSpan::new(2, 3));
+      Ok::<_, TestError>(())
+    },
+    "(x)",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[test]
+fn brackets_wrap_ident() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let delimited = brackets(inp, ident)?;
+      assert_eq!(as_bytes(delimited.data().source_ref()), b"x");
+      assert_eq!(delimited.data().span(), SimpleSpan::new(1, 2));
+      assert_eq!(delimited.span(), SimpleSpan::new(0, 3));
+      assert_eq!(delimited.open_ref().span(), &SimpleSpan::new(0, 1));
+      assert_eq!(delimited.close_ref().span(), &SimpleSpan::new(2, 3));
+      Ok::<_, TestError>(())
+    },
+    "[x]",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// An empty group with an `opt(try_ident)` inner yields `None` inside, proving the
+// inner runs between the delimiters and that a declining inner leaves the closer
+// for the atom to commit.
+#[test]
+fn braces_empty_with_opt_inner_yields_none() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let delimited = braces(inp, opt(try_ident))?;
+      assert!(delimited.data().is_none());
+      assert_eq!(delimited.span(), SimpleSpan::new(0, 2));
+      assert_eq!(delimited.open_ref().span(), &SimpleSpan::new(0, 1));
+      assert_eq!(delimited.close_ref().span(), &SimpleSpan::new(1, 2));
+      Ok::<_, TestError>(())
+    },
+    "{}",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// Unterminated groups: the inner consumes the `a` ident, then the missing closer
+// makes the committed closer atom error on end of input. That error propagates
+// identically under a fail-fast and a collecting emitter — a missing closer is
+// not recovered into a fabricated delimiter — so both modes return `Err`.
+
+#[test]
+fn braces_unterminated_errors() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| braces(inp, ident).map(|_| ()),
+    "{a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| braces(inp, ident).map(|_| ()),
+    "{a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[test]
+fn parens_unterminated_errors() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| parens(inp, ident).map(|_| ()),
+    "(a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| parens(inp, ident).map(|_| ()),
+    "(a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[test]
+fn brackets_unterminated_errors() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| brackets(inp, ident).map(|_| ()),
+    "[a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| brackets(inp, ident).map(|_| ()),
+    "[a",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+// The collecting-mode recovery continuation: an inner sub-parser that records a
+// non-fatal diagnostic and then yields. Under a fail-fast emitter the emit is
+// fatal, so `braces` aborts before the closer and returns `Err`. Under a
+// collecting emitter the emit is recorded and recovers, so the inner returns
+// `Ok`, `braces` threads on to commit the `}` closer, and it returns the
+// delimited construct spanning `{}` — a collecting emitter completes the group
+// where a fail-fast one aborts.
+#[test]
+fn braces_thread_collecting_mode_inner_emit() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| braces(inp, emit_then_recover).map(|_| ()),
+    "{}",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| {
+      let delimited = braces(inp, emit_then_recover)?;
+      assert_eq!(delimited.span(), SimpleSpan::new(0, 2));
+      assert_eq!(delimited.open_ref().span(), &SimpleSpan::new(0, 1));
+      assert_eq!(delimited.close_ref().span(), &SimpleSpan::new(1, 2));
+      Ok::<_, TestError>(())
+    },
+    "{}",
+    |out: Result<(), TestError>| assert!(out.is_ok())
   );
 }
