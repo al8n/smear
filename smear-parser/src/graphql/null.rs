@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   utils::{human_display::DisplayHuman, sdl_display::DisplaySDL, syntax_tree_display::DisplaySyntaxTree},
 };

@@ -10,7 +10,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::{Lexer, SimpleSpan};
+use tokora::{Lexer, SimpleSpan};
 
 use crate::graphql::syntactic::{SimdSyntacticLexer, SyntacticToken};
 

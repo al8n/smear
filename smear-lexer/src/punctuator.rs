@@ -1,70 +1,70 @@
 //! Punctuation tokens used in GraphQL and GraphQLx.
 //!
-//! These are type aliases over [`tokit::punct`] types, parameterised with
-//! [`SimpleSpan`](tokit::SimpleSpan) so they carry positional information
+//! These are type aliases over [`tokora::punct`] types, parameterised with
+//! [`SimpleSpan`](tokora::SimpleSpan) so they carry positional information
 //! without source content.
 
-use crate::__private::tokit;
+use crate::__private::tokora;
 
 /// The `@` punctuator.
-pub type At = tokit::punct::At<tokit::SimpleSpan>;
+pub type At = tokora::punct::At<tokora::SimpleSpan>;
 
 /// The `&` punctuator.
-pub type Ampersand = tokit::punct::Ampersand<tokit::SimpleSpan>;
+pub type Ampersand = tokora::punct::Ampersand<tokora::SimpleSpan>;
 
 /// The `*` punctuator.
-pub type Asterisk = tokit::punct::Asterisk<tokit::SimpleSpan>;
+pub type Asterisk = tokora::punct::Asterisk<tokora::SimpleSpan>;
 
 /// The `!` punctuator.
-pub type Bang = tokit::punct::Exclamation<tokit::SimpleSpan>;
+pub type Bang = tokora::punct::Exclamation<tokora::SimpleSpan>;
 
 /// The `,` punctuator.
-pub type Comma = tokit::punct::Comma<tokit::SimpleSpan>;
+pub type Comma = tokora::punct::Comma<tokora::SimpleSpan>;
 
 /// The `:` punctuator.
-pub type Colon = tokit::punct::Colon<tokit::SimpleSpan>;
+pub type Colon = tokora::punct::Colon<tokora::SimpleSpan>;
 
 /// The `$` punctuator.
-pub type Dollar = tokit::punct::Dollar<tokit::SimpleSpan>;
+pub type Dollar = tokora::punct::Dollar<tokora::SimpleSpan>;
 
 /// The `=` punctuator.
-pub type Equal = tokit::punct::Equal<tokit::SimpleSpan>;
+pub type Equal = tokora::punct::Equal<tokora::SimpleSpan>;
 
 /// The `|` punctuator.
-pub type Pipe = tokit::punct::Pipe<tokit::SimpleSpan>;
+pub type Pipe = tokora::punct::Pipe<tokora::SimpleSpan>;
 
 /// The `...` punctuator.
-pub type Spread = tokit::punct::Spread<tokit::SimpleSpan>;
+pub type Spread = tokora::punct::Spread<tokora::SimpleSpan>;
 
 /// The `[` punctuator.
-pub type LBracket = tokit::punct::OpenBracket<tokit::SimpleSpan>;
+pub type LBracket = tokora::punct::OpenBracket<tokora::SimpleSpan>;
 
 /// The `]` punctuator.
-pub type RBracket = tokit::punct::CloseBracket<tokit::SimpleSpan>;
+pub type RBracket = tokora::punct::CloseBracket<tokora::SimpleSpan>;
 
 /// The `{` punctuator.
-pub type LBrace = tokit::punct::OpenBrace<tokit::SimpleSpan>;
+pub type LBrace = tokora::punct::OpenBrace<tokora::SimpleSpan>;
 
 /// The `}` punctuator.
-pub type RBrace = tokit::punct::CloseBrace<tokit::SimpleSpan>;
+pub type RBrace = tokora::punct::CloseBrace<tokora::SimpleSpan>;
 
 /// The `(` punctuator.
-pub type LParen = tokit::punct::OpenParen<tokit::SimpleSpan>;
+pub type LParen = tokora::punct::OpenParen<tokora::SimpleSpan>;
 
 /// The `)` punctuator.
-pub type RParen = tokit::punct::CloseParen<tokit::SimpleSpan>;
+pub type RParen = tokora::punct::CloseParen<tokora::SimpleSpan>;
 
 /// The `<` punctuator.
-pub type LAngle = tokit::punct::OpenAngle<tokit::SimpleSpan>;
+pub type LAngle = tokora::punct::OpenAngle<tokora::SimpleSpan>;
 
 /// The `>` punctuator.
-pub type RAngle = tokit::punct::CloseAngle<tokit::SimpleSpan>;
+pub type RAngle = tokora::punct::CloseAngle<tokora::SimpleSpan>;
 
 /// The `=>` punctuator.
-pub type FatArrow = tokit::punct::FatArrow<tokit::SimpleSpan>;
+pub type FatArrow = tokora::punct::FatArrow<tokora::SimpleSpan>;
 
 /// The `->` punctuator.
-pub type ThinArrow = tokit::punct::Arrow<tokit::SimpleSpan>;
+pub type ThinArrow = tokora::punct::Arrow<tokora::SimpleSpan>;
 
 /// The `::` punctuator.
-pub type PathSeparator = tokit::punct::DoubleColon<tokit::SimpleSpan>;
+pub type PathSeparator = tokora::punct::DoubleColon<tokora::SimpleSpan>;

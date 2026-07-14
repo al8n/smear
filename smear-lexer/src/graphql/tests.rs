@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use tokit::{Lexer, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded};
+use tokora::{Lexer, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded};
 
 use crate::{
   LitComplexInlineStr, LitInlineStr, LitPlainStr,
@@ -37,7 +37,7 @@ where
 }
 
 pub(super) trait TestToken<'a>:
-  tokit::Token<'a, Error = TestErrors> + From<SyntacticToken<&'a str>> + Eq + Copy + core::fmt::Debug
+  tokora::Token<'a, Error = TestErrors> + From<SyntacticToken<&'a str>> + Eq + Copy + core::fmt::Debug
 {
   fn is_ignored(&self) -> bool;
 

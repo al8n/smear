@@ -6,7 +6,7 @@ use std::vec::Vec;
 #[allow(unused_imports)]
 use core::marker::PhantomData;
 
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   Emitter, InputRef, Lexer, Parse, ParseContext, Parser, SimpleSpan as Span,
   error::token::UnexpectedTokenOf, lexer::FromLogos, span::Spanned,
   state::recursion_tracker::RecursionLimitExceeded,
@@ -169,11 +169,11 @@ where
 
 // Implement From<FullContainer> for SyntacticTokenErrors to satisfy FullContainerEmitter.
 // With Vec-based containers this error should never actually be triggered in practice.
-impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>>
+impl<S, Lang: ?Sized> From<smear_lexer::tokora::error::syntax::FullContainer<Span, Lang>>
   for SyntacticTokenErrors<S>
 {
   #[inline]
-  fn from(err: smear_lexer::tokit::error::syntax::FullContainer<Span, Lang>) -> Self {
+  fn from(err: smear_lexer::tokora::error::syntax::FullContainer<Span, Lang>) -> Self {
     SyntacticTokenError::new(
       *err.span(),
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("container full")),
@@ -183,22 +183,22 @@ impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::FullContainer<Span
 }
 
 // Implement FromSeparatedError for SyntacticTokenErrors to satisfy SeparatedEmitter via FatalContext.
-// The `FromEmitterError` supertrait is satisfied by the blanket impl in tokit via the
+// The `FromEmitterError` supertrait is satisfied by the blanket impl in tokora via the
 // `From<SyntacticLexerErrors>` and `From<UnexpectedTokenOf>` impls above, but only when the
 // compiler can resolve `<SyntacticToken<S> as Token>::Error`. We add an explicit
-// `SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>`
+// `SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokora::Token<'inp>>::Error>`
 // bound so the blanket can kick in.
-impl<'inp, S: Clone> smear_lexer::tokit::emitter::FromSeparatedError<'inp, SyntacticLexer<'inp, S>>
+impl<'inp, S: Clone> smear_lexer::tokora::emitter::FromSeparatedError<'inp, SyntacticLexer<'inp, S>>
   for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
-  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokora::Token<'inp>>::Error>,
 {
   #[inline]
   fn from_missing_separator(
-    _name: smear_lexer::tokit::utils::CowStr,
-    err: smear_lexer::tokit::error::token::MissingTokenOf<'inp, SyntacticLexer<'inp, S>>,
+    _name: smear_lexer::tokora::utils::CowStr,
+    err: smear_lexer::tokora::error::token::MissingTokenOf<'inp, SyntacticLexer<'inp, S>>,
   ) -> Self {
     let off = err.offset();
     let span = Span::new(off, off);
@@ -211,7 +211,7 @@ where
 
   #[inline]
   fn from_missing_element(
-    err: smear_lexer::tokit::error::syntax::MissingSyntaxOf<'inp, SyntacticLexer<'inp, S>>,
+    err: smear_lexer::tokora::error::syntax::MissingSyntaxOf<'inp, SyntacticLexer<'inp, S>>,
   ) -> Self {
     let off = err.offset();
     let span = Span::new(off, off);
@@ -226,16 +226,16 @@ where
 // Implement FromUnexpectedTrailingSeparatorError for SyntacticTokenErrors.
 // Required by the `allow_leading` combinator variant.
 impl<'inp, S: Clone>
-  smear_lexer::tokit::emitter::FromUnexpectedTrailingSeparatorError<'inp, SyntacticLexer<'inp, S>>
+  smear_lexer::tokora::emitter::FromUnexpectedTrailingSeparatorError<'inp, SyntacticLexer<'inp, S>>
   for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
-  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokora::Token<'inp>>::Error>,
 {
   #[inline]
   fn from_unexpected_trailing_separator(
-    _name: smear_lexer::tokit::utils::CowStr,
+    _name: smear_lexer::tokora::utils::CowStr,
     err: UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>,
   ) -> Self {
     let (span, found, _expected) = err.into_components();
@@ -249,16 +249,16 @@ where
 // Implement FromUnexpectedLeadingSeparatorError for SyntacticTokenErrors.
 // Required when the `UnexpectedLeadingSeparatorEmitter` bound is present on emitters.
 impl<'inp, S: Clone>
-  smear_lexer::tokit::emitter::FromUnexpectedLeadingSeparatorError<'inp, SyntacticLexer<'inp, S>>
+  smear_lexer::tokora::emitter::FromUnexpectedLeadingSeparatorError<'inp, SyntacticLexer<'inp, S>>
   for SyntacticTokenErrors<S>
 where
   SyntacticToken<S>: FromLogos<'inp>,
   SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = Span, Offset = usize>,
-  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokit::Token<'inp>>::Error>,
+  SyntacticTokenErrors<S>: From<<SyntacticToken<S> as smear_lexer::tokora::Token<'inp>>::Error>,
 {
   #[inline]
   fn from_unexpected_leading_separator(
-    _name: smear_lexer::tokit::utils::CowStr,
+    _name: smear_lexer::tokora::utils::CowStr,
     err: UnexpectedTokenOf<'inp, SyntacticLexer<'inp, S>>,
   ) -> Self {
     let (span, found, _expected) = err.into_components();
@@ -270,11 +270,11 @@ where
 }
 
 // Implement From<TooFew> for SyntacticTokenErrors to satisfy TooFewEmitter (at_least).
-impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::TooFew<Span, Lang>>
+impl<S, Lang: ?Sized> From<smear_lexer::tokora::error::syntax::TooFew<Span, Lang>>
   for SyntacticTokenErrors<S>
 {
   #[inline]
-  fn from(err: smear_lexer::tokit::error::syntax::TooFew<Span, Lang>) -> Self {
+  fn from(err: smear_lexer::tokora::error::syntax::TooFew<Span, Lang>) -> Self {
     SyntacticTokenError::new(
       err.span().clone(),
       super::error::ErrorData::Other(std::borrow::Cow::Borrowed("too few elements")),
@@ -283,14 +283,14 @@ impl<S, Lang: ?Sized> From<smear_lexer::tokit::error::syntax::TooFew<Span, Lang>
   }
 }
 
-/// Helper to run a parse function against a string input using tokit's Parser infrastructure.
+/// Helper to run a parse function against a string input using tokora's Parser infrastructure.
 pub fn run_parse_str<'inp, O>(
   f: impl for<'c> FnMut(
     &mut InputRef<
       'inp,
       'c,
       SyntacticLexer<'inp, &'inp str>,
-      smear_lexer::tokit::FatalContext<
+      smear_lexer::tokora::FatalContext<
         'inp,
         SyntacticLexer<'inp, &'inp str>,
         SyntacticTokenErrors<&'inp str>,

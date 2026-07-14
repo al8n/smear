@@ -18,9 +18,9 @@ cst = ["std", "rowan"]
 graphql = ["smear-lexer/graphql", "smear-parser/graphql"]
 graphqlx = ["unstable", "smear-lexer/graphqlx", "smear-parser/graphqlx"]
 
-bytes = ["dep:bytes", "tokit/bytes_1", "smear-lexer/bytes", "smear-parser/bytes"]
-bstr = ["dep:bstr", "tokit/bstr_1", "smear-lexer/bstr", "smear-parser/bstr"]
-hipstr = ["dep:hipstr", "tokit/hipstr_0_8", "smear-lexer/hipstr", "smear-parser/hipstr"]
+bytes = ["dep:bytes", "tokora/bytes_1", "smear-lexer/bytes", "smear-parser/bytes"]
+bstr = ["dep:bstr", "tokora/bstr_1", "smear-lexer/bstr", "smear-parser/bstr"]
+hipstr = ["dep:hipstr", "tokora/hipstr_0_8", "smear-lexer/hipstr", "smear-parser/hipstr"]
 smallvec = ["dep:smallvec", "smear-lexer/smallvec", "smear-parser/smallvec"]
 
 [dependencies]
@@ -28,7 +28,7 @@ derive_more.workspace = true
 either = { version = "1", default-features = false }
 paste = "1"
 thiserror.workspace = true
-tokit.workspace = true
+tokora.workspace = true
 smear-lexer.workspace = true
 smear-scaffold.workspace = true
 smear-parser.workspace = true

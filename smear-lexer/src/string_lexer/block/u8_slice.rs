@@ -1,4 +1,4 @@
-use tokit::{
+use tokora::{
   lexer::Lexable,
   logos::{Lexer, Logos, Source},
 };
@@ -46,7 +46,7 @@ fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[logos(crate = tokit::logos, utf8 = false, error(StringError<u8>))]
+#[logos(crate = tokora::logos, utf8 = false, error(StringError<u8>))]
 pub(crate) enum BlockStringToken {
   /// \\"\\"\\" inside block string
   #[token("\\\"\"\"")]
@@ -213,7 +213,7 @@ pub(crate) fn skip_block_str_from_bytes(
 
 // sub-lexer over inner block-string content
 #[derive(Logos, Debug)]
-#[logos(crate = tokit::logos, utf8 = false, extras = BlockLineExtras)]
+#[logos(crate = tokora::logos, utf8 = false, extras = BlockLineExtras)]
 enum BlockLineTok {
   /// Body of a line (one or more bytes, never includes a terminator).
   /// We process the whole line in the callback.

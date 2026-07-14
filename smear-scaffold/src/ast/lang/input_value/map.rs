@@ -1,4 +1,4 @@
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
@@ -98,7 +98,7 @@ impl<Key, Value> MapEntry<Key, Value> {
 ///
 /// The `Container` parameter allows using different collection types:
 /// - `Vec<MapEntry<Key, Value>>` (default): Standard dynamic array
-/// - Any type implementing `tokit::container::Container<MapEntry<Key, Value>>`
+/// - Any type implementing `tokora::container::Container<MapEntry<Key, Value>>`
 ///
 /// ## Component Structure
 ///

@@ -5,7 +5,7 @@ use crate::{
     ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint, VariableValueHint,
   },
 };
-use smear_lexer::tokit::{SimpleSpan as Span, utils::IntoComponents};
+use smear_lexer::tokora::{SimpleSpan as Span, utils::IntoComponents};
 use smear_scaffold::error::{
   InvalidFragmentTypePath, UnclosedBraceError, UnclosedBracketError,
   UnexpectedEndOfEnumExtensionError, UnexpectedEndOfInputObjectExtensionError,

@@ -17,7 +17,7 @@
 //! `bytes.get(1) == None` branch in `lex()`'s `b'"'` arm, distinct from
 //! `str_unterminated_inline`'s `Some(_) => Err(_)` branch.
 
-use tokit::Lexer as _;
+use tokora::Lexer as _;
 
 use crate::{
   error::StringError,

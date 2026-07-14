@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokit::utils::human_display::DisplayHuman;
+use tokora::utils::human_display::DisplayHuman;
 
 /// Errors for GraphQLx lexers
 pub mod error;

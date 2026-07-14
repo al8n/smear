@@ -1,5 +1,5 @@
-use smear_lexer::tokit::{Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned};
-use tokit::{SimpleSpan, try_parse_input::ParseAttempt};
+use smear_lexer::tokora::{Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned};
+use tokora::{SimpleSpan, try_parse_input::ParseAttempt};
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors};
 use crate::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};

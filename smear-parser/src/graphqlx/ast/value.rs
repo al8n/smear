@@ -4,7 +4,7 @@ use super::{DefaultVec, Expectation, SyntacticTokenError, SyntacticTokenErrors, 
 use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span,
   lexer::FromLogos,
   span::{AsSpan, IntoSpan, Spanned},

@@ -1,5 +1,5 @@
 use derive_more::{From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,

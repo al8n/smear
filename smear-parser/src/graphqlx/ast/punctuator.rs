@@ -1,6 +1,6 @@
 use smear_lexer::{
   punctuator::*,
-  tokit::{
+  tokora::{
     Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
   },
 };
@@ -19,7 +19,7 @@ macro_rules! punctuator_parser {
         where
           S: Clone,
           SyntacticToken<S>: FromLogos<'inp>,
-          SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+          SyntacticLexer<'inp, S>: Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
           Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
           Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
           Lang: ?Sized,

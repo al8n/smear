@@ -22,7 +22,7 @@ use smear_lexer::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
     syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
-  tokit::lexer::Lexer as _,
+  tokora::lexer::Lexer as _,
 };
 use std::hint::black_box;
 

@@ -14,7 +14,7 @@ use std::{env, fs, process::ExitCode};
 
 use smear_lexer::{
   graphql::lossless::{LosslessLexer, LosslessTokenKind},
-  tokit::lexer::Lexer as _,
+  tokora::lexer::Lexer as _,
 };
 
 #[derive(Default, Debug, Clone, Copy)]

@@ -17,7 +17,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphqlx::syntactic::SimdSyntacticLexer;
 

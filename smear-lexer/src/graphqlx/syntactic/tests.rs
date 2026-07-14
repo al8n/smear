@@ -1,4 +1,4 @@
-use tokit::Lexer as _;
+use tokora::Lexer as _;
 
 use crate::graphqlx::{
   LitFloat, LitInt,
@@ -154,13 +154,13 @@ fn dot_forms_delegate_for_the_exact_error() {
   let mut lexer = SimdSyntacticLexer::<str>::new("..5");
   let first = lexer.lex().unwrap();
   assert!(first.is_err());
-  assert_eq!(lexer.error_span(), Some(tokit::SimpleSpan::new(0, 2)));
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
   let second = lexer.lex().unwrap();
   assert_eq!(second, Ok(SyntacticToken::LitInt(LitInt::Decimal("5"))));
 
   let mut lexer = SimdSyntacticLexer::<str>::new(".5");
   assert!(lexer.lex().unwrap().is_err());
-  assert_eq!(lexer.error_span(), Some(tokit::SimpleSpan::new(0, 2)));
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
 }
 
 #[test]

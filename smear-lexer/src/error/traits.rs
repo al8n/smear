@@ -1,4 +1,4 @@
-use tokit::SimpleSpan;
+use tokora::SimpleSpan;
 
 type Span = SimpleSpan;
 

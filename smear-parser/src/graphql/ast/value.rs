@@ -5,7 +5,7 @@ use super::{
   next_token,
 };
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   Branch, Emitter, InputRef, Lexer, ParseChoice, ParseContext, ParseInput, SimpleSpan as Span,
   cache::Peeked,
   emitter::{
@@ -19,7 +19,7 @@ use smear_lexer::tokit::{
 };
 use smear_scaffold::ast as scaffold;
 use std::vec::Vec;
-use tokit::{TryParseInput, try_parse_input::ParseAttempt};
+use tokora::{TryParseInput, try_parse_input::ParseAttempt};
 
 pub use boolean_value::*;
 pub use enum_value::*;
@@ -143,7 +143,7 @@ where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
   SyntacticLexer<'inp, S>:
-    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
@@ -346,7 +346,7 @@ where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
   SyntacticLexer<'inp, S>:
-    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,
@@ -492,7 +492,7 @@ where
   S: Clone,
   SyntacticToken<S>: FromLogos<'inp> + PunctuatorToken<'inp>,
   SyntacticLexer<'inp, S>:
-    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+    Lexer<'inp, Token = SyntacticToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
   Ctx: ParseContext<'inp, SyntacticLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, SyntacticLexer<'inp, S>, Lang, Error = SyntacticTokenErrors<S>>,
   str: Equivalent<S>,

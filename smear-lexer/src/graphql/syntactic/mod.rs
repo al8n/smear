@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokit::{state::recursion_tracker::RecursionLimitExceeded, utils::cmp::Equivalent};
+use tokora::{state::recursion_tracker::RecursionLimitExceeded, utils::cmp::Equivalent};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -33,7 +33,7 @@ const GRAPHQL_KEYWORDS: &[&str] = &[
 #[inline]
 pub fn graphql_keyword<S>(tok: &SyntacticToken<S>) -> Option<&'static str>
 where
-  str: tokit::utils::cmp::Equivalent<S>,
+  str: tokora::utils::cmp::Equivalent<S>,
 {
   match tok {
     SyntacticToken::Identifier(s) => GRAPHQL_KEYWORDS
@@ -103,7 +103,7 @@ pub type SyntacticLexerErrors<Char = char> = error::LexerErrors<Char, RecursionL
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
-/// use tokit::Lexer;
+/// use tokora::Lexer;
 ///
 /// let source = "query { user { id } }";
 /// let mut lexer = SyntacticLexer::new(source);
@@ -217,9 +217,9 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
 // `Error` type, and `S::Char`/`Clone` reproduce each flavor's bounds exactly
 // (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
 
-impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
+impl<'a, S> tokora::Token<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
 {
   type Kind = SyntacticTokenKind;
   type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
@@ -235,9 +235,9 @@ where
   }
 }
 
-impl<'a, S> tokit::token::KeywordToken<'a> for SyntacticToken<S>
+impl<'a, S> tokora::token::KeywordToken<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
   str: Equivalent<S>,
 {
   fn keyword(&self) -> Option<&'static str> {
@@ -245,9 +245,9 @@ where
   }
 }
 
-impl<'a, S> tokit::token::IdentifierToken<'a> for SyntacticToken<S>
+impl<'a, S> tokora::token::IdentifierToken<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
 {
   #[inline(always)]
   fn is_identifier(&self) -> bool {
@@ -255,9 +255,9 @@ where
   }
 }
 
-impl<'a, S> tokit::token::LitToken<'a> for SyntacticToken<S>
+impl<'a, S> tokora::token::LitToken<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
 {
   #[inline(always)]
   fn is_decimal_literal(&self) -> bool {
@@ -275,9 +275,9 @@ where
   }
 }
 
-impl<'a, S> tokit::token::PunctuatorToken<'a> for SyntacticToken<S>
+impl<'a, S> tokora::token::PunctuatorToken<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
 {
   fn pipe() -> Option<Self::Kind> {
     Some(SyntacticTokenKind::Pipe)
@@ -323,97 +323,97 @@ where
   }
 }
 
-// Required by the `Punctuator` trait impls on tokit's punctuator structs
-// (e.g. `tokit::punct::Pipe`), which are used as the `Sep` type parameter
+// Required by the `Punctuator` trait impls on tokora's punctuator structs
+// (e.g. `tokora::punct::Pipe`), which are used as the `Sep` type parameter
 // in `SeparatedWhile`.
 
-impl From<tokit::punct::Pipe<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Pipe<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Pipe<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Pipe<(), (), ()>) -> Self {
     Self::Pipe
   }
 }
 
-impl From<tokit::punct::Ampersand<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Ampersand<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Ampersand<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Ampersand<(), (), ()>) -> Self {
     Self::Ampersand
   }
 }
 
-impl From<tokit::punct::At<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::At<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::At<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::At<(), (), ()>) -> Self {
     Self::At
   }
 }
 
-impl From<tokit::punct::Colon<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Colon<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Colon<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Colon<(), (), ()>) -> Self {
     Self::Colon
   }
 }
 
-impl From<tokit::punct::OpenParen<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::OpenParen<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenParen<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::OpenParen<(), (), ()>) -> Self {
     Self::LParen
   }
 }
 
-impl From<tokit::punct::CloseParen<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::CloseParen<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseParen<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::CloseParen<(), (), ()>) -> Self {
     Self::RParen
   }
 }
 
-impl From<tokit::punct::OpenBrace<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::OpenBrace<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenBrace<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::OpenBrace<(), (), ()>) -> Self {
     Self::LBrace
   }
 }
 
-impl From<tokit::punct::CloseBrace<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::CloseBrace<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseBrace<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::CloseBrace<(), (), ()>) -> Self {
     Self::RBrace
   }
 }
 
-impl From<tokit::punct::OpenBracket<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::OpenBracket<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::OpenBracket<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::OpenBracket<(), (), ()>) -> Self {
     Self::LBracket
   }
 }
 
-impl From<tokit::punct::CloseBracket<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::CloseBracket<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::CloseBracket<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::CloseBracket<(), (), ()>) -> Self {
     Self::RBracket
   }
 }
 
-impl From<tokit::punct::Equal<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Equal<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Equal<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Equal<(), (), ()>) -> Self {
     Self::Equal
   }
 }
 
-impl From<tokit::punct::Exclamation<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Exclamation<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Exclamation<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Exclamation<(), (), ()>) -> Self {
     Self::Bang
   }
 }
 
-impl From<tokit::punct::Dollar<(), (), ()>> for SyntacticTokenKind {
+impl From<tokora::punct::Dollar<(), (), ()>> for SyntacticTokenKind {
   #[inline]
-  fn from(_: tokit::punct::Dollar<(), (), ()>) -> Self {
+  fn from(_: tokora::punct::Dollar<(), (), ()>) -> Self {
     Self::Dollar
   }
 }
@@ -493,7 +493,7 @@ impl core::fmt::Display for SyntacticTokenKind {
   }
 }
 
-use tokit::{
+use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::RecursionLimiter,
@@ -603,7 +603,7 @@ where
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn check(&self) -> Result<(), <Self::Token as tokit::Token<'inp>>::Error> {
+  fn check(&self) -> Result<(), <Self::Token as tokora::Token<'inp>>::Error> {
     self.state.check().map_err(Into::into)
   }
 
@@ -641,7 +641,7 @@ where
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokit::Token<'inp>>::Error>> {
+  fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
     // Bracket-close: decrement the depth, then re-check the limit *post-decrease*
     // (a decrease can bring an over-limit stream back under the limit). Because
     // it changes depth it cannot share the once-per-token entry-depth `recheck`

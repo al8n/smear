@@ -42,8 +42,8 @@ macro_rules! token_impl {
   ) => {
     mod $mod {
       #[allow(unused_imports)]
-      use tokit::utils::IntoEquivalent;
-      use tokit::{
+      use tokora::utils::IntoEquivalent;
+      use tokora::{
         logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
       };
       use crate::{
@@ -65,7 +65,7 @@ macro_rules! token_impl {
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl<'b: $slice_lt, $slice_lt: 'b> tokit::Token<'b> for LosslessToken<$slice> {
+      impl<'b: $slice_lt, $slice_lt: 'b> tokora::Token<'b> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
 
@@ -80,7 +80,7 @@ macro_rules! token_impl {
         }
       }
 
-      impl<'b: $slice_lt, $slice_lt: 'b> tokit::token::IdentifierToken<'b> for LosslessToken<$slice> {
+      impl<'b: $slice_lt, $slice_lt: 'b> tokora::token::IdentifierToken<'b> for LosslessToken<$slice> {
         #[inline(always)]
         fn is_identifier(&self) -> bool {
           matches!(self, Self::Identifier(_))
@@ -91,7 +91,7 @@ macro_rules! token_impl {
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
       #[logos(
-        crate = tokit::logos,
+        crate = tokora::logos,
         extras = Limiter,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
@@ -199,13 +199,13 @@ macro_rules! token_impl {
         Int($logos_slice),
         #[token("\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokora::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitInlineStr(LitInlineStr<$logos_slice>),
         #[token("\"\"\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokora::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitBlockStr(LitBlockStr<$logos_slice>),
@@ -246,7 +246,7 @@ macro_rules! token_impl {
         }
       }
 
-      impl<'b: $slice_lt, $slice_lt: 'b> tokit::lexer::FromLogos<'b> for LosslessToken<$slice> {
+      impl<'b: $slice_lt, $slice_lt: 'b> tokora::lexer::FromLogos<'b> for LosslessToken<$slice> {
         type Logos = Token<$slice_lt>;
 
         #[inline(always)]
@@ -264,8 +264,8 @@ macro_rules! token_impl {
   ) => {
     mod $mod {
       #[allow(unused_imports)]
-      use tokit::utils::IntoEquivalent;
-      use tokit::{
+      use tokora::utils::IntoEquivalent;
+      use tokora::{
         logos::Logos, lexer::Lexable, state::tracker::{LimitExceeded, Limiter},
       };
       use crate::{
@@ -287,7 +287,7 @@ macro_rules! token_impl {
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
 
-      impl tokit::Token<'_> for LosslessToken<$slice> {
+      impl tokora::Token<'_> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
 
@@ -302,7 +302,7 @@ macro_rules! token_impl {
         }
       }
 
-      impl tokit::token::IdentifierToken<'_> for LosslessToken<$slice> {
+      impl tokora::token::IdentifierToken<'_> for LosslessToken<$slice> {
         #[inline(always)]
         fn is_identifier(&self) -> bool {
           matches!(self, Self::Identifier(_))
@@ -313,7 +313,7 @@ macro_rules! token_impl {
         Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash
       )]
       #[logos(
-        crate = tokit::logos,
+        crate = tokora::logos,
         extras = Limiter,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
@@ -421,13 +421,13 @@ macro_rules! token_impl {
         Int($logos_slice),
         #[token("\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitInlineStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokora::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitInlineStr(LitInlineStr<$logos_slice>),
         #[token("\"\"\"", |lexer| {
           tt_hook_and_then(lexer, |lexer| {
-            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokit::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
+            <LitBlockStr<_> as Lexable<_, StringErrors<_>>>::lex(SealedWrapper::<tokora::logos::Lexer<'_, _>>::from_mut(lexer)).map_err(|e| TokenError::new(lexer.span(), e.into()))
           })
         })]
         LitBlockStr(LitBlockStr<$logos_slice>),
@@ -468,7 +468,7 @@ macro_rules! token_impl {
         }
       }
 
-      impl<'b> tokit::lexer::FromLogos<'b> for LosslessToken<$slice> {
+      impl<'b> tokora::lexer::FromLogos<'b> for LosslessToken<$slice> {
         type Logos = Token<'b>;
 
         #[inline(always)]

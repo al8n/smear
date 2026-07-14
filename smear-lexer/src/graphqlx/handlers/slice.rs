@@ -3,7 +3,7 @@ use crate::{
   handlers::{self, is_ignored_byte},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
 };
-use tokit::{
+use tokora::{
   error::UnexpectedEnd,
   logos::{Lexer, Logos, Source},
   state::tracker::Limiter,

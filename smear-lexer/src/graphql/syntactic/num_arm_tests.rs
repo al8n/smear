@@ -1,4 +1,4 @@
-use tokit::{Lexer as _, SimpleSpan};
+use tokora::{Lexer as _, SimpleSpan};
 
 use crate::graphql::{
   error::{FloatError, LexerErrorData},

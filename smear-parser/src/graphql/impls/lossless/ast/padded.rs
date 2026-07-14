@@ -1,6 +1,6 @@
 use smear_lexer::{
   punctuator::Comma,
-  tokit::{
+  tokora::{
     Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
     utils::cmp::Equivalent,
   },

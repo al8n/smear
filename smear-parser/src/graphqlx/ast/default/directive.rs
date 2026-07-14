@@ -1,7 +1,7 @@
 use derive_more::{From, Into};
 use smear_lexer::{
   keywords,
-  tokit::{
+  tokora::{
     SimpleSpan as Span,
     span::{AsSpan, IntoSpan},
     utils::IntoComponents,

@@ -103,7 +103,7 @@ pub use smear_scaffold as scaffold;
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::syntactic::SyntacticToken;
-/// use tokit::TokenStream;
+/// use tokora::TokenStream;
 ///
 /// let source = "query { user { id name } }";
 /// let tokens = TokenStream::<SyntacticToken<&str>>::new(source);
@@ -114,7 +114,7 @@ pub use smear_scaffold as scaffold;
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphql::lossless::LosslessToken;
-/// use tokit::TokenStream;
+/// use tokora::TokenStream;
 ///
 /// let source = "query { # comment\n  user { id }\n}";
 /// let tokens = TokenStream::<LosslessToken<&str>>::new(source);
@@ -129,7 +129,7 @@ pub use smear_lexer as lexer;
 ///
 /// ## Architecture
 ///
-/// The parser uses the **tokit** parser combinator library to compose
+/// The parser uses the **tokora** parser combinator library to compose
 /// reusable parsing components into complete parsers.
 ///
 /// ## Parsing Traits
@@ -157,5 +157,5 @@ pub use smear_parser as parser;
 
 #[doc(hidden)]
 pub mod __private {
-  pub use tokit;
+  pub use tokora;
 }

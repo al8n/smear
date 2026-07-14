@@ -9,14 +9,14 @@
 //! numbers, strings) lives in each dialect's own `syntactic` module and calls into
 //! these.
 
-use tokit::{
+use tokora::{
   Lexer, SimpleSpan, Source, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::RecursionLimiter,
 };
 
 /// Maximum byte recursion depth — matches the default in
-/// [`tokit::state::recursion_tracker::RecursionLimiter`].
+/// [`tokora::state::recursion_tracker::RecursionLimiter`].
 pub const DEFAULT_RECURSION_LIMIT: usize = 500;
 
 /// Borrow a source slice as raw bytes for SIMD scanning.
@@ -53,9 +53,9 @@ impl AsBytes for [u8] {
   }
 }
 
-// Each of these is `tokit::Source::Slice` for an owned or shared source type
+// Each of these is `tokora::Source::Slice` for an owned or shared source type
 // (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt` — see
-// tokit's `src/source/{bytes_1,bstr_1,hipstr_0_8}.rs`), so implementing
+// tokora's `src/source/{bytes_1,bstr_1,hipstr_0_8}.rs`), so implementing
 // `AsBytes` for them is what lets a SIMD lexer run over those source types,
 // exactly as it already does for `str`/`[u8]` above. Every impl is a trivial
 // deref to `&[u8]` — no allocation, no copying.

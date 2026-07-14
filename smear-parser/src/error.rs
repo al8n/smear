@@ -1,4 +1,4 @@
-use smear_lexer::tokit::SimpleSpan as Span;
+use smear_lexer::tokora::SimpleSpan as Span;
 
 use crate::hints::VariableValueHint;
 

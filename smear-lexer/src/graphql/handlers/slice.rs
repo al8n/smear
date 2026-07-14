@@ -2,7 +2,7 @@ use crate::{
   handlers::{self, is_ignored_byte},
   hints::{ExponentHint, FloatHint},
 };
-use tokit::{
+use tokora::{
   SimpleSpan,
   logos::{Lexer, Logos, Source},
   state::tracker::Limiter,

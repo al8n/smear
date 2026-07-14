@@ -11,7 +11,7 @@
 //! three methods, at every token (error or not), against the frozen render,
 //! giving per-token, post-error coverage.
 
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphql::syntactic::SimdSyntacticLexer;
 

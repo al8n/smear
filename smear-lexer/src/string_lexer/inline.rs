@@ -1,5 +1,5 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use tokit::utils::{
+use tokora::utils::{
   human_display::DisplayHuman,
   sdl_display::{DisplayCompact, DisplayPretty},
 };
@@ -177,7 +177,7 @@ impl<S> LitInlineStr<S> {
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitInlineStr<T>
   where
-    S: tokit::utils::ToEquivalent<T>,
+    S: tokora::utils::ToEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitInlineStr::Plain(s.to_equivalent()),
@@ -189,7 +189,7 @@ impl<S> LitInlineStr<S> {
   #[inline(always)]
   pub fn into_equivalent<T>(self) -> LitInlineStr<T>
   where
-    S: tokit::utils::IntoEquivalent<T>,
+    S: tokora::utils::IntoEquivalent<T>,
   {
     match self {
       Self::Plain(s) => LitInlineStr::Plain(s.into_equivalent()),

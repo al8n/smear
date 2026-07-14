@@ -1,4 +1,4 @@
-use tokit::lexer::Lexer;
+use tokora::lexer::Lexer;
 
 use crate::{
   LitInlineStr,
@@ -63,7 +63,7 @@ fn lone_quote_at_eof_is_error() {
   let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"\"");
   let tok = lexer.lex().unwrap();
   assert!(tok.is_err());
-  assert_eq!(lexer.error_span(), Some(tokit::SimpleSpan::new(0, 1)));
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 1)));
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn span_and_slice_track_error_token() {
   // First token: identifier "hello" at 0..5.
   let first = lexer.lex().unwrap();
   assert!(first.is_ok());
-  assert_eq!(lexer.span(), tokit::SimpleSpan::new(0, 5));
+  assert_eq!(lexer.span(), tokora::SimpleSpan::new(0, 5));
   assert!(lexer.error_span().is_none());
 
   // Second token: unterminated inline string → error. The opening `"` is at
@@ -85,7 +85,7 @@ fn span_and_slice_track_error_token() {
   let second = lexer.lex().unwrap();
   assert!(second.is_err());
 
-  let err_span = tokit::SimpleSpan::new(6, src.len());
+  let err_span = tokora::SimpleSpan::new(6, src.len());
   // span()/slice() now reflect the error token (Logos parity).
   assert_eq!(lexer.span(), err_span);
   assert_eq!(lexer.slice(), &src[6..]);

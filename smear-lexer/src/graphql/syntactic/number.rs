@@ -71,8 +71,8 @@ macro_rules! number_token_impl {
   ) => {
     mod $mod {
       #[allow(unused_imports)]
-      use tokit::utils::IntoEquivalent;
-      use tokit::{
+      use tokora::utils::IntoEquivalent;
+      use tokora::{
         logos::Logos,
         state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
@@ -86,7 +86,7 @@ macro_rules! number_token_impl {
 
       #[derive(Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
       #[logos(
-        crate = tokit::logos,
+        crate = tokora::logos,
         extras = RecursionLimiter,
         skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*?",
         utf8 = $utf8,
@@ -130,7 +130,7 @@ macro_rules! number_token_impl {
         }
       }
 
-      impl<'b: $slice_lt, $slice_lt: 'b> tokit::Token<'b> for NumberToken<$slice> {
+      impl<'b: $slice_lt, $slice_lt: 'b> tokora::Token<'b> for NumberToken<$slice> {
         type Kind = SyntacticTokenKind;
         type Error = TokenErrors;
 
@@ -145,7 +145,7 @@ macro_rules! number_token_impl {
         }
       }
 
-      impl<'b: $slice_lt, $slice_lt: 'b> tokit::lexer::FromLogos<'b> for NumberToken<$slice> {
+      impl<'b: $slice_lt, $slice_lt: 'b> tokora::lexer::FromLogos<'b> for NumberToken<$slice> {
         type Logos = Token<$slice_lt>;
 
         #[inline(always)]
@@ -163,8 +163,8 @@ macro_rules! number_token_impl {
   ) => {
     mod $mod {
       #[allow(unused_imports)]
-      use tokit::utils::IntoEquivalent;
-      use tokit::{
+      use tokora::utils::IntoEquivalent;
+      use tokora::{
         logos::Logos,
         state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
       };
@@ -178,7 +178,7 @@ macro_rules! number_token_impl {
 
       #[derive(Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
       #[logos(
-        crate = tokit::logos,
+        crate = tokora::logos,
         extras = RecursionLimiter,
         skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*?",
         utf8 = $utf8,
@@ -222,7 +222,7 @@ macro_rules! number_token_impl {
         }
       }
 
-      impl tokit::Token<'_> for NumberToken<$slice> {
+      impl tokora::Token<'_> for NumberToken<$slice> {
         type Kind = SyntacticTokenKind;
         type Error = TokenErrors;
 
@@ -237,7 +237,7 @@ macro_rules! number_token_impl {
         }
       }
 
-      impl<'b> tokit::lexer::FromLogos<'b> for NumberToken<$slice> {
+      impl<'b> tokora::lexer::FromLogos<'b> for NumberToken<$slice> {
         type Logos = Token<'b>;
 
         #[inline(always)]

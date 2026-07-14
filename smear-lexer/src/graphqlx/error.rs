@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use tokit::{
+use tokora::{
   SimpleSpan,
   error::{UnexpectedEnd, UnexpectedLexeme},
   utils::{Lexeme, PositionedChar},

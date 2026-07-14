@@ -12,7 +12,7 @@ extern crate std;
 
 pub use string_lexer::*;
 
-pub use tokit;
+pub use tokora;
 
 /// The error module contains error types and traits for lexer errors.
 pub mod error;
@@ -145,5 +145,5 @@ pub(crate) mod simd_common;
 
 #[doc(hidden)]
 pub mod __private {
-  pub use tokit;
+  pub use tokora;
 }

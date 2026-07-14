@@ -1,5 +1,5 @@
 use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
-use tokit::{
+use tokora::{
   logos::Lexer,
   utils::{
     human_display::DisplayHuman,
@@ -98,7 +98,7 @@ macro_rules! variant_type {
       #[inline(always)]
       pub fn to_equivalent<T>(&self) -> $name<T>
       where
-        S: tokit::utils::ToEquivalent<T>,
+        S: tokora::utils::ToEquivalent<T>,
       {
         $name::new(self.source.to_equivalent(), $(self.$field),*)
       }
@@ -107,16 +107,16 @@ macro_rules! variant_type {
       #[inline(always)]
       pub fn into_equivalent<T>(self) -> $name<T>
       where
-        S: tokit::utils::IntoEquivalent<T>,
+        S: tokora::utils::IntoEquivalent<T>,
       {
         $name::new(self.source.into_equivalent(), $(self.$field),*)
       }
     }
 
-    impl<S: tokit::utils::human_display::DisplayHuman> core::fmt::Display for $name<S> {
+    impl<S: tokora::utils::human_display::DisplayHuman> core::fmt::Display for $name<S> {
       #[inline]
       fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        tokit::utils::human_display::DisplayHuman::fmt(&self.source, f)
+        tokora::utils::human_display::DisplayHuman::fmt(&self.source, f)
       }
     }
 
@@ -288,7 +288,7 @@ impl<S> LitStr<S> {
   #[inline(always)]
   pub fn to_equivalent<T>(&self) -> LitStr<T>
   where
-    S: tokit::utils::ToEquivalent<T>,
+    S: tokora::utils::ToEquivalent<T>,
   {
     match self {
       Self::Inline(s) => LitStr::Inline(s.to_equivalent()),
@@ -300,7 +300,7 @@ impl<S> LitStr<S> {
   #[inline(always)]
   pub fn into_equivalent<T>(self) -> LitStr<T>
   where
-    S: tokit::utils::IntoEquivalent<T>,
+    S: tokora::utils::IntoEquivalent<T>,
   {
     match self {
       Self::Inline(s) => LitStr::Inline(s.into_equivalent()),

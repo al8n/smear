@@ -1,4 +1,4 @@
-use tokit::{
+use tokora::{
   SimpleSpan,
   lexer::Lexable,
   logos::{Lexer, Logos, Source},
@@ -15,7 +15,7 @@ use crate::{
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainStr};
 
 #[derive(Logos, Debug)]
-#[logos(crate = tokit::logos, extras = usize, error(StringError))]
+#[logos(crate = tokora::logos, extras = usize, error(StringError))]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -226,7 +226,7 @@ fn handle_invalid_escaped_unicode(
 
 #[inline(always)]
 fn handle_braced_escape_unicode(
-  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
+  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   // Slice looks like r#"\u{...}"#, guaranteed by the regex.
   let s = lexer.slice();
@@ -254,7 +254,7 @@ fn handle_braced_escape_unicode(
 
 #[inline(always)]
 fn handle_semi_braced_escape_unicode(
-  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
+  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let remainder = lexer.remainder();
 
@@ -269,7 +269,7 @@ fn handle_semi_braced_escape_unicode(
 
 #[inline(always)]
 fn empty_braced_unicode_escape(
-  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
+  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::empty_braced_unicode_escape(lexer.span().into()),
@@ -278,7 +278,7 @@ fn empty_braced_unicode_escape(
 
 #[inline(always)]
 fn too_many_hex_digits_in_braced_unicode_escape(
-  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
+  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   let slice = lexer.slice();
   let counts = slice.len() - 4; // subtract \u{}
@@ -289,7 +289,7 @@ fn too_many_hex_digits_in_braced_unicode_escape(
 
 #[inline(always)]
 fn unclosed_brace_in_braced_unicode_escape(
-  lexer: &mut tokit::logos::Lexer<'_, StringToken>,
+  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
   Err(StringError::Unicode(
     UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),

@@ -1,4 +1,4 @@
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
@@ -39,7 +39,7 @@ use std::vec::Vec;
 ///
 /// The `Container` parameter allows using different collection types:
 /// - `Vec<Value>` (default): Standard dynamic array
-/// - Any type implementing `tokit::container::Container<Value>`
+/// - Any type implementing `tokora::container::Container<Value>`
 ///
 /// ## Component Structure
 ///

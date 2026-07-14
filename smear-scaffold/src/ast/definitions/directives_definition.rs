@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::{

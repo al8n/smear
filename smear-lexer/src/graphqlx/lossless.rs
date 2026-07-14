@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokit::state::tracker::LimitExceeded;
+use tokora::state::tracker::LimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -14,7 +14,7 @@ mod slice;
 mod str;
 
 /// The lexer type for lossless GraphQLx tokenization.
-pub type LosslessLexer<'a, S = &'a str> = tokit::lexer::LogosLexer<'a, LosslessToken<S>>;
+pub type LosslessLexer<'a, S = &'a str> = tokora::lexer::LogosLexer<'a, LosslessToken<S>>;
 
 /// The error data type for lexing based on lossless token with `char` source.
 pub type LosslessLexerErrorData = error::LexerErrorData<char, LimitExceeded>;
@@ -60,7 +60,7 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphqlx::lossless::LosslessToken;
-/// use tokit::lexer::LogosLexer;
+/// use tokora::lexer::LogosLexer;
 ///
 /// let source = "query { # comment\n  user { id }\n}";
 /// let tokens = TokenStream::<LosslessToken<&str>>::new(source);

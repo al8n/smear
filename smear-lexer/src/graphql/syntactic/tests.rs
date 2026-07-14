@@ -1,4 +1,4 @@
-use tokit::{Lexer, state::recursion_tracker::RecursionLimiter};
+use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use super::*;
 
@@ -201,7 +201,7 @@ fn test_recursion_limit() {
 
 #[test]
 fn capability_traits_classify_tokens() {
-  use tokit::token::{IdentifierToken, LitToken as _, PunctuatorToken};
+  use tokora::token::{IdentifierToken, LitToken as _, PunctuatorToken};
   // UFCS on `IdentifierToken`: the `IsVariant` derive also generates an inherent
   // `is_identifier`, so method-call syntax would resolve to that instead of the trait.
   assert!(IdentifierToken::is_identifier(

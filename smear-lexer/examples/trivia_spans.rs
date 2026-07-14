@@ -13,7 +13,7 @@
 
 use std::{env, fs, process::ExitCode};
 
-use smear_lexer::{graphql::lossless::LosslessLexer, tokit::lexer::Lexer as _};
+use smear_lexer::{graphql::lossless::LosslessLexer, tokora::lexer::Lexer as _};
 
 fn collect_trivia_runs(input: &str) -> Vec<usize> {
   let mut runs: Vec<usize> = Vec::new();

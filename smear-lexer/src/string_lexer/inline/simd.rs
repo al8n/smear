@@ -22,7 +22,7 @@
 //! parsed literal or the errors found; the source argument `src` starts
 //! **after** the opening `"`.
 
-use tokit::{
+use tokora::{
   SimpleSpan,
   utils::{Lexeme, PositionedChar},
 };

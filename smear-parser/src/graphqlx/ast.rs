@@ -2,7 +2,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
 };
 

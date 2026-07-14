@@ -1,5 +1,5 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{
+use smear_lexer::tokora::{
   Emitter, InputRef, Lexer, ParseContext, SimpleSpan as Span, lexer::FromLogos, span::Spanned,
   utils::cmp::Equivalent,
 };
@@ -52,7 +52,7 @@ where
   S: Clone,
   LosslessToken<S>: FromLogos<'inp>,
   LosslessLexer<'inp, S>:
-    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
   Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
   str: Equivalent<S>,
@@ -124,7 +124,7 @@ where
   S: Clone,
   LosslessToken<S>: FromLogos<'inp>,
   LosslessLexer<'inp, S>:
-    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokit::SimpleSpan>,
+    Lexer<'inp, Token = LosslessToken<S>, Span = smear_lexer::tokora::SimpleSpan>,
   Ctx: ParseContext<'inp, LosslessLexer<'inp, S>, Lang>,
   Ctx::Emitter: Emitter<'inp, LosslessLexer<'inp, S>, Lang, Error = LosslessTokenErrors<S>>,
   str: Equivalent<S>,

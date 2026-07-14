@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokit::state::recursion_tracker::RecursionLimitExceeded;
+use tokora::state::recursion_tracker::RecursionLimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -62,7 +62,7 @@ pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>
 ///
 /// ```rust,ignore
 /// use smear::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
-/// use tokit::Lexer;
+/// use tokora::Lexer;
 ///
 /// let source = "query { user { id } }";
 /// let mut lexer = SyntacticLexer::new(source);
@@ -196,9 +196,9 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
 // supplies the `Char` for the frozen `Error` type (str/HipStr -> char,
 // &[u8]/Bytes/HipByt -> u8).
 
-impl<'a, S> tokit::Token<'a> for SyntacticToken<S>
+impl<'a, S> tokora::Token<'a> for SyntacticToken<S>
 where
-  S: tokit::Slice<'a> + Clone + 'a,
+  S: tokora::Slice<'a> + Clone + 'a,
 {
   type Kind = SyntacticTokenKind;
   type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
@@ -295,7 +295,7 @@ impl core::fmt::Display for SyntacticTokenKind {
 // `NumberToken` grammar (see `delegate_number_to_logos`), malformed strings to
 // `string_lexer` (see `delegate_string_error`), the unterminated-spread error
 // is emitted inline, and the unknown-byte error is hand-rolled inline in
-// [`lex`](tokit::Lexer::lex). Because the fast path never constructs a source-typed
+// [`lex`](tokora::Lexer::lex). Because the fast path never constructs a source-typed
 // error itself, parity with the pre-SIMD lexer holds by construction.
 //
 // GraphQLx differs from GraphQL in the *dispatch*, not the architecture:
@@ -314,7 +314,7 @@ impl core::fmt::Display for SyntacticTokenKind {
 // - Numbers are radix-prefixed (decimal / hex / binary / octal, plus decimal
 //   and hex floats) and always delegated to `NumberToken` — never hand-rolled.
 
-use tokit::{
+use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::RecursionLimiter,
@@ -438,7 +438,7 @@ where
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn check(&self) -> Result<(), <Self::Token as tokit::Token<'inp>>::Error> {
+  fn check(&self) -> Result<(), <Self::Token as tokora::Token<'inp>>::Error> {
     self.state.check().map_err(Into::into)
   }
 
@@ -476,7 +476,7 @@ where
   }
 
   #[cfg_attr(not(tarpaulin), inline(always))]
-  fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokit::Token<'inp>>::Error>> {
+  fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
     // Post-token recursion gate, mirroring `LogosLexer::lex`: after a token is
     // scanned it re-checks the limiter and, while the depth is over the limit,
     // yields the recursion error in the token's place. The conversion is

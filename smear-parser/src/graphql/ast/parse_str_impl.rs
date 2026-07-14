@@ -2,7 +2,7 @@
 //!
 //! Uses the generic combinator parsers from [`super::combinators`].
 
-use smear_lexer::tokit::Parse;
+use smear_lexer::tokora::Parse;
 
 use super::{
   ParseStr, SyntacticTokenErrors, combinators::*, default::*, fragment::*, run_parse_str,

@@ -1,5 +1,5 @@
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::tokit::{SimpleSpan as Span, utils::CowStr};
+use smear_lexer::tokora::{SimpleSpan as Span, utils::CowStr};
 
 use super::Expectation as Exp;
 
@@ -56,9 +56,9 @@ pub enum ErrorData<S, T, Char = char, Expectation = Exp, StateError = ()> {
   /// An unexpected keyword was found.
   UnexpectedKeyword(UnexpectedKeyword<S>),
   /// An unexpected end was found in a variable value.
-  UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd<VariableValueHint>),
+  UnexpectedEndOfVariableValue(smear_lexer::tokora::error::UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
-  UnexpectedEndOfObjectFieldValue(smear_lexer::tokit::error::UnexpectedEnd<ObjectFieldValueHint>),
+  UnexpectedEndOfObjectFieldValue(smear_lexer::tokora::error::UnexpectedEnd<ObjectFieldValueHint>),
   /// An unknown directive location was found.
   #[from(skip)]
   UnknownDirectiveLocation(S),
@@ -66,21 +66,21 @@ pub enum ErrorData<S, T, Char = char, Expectation = Exp, StateError = ()> {
   #[from(skip)]
   UnknownOperationType(S),
   /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(smear_lexer::tokit::error::UnexpectedEnd<ObjectTypeExtensionHint>),
+  UnexpectedEndOfObjectExtension(smear_lexer::tokora::error::UnexpectedEnd<ObjectTypeExtensionHint>),
   /// An unexpected end was found in an interface type extension.
   UnexpectedEndOfInterfaceExtension(
-    smear_lexer::tokit::error::UnexpectedEnd<InterfaceTypeExtensionHint>,
+    smear_lexer::tokora::error::UnexpectedEnd<InterfaceTypeExtensionHint>,
   ),
   /// An unexpected end was found in an enum type extension.
-  UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd<EnumTypeExtensionHint>),
+  UnexpectedEndOfEnumExtension(smear_lexer::tokora::error::UnexpectedEnd<EnumTypeExtensionHint>),
   /// An unexpected end was found in an input object type extension.
   UnexpectedEndOfInputObjectExtension(
-    smear_lexer::tokit::error::UnexpectedEnd<InputObjectTypeExtensionHint>,
+    smear_lexer::tokora::error::UnexpectedEnd<InputObjectTypeExtensionHint>,
   ),
   /// An unexpected end was found in a union type extension.
-  UnexpectedEndOfUnionExtension(smear_lexer::tokit::error::UnexpectedEnd<UnionTypeExtensionHint>),
+  UnexpectedEndOfUnionExtension(smear_lexer::tokora::error::UnexpectedEnd<UnionTypeExtensionHint>),
   /// An unexpected end was found in a schema extension.
-  UnexpectedEndOfSchemaExtension(smear_lexer::tokit::error::UnexpectedEnd<SchemaExtensionHint>),
+  UnexpectedEndOfSchemaExtension(smear_lexer::tokora::error::UnexpectedEnd<SchemaExtensionHint>),
   /// An end of input was found.
   EndOfInput,
   /// Some other error.
@@ -115,7 +115,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokit::error::UnexpectedEnd::with_name(
+      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokora::error::UnexpectedEnd::with_name(
         0,
         CowStr::from_static("variable value"),
         hint,
@@ -141,7 +141,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfObjectFieldValue(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("object field value"),
           hint,
@@ -159,7 +159,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfObjectExtension(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("object type extension"),
           hint,
@@ -177,7 +177,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfInterfaceExtension(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("interface type extension"),
           hint,
@@ -191,7 +191,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokit::error::UnexpectedEnd::with_name(
+      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokora::error::UnexpectedEnd::with_name(
         0,
         CowStr::from_static("enum type extension"),
         hint,
@@ -208,7 +208,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfInputObjectExtension(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("input object type extension"),
           hint,
@@ -223,7 +223,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfUnionExtension(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("union type extension"),
           hint,
@@ -238,7 +238,7 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
     Self::new(
       span,
       ErrorData::UnexpectedEndOfSchemaExtension(
-        smear_lexer::tokit::error::UnexpectedEnd::with_name(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
           0,
           CowStr::from_static("schema extension"),
           hint,

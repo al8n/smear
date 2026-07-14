@@ -16,7 +16,7 @@
 
 use std::{fs, path::PathBuf};
 
-use tokit::lexer::Lexer as _;
+use tokora::lexer::Lexer as _;
 
 /// Render a lexer's full stream to a stable, diffable string.
 ///
@@ -259,7 +259,7 @@ fn graphql_syntactic_simd_oracle() {
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_low_recursion_parity() {
-  use tokit::state::recursion_tracker::RecursionLimiter;
+  use tokora::state::recursion_tracker::RecursionLimiter;
 
   // Each input exercises a different set of gated arms past the first
   // over-limit bracket: identifier + close-bracket, nested brackets, the
@@ -425,7 +425,7 @@ use smear_lexer::graphql::{
 use smear_lexer::graphql::syntactic::AsBytes;
 #[cfg(all(feature = "graphqlx", not(feature = "graphql")))]
 use smear_lexer::graphqlx::syntactic::AsBytes;
-use tokit::{
+use tokora::{
   error::UnexpectedLexeme,
   utils::{Lexeme, PositionedChar},
 };
@@ -926,7 +926,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
   use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
-  use tokit::state::recursion_tracker::RecursionLimiter;
+  use tokora::state::recursion_tracker::RecursionLimiter;
 
   const CASES: &[(&str, &str)] = &[
     (
@@ -1061,7 +1061,7 @@ use smear_lexer::graphqlx::{
   syntactic::SyntacticToken as GxToken,
 };
 #[cfg(feature = "graphqlx")]
-use tokit::state::recursion_tracker::RecursionLimitExceeded;
+use tokora::state::recursion_tracker::RecursionLimitExceeded;
 
 // Each number-error enum reuses the shared `same_lexeme` for its `Char`-bearing
 // suffix leaf; its `UnexpectedEnd`/span-only leaves carry no `Char`, so both
