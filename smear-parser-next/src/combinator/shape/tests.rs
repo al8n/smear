@@ -21,9 +21,7 @@ use smear_lexer::tokora::{
   span::Spanned,
 };
 
-use super::{
-  list_of, opt, padded, padded_skipping, peek_kind, separated1, spanned, try_description,
-};
+use super::{list_of, opt, padded, peek_kind, separated1, spanned, try_description};
 
 use crate::combinator::{StringLiteral, at, colon, ident, rbrace, spread, try_at};
 
@@ -170,7 +168,7 @@ macro_rules! drive_all {
 
 // The lossless twin of the drive helpers, pinning the lossless lexer per source.
 // Its stream surfaces trivia as real tokens, so it is what the capturing
-// `padded` and the discarding `padded_skipping` are exercised over.
+// `padded` is exercised over.
 
 fn drive_str_lossless<'inp, O, Em>(
   emitter: Em,
@@ -652,26 +650,6 @@ fn padded_captures_nothing_when_stream_omits_trivia() {
       Ok::<_, TestError>(())
     },
     "x",
-    |out: Result<(), TestError>| assert!(out.is_ok())
-  );
-}
-
-// `padded_skipping` delegates to tokora's padding combinator: over the lossless
-// stream it skips the surrounding trivia and hands back the bare ident, keeping
-// none of it. Its span is the value's alone, and after it the stream is
-// exhausted — proving the trailing trivia was consumed, not left behind.
-#[test]
-fn padded_skipping_discards_surrounding_trivia_over_lossless() {
-  drive_all_lossless!(
-    Fatal::<TestError>::new(),
-    |inp| {
-      let id = padded_skipping(ident)(inp)?;
-      assert_eq!(as_bytes(id.source_ref()), b"x");
-      assert_eq!(id.span(), SimpleSpan::new(2, 3));
-      assert!(peek_kind(inp)?.is_none());
-      Ok::<_, TestError>(())
-    },
-    "  x  ",
     |out: Result<(), TestError>| assert!(out.is_ok())
   );
 }
