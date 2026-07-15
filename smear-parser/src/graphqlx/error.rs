@@ -77,7 +77,9 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   #[from(skip)]
   UnknownOperationType(S),
   /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(smear_lexer::tokora::error::UnexpectedEnd<ObjectTypeExtensionHint>),
+  UnexpectedEndOfObjectExtension(
+    smear_lexer::tokora::error::UnexpectedEnd<ObjectTypeExtensionHint>,
+  ),
   /// An unexpected end was found in an interface type extension.
   UnexpectedEndOfInterfaceExtension(
     smear_lexer::tokora::error::UnexpectedEnd<InterfaceTypeExtensionHint>,
@@ -126,11 +128,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfVariableValue(smear_lexer::tokora::error::UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("variable value"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfVariableValue(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("variable value"),
+          hint,
+        ),
+      ),
     )
   }
 
@@ -202,11 +206,13 @@ impl<S, T, Char, Expectation, StateError> Error<S, T, Char, Expectation, StateEr
   pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
     Self::new(
       span,
-      ErrorData::UnexpectedEndOfEnumExtension(smear_lexer::tokora::error::UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("enum type extension"),
-        hint,
-      )),
+      ErrorData::UnexpectedEndOfEnumExtension(
+        smear_lexer::tokora::error::UnexpectedEnd::with_name(
+          0,
+          CowStr::from_static("enum type extension"),
+          hint,
+        ),
+      ),
     )
   }
 

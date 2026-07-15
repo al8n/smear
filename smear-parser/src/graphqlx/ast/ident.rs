@@ -1,4 +1,6 @@
-use smear_lexer::tokora::{Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned};
+use smear_lexer::tokora::{
+  Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned,
+};
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors, next_token};
 use crate::lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};

@@ -1,4 +1,6 @@
-use smear_lexer::tokora::{Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned};
+use smear_lexer::tokora::{
+  Emitter, InputRef, Lexer, ParseContext, lexer::FromLogos, span::Spanned,
+};
 use tokora::{SimpleSpan, try_parse_input::ParseAttempt};
 
 use super::{Expectation, SyntacticTokenError, SyntacticTokenErrors};
