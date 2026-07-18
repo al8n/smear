@@ -197,3 +197,6 @@ where
   emitter.cst_finish();
   Ok(Some(directives))
 }
+
+#[cfg(test)]
+mod tests;
