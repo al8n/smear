@@ -32,3 +32,10 @@ mod value;
 /// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
 #[cfg(feature = "graphql")]
 pub mod graphql;
+
+/// The GraphQLx dialect: GraphQL extended with generics, `::`-paths, `set`/`map`
+/// composites, and imports — productions, syntax kinds, keyword atoms, AST node
+/// types, and the dialect error, all keyed to the [`GraphQLx`](graphqlx::GraphQLx)
+/// marker.
+#[cfg(feature = "graphqlx")]
+pub mod graphqlx;
