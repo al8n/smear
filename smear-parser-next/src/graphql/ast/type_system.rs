@@ -3,15 +3,14 @@
 //! Copied type-only from the frozen `smear-parser` crate (`graphql/ast/default.rs`
 //! and `graphql/ast/type_system.rs`): the input-value/field/argument definitions, the
 //! `implements`/union-member/directive-location clauses, the enum-value definitions,
-//! the root-operation-type definitions, and the scalar/object/interface/union/enum/
-//! input-object/directive/schema type definitions, keyed by the source slice `S` with
+//! the root-operation-type definitions, the scalar/object/interface/union/enum/
+//! input-object/directive/schema type definitions *and extensions*, and the
+//! definition-or-extension / document families, keyed by the source slice `S` with
 //! spans pinned to [`SimpleSpan`](tokora::SimpleSpan). Most are aliases over the
-//! generic `smear-scaffold` node types; [`TypeDefinition`] is a real enum (copied
-//! verbatim from the frozen crate, not the scaffold's `#[non_exhaustive]` generic) so
-//! the dispatch can match its variants exhaustively.
-//!
-//! Type-system *extensions* and the document/definition-or-extension families land in
-//! a later wave; only the definitions this wave's productions return are here.
+//! generic `smear-scaffold` node types; [`TypeDefinition`] and [`TypeExtension`] are
+//! real enums (copied verbatim from the frozen crate, not the scaffold's
+//! `#[non_exhaustive]` generics) so the dispatches can match their variants
+//! exhaustively.
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_scaffold::ast as scaffold;
@@ -20,7 +19,9 @@ use tokora::{
   span::{AsSpan, IntoSpan},
 };
 
-use super::{ConstDirectives, DefaultInputValue, Described, Name, OperationType, Type};
+use super::{
+  ConstDirectives, DefaultInputValue, Described, ExecutableDefinition, Name, OperationType, Type,
+};
 
 pub use scaffold::{
   DirectiveLocations, ExecutableDirectiveLocation, ImplementInterfaces, Location,
@@ -193,3 +194,146 @@ impl<S, Ty> TypeDefinition<S, Ty> {
     }
   }
 }
+
+/// Extension of a scalar type (`extend scalar Name Directives`).
+pub type ScalarTypeExtension<S> = scaffold::ScalarTypeExtension<Name<S>, ConstDirectives<S>>;
+
+/// Extension of an object type
+/// (`extend type Name` + at least one of implements/directives/fields).
+pub type ObjectTypeExtension<S, Ty = Type<Name<S>>> = scaffold::ObjectTypeExtension<
+  Name<S>,
+  ImplementInterfaces<Name<S>>,
+  ConstDirectives<S>,
+  FieldsDefinition<S, Ty>,
+>;
+
+/// Extension of an interface type
+/// (`extend interface Name` + at least one of implements/directives/fields).
+pub type InterfaceTypeExtension<S, Ty = Type<Name<S>>> = scaffold::InterfaceTypeExtension<
+  Name<S>,
+  ImplementInterfaces<Name<S>>,
+  ConstDirectives<S>,
+  FieldsDefinition<S, Ty>,
+>;
+
+/// Extension of a union type
+/// (`extend union Name` + at least one of directives/member types).
+pub type UnionTypeExtension<S> =
+  scaffold::UnionTypeExtension<Name<S>, ConstDirectives<S>, UnionMemberTypes<Name<S>>>;
+
+/// Extension of an enum type
+/// (`extend enum Name` + at least one of directives/values).
+pub type EnumTypeExtension<S> =
+  scaffold::EnumTypeExtension<Name<S>, ConstDirectives<S>, EnumValuesDefinition<S>>;
+
+/// Extension of an input object type
+/// (`extend input Name` + at least one of directives/fields).
+pub type InputObjectTypeExtension<S, Ty = Type<Name<S>>> =
+  scaffold::InputObjectTypeExtension<Name<S>, ConstDirectives<S>, InputFieldsDefinition<S, Ty>>;
+
+/// Schema extension (`extend schema` + at least one of directives/root operations).
+pub type SchemaExtension<S> =
+  scaffold::SchemaExtension<ConstDirectives<S>, RootOperationTypesDefinition<S>>;
+
+/// A GraphQL type extension — one of the six named type-system extension shapes.
+///
+/// Copied verbatim from the frozen `smear-parser` crate (`graphql/ast/type_system.rs`)
+/// rather than aliased to the `smear-scaffold` generic, so the dialect owns a concrete,
+/// exhaustively-matchable enum with `From` conversions for each arm.
+#[derive(Debug, Clone, From, Unwrap, IsVariant, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeExtension<S, Ty = Type<Name<S>>> {
+  /// The scalar type extension.
+  Scalar(ScalarTypeExtension<S>),
+  /// The object type extension.
+  Object(ObjectTypeExtension<S, Ty>),
+  /// The interface type extension.
+  Interface(InterfaceTypeExtension<S, Ty>),
+  /// The union type extension.
+  Union(UnionTypeExtension<S>),
+  /// The enum type extension.
+  Enum(EnumTypeExtension<S>),
+  /// The input object type extension.
+  InputObject(InputObjectTypeExtension<S, Ty>),
+}
+
+impl<S, Ty> AsSpan<Span> for TypeExtension<S, Ty> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S, Ty> IntoSpan<Span> for TypeExtension<S, Ty> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Scalar(v) => v.into_span(),
+      Self::Object(v) => v.into_span(),
+      Self::Interface(v) => v.into_span(),
+      Self::Union(v) => v.into_span(),
+      Self::Enum(v) => v.into_span(),
+      Self::InputObject(v) => v.into_span(),
+    }
+  }
+}
+
+impl<S, Ty> TypeExtension<S, Ty> {
+  /// Returns the span of the type extension.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Scalar(v) => v.span(),
+      Self::Object(v) => v.span(),
+      Self::Interface(v) => v.span(),
+      Self::Union(v) => v.span(),
+      Self::Enum(v) => v.span(),
+      Self::InputObject(v) => v.span(),
+    }
+  }
+}
+
+/// Type system definition (a type, directive, or schema definition).
+pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = scaffold::TypeSystemDefinition<
+  TypeDefinition<S, Ty>,
+  DirectiveDefinition<S, Ty>,
+  SchemaDefinition<S>,
+>;
+
+/// Type system definition with an optional leading description.
+pub type DescribedTypeSystemDefinition<S, Ty = Type<Name<S>>> =
+  Described<TypeSystemDefinition<S, Ty>, S>;
+
+/// Type system extension (a type or schema extension).
+pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
+  scaffold::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
+
+/// Type system definition or extension.
+pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
+  scaffold::TypeSystemDefinitionOrExtension<
+    DescribedTypeSystemDefinition<S, Ty>,
+    TypeSystemExtension<S, Ty>,
+  >;
+
+/// Executable definition with an optional leading description.
+pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =
+  Described<ExecutableDefinition<S, Ty>, S>;
+
+/// Definition (type system or executable).
+pub type Definition<S, Ty = Type<Name<S>>> =
+  scaffold::Definition<TypeSystemDefinition<S, Ty>, ExecutableDefinition<S, Ty>>;
+
+/// Definition with an optional leading description.
+pub type DescribedDefinition<S, Ty = Type<Name<S>>> = Described<Definition<S, Ty>, S>;
+
+/// Definition or extension — one entry of a full [`Document`].
+pub type DefinitionOrExtension<S, Ty = Type<Name<S>>> =
+  scaffold::DefinitionOrExtension<DescribedDefinition<S, Ty>, TypeSystemExtension<S, Ty>>;
+
+/// Type system document (only schema/type definitions and extensions).
+pub type TypeSystemDocument<S, Ty = Type<Name<S>>> =
+  scaffold::Document<TypeSystemDefinitionOrExtension<S, Ty>>;
+
+/// Full GraphQL document (both type-system and executable entries).
+pub type Document<S, Ty = Type<Name<S>>> = scaffold::Document<DefinitionOrExtension<S, Ty>>;
