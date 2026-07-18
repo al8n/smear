@@ -897,3 +897,32 @@ fn described_standalones_commit_their_keyword() {
   // A dangling description with no definition errors rather than parsing.
   reject_all!(super::described_object_type_definition, "\"doc\"");
 }
+
+// ─── list tails end cleanly before a following definition (W5 regression) ────
+
+#[test]
+fn pipe_amp_lists_end_cleanly_before_a_following_definition() {
+  // Regression: `separated1`'s peek-driven continuation treated the identifier
+  // that STARTS THE NEXT DEFINITION as a missing separator, so any pipe/amp list
+  // followed by another definition errored (`union A = X | Y union B = Z`). The
+  // lists now continue only through real separators; the follower stays in place.
+  fn two_members<S: AsRef<[u8]>>(m: Option<UnionMemberTypes<crate::graphql::ast::Name<S>>>) {
+    assert_eq!(m.expect("present").members().len(), 2);
+  }
+  accept_all!(union_members, "= X | Y union B = Z", two_members);
+
+  fn two_impls<S: AsRef<[u8]>>(i: Option<ImplementInterfaces<crate::graphql::ast::Name<S>>>) {
+    assert_eq!(i.expect("present").interfaces().len(), 2);
+  }
+  accept_all!(implements, "implements I & J type B { b: Int }", two_impls);
+
+  fn one_location(l: DirectiveLocations<Location>) {
+    assert_eq!(l.locations().len(), 1);
+  }
+  accept_all!(directive_locations, "FIELD type T { x: Int }", one_location);
+
+  // Trailing separators still error (the committed item after each separator).
+  reject_all!(union_members, "= X | Y |");
+  reject_all!(implements, "implements I &");
+  reject_all!(directive_locations, "FIELD |");
+}

@@ -42,7 +42,6 @@ use tokora::{
   punct::{Ampersand, Pipe},
   token::{IdentifierToken, KeywordToken, PunctuatorToken},
   try_parse_input::ParseAttempt,
-  utils::IntoComponents,
 };
 
 use super::{

@@ -27,8 +27,27 @@
 //! `separated1` does not fit), so an empty `()`/`{}` errors: a documented deviation
 //! from the frozen parser, whose unenforced `+` accepted the empty forms. The
 //! pipe/amp lists — [`implements`] (`&`), [`union_members`] (`|`),
-//! [`directive_locations`] (`|`) — use [`separated1`]
-//! with `allow_leading` (already non-empty in frozen via `at_least(1)`).
+//! [`directive_locations`] (`|`) — commit their first item after an optional
+//! leading separator and continue only through real separators (already non-empty
+//! in frozen via `at_least(1)`): `separated1`'s peek-driven continuation treats an
+//! adjacent identifier as a missing separator, but at these list tails an adjacent
+//! identifier legitimately starts the NEXT definition.
+//!
+//! # Node placement
+//!
+//! Definitions retro-wrap their kind after the body settles (Amendment 1: content is
+//! not known up front). The description-carrying productions ([`input_value_definition`],
+//! [`field_definition`], [`enum_value_definition`]) mint the definition mark first, then
+//! an inner `K::Description` node via [`description`], so the description lands inside
+//! the definition node. The optional list clauses ([`fields_definition`],
+//! [`input_fields_definition`], [`enum_values_definition`], [`implements`],
+//! [`union_members`]) mint the mark before the attempt and spend it only when the clause
+//! is actually present. The committed delimited regions ([`arguments_definition`],
+//! [`root_operation_types_definition`]) open their kind up front with
+//! [`node`] over the delimiter shape. [`type_definition`] adds no
+//! wrapper of its own beyond the resolved arm's kind (sum-type convention), spent by a
+//! content-dependent retro-wrap once the dispatch reveals which arm; [`described_type_definition`]
+//! reuses that dispatch with a leading description landing inside the same node.
 
 use smear_lexer::{LitBlockStr, LitInlineStr, keywords};
 use smear_scaffold::ast as scaffold;
@@ -50,8 +69,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at, colon,
-    enum_value, ident, separated1, try_description, try_equal,
+    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at,
+    colon, enum_value, ident, try_ampersand, try_description, try_equal, try_pipe,
   },
   graphql::{
     ast::{
@@ -419,9 +438,10 @@ where
 /// Parses an optional `ImplementsInterfaces` clause (`'implements' '&'? Name ('&'
 /// Name)*`), declining to `None` (no tokens consumed) unless `implements` is next.
 ///
-/// The `&`-separated names use [`separated1`] with an
-/// optional leading `&` (spec `implements &? …`), so the list is non-empty exactly as
-/// the frozen parser enforced (`at_least(1)`).
+/// The `&`-separated names commit the first after an optional leading `&` (spec
+/// `implements &? …`) and continue only through real `&` separators, so the list is
+/// non-empty exactly as the frozen parser enforced (`at_least(1)`) and ends cleanly
+/// at any non-`&` token.
 ///
 /// Spec: [ImplementsInterfaces](https://spec.graphql.org/draft/#ImplementsInterfaces).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production.
@@ -441,10 +461,18 @@ where
   let cursor = inp.cursor().clone();
   match try_implements(inp)? {
     ParseAttempt::Accept(_kw) => {
-      let items = separated1::<Ampersand<(), (), Lang>, _, _, _, _, _, _>(
-        name,
-        <L::Token as IdentifierToken>::is_identifier,
-      )(inp)?;
+      // `&`-separated names, optional leading `&` (spec `implements &? …`), first
+      // name committed (non-empty), each further name committed after its `&` (a
+      // trailing `&` errors), and any non-`&` token cleanly ENDS the clause — an
+      // adjacent identifier belongs to whatever follows (the next definition),
+      // never to this list. `separated1`'s peek-driven continuation treats a
+      // following identifier as a missing separator, so it does not fit here.
+      let mut items = Vec::new();
+      let _ = try_ampersand(inp)?;
+      items.push(name(inp)?);
+      while let ParseAttempt::Accept(_amp) = try_ampersand(inp)? {
+        items.push(name(inp)?);
+      }
       let span = inp.span_since(&cursor);
       let clause = scaffold::ImplementInterfaces::new(span, items);
       Ok(Some(clause))
@@ -456,9 +484,10 @@ where
 /// Parses an optional `UnionMemberTypes` clause (`'=' '|'? Name ('|' Name)*`),
 /// declining to `None` (no tokens consumed) unless `=` is next.
 ///
-/// The `|`-separated names use [`separated1`] with an
-/// optional leading `|` (spec `= |? …`), so the list is non-empty exactly as the
-/// frozen parser enforced (`at_least(1)`).
+/// The `|`-separated names commit the first after an optional leading `|` (spec
+/// `= |? …`) and continue only through real `|` separators, so the list is non-empty
+/// exactly as the frozen parser enforced (`at_least(1)`) and ends cleanly at any
+/// non-`|` token.
 ///
 /// Spec: [UnionMemberTypes](https://spec.graphql.org/draft/#UnionMemberTypes).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production.
@@ -478,10 +507,18 @@ where
   let cursor = inp.cursor().clone();
   match try_equal(inp)? {
     ParseAttempt::Accept(_eq) => {
-      let items = separated1::<Pipe<(), (), Lang>, _, _, _, _, _, _>(
-        name,
-        <L::Token as IdentifierToken>::is_identifier,
-      )(inp)?;
+      // `|`-separated names, optional leading `|` (spec `= |? …`), first member
+      // committed (non-empty), each further member committed after its `|` (a
+      // trailing `|` errors), and any non-`|` token cleanly ENDS the clause — an
+      // adjacent identifier starts the NEXT definition (`union A = X | Y union B`),
+      // never another member. `separated1`'s peek-driven continuation treats that
+      // identifier as a missing separator, so it does not fit here.
+      let mut items = Vec::new();
+      let _ = try_pipe(inp)?;
+      items.push(name(inp)?);
+      while let ParseAttempt::Accept(_pipe) = try_pipe(inp)? {
+        items.push(name(inp)?);
+      }
       let span = inp.span_since(&cursor);
       let clause = scaffold::UnionMemberTypes::new(span, items);
       Ok(Some(clause))
@@ -558,9 +595,10 @@ where
 
 /// Parses a `DirectiveLocations` clause (`'|'? Location ('|' Location)*`).
 ///
-/// The `|`-separated locations use [`separated1`] with
-/// an optional leading `|` (spec `|? …`), so the list is non-empty exactly as the
-/// frozen parser enforced (`at_least(1)`).
+/// The `|`-separated locations commit the first after an optional leading `|`
+/// (spec `|? …`) and continue only through real `|` separators, so the list is
+/// non-empty exactly as the frozen parser enforced (`at_least(1)`) and ends cleanly
+/// at any non-`|` token.
 ///
 /// Spec: [DirectiveLocations](https://spec.graphql.org/draft/#DirectiveLocations).
 pub fn directive_locations<'inp, L, Ctx, Lang>(
@@ -577,10 +615,18 @@ where
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
   let cursor = inp.cursor().clone();
-  let items = separated1::<Pipe<(), (), Lang>, _, _, _, _, _, _>(
-    location,
-    <L::Token as IdentifierToken>::is_identifier,
-  )(inp)?;
+  // `|`-separated locations, optional leading `|` (spec `|? …`), first location
+  // committed (non-empty), each further location committed after its `|` (a
+  // trailing `|` errors), and any non-`|` token cleanly ENDS the clause — an
+  // adjacent identifier starts the NEXT definition (`directive @a on FIELD type
+  // T`), never another location. `separated1`'s peek-driven continuation treats
+  // that identifier as a missing separator, so it does not fit here.
+  let mut items = Vec::new();
+  let _ = try_pipe(inp)?;
+  items.push(location(inp)?);
+  while let ParseAttempt::Accept(_pipe) = try_pipe(inp)? {
+    items.push(location(inp)?);
+  }
   let span = inp.span_since(&cursor);
   let clause = scaffold::DirectiveLocations::new(span, items);
   Ok(clause)
