@@ -13,7 +13,7 @@ use tokora::{FatalContext, InputRef, Parse, Parser};
 use super::{
   definition_name, definition_type_param, executable_definition_name, extension_type_param,
   try_definition_type_generics, try_executable_definition_type_generics,
-  try_extension_type_generics,
+  try_extension_type_generics, try_where_clause, where_predicate,
 };
 use crate::graphqlx::error::GraphqlxErrors;
 
@@ -297,4 +297,147 @@ fn executable_definition_name_rejects_on_per_spec() {
   // `FragmentName : Name but not on` — the shared-grammar exclusion carried to
   // GraphQLx (the carrier's only grammar position is a fragment's name).
   reject_all!(executable_definition_name, "on");
+}
+
+// ─── where_predicate ─────────────────────────────────────────────────────────
+
+#[test]
+fn where_predicate_single_bound() {
+  // Fixture `0006_where_clause_simple`: `where T: Node`.
+  fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::WherePredicate<S>) {
+    assert_eq!(
+      bytes(p.bounded_type().path().segments_slice()[0].source_ref()),
+      b"T"
+    );
+    let bounds = p.bounds_slice();
+    assert_eq!(bounds.len(), 1);
+    assert_eq!(
+      bytes(bounds[0].path().segments_slice()[0].source_ref()),
+      b"Node"
+    );
+  }
+  accept_all!(where_predicate, "T: Node", check);
+}
+
+#[test]
+fn where_predicate_multiple_bounds() {
+  // Fixture `0007_where_clause_multiple_bounds`: `where T: Node & Timestamped`.
+  fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::WherePredicate<S>) {
+    let bounds = p.bounds_slice();
+    assert_eq!(bounds.len(), 2);
+    assert_eq!(
+      bytes(bounds[0].path().segments_slice()[0].source_ref()),
+      b"Node"
+    );
+    assert_eq!(
+      bytes(bounds[1].path().segments_slice()[0].source_ref()),
+      b"Timestamped"
+    );
+  }
+  accept_all!(where_predicate, "T: Node & Timestamped", check);
+}
+
+#[test]
+fn where_predicate_generic_and_pathed_shapes() {
+  // Both sides of a predicate are full type paths: bounded `u::V<W>`, bound `X<Y>`.
+  fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::WherePredicate<S>) {
+    assert_eq!(p.bounded_type().path().segments_slice().len(), 2);
+    assert!(p.bounded_type().type_generics().is_some());
+    assert!(p.bounds_slice()[0].type_generics().is_some());
+  }
+  accept_all!(where_predicate, "u::V<W>: X<Y>", check);
+}
+
+#[test]
+fn where_predicate_rejects_headless_and_boundless() {
+  reject_all!(where_predicate, "T");
+  reject_all!(where_predicate, "T:");
+  reject_all!(where_predicate, "T: Node &");
+  reject_all!(where_predicate, ": Node");
+}
+
+// ─── try_where_clause ────────────────────────────────────────────────────────
+
+#[test]
+fn where_clause_single_predicate() {
+  fn check<S: AsRef<[u8]>>(c: Option<crate::graphqlx::ast::WhereClause<S>>) {
+    let c = c.expect("clause present");
+    assert_eq!(c.predicates_slice().len(), 1);
+  }
+  accept_all!(try_where_clause, "where T: Node", check);
+}
+
+#[test]
+fn where_clause_multiple_predicates_without_separators() {
+  // Fixture `0020_where_multiple_predicates`: predicates stack with no separator.
+  fn check<S: AsRef<[u8]>>(c: Option<crate::graphqlx::ast::WhereClause<S>>) {
+    let c = c.expect("clause present");
+    let preds = c.predicates_slice();
+    assert_eq!(preds.len(), 2);
+    assert_eq!(
+      bytes(preds[0].bounded_type().path().segments_slice()[0].source_ref()),
+      b"T"
+    );
+    assert_eq!(preds[0].bounds_slice().len(), 2);
+    assert_eq!(
+      bytes(preds[1].bounded_type().path().segments_slice()[0].source_ref()),
+      b"U"
+    );
+  }
+  accept_all!(
+    try_where_clause,
+    "where\n    T: Node & Timestamped\n    U: Serializable",
+    check
+  );
+}
+
+#[test]
+fn where_clause_declines_without_keyword() {
+  // No `where` ahead: decline without consuming — the next token stays readable.
+  let out = drive_str(
+    |inp| {
+      let clause = try_where_clause(inp)?;
+      assert!(clause.is_none());
+      crate::combinator::ident(inp).map(|id| *id.source_ref())
+    },
+    "wherever",
+  );
+  assert_eq!(out.ok(), Some("wherever"));
+}
+
+#[test]
+fn where_clause_stops_before_a_non_predicate_identifier() {
+  // The probe ends the clause at `type Bar` — an identifier that heads no
+  // `TypePath ':'` — leaving it unconsumed for the enclosing construct (the
+  // W8b document-stream case: `scalar Foo<T> where T: X` followed by another
+  // definition).
+  let out = drive_str(
+    |inp| {
+      let clause = try_where_clause(inp)?.expect("clause present");
+      assert_eq!(clause.predicates_slice().len(), 1);
+      crate::combinator::ident(inp).map(|id| *id.source_ref())
+    },
+    "where T: Node type",
+  );
+  assert_eq!(out.ok(), Some("type"));
+}
+
+#[test]
+fn where_clause_probe_commits_across_pathed_predicate_heads() {
+  // A variable-length predicate head (`u::V<W>:`) continues the clause — the
+  // probe is not a fixed-width peek.
+  fn check<S: AsRef<[u8]>>(c: Option<crate::graphqlx::ast::WhereClause<S>>) {
+    let c = c.expect("clause present");
+    assert_eq!(c.predicates_slice().len(), 2);
+  }
+  accept_all!(try_where_clause, "where T: A & B u::V<W>: X", check);
+}
+
+#[test]
+fn where_clause_rejects_empty_and_boundless_per_cardinality() {
+  // Amendment 2: `where WherePredicate+` — a bare `where` errors on its committed
+  // first predicate; a committed probe head with no bound (`U:`) stays an error.
+  reject_all!(try_where_clause, "where");
+  reject_all!(try_where_clause, "where {");
+  reject_all!(try_where_clause, "where T: A U:");
 }

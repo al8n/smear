@@ -25,13 +25,34 @@
 //! grammar position is a fragment's name, where `FragmentName : Name but not on`
 //! applies (the shared-grammar rule W3 enforces for GraphQL).
 //!
+//! The where-clause family ([`where_predicate`], [`try_where_clause`]) constrains
+//! the parameters a list introduced: `where T: Node & Timestamped` bounds `T` by
+//! two interface type paths (fixtures `0006`/`0007`/`0020`).
+//!
 //! # Spec cardinality (plan Amendment 2)
 //!
 //! Every parameter list is `< Param+ >`: an empty `<>` rejects, exactly as the
 //! generic-argument list rejects it (the fixtures never write empty generics, and
 //! the scaffold shapes document non-empty lists). Each list commits its first
 //! parameter and collects the rest with a `list_of` loop — commas between
-//! parameters are trivia.
+//! parameters are trivia. The where clause is `where WherePredicate+` and a
+//! predicate's bounds are `TypePath (& TypePath)*` — both one-or-more, both
+//! committed-first (the bounds continue on a `try_ampersand` commit-first loop,
+//! never a separated1 with an identifier follow-set).
+//!
+//! # The predicate probe
+//!
+//! Predicates carry no separator (fixture `0020` stacks them on bare newlines), and
+//! a predicate's bounded type is a full [`type_path`](super::ty::type_path) — a
+//! variable-length head — so "does another predicate follow?" is not decidable by
+//! any fixed-width peek: after `where T: Node`, a following `type Bar` must end the
+//! clause while `u::V<W>: X` must continue it. The loop therefore probes with
+//! [`InputRef::try_attempt`]: it speculatively parses `TypePath ':'` and, on any
+//! failure, rolls the probe back — tokens, diagnostics, and emitted events alike
+//! (the checkpoint carries the emitter's emission mark) — and ends the clause. A
+//! probe that commits hands its bounded type to the committed predicate tail, so a
+//! true malformation *after* the `:` (`U:` with no bound) is still an error, never
+//! a silent stop.
 //!
 //! # Node placement
 //!
@@ -41,7 +62,11 @@
 //! (Amendment 1: content-dependent spans use the manual
 //! `cst_mark`/`cst_start_at`/`cst_finish` idiom). The name carriers wrap
 //! `K::DefinitionName` / `K::ExecutableDefinitionName` around the identifier and
-//! any parameter list.
+//! any parameter list. Each predicate retro-wraps `K::WherePredicate` (its mark
+//! minted inside the probe, before the bounded type, so a committed probe's events
+//! nest correctly and a rolled-back probe's mark vanishes with the rollback);
+//! [`try_where_clause`] retro-wraps `K::WhereClause` around the keyword and every
+//! predicate.
 
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
@@ -49,19 +74,21 @@ use tokora::{
   emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{list_of, try_angles},
-  token::{IdentifierToken, PunctuatorToken, PunctuatorTokenExt},
+  token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
   utils::IntoComponents,
 };
 
-use super::ty::ty;
+use super::ty::{ty, type_path};
 use crate::{
-  combinator::{ErrorOf, ParseCtx, SliceOf, fragment_name, ident, try_equal},
+  combinator::{ErrorOf, ParseCtx, SliceOf, colon, fragment_name, ident, try_ampersand, try_equal},
   graphqlx::{
     ast::{
       DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam, ExecutableDefinitionName,
-      ExecutableDefinitionTypeGenerics, ExtensionTypeGenerics, ExtensionTypeParam, Name,
+      ExecutableDefinitionTypeGenerics, ExtensionTypeGenerics, ExtensionTypeParam, Name, TypePath,
+      WhereClause, WherePredicate,
     },
+    keyword::try_where,
     kinds::SyntaxKind as K,
   },
 };
@@ -356,6 +383,131 @@ where
   emitter.cst_start_at(mark, K::ExecutableDefinitionName.raw());
   emitter.cst_finish();
   Ok(def_name)
+}
+
+/// Parses the bounds and construction tail of a where predicate whose
+/// `TypePath ':'` head the caller has already consumed (`bounded` here, its
+/// speculative `mark` minted before it).
+///
+/// The bounds are `TypePath (& TypePath)*` — the first commits (Amendment 2:
+/// one-or-more), the rest continue on a `try_ampersand` commit-first loop.
+/// Shared by [`where_predicate`] (committed head) and [`try_where_clause`]'s
+/// probe loop (speculative head).
+fn where_predicate_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+  bounded: TypePath<SliceOf<'inp, L>>,
+) -> Result<WherePredicate<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let first = type_path(inp)?;
+  let mut bounds = std::vec::Vec::from_iter([first]);
+  while let ParseAttempt::Accept(_amp) = try_ampersand(inp)? {
+    bounds.push(type_path(inp)?);
+  }
+  // The first bound is committed above, so `bounds` is never empty.
+  let end = bounds.last().expect("at least one bound").span().end();
+  let span = SimpleSpan::new(bounded.span().start(), end);
+  let predicate = WherePredicate::new(span, bounded, bounds);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::WherePredicate.raw());
+  emitter.cst_finish();
+  Ok(predicate)
+}
+
+/// Parses a `WherePredicate` (`TypePath ':' TypePath ('&' TypePath)*`) — one
+/// bounded type and its one-or-more interface bounds, wrapped as a
+/// `WherePredicate` node.
+///
+/// Grammar: `WherePredicate : TypePath : TypePath (& TypePath)*` (frozen GraphQLx
+/// model; fixtures `0006`/`0007`/`0020`).
+pub fn where_predicate<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<WherePredicate<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let bounded = type_path(inp)?;
+  colon(inp)?;
+  where_predicate_body(inp, mark, bounded)
+}
+
+/// Parses an optional `WhereClause` (`'where' WherePredicate+`), declining to
+/// `None` (no tokens consumed) unless the soft `where` keyword is next.
+///
+/// Once `where` commits, at least one predicate is required (Amendment 2); the
+/// rest continue while a speculative `TypePath ':'` probe commits (see the module
+/// note on the predicate probe — the clause ends at the first non-predicate,
+/// whatever construct follows). Retro-wrapped as `K::WhereClause` when present.
+// The `Option<WhereClause<…>>` return is inherent to an optional generic
+// production; factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn try_where_clause<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<Option<WhereClause<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let kw = match try_where(inp)? {
+    ParseAttempt::Accept(kw) => kw,
+    ParseAttempt::Decline => return Ok(None),
+  };
+  // Spec cardinality (`WherePredicate+`): the first predicate is committed.
+  let first = where_predicate(inp)?;
+  let mut predicates = std::vec::Vec::from_iter([first]);
+  // Predicate probe: speculatively parse the next predicate's `TypePath ':'` head;
+  // a probe that fails rolls back (tokens, diagnostics, events) and ends the
+  // clause. A committed probe hands off to the committed tail, so `U:` with no
+  // bound stays an error.
+  loop {
+    let probed = inp.try_attempt(
+      |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| -> Result<_, ErrorOf<'inp, L, Ctx, Lang>> {
+        let mark = inp.emitter().cst_mark();
+        let bounded = type_path(inp)?;
+        colon(inp)?;
+        Ok((mark, bounded))
+      },
+    );
+    match probed {
+      Ok((pred_mark, bounded)) => {
+        predicates.push(where_predicate_body(inp, pred_mark, bounded)?);
+      }
+      Err(_not_a_predicate) => break,
+    }
+  }
+  // The first predicate is committed above, so `predicates` is never empty.
+  let end = predicates
+    .last()
+    .expect("at least one predicate")
+    .span()
+    .end();
+  let span = SimpleSpan::new(kw.span().start(), end);
+  let clause = WhereClause::new(span, predicates);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::WhereClause.raw());
+  emitter.cst_finish();
+  Ok(Some(clause))
 }
 
 #[cfg(test)]
