@@ -8,8 +8,9 @@
 //!
 //! - `L: Lexer<'inp>` and the token *capability* traits it satisfies,
 //! - the language marker `Lang`,
-//! - the aliases and bundles defined here ([`SliceOf`], [`ErrorOf`],
-//!   [`ComposableEmitter`], [`ParseCtx`]).
+//! - the aliases and bundles re-exported here ([`SliceOf`], [`ErrorOf`],
+//!   [`ComposableEmitter`], [`ParseCtx`]) — promoted to tokora 0.2.0, where the
+//!   definitions now live.
 //!
 //! It never names a concrete `SyntacticToken`, a concrete `SyntacticLexer`, or a
 //! dialect error type. Those are studs the *consumer* plugs in when it picks a
@@ -24,77 +25,7 @@
 //! atom's signature carries one `Ctx: ParseCtx<'inp, L>` instead of the whole
 //! ladder.
 
-use smear_lexer::tokora::{
-  Emitter, Lexer, ParseContext, Source,
-  emitter::{
-    FullContainerEmitter, SeparatedEmitter, TooFewEmitter, UnexpectedLeadingSeparatorEmitter,
-    UnexpectedTrailingSeparatorEmitter,
-  },
-};
-
-/// The slice type lexer `L` yields from its source.
-pub type SliceOf<'inp, L> =
-  <<L as Lexer<'inp>>::Source as Source<<L as Lexer<'inp>>::Offset>>::Slice<'inp>;
-
-/// The error type context `Ctx`'s emitter produces.
-pub type ErrorOf<'inp, L, Ctx, Lang> =
-  <<Ctx as ParseContext<'inp, L, Lang>>::Emitter as Emitter<'inp, L, Lang>>::Error;
-
-/// Everything the shape atoms require from an emitter, as one bound.
-///
-/// Blanket-implemented for every emitter that satisfies the whole family, so a
-/// bound of `E: ComposableEmitter<'inp, L, Lang>` is interchangeable with
-/// spelling out all six sub-traits.
-pub trait ComposableEmitter<'inp, L, Lang: ?Sized = ()>:
-  Emitter<'inp, L, Lang>
-  + FullContainerEmitter<'inp, L, Lang>
-  + SeparatedEmitter<'inp, L, Lang>
-  + UnexpectedLeadingSeparatorEmitter<'inp, L, Lang>
-  + UnexpectedTrailingSeparatorEmitter<'inp, L, Lang>
-  + TooFewEmitter<'inp, L, Lang>
-where
-  L: Lexer<'inp>,
-{
-}
-
-impl<'inp, L, Lang: ?Sized, T> ComposableEmitter<'inp, L, Lang> for T
-where
-  L: Lexer<'inp>,
-  T: Emitter<'inp, L, Lang>
-    + FullContainerEmitter<'inp, L, Lang>
-    + SeparatedEmitter<'inp, L, Lang>
-    + UnexpectedLeadingSeparatorEmitter<'inp, L, Lang>
-    + UnexpectedTrailingSeparatorEmitter<'inp, L, Lang>
-    + TooFewEmitter<'inp, L, Lang>,
-{
-}
-
-/// The context bundle every atom takes.
-///
-/// Implemented for every [`ParseContext`] whose emitter is a
-/// [`ComposableEmitter`] and whose source slice is [`Clone`], so an atom needs
-/// only `Ctx: ParseCtx<'inp, L>` to unlock the entire emitter surface. The
-/// emitter requirement rides on the [`ParseContext`] supertrait as an
-/// associated-type bound so it elaborates to callers of the bundle rather than
-/// having to be restated at every use site; the `SliceOf<'inp, L>: Clone`
-/// requirement lives on the blanket impl (a projection bound cannot be a
-/// supertrait), so it gates which contexts qualify without forcing that clause
-/// onto every mention of the bound. Atoms that clone a slice restate that one
-/// bound locally.
-pub trait ParseCtx<'inp, L, Lang: ?Sized = ()>:
-  ParseContext<'inp, L, Lang, Emitter: ComposableEmitter<'inp, L, Lang>>
-where
-  L: Lexer<'inp>,
-{
-}
-
-impl<'inp, L, Lang: ?Sized, T> ParseCtx<'inp, L, Lang> for T
-where
-  L: Lexer<'inp>,
-  SliceOf<'inp, L>: Clone,
-  T: ParseContext<'inp, L, Lang, Emitter: ComposableEmitter<'inp, L, Lang>>,
-{
-}
+pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf};
 
 #[cfg(test)]
 mod tests;
