@@ -20,8 +20,7 @@ use smear_lexer::tokora::error::{
 /// lexer errors) into a unit. Implementing the full `From` set makes it a
 /// [`FromEmitterError`](smear_lexer::tokora::emitter::FromEmitterError), so
 /// [`Fatal`](smear_lexer::tokora::emitter::Fatal) instantiates as a complete
-/// emitter over it, and the [`UnexpectedEot`] conversion satisfies the atoms'
-/// error bound.
+/// emitter over it.
 #[derive(Debug)]
 struct TestError;
 

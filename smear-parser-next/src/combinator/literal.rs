@@ -16,9 +16,7 @@
 //! [`impls`] shim (GraphQL and GraphQLx); because it names dialect types it is
 //! not part of the atom surface.
 
-use tokora::{
-  InputRef, Lexer, error::UnexpectedEot, token::LitToken, try_parse_input::ParseAttempt,
-};
+use tokora::{InputRef, Lexer, token::LitToken, try_parse_input::ParseAttempt};
 
 use super::{ErrorOf, ParseCtx};
 
@@ -122,7 +120,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
     .try_expect(|t| t.into_data().is_integer_literal())
@@ -151,7 +148,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
     .try_expect(|t| {
@@ -189,7 +185,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
     .try_expect(|t| t.into_data().is_inline_string_literal())
@@ -218,7 +213,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
     .try_expect(|t| t.into_data().is_multiline_string_literal())
@@ -248,7 +242,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
     .try_expect(|t| t.into_data().is_string_literal())
