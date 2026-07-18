@@ -17,3 +17,8 @@ pub use smear_lexer as lexer;
 pub use smear_scaffold as scaffold;
 
 pub mod combinator;
+
+/// The GraphQL dialect: productions, syntax kinds, keyword atoms, AST node types,
+/// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
+#[cfg(feature = "graphql")]
+pub mod graphql;
