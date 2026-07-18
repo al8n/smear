@@ -173,7 +173,7 @@ where
   L: Lexer<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  P: for<'c> FnMut(&mut InputRef<'inp, 'c, L, Ctx, Lang>) -> Result<O, ErrorOf<'inp, L, Ctx, Lang>>,
+  P: ParseInput<'inp, L, O, Ctx, Lang>,
 {
   move |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     let cursor = inp.cursor().clone();
@@ -181,7 +181,7 @@ where
     while let Some(tok) = inp.try_expect(|t| t.data.is_trivia())? {
       leading.push(tok);
     }
-    let value = p(inp)?;
+    let value = p.parse_input(inp)?;
     let mut trailing = Vec::new();
     while let Some(tok) = inp.try_expect(|t| t.data.is_trivia())? {
       trailing.push(tok);
