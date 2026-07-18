@@ -7,19 +7,28 @@
 //! fns that lived beside them in the frozen crate are *not* copied — the
 //! productions are rebuilt on the atom layer, wave by wave.
 //!
-//! This substrate wave lands the value layer (`value`), the type-reference layer
+//! The substrate wave landed the value layer (`value`), the type-reference layer
 //! (`ty`), the generic / where family (`generic`), and the import types
-//! (`import`); the SDL definition and document aliases land with their production
-//! waves.
+//! (`import`); the executable wave added the argument / directive / selection /
+//! executable-definition aliases (`argument`, `directive`, `field`, `executable`).
+//! The SDL definition and document aliases land with their production waves.
 
 use std::vec::Vec;
 
+pub use argument::*;
+pub use directive::*;
+pub use executable::*;
+pub use field::*;
 pub use generic::*;
 pub use import::*;
 pub use name::*;
 pub use ty::*;
 pub use value::*;
 
+mod argument;
+mod directive;
+mod executable;
+mod field;
 mod generic;
 mod import;
 mod name;
