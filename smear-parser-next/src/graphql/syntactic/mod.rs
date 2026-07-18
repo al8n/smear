@@ -54,6 +54,8 @@ where
 
 pub mod argument;
 pub mod directive;
+pub mod executable;
+pub mod selection;
 pub mod ty;
 pub mod value;
 
@@ -145,3 +147,28 @@ impl<S> ast::Name<S> {
 
 #[cfg(test)]
 mod tests;
+
+/// Peeks the next token without consuming it and reports whether it satisfies
+/// `pred`. It returns `false` at end of input.
+///
+/// Selection and executable productions use this one-token dispatch primitive to
+/// choose a committed arm while leaving the token available to that arm.
+fn peeks_where<'inp, Src, Ctx, F>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  pred: F,
+) -> Result<bool, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  F: Fn(&GraphqlToken<'inp, Src>) -> bool,
+{
+  let mut found = false;
+  inp.try_expect(|spanned| {
+    found = pred(spanned.data);
+    false
+  })?;
+  Ok(found)
+}

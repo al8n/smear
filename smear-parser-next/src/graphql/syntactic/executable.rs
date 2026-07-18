@@ -1,0 +1,469 @@
+//! GraphQL executable-definition productions — variable definitions, operations,
+//! fragments, and the executable document.
+//!
+//! [`operation_definition`] handles both the query-shorthand (`{ … }`) and the named
+//! `OperationType Name? VariablesDefinition? Directives? SelectionSet` forms;
+//! [`fragment_definition`] parses `fragment FragmentName on NamedType Directives?
+//! SelectionSet`; [`executable_definition`] dispatches between them; and
+//! [`executable_document`] collects the whole `ExecutableDefinition+` stream.
+//!
+//! # Spec cardinality (plan Amendment 2)
+//!
+//! Two `+` sites are enforced natively, each a documented deviation from the frozen
+//! parser (whose unenforced `repeated_while::<_, U1>` accepted empty):
+//! [`variables_definition`] rejects an empty `()` (`VariableDefinition+`), and
+//! [`executable_document`] rejects an empty input (`ExecutableDefinition+`). Both use
+//! the committed-first-element-then-`list_of`-rest idiom (commas are trivia, so
+//! `separated1` does not fit).
+//!
+//! # Deviation: operation name
+//!
+//! The optional operation name is any `Name` (spec-correct: `OperationDefinition`'s
+//! `Name?` is unrestricted). The frozen parser additionally excludes `on`
+//! (`!peek_keyword("on")`), an unspec'd quirk with no cardinality basis; parser-next
+//! accepts `on` as an operation name. Because a soft keyword cannot be peeked without
+//! consuming (the capability-based token exposes no text non-destructively), matching
+//! the quirk would need a speculative rollback; the spec-correct reading is taken and
+//! flagged here instead.
+//!
+//! # Node placement
+//!
+//! Every materialising definition retro-wraps its kind after the body settles
+//! (Amendment 1). [`variable_definition`] additionally retro-wraps `K::Description`
+//! around an optional leading string. [`operation_type`] wraps `K::OperationType`
+//! around the operation keyword. [`executable_definition`] adds no wrapper node — the
+//! committed arm's kind is the definition's (sum-type convention) — so on the
+//! operation arm its speculative fragment mark is left unspent.
+
+use smear_lexer::keywords::Fragment;
+use smear_scaffold::ast as scaffold;
+use tokora::{
+  InputRef, Lexer, SimpleSpan, Token,
+  cst::event::EventMark,
+  emitter::CstEmitter,
+  error::{UnexpectedEot, token::UnexpectedToken},
+  parser::{list_of, try_parens},
+  token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
+  try_parse_input::ParseAttempt,
+  utils::IntoComponents,
+};
+
+use super::{
+  directive::directives,
+  peeks_where,
+  selection::selection_set,
+  ty::ty,
+  value::{default_value, variable_value},
+};
+use crate::{
+  combinator::{
+    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, ident, try_description,
+    try_ident,
+  },
+  graphql::{
+    ast::{
+      DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, FragmentDefinition,
+      FragmentName, Name, OperationDefinition, OperationType, StringValue, VariablesDefinition,
+    },
+    keyword::{fragment, on, try_fragment, try_mutation, try_query, try_subscription},
+    kinds::SyntaxKind as K,
+  },
+};
+
+/// The shared error tail: reports the offending token as unexpected, or end of input.
+fn unexpected<'inp, L, Ctx, T, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let (span, token) = spanned.into_components();
+      Err(UnexpectedToken::of(span).with_found(token).into())
+    }
+    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
+  }
+}
+
+/// Parses a `VariableDefinition`
+/// (`Description? Variable ':' Type DefaultValue? Directives?`).
+///
+/// Carries an optional leading description exactly as the frozen crate does, so the
+/// return is a [`DescribedVariableDefinition`]. Note the source order — default value
+/// before directives — matching the spec (`Type DefaultValue? Directives?`).
+///
+/// Spec: [VariableDefinition](https://spec.graphql.org/draft/#VariableDefinition).
+pub fn variable_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<DescribedVariableDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let cursor = inp.cursor().clone();
+  // Optional leading description; `K::Description` wraps it when present, else the
+  // speculative mark is left unspent (no node).
+  let desc_mark = inp.emitter().cst_mark();
+  let description = match try_description(inp)? {
+    Some((lit, dspan)) => {
+      let value = match lit {
+        StringLiteral::Inline(inline) => StringValue::new(dspan, inline.into()),
+        StringLiteral::Block(block) => StringValue::new(dspan, block.into()),
+      };
+      let emitter = inp.emitter();
+      emitter.cst_start_at(desc_mark, K::Description.raw());
+      emitter.cst_finish();
+      Some(value)
+    }
+    None => None,
+  };
+  let var = variable_value(inp)?;
+  colon(inp)?;
+  let ty = ty(inp)?;
+  let default = default_value(inp)?;
+  let dirs = directives(inp)?;
+  let span = inp.span_since(&cursor);
+  let def = scaffold::VariableDefinition::new(span, var, ty, dirs, default);
+  let described = scaffold::Described::new(span, description, def);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::VariableDefinition.raw());
+  emitter.cst_finish();
+  Ok(described)
+}
+
+/// Parses an optional `VariablesDefinition` list (`'(' VariableDefinition+ ')'`),
+/// declining to `None` (no tokens consumed) unless the next token is `(`.
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `VariableDefinition+` demands one-or-more, so an empty `()` errors here
+/// where frozen's unenforced `+` accepted it.
+///
+/// Spec: [VariablesDefinition](https://spec.graphql.org/draft/#VariablesDefinition).
+// The `Result<Option<…>, …>` return is inherent to an optional generic production;
+// factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn variables_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<Option<VariablesDefinition<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    // Spec cardinality (`VariableDefinition+`): the first is committed, so an empty
+    // `()` errors at the `)` exactly as the committed variable reports it.
+    let first = variable_definition(inp)?;
+    let mut items = list_of(
+      variable_definition,
+      <L::Token as PunctuatorTokenExt>::is_close_paren,
+    )(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)?
+  {
+    Some(delimited) => {
+      let (span, _open, _close, items) = delimited.into_components();
+      let vars = scaffold::VariablesDefinition::new(span, items);
+      let emitter = inp.emitter();
+      emitter.cst_start_at(mark, K::VariablesDefinition.raw());
+      emitter.cst_finish();
+      Ok(Some(vars))
+    }
+    None => Ok(None),
+  }
+}
+
+/// Parses an `OperationType` (`query` / `mutation` / `subscription`), soft keywords
+/// resolved by slice compare, wrapping the keyword in a `K::OperationType` node.
+///
+/// Spec: [OperationType](https://spec.graphql.org/draft/#OperationType).
+pub fn operation_type<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<OperationType, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: KeywordToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let op = if let ParseAttempt::Accept(kw) = try_query(inp)? {
+    OperationType::Query(kw)
+  } else if let ParseAttempt::Accept(kw) = try_mutation(inp)? {
+    OperationType::Mutation(kw)
+  } else if let ParseAttempt::Accept(kw) = try_subscription(inp)? {
+    OperationType::Subscription(kw)
+  } else {
+    return unexpected(inp);
+  };
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::OperationType.raw());
+  emitter.cst_finish();
+  Ok(op)
+}
+
+/// Parses an `OperationDefinition` — the query-shorthand `SelectionSet`, or a named
+/// `OperationType Name? VariablesDefinition? Directives? SelectionSet`.
+///
+/// Spec: [OperationDefinition](https://spec.graphql.org/draft/#OperationDefinition).
+pub fn operation_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<OperationDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  // Query-shorthand: a bare selection set is an operation definition too, wrapped in
+  // `K::OperationDefinition` over its `K::SelectionSet`.
+  if peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
+    let ss = selection_set(inp)?;
+    let emitter = inp.emitter();
+    emitter.cst_start_at(mark, K::OperationDefinition.raw());
+    emitter.cst_finish();
+    return Ok(OperationDefinition::Shorthand(ss));
+  }
+  let cursor = inp.cursor().clone();
+  let op = operation_type(inp)?;
+  // Optional name: any identifier (spec-correct; see the module note on `on`).
+  let name = match try_ident(inp)? {
+    ParseAttempt::Accept(id) => {
+      let (span, src) = id.into_components();
+      Some(Name::new(span, src))
+    }
+    ParseAttempt::Decline => None,
+  };
+  let vars = variables_definition(inp)?;
+  let dirs = directives(inp)?;
+  let ss = selection_set(inp)?;
+  let span = inp.span_since(&cursor);
+  let named = scaffold::NamedOperationDefinition::new(span, op, name, vars, dirs, ss);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::OperationDefinition.raw());
+  emitter.cst_finish();
+  Ok(OperationDefinition::Named(named))
+}
+
+/// Parses a `FragmentDefinition`
+/// (`fragment FragmentName on NamedType Directives? SelectionSet`).
+///
+/// Spec: [FragmentDefinition](https://spec.graphql.org/draft/#FragmentDefinition).
+pub fn fragment_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<FragmentDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let kw = fragment(inp)?;
+  fragment_definition_body(inp, mark, kw)
+}
+
+/// Parses the body of a fragment definition after the `fragment` keyword has been
+/// consumed, spending `mark` as `K::FragmentDefinition` over the whole definition.
+///
+/// Shared by [`fragment_definition`] (which mints `mark` and consumes the keyword)
+/// and [`executable_definition`] (which consumes the keyword as its dispatch and
+/// hands the keyword and its pre-keyword mark here) — since a soft keyword cannot be
+/// peeked without consuming, the dispatch and the standalone production converge on
+/// this tail.
+fn fragment_definition_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+  kw: Fragment,
+) -> Result<FragmentDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let (name_span, name_src) = ident(inp)?.into_components();
+  let fname = FragmentName::new(name_span, name_src);
+  let on_kw = on(inp)?;
+  let (tn_span, tn_src) = ident(inp)?.into_components();
+  let tn = Name::new(tn_span, tn_src);
+  let tc_span = SimpleSpan::new(on_kw.span().start(), tn.span().end());
+  let tc = scaffold::TypeCondition::new(tc_span, tn);
+  let dirs = directives(inp)?;
+  let ss = selection_set(inp)?;
+  let span = SimpleSpan::new(kw.span().start(), ss.span().end());
+  let def = scaffold::FragmentDefinition::new(span, fname, tc, dirs, ss);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::FragmentDefinition.raw());
+  emitter.cst_finish();
+  Ok(def)
+}
+
+/// Parses an `ExecutableDefinition` — an operation or a fragment.
+///
+/// The leading `fragment` soft keyword selects a fragment definition; anything else
+/// is an operation definition. No wrapper node of its own — the committed arm's kind
+/// is the definition's (sum-type convention).
+///
+/// Spec: [ExecutableDefinition](https://spec.graphql.org/draft/#ExecutableDefinition).
+pub fn executable_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ExecutableDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  // Mint the fragment node's mark before the dispatch consumes the soft `fragment`
+  // keyword; on the operation arm it is left unspent (no wrapper node).
+  let mark = inp.emitter().cst_mark();
+  match try_fragment(inp)? {
+    ParseAttempt::Accept(kw) => {
+      fragment_definition_body(inp, mark, kw).map(scaffold::ExecutableDefinition::Fragment)
+    }
+    ParseAttempt::Decline => {
+      operation_definition(inp).map(scaffold::ExecutableDefinition::Operation)
+    }
+  }
+}
+
+/// Parses an `ExecutableDocument` (`ExecutableDefinition+`).
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `ExecutableDefinition+` demands one-or-more, so an empty input errors here
+/// where frozen's unenforced `+` accepted it. The first definition is committed
+/// before the `list_of` rest, which runs to end of input.
+///
+/// Spec: [ExecutableDocument](https://spec.graphql.org/draft/#ExecutableDocument).
+pub fn executable_document<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ExecutableDocument<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mark = inp.emitter().cst_mark();
+  let cursor = inp.cursor().clone();
+  // Spec cardinality (`ExecutableDefinition+`): the first definition is committed, so
+  // an empty input errors as end of input; the rest collect until end of input (no
+  // stop token — a document has no closing delimiter).
+  let first = executable_definition(inp)?;
+  let mut defs = list_of(executable_definition, |_: &L::Token| false)(inp)?;
+  defs.insert(0, first);
+  let span = inp.span_since(&cursor);
+  let doc = scaffold::Document::new(span, defs);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, K::ExecutableDocument.raw());
+  emitter.cst_finish();
+  Ok(doc)
+}
+
+#[cfg(test)]
+mod tests;
