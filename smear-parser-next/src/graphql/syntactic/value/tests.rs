@@ -15,7 +15,7 @@
 //! error, not by the marker.
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan};
+use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{
   const_object_field, const_value, default_value, float_value, int_value, object_field,
@@ -92,18 +92,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── Leaf builders (driven standalone) ───────────────────────────────────────
 
 #[test]
 fn int_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::IntValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"42");
+    assert!("42".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(int_value, "42", check);
@@ -118,7 +112,7 @@ fn int_value_rejects_non_int() {
 #[test]
 fn float_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::FloatValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"3.14");
+    assert!("3.14".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(float_value, "3.14", check);
@@ -132,7 +126,7 @@ fn float_value_rejects_int() {
 #[test]
 fn string_value_accepts_inline() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"\"hi\"");
+    assert!("\"hi\"".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(string_value, "\"hi\"", check);
@@ -141,7 +135,7 @@ fn string_value_accepts_inline() {
 #[test]
 fn string_value_accepts_block() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"\"\"\"hi\"\"\"");
+    assert!("\"\"\"hi\"\"\"".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 8));
   }
   accept_all!(string_value, "\"\"\"hi\"\"\"", check);
@@ -157,7 +151,7 @@ fn string_value_rejects_int() {
 #[test]
 fn variable_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::VariableValue<S>) {
-    assert_eq!(bytes(v.name().source_ref()), b"userId");
+    assert!("userId".equivalent(v.name().source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 7));
   }
   accept_all!(variable_value, "$userId", check);
@@ -198,7 +192,7 @@ fn try_variable_value_accepts_and_declines() {
 fn value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let i = v.unwrap_int();
-    assert_eq!(bytes(i.source_ref()), b"42");
+    assert!("42".equivalent(i.source_ref()));
     assert_eq!(*i.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(value, "42", check);
@@ -207,7 +201,7 @@ fn value_int_arm() {
 #[test]
 fn value_float_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert_eq!(bytes(v.unwrap_float().source_ref()), b"1.5e3");
+    assert!("1.5e3".equivalent(v.unwrap_float().source_ref()));
   }
   accept_all!(value, "1.5e3", check);
 }
@@ -215,7 +209,7 @@ fn value_float_arm() {
 #[test]
 fn value_string_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert_eq!(bytes(v.unwrap_string().source_ref()), b"\"hi\"");
+    assert!("\"hi\"".equivalent(v.unwrap_string().source_ref()));
   }
   accept_all!(value, "\"hi\"", check);
 }
@@ -250,7 +244,7 @@ fn value_false_arm() {
 fn value_null_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let n = v.unwrap_null();
-    assert_eq!(bytes(n.source_ref()), b"null");
+    assert!("null".equivalent(n.source_ref()));
     assert_eq!(*n.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(value, "null", check);
@@ -260,7 +254,7 @@ fn value_null_arm() {
 fn value_enum_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let e = v.unwrap_enum();
-    assert_eq!(bytes(e.source_ref()), b"ACTIVE");
+    assert!("ACTIVE".equivalent(e.source_ref()));
     assert_eq!(*e.span(), SimpleSpan::new(0, 6));
   }
   accept_all!(value, "ACTIVE", check);
@@ -279,7 +273,7 @@ fn value_enum_arm_accepts_soft_keywords() {
 #[test]
 fn value_variable_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert_eq!(bytes(v.unwrap_variable().name().source_ref()), b"x");
+    assert!("x".equivalent(v.unwrap_variable().name().source_ref()));
   }
   accept_all!(value, "$x", check);
 }
@@ -310,7 +304,7 @@ fn value_object_arm() {
     let obj = v.unwrap_object();
     assert_eq!(obj.fields().len(), 1);
     let field = &obj.fields()[0];
-    assert_eq!(bytes(field.name().source_ref()), b"a");
+    assert!("a".equivalent(field.name().source_ref()));
     assert!(field.value().is_int());
   }
   accept_all!(value, "{ a: 1 }", check);
@@ -402,7 +396,7 @@ fn value_object_field_missing_colon_is_error() {
 #[test]
 fn const_value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
-    assert_eq!(bytes(v.unwrap_int().source_ref()), b"7");
+    assert!("7".equivalent(v.unwrap_int().source_ref()));
   }
   accept_all!(const_value, "7", check);
 }
@@ -458,7 +452,7 @@ fn const_value_rejects_nested_variable() {
 #[test]
 fn object_field_accepts() {
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"name");
+    assert!("name".equivalent(f.name().source_ref()));
     assert!(f.value().is_string());
     assert_eq!(f.span().start(), 0);
   }
@@ -470,7 +464,7 @@ fn object_field_name_may_be_reserved_word() {
   // Object field names are `Name`s; `true` is a legal field name (only the enum
   // *value* position excludes it).
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"true");
+    assert!("true".equivalent(f.name().source_ref()));
     assert!(f.value().is_int());
   }
   accept_all!(object_field, "true: 1", check);
@@ -479,7 +473,7 @@ fn object_field_name_may_be_reserved_word() {
 #[test]
 fn const_object_field_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ConstObjectField<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"k");
+    assert!("k".equivalent(f.name().source_ref()));
     assert!(f.value().is_int());
   }
   accept_all!(const_object_field, "k: 1", check);

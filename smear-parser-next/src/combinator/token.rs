@@ -19,7 +19,7 @@ use tokora::{
   try_parse_input::ParseAttempt,
 };
 
-use super::{ErrorOf, ParseCtx, SliceOf};
+use super::{Equivalent, ErrorOf, ParseCtx, SliceOf};
 
 macro_rules! punct_atoms {
   ($($fn_name:ident / $try_fn_name:ident => $Ty:ident),+ $(,)?) => {
@@ -114,8 +114,11 @@ where
 /// Returns `true` for the three spellings the spec excludes from `EnumValue`:
 /// `true`, `false`, and `null`.
 #[inline]
-fn is_excluded_from_enum_value(text: &[u8]) -> bool {
-  matches!(text, b"true" | b"false" | b"null")
+fn is_excluded_from_enum_value<S>(text: &S) -> bool
+where
+  S: Equivalent<str>,
+{
+  text.equivalent("true") || text.equivalent("false") || text.equivalent("null")
 }
 
 /// Commits to an `EnumValue`: a `Name` that is not `true`, `false`, or `null`.
@@ -138,13 +141,13 @@ where
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
 {
   match inp.next()? {
     Some(spanned) => {
       if spanned.data().is_identifier() {
         let text = inp.slice();
-        if is_excluded_from_enum_value(text.as_ref()) {
+        if is_excluded_from_enum_value(&text) {
           let (span, tok) = spanned.into_components();
           Err(UnexpectedToken::of(span).with_found(tok).into())
         } else {
@@ -177,13 +180,11 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
 {
   let mut failed = None;
   let accepted = inp.attempt(|inp| match try_ident(inp) {
-    Ok(ParseAttempt::Accept(id)) if !is_excluded_from_enum_value(id.source_ref().as_ref()) => {
-      Some(id)
-    }
+    Ok(ParseAttempt::Accept(id)) if !is_excluded_from_enum_value(id.source_ref()) => Some(id),
     Ok(_) => None,
     Err(err) => {
       failed = Some(err);
