@@ -17,6 +17,7 @@ pub use smear_lexer as lexer;
 pub use smear_scaffold as scaffold;
 
 pub mod combinator;
+pub mod entry;
 
 /// The [`Ident`](ident::Ident) carrier the dialect `Name` node types alias.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
