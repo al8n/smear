@@ -33,7 +33,9 @@
 use smear_lexer::{LitBlockStr, LitInlineStr, keywords};
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, SimpleSpan, Token,
+  InputRef, Lexer, ParseInput, SimpleSpan, Token,
+  cst::event::EventMark,
+  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{braces, list_of, parens, try_braces},
   punct::{Ampersand, Pipe},
@@ -1164,15 +1166,51 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
+  let mark = inp.emitter().cst_mark();
+  let kw = directive_kw(inp)?;
+  directive_definition_body(inp, mark, kw.span().start())
+}
+
+/// Parses a directive definition's body after its `directive` keyword has been
+/// consumed, spending `mark` as `K::DirectiveDefinition` over the whole definition
+/// (the description lands inside when a described dispatch minted the mark first).
+///
+/// Shared by [`directive_definition`] and the document-level definition dispatches
+/// (the W3 `fragment_definition_body` convergence pattern — a soft keyword cannot be
+/// peeked without consuming).
+pub(super) fn directive_definition_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+  kw_start: usize,
+) -> Result<DirectiveDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
   let cursor = inp.cursor().clone();
-  directive_kw(inp)?;
   at(inp)?;
   let name = name(inp)?;
   let args = opt_arguments_definition(inp)?;
   let repeatable = matches!(try_repeatable(inp)?, ParseAttempt::Accept(_));
   on(inp)?;
   let locations = directive_locations(inp)?;
-  let span = inp.span_since(&cursor);
+  let span = SimpleSpan::new(kw_start, inp.span_since(&cursor).end());
   let def = scaffold::DirectiveDefinition::new(span, name, args, repeatable, locations);
   Ok(def)
 }
@@ -1202,11 +1240,46 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
+  let mark = inp.emitter().cst_mark();
+  let kw = schema(inp)?;
+  schema_definition_body(inp, mark, kw.span().start())
+}
+
+/// Parses a schema definition's body after its `schema` keyword has been consumed,
+/// spending `mark` as `K::SchemaDefinition` over the whole definition (the
+/// description lands inside when a described dispatch minted the mark first).
+///
+/// Shared by [`schema_definition`] and the document-level definition dispatches
+/// (the W3 `fragment_definition_body` convergence pattern).
+pub(super) fn schema_definition_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+  kw_start: usize,
+) -> Result<SchemaDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
   let cursor = inp.cursor().clone();
-  schema(inp)?;
   let dirs = const_directives(inp)?;
   let ops = root_operation_types_definition(inp)?;
-  let span = inp.span_since(&cursor);
+  let span = SimpleSpan::new(kw_start, inp.span_since(&cursor).end());
   let def = scaffold::SchemaDefinition::new(span, dirs, ops);
   Ok(def)
 }
@@ -1214,8 +1287,69 @@ where
 // ─── type-definition dispatch ────────────────────────────────────────────────
 
 /// Dispatches on the leading soft keyword to the matching type-definition body,
-/// consuming the keyword through the declining `try_*` atoms.
+/// consuming the keyword through the declining `try_*` atoms, declining to `None`
+/// (no tokens consumed) when the next token opens none of the six shapes. No node:
+/// the caller retro-wraps the resolved arm's kind (sum-type convention).
+// The `Result<Option<…>, …>` return is inherent to a declining generic dispatch.
 #[allow(clippy::type_complexity)]
+pub(super) fn try_dispatch_type_definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<Option<TypeDefinition<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  if let ParseAttempt::Accept(kw) = try_scalar(inp)? {
+    return scalar_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::Scalar)
+      .map(Some);
+  }
+  if let ParseAttempt::Accept(kw) = try_type(inp)? {
+    return object_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::Object)
+      .map(Some);
+  }
+  if let ParseAttempt::Accept(kw) = try_interface(inp)? {
+    return interface_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::Interface)
+      .map(Some);
+  }
+  if let ParseAttempt::Accept(kw) = try_union(inp)? {
+    return union_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::Union)
+      .map(Some);
+  }
+  if let ParseAttempt::Accept(kw) = try_enum(inp)? {
+    return enum_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::Enum)
+      .map(Some);
+  }
+  if let ParseAttempt::Accept(kw) = try_input(inp)? {
+    return input_object_after_kw(inp, kw.span().start())
+      .map(TypeDefinition::InputObject)
+      .map(Some);
+  }
+  Ok(None)
+}
+
+/// Dispatches on the leading soft keyword to the matching type-definition body,
+/// erroring (committed) when the next token opens none of the six shapes.
 fn dispatch_type_definition<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<TypeDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -1238,25 +1372,22 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  if let ParseAttempt::Accept(kw) = try_scalar(inp)? {
-    return scalar_after_kw(inp, kw.span().start()).map(TypeDefinition::Scalar);
+  match try_dispatch_type_definition(inp)? {
+    Some(def) => Ok(def),
+    None => unexpected(inp),
   }
-  if let ParseAttempt::Accept(kw) = try_type(inp)? {
-    return object_after_kw(inp, kw.span().start()).map(TypeDefinition::Object);
+}
+
+/// The `K::…` kind the resolved [`TypeDefinition`] arm materializes as.
+pub(super) fn type_definition_kind<S, Ty>(def: &TypeDefinition<S, Ty>) -> u16 {
+  match def {
+    TypeDefinition::Scalar(_) => K::ScalarTypeDefinition.raw(),
+    TypeDefinition::Object(_) => K::ObjectTypeDefinition.raw(),
+    TypeDefinition::Interface(_) => K::InterfaceTypeDefinition.raw(),
+    TypeDefinition::Union(_) => K::UnionTypeDefinition.raw(),
+    TypeDefinition::Enum(_) => K::EnumTypeDefinition.raw(),
+    TypeDefinition::InputObject(_) => K::InputObjectTypeDefinition.raw(),
   }
-  if let ParseAttempt::Accept(kw) = try_interface(inp)? {
-    return interface_after_kw(inp, kw.span().start()).map(TypeDefinition::Interface);
-  }
-  if let ParseAttempt::Accept(kw) = try_union(inp)? {
-    return union_after_kw(inp, kw.span().start()).map(TypeDefinition::Union);
-  }
-  if let ParseAttempt::Accept(kw) = try_enum(inp)? {
-    return enum_after_kw(inp, kw.span().start()).map(TypeDefinition::Enum);
-  }
-  if let ParseAttempt::Accept(kw) = try_input(inp)? {
-    return input_object_after_kw(inp, kw.span().start()).map(TypeDefinition::InputObject);
-  }
-  unexpected(inp)
 }
 
 /// Parses a `TypeDefinition` by dispatching on the leading soft keyword

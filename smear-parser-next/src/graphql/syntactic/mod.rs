@@ -13,6 +13,7 @@
 pub mod argument;
 pub mod definition;
 pub mod directive;
+pub mod document;
 pub mod executable;
 pub mod extension;
 pub mod selection;

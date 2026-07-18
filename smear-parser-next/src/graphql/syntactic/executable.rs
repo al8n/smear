@@ -244,7 +244,41 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  // Query-shorthand: a bare selection set is an operation definition too.
+  let mark = inp.emitter().cst_mark();
+  operation_definition_body(inp, mark)
+}
+
+/// Parses an operation definition, spending the caller-minted `mark` as
+/// `K::OperationDefinition` over the whole definition (the description lands inside
+/// when a described dispatch minted the mark first).
+///
+/// Shared by [`operation_definition`] (which mints the mark) and the document-level
+/// definition dispatches (the `fragment_definition_body` convergence pattern).
+pub(super) fn operation_definition_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+) -> Result<OperationDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  // Query-shorthand: a bare selection set is an operation definition too, wrapped in
+  // `K::OperationDefinition` over its `K::SelectionSet`.
   if peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let ss = selection_set(inp)?;
     return Ok(OperationDefinition::Shorthand(ss));
@@ -299,11 +333,12 @@ where
 /// Parses the body of a fragment definition after the `fragment` keyword has been
 /// consumed.
 ///
-/// Shared by [`fragment_definition`] (which consumes the keyword) and
-/// [`executable_definition`] (which consumes the keyword as its dispatch and hands
-/// it here) — since a soft keyword cannot be peeked without consuming, the dispatch
-/// and the standalone production converge on this tail.
-fn fragment_definition_body<'inp, L, Ctx, Lang>(
+/// Shared by [`fragment_definition`] (which mints `mark` and consumes the keyword),
+/// [`executable_definition`], and the document-level definition dispatches (each
+/// consumes the keyword as its dispatch and hands the keyword and its pre-keyword
+/// mark here) — since a soft keyword cannot be peeked without consuming, the
+/// dispatches and the standalone production converge on this tail.
+pub(super) fn fragment_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw: Fragment,
 ) -> Result<FragmentDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>

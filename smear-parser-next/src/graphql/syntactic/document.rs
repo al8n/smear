@@ -1,0 +1,376 @@
+//! GraphQL document productions — the top-level `definition` dispatch, the
+//! definition-or-extension forks, and the three document roots.
+//!
+//! [`definition`] dispatches on the leading soft keyword — `schema` / `directive` /
+//! the six type-definition keywords — falling through to an executable definition
+//! (`fragment`, an operation keyword, or the query-shorthand `{`), exactly the frozen
+//! decision order. [`definition_or_extension`] and
+//! [`type_system_definition_or_extension`] put `extend` in front of that dispatch and
+//! wrap the non-extension arm in an optional leading description
+//! ([`Described`](crate::graphql::ast::Described));
+//! [`document`] and [`type_system_document`] collect their entry productions to end
+//! of input ([`executable_document`](super::executable::executable_document) is the
+//! Wave-3 third root).
+//!
+//! # Spec cardinality (plan Amendment 2)
+//!
+//! `Document : Definition+` and `TypeSystemDocument : TypeSystemDefinitionOrExtension+`
+//! are enforced natively: an EMPTY input errors in both [`document`] and
+//! [`type_system_document`] — a documented deviation from the frozen parser, whose
+//! unenforced `repeated_while` accepted zero definitions (the same class as Wave 3's
+//! `executable_document` entry).
+//!
+//! # Node placement
+//!
+//! The described dispatches follow the described-definition retro-wrap convention:
+//! ONE mark minted before the description, spent as the resolved definition's kind
+//! by the shared `*_body` productions — so the `K::Description` node lands INSIDE
+//! the definition node, for every arm including the executable ones. The `extend`
+//! arm hands the same pre-keyword mark to
+//! [`type_system_extension_body`](super::extension) (extension kinds cover the
+//! `extend` keyword). The documents wrap the whole run in `K::Document` /
+//! `K::TypeSystemDocument`.
+
+use smear_lexer::{LitBlockStr, LitInlineStr};
+use smear_scaffold::ast as scaffold;
+use tokora::{
+  InputRef, Lexer, SimpleSpan, Token,
+  cst::event::EventMark,
+  emitter::CstEmitter,
+  error::{UnexpectedEot, token::UnexpectedToken},
+  parser::list_of,
+  punct::{Ampersand, Pipe},
+  token::{IdentifierToken, KeywordToken, PunctuatorToken},
+  try_parse_input::ParseAttempt,
+  utils::IntoComponents,
+};
+
+use super::{
+  definition::{
+    description, directive_definition_body, schema_definition_body, try_dispatch_type_definition,
+    type_definition_kind,
+  },
+  executable::{fragment_definition_body, operation_definition_body},
+  extension::type_system_extension_body,
+};
+use crate::{
+  combinator::{ErrorOf, LiteralValueToken, ParseCtx, SliceOf},
+  graphql::{
+    ast::{
+      Definition, DefinitionOrExtension, Document, TypeSystemDefinition,
+      TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    },
+    keyword::{try_directive, try_extend, try_fragment, try_schema},
+    kinds::SyntaxKind as K,
+  },
+};
+
+/// The shared error tail: reports the offending token as unexpected, or end of input.
+fn unexpected<'inp, L, Ctx, T, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let (span, token) = spanned.into_components();
+      Err(UnexpectedToken::of(span).with_found(token).into())
+    }
+    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
+  }
+}
+
+/// Parses a `Definition`'s body, spending the caller-minted `mark` as the resolved
+/// definition's kind (every arm routes through a shared `*_body` production, so a
+/// described dispatch's leading description lands inside the definition node).
+///
+/// Decision order (frozen parity): `schema` → `directive` → the six type-definition
+/// keywords → `fragment` → operation (keyword or query-shorthand).
+fn definition_body<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  mark: EventMark,
+) -> Result<Definition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  if let ParseAttempt::Accept(kw) = try_schema(inp)? {
+    return schema_definition_body(inp, mark, kw.span().start())
+      .map(|d| Definition::TypeSystem(TypeSystemDefinition::Schema(d)));
+  }
+  if let ParseAttempt::Accept(kw) = try_directive(inp)? {
+    return directive_definition_body(inp, mark, kw.span().start())
+      .map(|d| Definition::TypeSystem(TypeSystemDefinition::Directive(d)));
+  }
+  if let Some(def) = try_dispatch_type_definition(inp)? {
+    let kind = type_definition_kind(&def);
+    let emitter = inp.emitter();
+    emitter.cst_start_at(mark, kind);
+    emitter.cst_finish();
+    return Ok(Definition::TypeSystem(TypeSystemDefinition::Type(def)));
+  }
+  if let ParseAttempt::Accept(kw) = try_fragment(inp)? {
+    return fragment_definition_body(inp, mark, kw)
+      .map(|d| Definition::Executable(scaffold::ExecutableDefinition::Fragment(d)));
+  }
+  operation_definition_body(inp, mark)
+    .map(|d| Definition::Executable(scaffold::ExecutableDefinition::Operation(d)))
+}
+
+/// Parses a `Definition` — a type-system definition (schema, directive, or type) or
+/// an executable definition (operation or fragment), without a leading description
+/// (frozen parity: the description belongs to the document-level described forms).
+///
+/// No wrapper node of its own beyond the resolved arm's kind (sum-type convention).
+///
+/// Spec: [Definition](https://spec.graphql.org/draft/#Definition).
+pub fn definition<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<Definition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  let mark = inp.emitter().cst_mark();
+  definition_body(inp, mark)
+}
+
+/// Parses a `DefinitionOrExtension` — a `TypeSystemExtension` when `extend` leads,
+/// otherwise a [`Definition`] with an optional leading description.
+///
+/// Spec: [Document](https://spec.graphql.org/draft/#Document) (the full-document
+/// entry form; extensions per
+/// [TypeSystemDefinitionOrExtension](https://spec.graphql.org/draft/#TypeSystemDefinitionOrExtension)).
+pub fn definition_or_extension<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<DefinitionOrExtension<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  let mark = inp.emitter().cst_mark();
+  if let ParseAttempt::Accept(kw) = try_extend(inp)? {
+    return type_system_extension_body(inp, mark, kw.span().start())
+      .map(DefinitionOrExtension::Extension);
+  }
+  let cursor = inp.cursor().clone();
+  let desc = description(inp)?;
+  let def = definition_body(inp, mark)?;
+  let span = inp.span_since(&cursor);
+  Ok(DefinitionOrExtension::Definition(scaffold::Described::new(
+    span, desc, def,
+  )))
+}
+
+/// Parses a `TypeSystemDefinitionOrExtension` — a `TypeSystemExtension` when
+/// `extend` leads, otherwise a described `TypeSystemDefinition` (`schema` /
+/// `directive` / a type definition; executable definitions REJECT here).
+///
+/// Spec: [TypeSystemDefinitionOrExtension](https://spec.graphql.org/draft/#TypeSystemDefinitionOrExtension).
+pub fn type_system_definition_or_extension<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<TypeSystemDefinitionOrExtension<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  let mark = inp.emitter().cst_mark();
+  if let ParseAttempt::Accept(kw) = try_extend(inp)? {
+    return type_system_extension_body(inp, mark, kw.span().start())
+      .map(TypeSystemDefinitionOrExtension::Extension);
+  }
+  let cursor = inp.cursor().clone();
+  let desc = description(inp)?;
+  let def = if let ParseAttempt::Accept(kw) = try_schema(inp)? {
+    TypeSystemDefinition::Schema(schema_definition_body(inp, mark, kw.span().start())?)
+  } else if let ParseAttempt::Accept(kw) = try_directive(inp)? {
+    TypeSystemDefinition::Directive(directive_definition_body(inp, mark, kw.span().start())?)
+  } else if let Some(def) = try_dispatch_type_definition(inp)? {
+    let kind = type_definition_kind(&def);
+    let emitter = inp.emitter();
+    emitter.cst_start_at(mark, kind);
+    emitter.cst_finish();
+    TypeSystemDefinition::Type(def)
+  } else {
+    return unexpected(inp);
+  };
+  let span = inp.span_since(&cursor);
+  Ok(TypeSystemDefinitionOrExtension::Definition(
+    scaffold::Described::new(span, desc, def),
+  ))
+}
+
+/// Wraps a described-or-extension entry parser into its document production: the
+/// first entry is committed (spec `+`), the rest collect to end of input, the whole
+/// run wrapped in `kind`.
+fn document_of<'inp, L, Ctx, Lang, T>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  entry: fn(&mut InputRef<'inp, '_, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
+  kind: u16,
+) -> Result<scaffold::Document<T>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+{
+  let mark = inp.emitter().cst_mark();
+  let cursor = inp.cursor().clone();
+  // Spec cardinality (`+`): the first entry is committed, so an empty input errors
+  // as end of input; the rest collect until end of input (a document has no closing
+  // delimiter, so the stop predicate never fires).
+  let first = entry(inp)?;
+  let mut defs = list_of(entry, |_: &L::Token| false)(inp)?;
+  defs.insert(0, first);
+  let span = inp.span_since(&cursor);
+  let doc = scaffold::Document::new(span, defs);
+  let emitter = inp.emitter();
+  emitter.cst_start_at(mark, kind);
+  emitter.cst_finish();
+  Ok(doc)
+}
+
+/// Parses a full `Document` (`Definition+`, each entry a described definition or a
+/// type-system extension), running to end of input.
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `Definition+` demands one-or-more, so an empty input errors here where
+/// frozen's unenforced `+` accepted it.
+///
+/// Spec: [Document](https://spec.graphql.org/draft/#Document).
+pub fn document<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<Document<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  document_of(inp, definition_or_extension, K::Document.raw())
+}
+
+/// Parses a `TypeSystemDocument` (`TypeSystemDefinitionOrExtension+`), running to
+/// end of input. Executable definitions REJECT (this root is schema-only).
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `TypeSystemDefinitionOrExtension+` demands one-or-more, so an empty input
+/// errors here where frozen's unenforced `+` accepted it.
+///
+/// Spec: [TypeSystemDocument](https://spec.graphql.org/draft/#TypeSystemDocument).
+pub fn type_system_document<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<TypeSystemDocument<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + KeywordToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+{
+  document_of(
+    inp,
+    type_system_definition_or_extension,
+    K::TypeSystemDocument.raw(),
+  )
+}
+
+#[cfg(test)]
+mod tests;
