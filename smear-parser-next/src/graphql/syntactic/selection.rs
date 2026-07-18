@@ -11,6 +11,14 @@
 //! lookahead make `FragmentSpread` and `InlineFragment` one deterministic fork
 //! rather than two independently-callable productions.
 //!
+//! Because the fork rules `on` out FIRST, a fragment spread named `on` is
+//! structurally unrepresentable — `... on …` always commits to the inline-fragment
+//! arm — which is exactly the spec's `FragmentName : Name but not on` exclusion.
+//! The spread arm still parses its name through the
+//! [`fragment_name`] exclusion atom as defense in
+//! depth, and the per-shape behavior is pinned by
+//! `fragment_spread_named_on_is_unrepresentable`.
+//!
 //! # Spec cardinality (plan Amendment 2)
 //!
 //! [`selection_set`] enforces `SelectionSet : { Selection+ }` natively: the first
@@ -43,7 +51,9 @@ use tokora::{
 
 use super::{argument::arguments, directive::directives, peeks_where};
 use crate::{
-  combinator::{ErrorOf, LiteralValueToken, ParseCtx, SliceOf, ident, spread, try_colon},
+  combinator::{
+    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, fragment_name, ident, spread, try_colon,
+  },
   graphql::{
     ast::{Field, FragmentName, Name, Selection, SelectionSet},
     keyword::try_on,
@@ -218,8 +228,10 @@ where
         )))
       } else {
         // `... FragmentName Directives?` — fragment spread. The `on` head was ruled
-        // out above, so any name here is a valid fragment name.
-        let (name_span, name_src) = ident(inp)?.into_components();
+        // out above (the fork consumed it into the inline-fragment arm), so a spread
+        // named `on` is structurally unrepresentable here; the `fragment_name`
+        // exclusion atom (`Name` but not `on`) is defense in depth.
+        let (name_span, name_src) = fragment_name(inp)?.into_components();
         let fname = FragmentName::new(name_span, name_src);
         let dirs = directives(inp)?;
         let span = inp.span_since(&cursor);

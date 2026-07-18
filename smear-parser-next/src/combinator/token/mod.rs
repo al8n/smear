@@ -122,10 +122,11 @@ where
 }
 
 /// Commits to an `EnumValue`: a `Name` that is not `true`, `false`, or `null`.
-/// The spec carves out exactly this one exclusion from `Name`, which is
-/// otherwise unreserved, so soft keywords such as `enum`/`type` parse here
-/// exactly as [`ident`] accepts them. The same exclusion governs the `Name`
-/// that `EnumValueDefinition` introduces, so this atom backs both positions.
+/// This is one of the spec's two named exclusions from `Name`, which is
+/// otherwise unreserved ([`fragment_name`] enforces the other), so soft
+/// keywords such as `enum`/`type` parse here exactly as [`ident`] accepts
+/// them. The same exclusion governs the `Name` that `EnumValueDefinition`
+/// introduces, so this atom backs both positions.
 ///
 /// Errors on a non-identifier token, end of input, or an identifier spelled
 /// `true`, `false`, or `null` — consuming whatever token is next either way,
@@ -197,6 +198,58 @@ where
       Some(id) => ParseAttempt::Accept(id),
       None => ParseAttempt::Decline,
     }),
+  }
+}
+
+/// Returns `true` for the one spelling the spec excludes from `FragmentName`:
+/// `on`.
+#[inline]
+fn is_excluded_from_fragment_name(text: &[u8]) -> bool {
+  matches!(text, b"on")
+}
+
+/// Commits to a `FragmentName`: a `Name` that is not `on`. This is the other of
+/// the spec's two named exclusions from `Name` ([`enum_value`] enforces the
+/// first) — `on` would be ambiguous with a type condition, so the spec carves it
+/// out of fragment names in both positions that introduce one (`FragmentSpread`
+/// and `FragmentDefinition`); every other soft keyword parses here exactly as
+/// [`ident`] accepts it.
+///
+/// Errors on a non-identifier token, end of input, or an identifier spelled
+/// `on` — consuming whatever token is next either way, exactly like [`ident`]'s
+/// commit discipline.
+///
+/// Spec: [FragmentName](https://spec.graphql.org/draft/#FragmentName).
+#[inline]
+pub fn fragment_name<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<IdentOf<'inp, L, Lang>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  SliceOf<'inp, L>: AsRef<[u8]>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      if spanned.data().is_identifier() {
+        let text = inp.slice();
+        if is_excluded_from_fragment_name(text.as_ref()) {
+          let (span, tok) = spanned.into_components();
+          Err(UnexpectedToken::of(span).with_found(tok).into())
+        } else {
+          Ok(tokora::types::Ident::new(spanned.into_span(), text))
+        }
+      } else {
+        let (span, tok) = spanned.into_components();
+        Err(UnexpectedToken::of(span).with_found(tok).into())
+      }
+    }
+    // Fully qualified so the `Span` trait need not join this module's imports.
+    None => Err(UnexpectedEot::eot_of(tokora::Span::end(inp.span())).into()),
   }
 }
 

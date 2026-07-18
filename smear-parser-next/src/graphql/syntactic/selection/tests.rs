@@ -238,6 +238,37 @@ fn selection_rejects_bare_spread() {
   reject_all!(selection, "... 123");
 }
 
+#[test]
+fn fragment_spread_named_on_is_unrepresentable() {
+  // `FragmentName : Name but not on`, spread side. The `...`-fork rules `on` out
+  // FIRST (`try_on` commits the inline-fragment arm), so a fragment spread named
+  // `on` is structurally unrepresentable; the spread arm's `fragment_name` atom is
+  // defense in depth. Behavior per input shape, pinned:
+  //
+  //   `... on X { f }`   -> inline fragment, type condition `X`
+  //   `... on on { f }`  -> inline fragment, type condition `on` (the FIRST `on` is
+  //                         always the keyword; `NamedType` has no exclusion)
+  //   `... on { f }`     -> ERROR (inline arm committed; `{` is no type name) —
+  //                         never a fragment spread named `on`
+  //   `... on @d { f }`  -> ERROR (inline arm committed; `@` is no type name)
+  //   `... on`           -> ERROR (end of input at the type name)
+  fn tc_x<S: AsRef<[u8]>>(s: Selection<S>) {
+    let ifr = s.unwrap_inline_fragment_ref();
+    let tc = ifr.type_condition().expect("type condition");
+    assert_eq!(bytes(tc.name().source_ref()), b"X");
+  }
+  fn tc_on<S: AsRef<[u8]>>(s: Selection<S>) {
+    let ifr = s.unwrap_inline_fragment_ref();
+    let tc = ifr.type_condition().expect("type condition");
+    assert_eq!(bytes(tc.name().source_ref()), b"on");
+  }
+  accept_all!(selection, "... on X { f }", tc_x);
+  accept_all!(selection, "... on on { f }", tc_on);
+  reject_all!(selection, "... on { f }");
+  reject_all!(selection, "... on @d { f }");
+  reject_all!(selection, "... on");
+}
+
 // ─── selection_set ─────────────────────────────────────────────────────────────
 
 #[test]
