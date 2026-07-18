@@ -14,7 +14,7 @@ use smear_lexer::tokora::{
   },
 };
 
-use super::{ident, try_ident};
+use super::{enum_value, ident, try_enum_value, try_ident};
 
 #[cfg(feature = "graphql")]
 use super::{at, colon, lbrace, spread, try_at};
@@ -504,6 +504,428 @@ fn try_ident_declines_on_empty_input_graphqlx() {
   drive_all_gx!(
     Fatal::<TestError>::new(),
     |inp| Ok::<_, TestError>(try_ident(inp)?.is_decline()),
+    "",
+    |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+// `EnumValue` atoms: the accept paths mirror `ident`'s (span and, via
+// `AsRef<[u8]>`, the source slice); the reject paths additionally cover the
+// content-based exclusion `enum_value`/`try_enum_value` enforce on top of
+// `ident`'s lexical check. Soft keywords (`enum`, `type`) are pinned as legal
+// Names, matching the spec: only `true`, `false`, and `null` are excluded.
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_commits_on_hello() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let id = enum_value(inp)?;
+      assert_eq!(as_bytes(id.source_ref()), b"hello");
+      assert_eq!(id.span(), SimpleSpan::new(0, 5));
+      Ok::<_, TestError>(())
+    },
+    "hello",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_commits_on_soft_keywords() {
+  // `enum` and `type` are soft keywords: the spec reserves no words for
+  // `Name` besides the three `enum_value` excludes, so both parse here.
+  for word in ["enum", "type"] {
+    drive_all!(
+      Fatal::<TestError>::new(),
+      |inp| {
+        let id = enum_value(inp)?;
+        assert_eq!(as_bytes(id.source_ref()), word.as_bytes());
+        assert_eq!(id.span(), SimpleSpan::new(0, word.len()));
+        Ok::<_, TestError>(())
+      },
+      word,
+      |out: Result<(), TestError>| assert!(out.is_ok(), "{word} should parse as a Name")
+    );
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_errors_on_reserved_words() {
+  for word in ["true", "false", "null"] {
+    drive_all!(
+      Fatal::<TestError>::new(),
+      |inp| enum_value(inp).map(|_| ()),
+      word,
+      |out: Result<(), TestError>| assert!(out.is_err(), "{word} should be rejected")
+    );
+    drive_all!(
+      Verbose::<TestError>::new(),
+      |inp| enum_value(inp).map(|_| ()),
+      word,
+      |out: Result<(), TestError>| assert!(out.is_err(), "{word} should be rejected")
+    );
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_errors_on_lbrace() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_errors_on_empty_input() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+/// A test error that keeps an [`UnexpectedToken`]'s span, unlike [`TestError`]
+/// (which absorbs every error family into a unit, so it cannot answer
+/// "where"). Scoped to [`enum_value_errors_carry_the_reserved_words_span`],
+/// the one test that needs to inspect a rejected span directly; the other
+/// conversions this sink carries exist only to complete the emitter's `From`
+/// set (as [`TestError`]'s do) and are unreachable for the well-formed,
+/// single-token inputs that test drives.
+#[cfg(feature = "graphql")]
+#[derive(Debug)]
+struct SpanOnly(SimpleSpan);
+
+#[cfg(feature = "graphql")]
+impl<'a, T, Kind: Clone, Lang: ?Sized> From<UnexpectedToken<'a, T, Kind, SimpleSpan, Lang>>
+  for SpanOnly
+{
+  fn from(err: UnexpectedToken<'a, T, Kind, SimpleSpan, Lang>) -> Self {
+    Self(err.span())
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<'a, T, Kind: Clone, S, Lang: ?Sized> From<SeparatedError<'a, T, Kind, S, Lang>> for SpanOnly {
+  fn from(_: SeparatedError<'a, T, Kind, S, Lang>) -> Self {
+    unreachable!("enum_value span tests never drive a separated combinator")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<'a, Kind: Clone, O, Lang: ?Sized> From<MissingToken<'a, Kind, O, Lang>> for SpanOnly {
+  fn from(_: MissingToken<'a, Kind, O, Lang>) -> Self {
+    unreachable!("enum_value span tests never report a missing token")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<O, Lang: ?Sized> From<UnexpectedEot<O, Lang>> for SpanOnly {
+  fn from(_: UnexpectedEot<O, Lang>) -> Self {
+    unreachable!("enum_value span tests never run past end of input")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<O, Lang: ?Sized> From<MissingSyntax<O, Lang>> for SpanOnly {
+  fn from(_: MissingSyntax<O, Lang>) -> Self {
+    unreachable!("enum_value span tests never report missing syntax")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<S, Lang: ?Sized> From<FullContainer<S, Lang>> for SpanOnly {
+  fn from(_: FullContainer<S, Lang>) -> Self {
+    unreachable!("enum_value span tests never fill a container")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<S, Lang: ?Sized> From<TooFew<S, Lang>> for SpanOnly {
+  fn from(_: TooFew<S, Lang>) -> Self {
+    unreachable!("enum_value span tests never underfill a repetition")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<Char, StateError> From<smear_lexer::graphql::error::LexerErrors<Char, StateError>>
+  for SpanOnly
+{
+  fn from(_: smear_lexer::graphql::error::LexerErrors<Char, StateError>) -> Self {
+    unreachable!("enum_value span tests never trip a lexer error")
+  }
+}
+
+/// The [`drive_str`] twin over [`SpanOnly`], pinning the closure's `InputRef`
+/// shape so [`enum_value`] monomorphises against the span-keeping sink.
+#[cfg(feature = "graphql")]
+fn drive_str_span_only<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut InputRef<
+      'inp,
+      'c,
+      SyntacticLexer<'inp, str>,
+      ParserContext<'inp, SyntacticLexer<'inp, str>, Fatal<SpanOnly>>,
+    >,
+  ) -> Result<O, SpanOnly>,
+  input: &'inp str,
+) -> Result<O, SpanOnly> {
+  let ctx: ParserContext<'inp, SyntacticLexer<'inp, str>, Fatal<SpanOnly>> =
+    ParserContext::new(Fatal::new());
+  Parser::with_parser_and_context(f, ctx).parse_str(input)
+}
+
+/// Runs [`enum_value`] over `src` under the GraphQL lexer with [`SpanOnly`] as
+/// the error sink, returning the rejected span. Panics if `enum_value` accepts
+/// `src`; every caller passes one of the three excluded spellings.
+#[cfg(feature = "graphql")]
+fn enum_value_rejection_span(src: &str) -> SimpleSpan {
+  match drive_str_span_only(|inp: &mut _| enum_value(inp).map(|_| ()), src) {
+    Err(SpanOnly(span)) => span,
+    Ok(()) => panic!("enum_value accepted the reserved word `{src}`"),
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn enum_value_errors_carry_the_reserved_words_span() {
+  assert_eq!(enum_value_rejection_span("true"), SimpleSpan::new(0, 4));
+  assert_eq!(enum_value_rejection_span("false"), SimpleSpan::new(0, 5));
+  assert_eq!(enum_value_rejection_span("null"), SimpleSpan::new(0, 4));
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_enum_value_accepts_hello() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let attempt = try_enum_value(inp)?;
+      assert!(attempt.is_accept());
+      let id = attempt.unwrap_accept();
+      assert_eq!(as_bytes(id.source_ref()), b"hello");
+      assert_eq!(id.span(), SimpleSpan::new(0, 5));
+      Ok::<_, TestError>(())
+    },
+    "hello",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_enum_value_accepts_soft_keywords() {
+  for word in ["enum", "type"] {
+    drive_all!(
+      Fatal::<TestError>::new(),
+      |inp| {
+        let attempt = try_enum_value(inp)?;
+        assert!(attempt.is_accept());
+        let id = attempt.unwrap_accept();
+        assert_eq!(as_bytes(id.source_ref()), word.as_bytes());
+        Ok::<_, TestError>(())
+      },
+      word,
+      |out: Result<(), TestError>| assert!(out.is_ok(), "{word} should parse as a Name")
+    );
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_enum_value_declines_on_reserved_words_and_leaves_them() {
+  for word in ["true", "false", "null"] {
+    drive_all!(
+      Fatal::<TestError>::new(),
+      |inp| {
+        let declined = try_enum_value(inp)?.is_decline();
+        // The reserved word is untouched, so a plain `ident` parse (which has
+        // no exclusion of its own) picks it straight back up.
+        let leftover = ident(inp)?;
+        assert_eq!(as_bytes(leftover.source_ref()), word.as_bytes());
+        Ok::<_, TestError>(declined)
+      },
+      word,
+      |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)), "{word} should decline")
+    );
+  }
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_enum_value_declines_on_lbrace_and_leaves_it() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let declined = try_enum_value(inp)?.is_decline();
+      let brace_present = inp.next()?.is_some();
+      Ok::<_, TestError>((declined, brace_present))
+    },
+    "{",
+    |out: Result<(bool, bool), TestError>| assert!(matches!(out, Ok((true, true))))
+  );
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn try_enum_value_declines_on_empty_input() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| Ok::<_, TestError>(try_enum_value(inp)?.is_decline()),
+    "",
+    |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+// GraphQL-like mirrors: `enum_value`/`try_enum_value` only need
+// `IdentifierToken`, which the GraphQL-like lexer supplies same as GraphQL's,
+// so the same exclusion rule and matrix apply.
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn enum_value_commits_on_hello_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let id = enum_value(inp)?;
+      assert_eq!(as_bytes(id.source_ref()), b"hello");
+      assert_eq!(id.span(), SimpleSpan::new(0, 5));
+      Ok::<_, TestError>(())
+    },
+    "hello",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn enum_value_errors_on_reserved_words_graphqlx() {
+  for word in ["true", "false", "null"] {
+    drive_all_gx!(
+      Fatal::<TestError>::new(),
+      |inp| enum_value(inp).map(|_| ()),
+      word,
+      |out: Result<(), TestError>| assert!(out.is_err(), "{word} should be rejected")
+    );
+    drive_all_gx!(
+      Verbose::<TestError>::new(),
+      |inp| enum_value(inp).map(|_| ()),
+      word,
+      |out: Result<(), TestError>| assert!(out.is_err(), "{word} should be rejected")
+    );
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn enum_value_errors_on_lbrace_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all_gx!(
+    Verbose::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "{",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn enum_value_errors_on_empty_input_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all_gx!(
+    Verbose::<TestError>::new(),
+    |inp| enum_value(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn try_enum_value_accepts_hello_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let attempt = try_enum_value(inp)?;
+      assert!(attempt.is_accept());
+      let id = attempt.unwrap_accept();
+      assert_eq!(as_bytes(id.source_ref()), b"hello");
+      assert_eq!(id.span(), SimpleSpan::new(0, 5));
+      Ok::<_, TestError>(())
+    },
+    "hello",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn try_enum_value_declines_on_reserved_words_and_leaves_them_graphqlx() {
+  for word in ["true", "false", "null"] {
+    drive_all_gx!(
+      Fatal::<TestError>::new(),
+      |inp| {
+        let declined = try_enum_value(inp)?.is_decline();
+        let leftover = ident(inp)?;
+        assert_eq!(as_bytes(leftover.source_ref()), word.as_bytes());
+        Ok::<_, TestError>(declined)
+      },
+      word,
+      |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)), "{word} should decline")
+    );
+  }
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn try_enum_value_declines_on_lbrace_and_leaves_it_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let declined = try_enum_value(inp)?.is_decline();
+      let brace_present = inp.next()?.is_some();
+      Ok::<_, TestError>((declined, brace_present))
+    },
+    "{",
+    |out: Result<(bool, bool), TestError>| assert!(matches!(out, Ok((true, true))))
+  );
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn try_enum_value_declines_on_empty_input_graphqlx() {
+  drive_all_gx!(
+    Fatal::<TestError>::new(),
+    |inp| Ok::<_, TestError>(try_enum_value(inp)?.is_decline()),
     "",
     |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
   );
