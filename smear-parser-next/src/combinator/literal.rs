@@ -12,9 +12,9 @@
 //!
 //! The atoms stay Lego-clean — generic over the [`LiteralValueToken`] capability
 //! alone, naming no concrete dialect token. The per-dialect glue that actually
-//! implements the capability for a concrete token lives in the graphql-gated
-//! [`impls`] shim; because it names dialect types it is not part of the atom
-//! surface.
+//! implements the capability for a concrete token lives in the dialect-gated
+//! [`impls`] shim (GraphQL and GraphQLx); because it names dialect types it is
+//! not part of the atom surface.
 
 use tokora::{
   InputRef, Lexer, error::UnexpectedEot, token::LitToken, try_parse_input::ParseAttempt,
@@ -22,7 +22,7 @@ use tokora::{
 
 use super::{ErrorOf, ParseCtx};
 
-#[cfg(feature = "graphql")]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod impls;
 
 /// Payload extraction for GraphQL-family literal tokens.
@@ -125,14 +125,14 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
-    .try_expect(|t| t.into_data().is_decimal_literal())
+    .try_expect(|t| t.into_data().is_integer_literal())
     .map(|opt| {
       opt
         .map(|tok| {
           let (span, token) = tok.into_components();
           let value = match token.into_int() {
             Ok(value) => value,
-            Err(_) => unreachable!("is_decimal_literal implies into_int succeeds"),
+            Err(_) => unreachable!("is_integer_literal implies into_int succeeds"),
           };
           (value, span)
         })
@@ -154,14 +154,23 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   inp
-    .try_expect(|t| t.into_data().is_float_literal())
+    .try_expect(|t| {
+      // tokora keeps `is_hex_float_literal` separate from `is_float_literal`, so a
+      // float atom must accept both to reach GraphQLx hex floats (`0x1.8p3`). The
+      // GraphQL impl leaves `is_hex_float_literal` default-false, so it is
+      // unaffected.
+      let data = t.into_data();
+      data.is_float_literal() || data.is_hex_float_literal()
+    })
     .map(|opt| {
       opt
         .map(|tok| {
           let (span, token) = tok.into_components();
           let value = match token.into_float() {
             Ok(value) => value,
-            Err(_) => unreachable!("is_float_literal implies into_float succeeds"),
+            Err(_) => {
+              unreachable!("is_float_literal or is_hex_float_literal implies into_float succeeds")
+            }
           };
           (value, span)
         })
