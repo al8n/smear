@@ -243,7 +243,11 @@ macro_rules! drive_all_gx {
 fn at_commits_on_at() {
   drive_all!(
     Fatal::<TestError>::new(),
-    |inp| at(inp).map(|_| ()),
+    |inp| {
+      let at = at(inp)?;
+      assert_eq!(at.span(), &SimpleSpan::new(0, 1));
+      Ok::<_, TestError>(())
+    },
     "@",
     |out: Result<(), TestError>| assert!(out.is_ok())
   );
@@ -273,11 +277,15 @@ fn try_at_declines_on_colon_and_leaves_colon() {
     Fatal::<TestError>::new(),
     |inp| {
       let declined = try_at(inp)?.is_decline();
-      let colon_parsed = colon(inp).map(|_| ()).is_ok();
-      Ok::<_, TestError>((declined, colon_parsed))
+      // The `:` is untouched, so the committed `colon` atom pulls it straight off;
+      // its span proves the leftover is the colon and that the decline consumed
+      // nothing.
+      let col = colon(inp)?;
+      assert_eq!(col.span(), &SimpleSpan::new(0, 1));
+      Ok::<_, TestError>(declined)
     },
     ":",
-    |out: Result<(bool, bool), TestError>| assert!(matches!(out, Ok((true, true))))
+    |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
   );
 }
 
@@ -286,7 +294,11 @@ fn try_at_declines_on_colon_and_leaves_colon() {
 fn spread_commits_on_spread() {
   drive_all!(
     Fatal::<TestError>::new(),
-    |inp| spread(inp).map(|_| ()),
+    |inp| {
+      let spread = spread(inp)?;
+      assert_eq!(spread.span(), &SimpleSpan::new(0, 3));
+      Ok::<_, TestError>(())
+    },
     "...",
     |out: Result<(), TestError>| assert!(out.is_ok())
   );

@@ -10,7 +10,7 @@
 #![cfg(feature = "graphql")]
 
 use smear_lexer::tokora::{
-  Emitter, InputRef, Parse, Parser, ParserContext, SimpleSpan,
+  Emitter, InputRef, Lexer, Parse, Parser, ParserContext, SimpleSpan,
   emitter::{Fatal, Verbose},
   error::{
     UnexpectedEot,
@@ -18,13 +18,17 @@ use smear_lexer::tokora::{
     token::{MissingToken, SeparatedError, UnexpectedToken},
   },
   punct::Pipe,
+  span::Spanned,
 };
 
-use super::{list_of, opt, peek_kind, separated1, spanned, try_description};
+use super::{list_of, opt, padded, peek_kind, separated1, spanned, try_description};
 
 use crate::combinator::{StringLiteral, at, colon, ident, rbrace, spread, try_at};
 
-use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
+use smear_lexer::graphql::{
+  lossless::{LosslessLexer, LosslessToken},
+  syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind},
+};
 
 /// A test error sink that absorbs every tokora error family (and GraphQL's lexer
 /// errors) into a unit. Implementing the full `From` set makes it a
@@ -158,6 +162,86 @@ macro_rules! drive_all {
     {
       let owned = ::bytes::Bytes::from_static($src.as_bytes());
       $assert(drive_bytes($emitter, |$inp: &mut _| $body, &owned));
+    }
+  }};
+}
+
+// The lossless twin of the drive helpers, pinning the lossless lexer per source.
+// Its stream surfaces trivia as real tokens, so it is what the capturing
+// `padded` is exercised over.
+
+fn drive_str_lossless<'inp, O, Em>(
+  emitter: Em,
+  f: impl for<'c> FnMut(
+    &mut InputRef<
+      'inp,
+      'c,
+      LosslessLexer<'inp, &'inp str>,
+      ParserContext<'inp, LosslessLexer<'inp, &'inp str>, Em>,
+    >,
+  ) -> Result<O, TestError>,
+  input: &'inp str,
+) -> Result<O, TestError>
+where
+  Em: Emitter<'inp, LosslessLexer<'inp, &'inp str>, Error = TestError>,
+{
+  let ctx: ParserContext<'inp, LosslessLexer<'inp, &'inp str>, Em> = ParserContext::new(emitter);
+  Parser::with_parser_and_context(f, ctx).parse_str(input)
+}
+
+fn drive_slice_lossless<'inp, O, Em>(
+  emitter: Em,
+  f: impl for<'c> FnMut(
+    &mut InputRef<
+      'inp,
+      'c,
+      LosslessLexer<'inp, &'inp [u8]>,
+      ParserContext<'inp, LosslessLexer<'inp, &'inp [u8]>, Em>,
+    >,
+  ) -> Result<O, TestError>,
+  input: &'inp [u8],
+) -> Result<O, TestError>
+where
+  Em: Emitter<'inp, LosslessLexer<'inp, &'inp [u8]>, Error = TestError>,
+{
+  let ctx: ParserContext<'inp, LosslessLexer<'inp, &'inp [u8]>, Em> = ParserContext::new(emitter);
+  Parser::with_parser_and_context(f, ctx).parse_slice(input)
+}
+
+#[cfg(feature = "bytes")]
+fn drive_bytes_lossless<'inp, O, Em>(
+  emitter: Em,
+  f: impl for<'c> FnMut(
+    &mut InputRef<
+      'inp,
+      'c,
+      LosslessLexer<'inp, &'inp [u8]>,
+      ParserContext<'inp, LosslessLexer<'inp, &'inp [u8]>, Em>,
+    >,
+  ) -> Result<O, TestError>,
+  input: &'inp ::bytes::Bytes,
+) -> Result<O, TestError>
+where
+  Em: Emitter<'inp, LosslessLexer<'inp, &'inp [u8]>, Error = TestError>,
+{
+  let ctx: ParserContext<'inp, LosslessLexer<'inp, &'inp [u8]>, Em> = ParserContext::new(emitter);
+  Parser::with_parser_and_context(f, ctx).parse_bytes(input)
+}
+
+/// The lossless twin of [`drive_all`], routing each source through the lossless
+/// lexer whose stream carries trivia.
+macro_rules! drive_all_lossless {
+  ($emitter:expr, |$inp:ident| $body:expr, $src:expr, $assert:expr) => {{
+    $assert(drive_str_lossless($emitter, |$inp: &mut _| $body, $src));
+    $assert(drive_slice_lossless(
+      $emitter,
+      |$inp: &mut _| $body,
+      $src.as_bytes(),
+    ));
+    #[cfg(feature = "bytes")]
+    {
+      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      $assert(drive_bytes_lossless($emitter, |$inp: &mut _| $body, &owned));
     }
   }};
 }
@@ -348,6 +432,25 @@ fn is_close_brace<S>(tok: &SyntacticToken<S>) -> bool {
   SyntacticTokenKind::from(tok) == SyntacticTokenKind::RBrace
 }
 
+/// An inner sub-parser that records one non-fatal diagnostic and then yields
+/// `()`. Under a fail-fast emitter the emit is fatal and this errors; under a
+/// collecting emitter the diagnostic is recorded, the emit recovers, and this
+/// returns `Ok` — so an enclosing `padded` threads on to collect its trailing
+/// trivia. It is a bare `fn` (not a closure) so the padded atom's higher-order
+/// bound pins the lexer for the emitter call, the way the atom fns compose.
+fn emit_then_recover<'inp, L, Em>(
+  inp: &mut InputRef<'inp, '_, L, ParserContext<'inp, L, Em>>,
+) -> Result<(), TestError>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Em: Emitter<'inp, L, Error = TestError>,
+{
+  inp
+    .emitter()
+    .emit_error(Spanned::new(SimpleSpan::new(0, 0), TestError))?;
+  Ok(())
+}
+
 // `separated1`: one-or-more `|`-separated idents, leading separator allowed,
 // trailing rejected, at least one required. The accept paths assert each item's
 // slice and span; the leading-separator and too-few/trailing-separator paths run
@@ -483,6 +586,97 @@ fn list_of_empty_leaves_stop_token() {
       Ok::<_, TestError>(())
     },
     "}",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// `padded`: over the lossless stream the lexer surfaces trivia as real tokens,
+// and the atom captures rather than discards it. `"  x  # c\n"` pads the ident
+// `x` with two leading spaces and, after it, two spaces, a comment, and a
+// newline; the atom keeps every one. The success assertions cover the value's
+// slice and span, both capture collections (non-empty, as the brief requires),
+// the run span that reaches over the trivia, and one trivia token's own slice
+// and span — proving the comment was retained verbatim, not dropped.
+#[test]
+fn padded_captures_surrounding_trivia_over_lossless() {
+  drive_all_lossless!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let wrapped = padded(ident)(inp)?;
+      // The value is the ident, stripped of its padding.
+      assert_eq!(as_bytes(wrapped.value().source_ref()), b"x");
+      assert_eq!(wrapped.value().span(), SimpleSpan::new(2, 3));
+      // Both edges captured their trivia — two leading spaces; two spaces, a
+      // comment, and a newline trailing.
+      assert_eq!(wrapped.leading().len(), 2);
+      assert_eq!(wrapped.trailing().len(), 4);
+      // The run span reaches over the captured trivia, not just the value.
+      assert_eq!(wrapped.span(), &SimpleSpan::new(0, 9));
+      // A leading space, kept with its span.
+      assert_eq!(wrapped.leading()[0].span, SimpleSpan::new(0, 1));
+      // The comment trivia is retained with its slice and span — the whole point
+      // of the atom: nothing the value was wrapped in is discarded.
+      let comment = wrapped
+        .trailing()
+        .iter()
+        .find_map(|t| match &t.data {
+          LosslessToken::Comment(slice) => Some((slice, t.span)),
+          _ => None,
+        })
+        .expect("the comment is retained among the trailing trivia");
+      assert_eq!(as_bytes(comment.0), b"# c");
+      assert_eq!(comment.1, SimpleSpan::new(5, 8));
+      Ok::<_, TestError>(())
+    },
+    "  x  # c\n",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// The same atom over the plain syntactic stream, whose lexer skips trivia so it
+// never reaches the parser: both capture collections come back empty and the run
+// span is exactly the value's.
+#[test]
+fn padded_captures_nothing_when_stream_omits_trivia() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let wrapped = padded(ident)(inp)?;
+      assert_eq!(as_bytes(wrapped.value().source_ref()), b"x");
+      assert_eq!(wrapped.value().span(), SimpleSpan::new(0, 1));
+      assert!(wrapped.leading().is_empty());
+      assert!(wrapped.trailing().is_empty());
+      assert_eq!(wrapped.span(), &SimpleSpan::new(0, 1));
+      Ok::<_, TestError>(())
+    },
+    "x",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// `padded` runs its sub-parser between the two trivia loops, so an emit from that
+// sub-parser threads through the atom exactly as the delimited atoms' do.
+// `emit_then_recover` records one non-fatal diagnostic: under a fail-fast emitter
+// it is fatal, so `padded` aborts before it can wrap and returns `Err`; under a
+// collecting emitter the diagnostic recovers, the trailing loop finds no trivia,
+// and `padded` returns the value wrapped with empty capture collections.
+#[test]
+fn padded_threads_inner_emit_across_emitter_modes() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| padded(emit_then_recover)(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| {
+      let wrapped = padded(emit_then_recover)(inp)?;
+      assert!(wrapped.leading().is_empty());
+      assert!(wrapped.trailing().is_empty());
+      Ok::<_, TestError>(())
+    },
+    "",
     |out: Result<(), TestError>| assert!(out.is_ok())
   );
 }
