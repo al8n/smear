@@ -462,8 +462,9 @@ where
 
 /// Parses a `ScalarTypeExtension` (`extend scalar Name Directives[Const]`).
 ///
-/// Deviation (spec-cardinality audit): the directives are required — see
-/// [`scalar_extension_body`]'s note.
+/// Deviation (spec-cardinality audit): the directives are required — the spec form
+/// has no `?`, so a bare `extend scalar Name` errors here where the frozen parser
+/// accepted it by fabricating an empty directives list.
 ///
 /// Spec: [ScalarTypeExtension](https://spec.graphql.org/draft/#ScalarTypeExtension).
 pub fn scalar_type_extension<'inp, L, Ctx, Lang>(

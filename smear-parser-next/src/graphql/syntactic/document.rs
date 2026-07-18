@@ -272,6 +272,9 @@ where
 /// Wraps a described-or-extension entry parser into its document production: the
 /// first entry is committed (spec `+`), the rest collect to end of input, the whole
 /// run wrapped in `kind`.
+// The fn-pointer parameter spells the full generic parser shape; an alias would
+// only move the same generics.
+#[allow(clippy::type_complexity)]
 fn document_of<'inp, L, Ctx, Lang, T>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   entry: fn(&mut InputRef<'inp, '_, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,

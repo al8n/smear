@@ -49,6 +49,8 @@
 //! content-dependent retro-wrap once the dispatch reveals which arm; [`described_type_definition`]
 //! reuses that dispatch with a leading description landing inside the same node.
 
+use std::vec::Vec;
+
 use smear_lexer::{LitBlockStr, LitInlineStr, keywords};
 use smear_scaffold::ast as scaffold;
 use tokora::{
