@@ -15,7 +15,7 @@
 
 use smear_scaffold::ast::{
   ListType, MapType, SetType,
-  generic::{DefinitionTypePath, TypeGenerics},
+  generic::{DefinitionTypePath, TypeGenerics, TypePath as GenericTypePath},
 };
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
@@ -139,7 +139,9 @@ where
   Ok((path, generics))
 }
 
-/// Parses an optional `<Type, …>` generic-argument list.
+/// Parses an optional `<Type, …>` generic-**argument** list (a generic
+/// *application*, `Container<String!>` — not the parameter declarations a
+/// definition introduces), retro-wrapped as a `TypeGenerics` node when present.
 ///
 /// Declines to `None` (no tokens consumed) unless the next token is `<`. Once the
 /// `<` commits, at least one type is required — an empty `<>` is a rejection
@@ -147,9 +149,14 @@ where
 /// fixtures never write empty generics). The first element commits, the rest are
 /// collected by a commit-first `list_of` loop (never a separated1 with a type /
 /// identifier follow-set — the W5 bug class); commas between them are insignificant.
+///
+/// Shared by every generic-application site: [`ty`]'s `TypePath` arm, the bounded
+/// [`type_path`], and the fragment-spread / type-condition paths of the executable
+/// productions. The parameter-declaration side (`<T, U = String>`) is a distinct
+/// production family in [`generics`](super::generics).
 // The `Option<TypeGenerics<…>>` return is inherent to the optional generic arguments.
 #[allow(clippy::type_complexity)]
-fn try_type_generics<'inp, L, Ctx, Lang>(
+pub fn try_type_generics<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Option<TypeGenerics<Type<SliceOf<'inp, L>>>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -192,8 +199,41 @@ where
   Ok(params)
 }
 
-/// Parses the `[ Type ]` region of a `ListType` — the brackets and the
-/// recursively-parsed element, never a trailing `!`.
+/// Parses a `TypePath` in a *bounded* position — a `::`-path optionally applied to
+/// a `<…>` generic-argument list, with **no** trailing `!` participating — wrapped
+/// as a `TypePath` node.
+///
+/// This is the shape a where-predicate's bounded type and bounds and a fragment
+/// type condition name (`on Item<T>`): the un-flagged
+/// [`TypePath`](crate::graphqlx::ast::TypePath), where [`ty`]'s `TypePath` arm
+/// instead folds a trailing `!` into a
+/// [`DefinitionTypePath`](crate::graphqlx::ast::DefinitionTypePath).
+pub fn type_path<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<crate::graphqlx::ast::TypePath<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  node(
+    K::TypePath.raw(),
+    |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+      let cursor = inp.cursor().clone();
+      let (path, generics) = type_path_body(inp)?;
+      let span = inp.span_since(&cursor);
+      Ok(GenericTypePath::new(span, path, generics))
+    },
+  )
+  .parse_input(inp)
+}
+
+/// Parses the `[ Type ]` region of a `ListType` — the [`node`]-wrapped region covers
+/// the brackets and the recursively-parsed element, never a trailing `!`.
 fn list_type_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Type<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>

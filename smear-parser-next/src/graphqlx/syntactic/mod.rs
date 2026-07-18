@@ -10,6 +10,7 @@
 //! productions with; the productions themselves are purely syntactic — lossless/CST
 //! structure is a separate `lossless` module's concern (a later wave).
 
+pub mod generics;
 pub mod ty;
 pub mod value;
 

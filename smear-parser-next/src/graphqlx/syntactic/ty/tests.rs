@@ -11,7 +11,7 @@
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
 use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
-use super::{path, ty};
+use super::{path, ty, type_path};
 use crate::graphqlx::{ast::Type, error::GraphqlxErrors};
 
 /// The fatal context a `str`-sourced parse runs under.
@@ -389,4 +389,51 @@ fn ty_span_covers_bang() {
     assert_eq!(*p.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(ty, "Foo!", check);
+}
+
+// ─── type_path (bounded position) ────────────────────────────────────────────
+
+#[test]
+fn type_path_plain_multi_segment_and_generic() {
+  fn plain<S: AsRef<[u8]>>(tp: crate::graphqlx::ast::TypePath<S>) {
+    assert_eq!(tp.path().segments_slice().len(), 1);
+    assert_eq!(bytes(tp.path().segments_slice()[0].source_ref()), b"Node");
+    assert!(tp.type_generics().is_none());
+  }
+  accept_all!(type_path, "Node", plain);
+
+  // Fixture `0022_complex_fragments`: `on Connection<K, V>` — a generic
+  // application in a bounded position.
+  fn generic<S: AsRef<[u8]>>(tp: crate::graphqlx::ast::TypePath<S>) {
+    let segs = tp.path().segments_slice();
+    assert_eq!(segs.len(), 2);
+    assert_eq!(bytes(segs[0].source_ref()), b"ns");
+    assert_eq!(bytes(segs[1].source_ref()), b"Connection");
+    let generics = tp.type_generics().expect("generic arguments present");
+    assert_eq!(generics.params().len(), 2);
+  }
+  accept_all!(type_path, "ns::Connection<K, V>", generic);
+}
+
+#[test]
+fn type_path_leaves_a_trailing_bang_unconsumed() {
+  // A bounded position has no non-null flag: the `!` stays in the stream for the
+  // caller (contrast `ty`, whose path arm folds it into `required`).
+  let out = drive_str(
+    |inp| {
+      let tp = type_path(inp)?;
+      assert!(tp.type_generics().is_none());
+      crate::combinator::bang(inp).map(|_| ())
+    },
+    "Node!",
+  );
+  assert!(out.is_ok(), "type_path must stop before the bang");
+}
+
+#[test]
+fn type_path_rejects_non_path_heads_and_empty_generics() {
+  reject_all!(type_path, "[Node]");
+  reject_all!(type_path, "<Node>");
+  // Amendment 2 carried through the shared argument list: `< Type+ >`.
+  reject_all!(type_path, "Node<>");
 }

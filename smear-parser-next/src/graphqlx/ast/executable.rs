@@ -38,8 +38,7 @@ pub type VariableDefinition<S> =
 pub type DescribedVariableDefinition<S> = Described<VariableDefinition<S>, S>;
 
 /// List of variable definitions for an operation (`( VariableDefinition+ )`).
-pub type VariablesDefinition<S> =
-  scaffold::VariablesDefinition<DescribedVariableDefinition<S>>;
+pub type VariablesDefinition<S> = scaffold::VariablesDefinition<DescribedVariableDefinition<S>>;
 
 /// A selection set optionally constrained by a leading where clause
 /// (`WhereClause? SelectionSet`).
