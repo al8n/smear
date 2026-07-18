@@ -16,15 +16,26 @@
 //! the committed-first-element-then-`list_of`-rest idiom (commas are trivia, so
 //! `separated1` does not fit).
 //!
-//! # Deviation: operation name
+//! # Deviation: operation name (adjudicated — spec-correct relaxation vs frozen)
 //!
 //! The optional operation name is any `Name` (spec-correct: `OperationDefinition`'s
-//! `Name?` is unrestricted). The frozen parser additionally excludes `on`
-//! (`!peek_keyword("on")`), an unspec'd quirk with no cardinality basis; parser-next
-//! accepts `on` as an operation name. Because a soft keyword cannot be peeked without
-//! consuming (the capability-based token exposes no text non-destructively), matching
-//! the quirk would need a speculative rollback; the spec-correct reading is taken and
-//! flagged here instead.
+//! `Name?` is unrestricted; the grammar reserves `on` ONLY in `FragmentName`). The
+//! frozen parser additionally excludes `on` (`!peek_keyword("on")`), an
+//! over-restriction with no spec basis; parser-next accepts `on` as an operation
+//! name.
+//!
+//! # Deviation: fragment name (spec-enforced where frozen was not)
+//!
+//! `FragmentName : Name but not on` — the spec's second named exclusion, exactly
+//! parallel to `enum_value`'s — is enforced through the
+//! [`fragment_name`] atom, so
+//! `fragment on on X { … }` errors. The frozen parser did NOT enforce it at either
+//! call site (its `parse_fragment_name` helper carried the check but
+//! `parse_fragment_definition` and `parse_selection` both bypassed it via
+//! `parse_name`). Regressions: `fragment_named_on_error_per_spec` here and
+//! `fragment_spread_named_on_is_unrepresentable` on the spread side (where the
+//! `...`-fork's `on`-first dispatch makes a spread named `on` structurally
+//! unrepresentable — the atom there is defense in depth).
 //!
 //! # Node placement
 //!
@@ -57,8 +68,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, ident, try_description,
-    try_ident,
+    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, fragment_name, ident,
+    try_description, try_ident,
   },
   graphql::{
     ast::{
@@ -360,7 +371,9 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let (name_span, name_src) = ident(inp)?.into_components();
+  // `FragmentName : Name but not on` — the exclusion atom, so `fragment on on X`
+  // errors here (spec-enforced; frozen bypassed its own check via `parse_name`).
+  let (name_span, name_src) = fragment_name(inp)?.into_components();
   let fname = FragmentName::new(name_span, name_src);
   let on_kw = on(inp)?;
   let (tn_span, tn_src) = ident(inp)?.into_components();

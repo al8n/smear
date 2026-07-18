@@ -279,6 +279,44 @@ fn fragment_definition_rejects_missing_parts() {
   reject_all!(fragment_definition, "fragment F on User");
 }
 
+#[test]
+fn fragment_named_on_error_per_spec() {
+  // `FragmentName : Name but not on` — the spec's second named exclusion, enforced
+  // through the `fragment_name` atom. A documented deviation from the frozen parser,
+  // which parsed `fragment on on X { … }`: its enforcing `parse_fragment_name`
+  // helper had no callers — `parse_fragment_definition` used plain `parse_name`.
+  reject_all!(fragment_definition, "fragment on on User { id }");
+  // Through the executable-definition dispatch too (the `fragment` keyword commits).
+  reject_all!(executable_definition, "fragment on on User { id }");
+  // The rejection is the exclusion atom's unexpected-token at the `on` name.
+  let family = match drive_str(
+    |inp| fragment_definition(inp).map(|_| ()),
+    "fragment on on User { id }",
+  ) {
+    Err(errs) => errs
+      .into_iter()
+      .next()
+      .is_some_and(|e| e.data().is_unexpected_token()),
+    Ok(()) => false,
+  };
+  assert!(family);
+  // The exclusion is exactly `on`: `true`/`false`/`null` stay legal fragment names
+  // (the `enum_value` exclusions do not cross over), and a type NAMED `on` is legal
+  // (`NamedType` carries no exclusion).
+  fn named_true<S: AsRef<[u8]>>(f: FragmentDefinition<S>) {
+    assert_eq!(bytes(f.name().source_ref()), b"true");
+  }
+  fn on_typed<S: AsRef<[u8]>>(f: FragmentDefinition<S>) {
+    assert_eq!(bytes(f.type_condition().name().source_ref()), b"on");
+  }
+  accept_all!(
+    fragment_definition,
+    "fragment true on User { id }",
+    named_true
+  );
+  accept_all!(fragment_definition, "fragment F on on { id }", on_typed);
+}
+
 // ─── executable_definition ───────────────────────────────────────────────────
 
 #[test]
