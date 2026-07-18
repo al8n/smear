@@ -43,4 +43,5 @@ where
   Ctx: ParseContext<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 = InputRef<'inp, 'input, GraphqlLexer<'inp, Src>, Ctx, GraphQL>;
 
+pub mod ty;
 pub mod value;
