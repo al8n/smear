@@ -17,13 +17,14 @@ use smear_lexer::tokora::{
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken},
   },
+  punct::Pipe,
 };
 
-use super::{opt, peek_kind, spanned, try_description};
+use super::{list_of, opt, peek_kind, separated1, spanned, try_description};
 
-use crate::combinator::{StringLiteral, at, colon, ident, spread, try_at};
+use crate::combinator::{StringLiteral, at, colon, ident, rbrace, spread, try_at};
 
-use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticTokenKind};
+use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
 
 /// A test error sink that absorbs every tokora error family (and GraphQL's lexer
 /// errors) into a unit. Implementing the full `From` set makes it a
@@ -332,5 +333,156 @@ fn try_description_declines_on_ident_and_leaves_it() {
     },
     "x",
     |out: Result<bool, TestError>| assert!(matches!(out, Ok(true)))
+  );
+}
+
+/// Continue-predicate for `separated1`: the next token is an identifier, so it
+/// starts another item in a `|`-separated list of names.
+fn starts_ident<S>(tok: &SyntacticToken<S>) -> bool {
+  SyntacticTokenKind::from(tok) == SyntacticTokenKind::Identifier
+}
+
+/// Stop-predicate for `list_of`: the next token is the closing brace that ends the
+/// list, so the loop stops and leaves the `}` in place.
+fn is_close_brace<S>(tok: &SyntacticToken<S>) -> bool {
+  SyntacticTokenKind::from(tok) == SyntacticTokenKind::RBrace
+}
+
+// `separated1`: one-or-more `|`-separated idents, leading separator allowed,
+// trailing rejected, at least one required. The accept paths assert each item's
+// slice and span; the leading-separator and too-few/trailing-separator paths run
+// under both emitter modes, and the collecting mode's returned items are asserted.
+
+#[test]
+fn separated1_three_idents() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let items = separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp)?;
+      assert_eq!(items.len(), 3);
+      assert_eq!(as_bytes(items[0].source_ref()), b"A");
+      assert_eq!(items[0].span(), SimpleSpan::new(0, 1));
+      assert_eq!(as_bytes(items[1].source_ref()), b"B");
+      assert_eq!(items[1].span(), SimpleSpan::new(4, 5));
+      assert_eq!(as_bytes(items[2].source_ref()), b"C");
+      assert_eq!(items[2].span(), SimpleSpan::new(8, 9));
+      Ok::<_, TestError>(())
+    },
+    "A | B | C",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+#[test]
+fn separated1_allows_leading_separator() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      // The leading `|` is consumed and does not count as an item, so the two
+      // names remain and their spans skip the leading separator.
+      let items = separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp)?;
+      assert_eq!(items.len(), 2);
+      assert_eq!(as_bytes(items[0].source_ref()), b"A");
+      assert_eq!(items[0].span(), SimpleSpan::new(2, 3));
+      assert_eq!(as_bytes(items[1].source_ref()), b"B");
+      assert_eq!(items[1].span(), SimpleSpan::new(6, 7));
+      Ok::<_, TestError>(())
+    },
+    "| A | B",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// A trailing separator is unexpected (no `allow_trailing`): the closing `|` with
+// no item after it is an unexpected-trailing-separator emit. Under a fail-fast
+// emitter it aborts to `Err`; under a collecting emitter it is recorded and the
+// parse threads on to return the one item gathered before the trailing separator.
+#[test]
+fn separated1_trailing_separator_errors() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp).map(|_| ()),
+    "A |",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| {
+      let items = separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp)?;
+      assert_eq!(items.len(), 1);
+      assert_eq!(as_bytes(items[0].source_ref()), b"A");
+      assert_eq!(items[0].span(), SimpleSpan::new(0, 1));
+      Ok::<_, TestError>(())
+    },
+    "A |",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// At least one item is required: empty input is a too-few emit. Under a fail-fast
+// emitter it aborts to `Err`; under a collecting emitter it is recorded and the
+// parse returns the empty collection.
+#[test]
+fn separated1_empty_errors() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp).map(|_| ()),
+    "",
+    |out: Result<(), TestError>| assert!(out.is_err())
+  );
+  drive_all!(
+    Verbose::<TestError>::new(),
+    |inp| {
+      let items = separated1::<Pipe, _, _, _, _, _, _>(ident, starts_ident)(inp)?;
+      assert!(items.is_empty());
+      Ok::<_, TestError>(())
+    },
+    "",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// `list_of`: zero-or-more idents, no separator, stopping at the `}` the stop
+// predicate accepts. The accept path asserts each item's slice and span, then
+// commits `rbrace` to prove `list_of` stopped before the `}` and left it in place.
+
+#[test]
+fn list_of_three_idents_until_brace() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let items = list_of(ident, is_close_brace)(inp)?;
+      assert_eq!(items.len(), 3);
+      assert_eq!(as_bytes(items[0].source_ref()), b"a");
+      assert_eq!(items[0].span(), SimpleSpan::new(0, 1));
+      assert_eq!(as_bytes(items[1].source_ref()), b"b");
+      assert_eq!(items[1].span(), SimpleSpan::new(2, 3));
+      assert_eq!(as_bytes(items[2].source_ref()), b"c");
+      assert_eq!(items[2].span(), SimpleSpan::new(4, 5));
+      // The `}` was the stop token, left in place, so the committed closer parses it.
+      let close = rbrace(inp)?;
+      assert_eq!(close.span(), &SimpleSpan::new(6, 7));
+      Ok::<_, TestError>(())
+    },
+    "a b c }",
+    |out: Result<(), TestError>| assert!(out.is_ok())
+  );
+}
+
+// An immediate stop yields an empty list with the stop token left in place — the
+// zero-or-more lower bound, with no diagnostic.
+#[test]
+fn list_of_empty_leaves_stop_token() {
+  drive_all!(
+    Fatal::<TestError>::new(),
+    |inp| {
+      let items = list_of(ident, is_close_brace)(inp)?;
+      assert!(items.is_empty());
+      let close = rbrace(inp)?;
+      assert_eq!(close.span(), &SimpleSpan::new(0, 1));
+      Ok::<_, TestError>(())
+    },
+    "}",
+    |out: Result<(), TestError>| assert!(out.is_ok())
   );
 }

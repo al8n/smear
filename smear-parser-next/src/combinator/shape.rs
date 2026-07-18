@@ -9,6 +9,15 @@
 //! description" atom: an optional leading string literal, expressed as
 //! [`try_string`] lifted through [`opt`].
 //!
+//! [`separated1`] and [`list_of`] are the collecting-shape atoms, each returning a
+//! parser that gathers repeated `item`s into a `Vec`. [`separated1`] parses
+//! one-or-more items separated by a `Sep` punctuator, permitting an optional
+//! leading separator but rejecting a trailing one, and requires at least one item;
+//! its trailing-separator and too-few cases are emitter paths, so they abort under
+//! a fail-fast emitter and record-then-continue under a collecting one. [`list_of`]
+//! parses zero-or-more items with no separator, stopping when the caller's `until`
+//! predicate accepts the next token (which it leaves in place) or at end of input.
+//!
 //! The higher-order atoms take their sub-parser through a `for<'c> FnMut(&mut
 //! InputRef<…>)` bound, the closure-parameter shape that keeps inference honest at
 //! the call site, so one atom composes over every lexer, source, and emitter the
@@ -18,7 +27,9 @@ use tokora::{InputRef, Lexer, ParseInput, error::UnexpectedEot};
 
 use super::{ErrorOf, LiteralValueToken, ParseCtx, StringOf, try_string};
 
-pub use tokora::parser::{OptOf, PeekedKind, opt, peek_kind};
+pub use tokora::parser::{
+  ListOf, OptOf, PeekedKind, Separated1Of, list_of, opt, peek_kind, separated1,
+};
 
 /// The result the parser [`spanned`] builds yields: the sub-parser's output paired
 /// with the span it covered, or the propagated error.
