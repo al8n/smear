@@ -25,8 +25,10 @@
 //! atom's signature carries one `Ctx: ParseCtx<'inp, L>` instead of the whole
 //! ladder.
 
+mod literal;
 mod token;
 
+pub use literal::*;
 pub use token::*;
 pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf};
 

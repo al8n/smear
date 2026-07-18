@@ -273,6 +273,16 @@ where
   fn is_string_literal(&self) -> bool {
     matches!(self, Self::LitInlineStr(_) | Self::LitBlockStr(_))
   }
+
+  #[inline(always)]
+  fn is_inline_string_literal(&self) -> bool {
+    matches!(self, Self::LitInlineStr(_))
+  }
+
+  #[inline(always)]
+  fn is_multiline_string_literal(&self) -> bool {
+    matches!(self, Self::LitBlockStr(_))
+  }
 }
 
 impl<'a, S> tokora::token::PunctuatorToken<'a> for SyntacticToken<S>

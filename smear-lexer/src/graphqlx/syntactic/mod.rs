@@ -224,6 +224,61 @@ where
   }
 }
 
+impl<'a, S> tokora::token::LitToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+{
+  // GraphQLx preserves the integer radix in the `LitInt` payload, so each radix
+  // predicate inspects the payload variant rather than merely the token variant.
+  // `is_integer_literal`/`is_numeric_literal` stay derived from these leaves.
+  #[inline(always)]
+  fn is_decimal_literal(&self) -> bool {
+    matches!(self, Self::LitInt(LitInt::Decimal(_)))
+  }
+
+  #[inline(always)]
+  fn is_hexadecimal_literal(&self) -> bool {
+    matches!(self, Self::LitInt(LitInt::Hex(_)))
+  }
+
+  #[inline(always)]
+  fn is_binary_literal(&self) -> bool {
+    matches!(self, Self::LitInt(LitInt::Binary(_)))
+  }
+
+  #[inline(always)]
+  fn is_octal_literal(&self) -> bool {
+    matches!(self, Self::LitInt(LitInt::Octal(_)))
+  }
+
+  // GraphQLx has both decimal and hexadecimal floats; the latter reports through
+  // `is_hex_float_literal`, which tokora keeps separate from `is_float_literal`.
+  #[inline(always)]
+  fn is_float_literal(&self) -> bool {
+    matches!(self, Self::LitFloat(LitFloat::Decimal(_)))
+  }
+
+  #[inline(always)]
+  fn is_hex_float_literal(&self) -> bool {
+    matches!(self, Self::LitFloat(LitFloat::Hex(_)))
+  }
+
+  #[inline(always)]
+  fn is_string_literal(&self) -> bool {
+    matches!(self, Self::LitInlineStr(_) | Self::LitBlockStr(_))
+  }
+
+  #[inline(always)]
+  fn is_inline_string_literal(&self) -> bool {
+    matches!(self, Self::LitInlineStr(_))
+  }
+
+  #[inline(always)]
+  fn is_multiline_string_literal(&self) -> bool {
+    matches!(self, Self::LitBlockStr(_))
+  }
+}
+
 /// The kind of a [`SyntacticToken`], without the associated source data.
 ///
 /// This enum represents the type of a token without carrying the actual source slice,
