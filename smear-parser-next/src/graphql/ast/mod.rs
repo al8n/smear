@@ -9,11 +9,13 @@
 use std::vec::Vec;
 
 pub use argument::*;
+pub use directive::*;
 pub use name::*;
 pub use ty::*;
 pub use value::*;
 
 mod argument;
+mod directive;
 mod name;
 mod ty;
 mod value;
