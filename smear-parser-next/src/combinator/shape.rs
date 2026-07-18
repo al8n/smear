@@ -14,18 +14,11 @@
 //! the call site, so one atom composes over every lexer, source, and emitter the
 //! substrate admits.
 
-use tokora::{InputRef, Lexer, Token, error::UnexpectedEot, try_parse_input::ParseAttempt};
+use tokora::{InputRef, Lexer, error::UnexpectedEot};
 
 use super::{ErrorOf, LiteralValueToken, ParseCtx, StringOf, try_string};
 
-/// The result [`peek_kind`] returns: the next token's kind, `None` at end of
-/// input, or the propagated error.
-pub type PeekedKind<'inp, L, Ctx, Lang = ()> =
-  Result<Option<<<L as Lexer<'inp>>::Token as Token<'inp>>::Kind>, ErrorOf<'inp, L, Ctx, Lang>>;
-
-/// The result the parser [`opt`] builds yields: `Some` on accept, `None` on
-/// decline, or the propagated error.
-pub type OptOf<'inp, L, Ctx, Lang, O> = Result<Option<O>, ErrorOf<'inp, L, Ctx, Lang>>;
+pub use tokora::parser::{OptOf, PeekedKind, opt, peek_kind};
 
 /// The result the parser [`spanned`] builds yields: the sub-parser's output paired
 /// with the span it covered, or the propagated error.
@@ -36,47 +29,6 @@ pub type SpannedOf<'inp, L, Ctx, Lang, O> =
 /// its span, or the propagated error.
 pub type DescriptionAttempt<'inp, L, Ctx, Lang = ()> =
   Result<Option<(StringOf<'inp, L>, <L as Lexer<'inp>>::Span)>, ErrorOf<'inp, L, Ctx, Lang>>;
-
-/// Reports the kind of the next token without consuming it, or `None` at end of
-/// input.
-///
-/// The dispatch primitive for sum-type composites: a composite peeks one kind and
-/// matches it into a committed arm rather than trying each declining atom in turn.
-/// Peeking leaves the token in place, so a subsequent committed atom still parses
-/// it. Any lexer error surfacing as the next token is read is propagated.
-#[inline]
-pub fn peek_kind<'inp, L, Ctx, Lang>(
-  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-) -> PeekedKind<'inp, L, Ctx, Lang>
-where
-  L: Lexer<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
-  Lang: ?Sized,
-{
-  let mut kind = None;
-  inp.try_expect(|spanned| {
-    kind = Some(<L::Token as Token<'inp>>::kind(spanned.data));
-    false
-  })?;
-  Ok(kind)
-}
-
-/// Adapts a declining `try_`-parser into one that yields `Option`: an accepted
-/// attempt becomes `Some`, a decline becomes `None`.
-#[inline]
-pub fn opt<'inp, L, Ctx, Lang, P, O>(
-  mut p: P,
-) -> impl for<'c> FnMut(&mut InputRef<'inp, 'c, L, Ctx, Lang>) -> OptOf<'inp, L, Ctx, Lang, O>
-where
-  L: Lexer<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
-  Lang: ?Sized,
-  P: for<'c> FnMut(
-    &mut InputRef<'inp, 'c, L, Ctx, Lang>,
-  ) -> Result<ParseAttempt<O>, ErrorOf<'inp, L, Ctx, Lang>>,
-{
-  move |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| p(inp).map(Option::from)
-}
 
 /// Runs `p` and pairs its output with the span covering the tokens it consumed.
 ///
