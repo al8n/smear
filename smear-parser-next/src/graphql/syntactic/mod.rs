@@ -11,6 +11,7 @@
 //! structure is a separate `lossless` module's concern (a later wave).
 
 pub mod argument;
+pub mod definition;
 pub mod directive;
 pub mod executable;
 pub mod selection;
