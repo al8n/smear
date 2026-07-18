@@ -842,3 +842,58 @@ fn directive_definition_matches_frozen_verdicts() {
     );
   }
 }
+
+// ─── described standalone family ─────────────────────────────────────────────
+
+#[test]
+fn described_standalones_carry_description() {
+  fn with_desc<T, S: AsRef<[u8]>>(d: Described<T, S>) {
+    assert!(d.description().is_some());
+  }
+  fn without_desc<T, S: AsRef<[u8]>>(d: Described<T, S>) {
+    assert!(d.description().is_none());
+  }
+  accept_all!(
+    super::described_object_type_definition,
+    "\"a user\" type User { id: ID }",
+    with_desc
+  );
+  accept_all!(
+    super::described_object_type_definition,
+    "type User { id: ID }",
+    without_desc
+  );
+  accept_all!(
+    super::described_interface_type_definition,
+    "\"\"\"a node\"\"\" interface Node { id: ID }",
+    with_desc
+  );
+  accept_all!(
+    super::described_enum_type_definition,
+    "\"states\" enum E { A B }",
+    with_desc
+  );
+  accept_all!(
+    super::described_input_object_type_definition,
+    "\"input\" input In { x: Int }",
+    with_desc
+  );
+}
+
+#[test]
+fn described_standalones_commit_their_keyword() {
+  // Each standalone form is keyword-committed: the wrong shape keyword errors
+  // (unlike the `described_type_definition` dispatch, which resolves any of the six).
+  reject_all!(super::described_object_type_definition, "scalar DateTime");
+  reject_all!(
+    super::described_interface_type_definition,
+    "type User { id: ID }"
+  );
+  reject_all!(super::described_enum_type_definition, "input In { x: Int }");
+  reject_all!(
+    super::described_input_object_type_definition,
+    "enum E { A }"
+  );
+  // A dangling description with no definition errors rather than parsing.
+  reject_all!(super::described_object_type_definition, "\"doc\"");
+}

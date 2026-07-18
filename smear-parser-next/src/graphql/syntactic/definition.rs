@@ -55,12 +55,14 @@ use crate::{
   },
   graphql::{
     ast::{
-      ArgumentsDefinition, DirectiveDefinition, DirectiveLocations, EnumTypeDefinition,
-      EnumValueDefinition, EnumValuesDefinition, FieldDefinition, FieldsDefinition,
-      ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition, InputValueDefinition,
-      InterfaceTypeDefinition, Location, Name, ObjectTypeDefinition, RootOperationTypeDefinition,
-      RootOperationTypesDefinition, ScalarTypeDefinition, SchemaDefinition, StringValue,
-      TypeDefinition, UnionMemberTypes, UnionTypeDefinition,
+      ArgumentsDefinition, DescribedEnumTypeDefinition, DescribedInputObjectTypeDefinition,
+      DescribedInterfaceTypeDefinition, DescribedObjectTypeDefinition, DirectiveDefinition,
+      DirectiveLocations, EnumTypeDefinition, EnumValueDefinition, EnumValuesDefinition,
+      FieldDefinition, FieldsDefinition, ImplementInterfaces, InputFieldsDefinition,
+      InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, Location, Name,
+      ObjectTypeDefinition, RootOperationTypeDefinition, RootOperationTypesDefinition,
+      ScalarTypeDefinition, SchemaDefinition, StringValue, TypeDefinition, UnionMemberTypes,
+      UnionTypeDefinition,
     },
     keyword::{
       directive as directive_kw, r#enum as enum_kw, input as input_kw, interface, on, scalar,
@@ -1456,6 +1458,86 @@ where
   let span = inp.span_since(&cursor);
   Ok(scaffold::Described::new(span, desc, def))
 }
+
+/// Declares one keyword-committed described standalone production: mark →
+/// description → the committed shape keyword → the shared `*_after_kw` body → the
+/// definition's kind spent over the whole region (description landing inside) —
+/// the described-definition retro-wrap at a FIXED shape, mirroring the frozen
+/// crate's standalone `parse_described_*` entry roots.
+macro_rules! described_standalone {
+  ($(#[$meta:meta])* $name:ident => $kw:ident, $body:ident, $kind:ident, $out:ident) => {
+    $(#[$meta])*
+    // The `Result<Described<…>, …>` return is inherent to this generic production.
+    #[allow(clippy::type_complexity)]
+    pub fn $name<'inp, L, Ctx, Lang>(
+      inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+    ) -> Result<$out<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+    where
+      L: Lexer<'inp, Span = SimpleSpan>,
+      L::Token: IdentifierToken<'inp>
+        + KeywordToken<'inp>
+        + PunctuatorToken<'inp>
+        + LiteralValueToken<
+          'inp,
+          Int = SliceOf<'inp, L>,
+          Float = SliceOf<'inp, L>,
+          InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+          BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+        >,
+      Ctx: ParseCtx<'inp, L, Lang>,
+      Lang: ?Sized,
+      Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+      SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+      ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+        + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+      <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
+    {
+      let mark = inp.emitter().cst_mark();
+      let cursor = inp.cursor().clone();
+      let desc = description(inp)?;
+      let kw = $kw(inp)?;
+      let def = $body(inp, kw.span().start())?;
+      let span = inp.span_since(&cursor);
+      let emitter = inp.emitter();
+      emitter.cst_start_at(mark, K::$kind.raw());
+      emitter.cst_finish();
+      Ok(scaffold::Described::new(span, desc, def))
+    }
+  };
+}
+
+described_standalone!(
+  /// Parses a described `ObjectTypeDefinition` (`Description? type Name …`) — the
+  /// keyword-committed standalone form of the described retro-wrap family.
+  ///
+  /// Spec: [ObjectTypeDefinition](https://spec.graphql.org/draft/#ObjectTypeDefinition).
+  described_object_type_definition => type_kw, object_after_kw, ObjectTypeDefinition,
+  DescribedObjectTypeDefinition
+);
+
+described_standalone!(
+  /// Parses a described `InterfaceTypeDefinition` (`Description? interface Name …`).
+  ///
+  /// Spec: [InterfaceTypeDefinition](https://spec.graphql.org/draft/#InterfaceTypeDefinition).
+  described_interface_type_definition => interface, interface_after_kw,
+  InterfaceTypeDefinition, DescribedInterfaceTypeDefinition
+);
+
+described_standalone!(
+  /// Parses a described `EnumTypeDefinition` (`Description? enum Name …`).
+  ///
+  /// Spec: [EnumTypeDefinition](https://spec.graphql.org/draft/#EnumTypeDefinition).
+  described_enum_type_definition => enum_kw, enum_after_kw, EnumTypeDefinition,
+  DescribedEnumTypeDefinition
+);
+
+described_standalone!(
+  /// Parses a described `InputObjectTypeDefinition` (`Description? input Name …`).
+  ///
+  /// Spec: [InputObjectTypeDefinition](https://spec.graphql.org/draft/#InputObjectTypeDefinition).
+  described_input_object_type_definition => input_kw, input_object_after_kw,
+  InputObjectTypeDefinition, DescribedInputObjectTypeDefinition
+);
 
 #[cfg(test)]
 mod tests;
