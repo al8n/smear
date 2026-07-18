@@ -636,3 +636,6 @@ where
     ParseAttempt::Decline => Ok(None),
   }
 }
+
+#[cfg(test)]
+mod tests;
