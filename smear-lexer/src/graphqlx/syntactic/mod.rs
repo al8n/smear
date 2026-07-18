@@ -1,10 +1,58 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokora::state::recursion_tracker::RecursionLimitExceeded;
+use tokora::{state::recursion_tracker::RecursionLimitExceeded, utils::cmp::Equivalent};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
   LitFloat, LitInt, error,
 };
+
+/// All GraphQLx reserved keywords: the GraphQL set plus the GraphQLx-only
+/// `import`/`from`/`as`/`where`/`set`/`map`. Every spelling is soft (contextual)
+/// — the lexer still yields an [`Identifier`](SyntacticToken::Identifier) for
+/// each — so this list only feeds the [`KeywordToken`](tokora::token::KeywordToken)
+/// classification surface a production consults when it asks for a keyword.
+const GRAPHQLX_KEYWORDS: &[&str] = &[
+  "type",
+  "interface",
+  "union",
+  "enum",
+  "input",
+  "scalar",
+  "extend",
+  "schema",
+  "directive",
+  "fragment",
+  "query",
+  "mutation",
+  "subscription",
+  "implements",
+  "repeatable",
+  "on",
+  "true",
+  "false",
+  "null",
+  "import",
+  "from",
+  "as",
+  "where",
+  "set",
+  "map",
+];
+
+/// Check if a `SyntacticToken` is a GraphQLx keyword, returning the keyword string if so.
+#[inline]
+pub fn graphqlx_keyword<S>(tok: &SyntacticToken<S>) -> Option<&'static str>
+where
+  str: Equivalent<S>,
+{
+  match tok {
+    SyntacticToken::Identifier(s) => GRAPHQLX_KEYWORDS
+      .iter()
+      .copied()
+      .find(|kw| (*kw).equivalent(s)),
+    _ => None,
+  }
+}
 
 /// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
 /// sign-ambiguous numbers to; see [`number::NumberToken`].
@@ -276,6 +324,85 @@ where
   #[inline(always)]
   fn is_multiline_string_literal(&self) -> bool {
     matches!(self, Self::LitBlockStr(_))
+  }
+}
+
+impl<'a, S> tokora::token::KeywordToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+  str: Equivalent<S>,
+{
+  fn keyword(&self) -> Option<&'static str> {
+    graphqlx_keyword(self)
+  }
+}
+
+impl<'a, S> tokora::token::PunctuatorToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+{
+  fn pipe() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Pipe)
+  }
+  fn ampersand() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Ampersand)
+  }
+  fn at() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::At)
+  }
+  fn colon() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Colon)
+  }
+  fn open_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LParen)
+  }
+  fn close_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RParen)
+  }
+  fn open_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBrace)
+  }
+  fn close_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBrace)
+  }
+  fn open_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBracket)
+  }
+  fn close_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBracket)
+  }
+  fn open_angle() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LAngle)
+  }
+  fn close_angle() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RAngle)
+  }
+  fn equal() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Equal)
+  }
+  fn exclamation() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Bang)
+  }
+  fn dollar() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Dollar)
+  }
+  fn spread() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Spread)
+  }
+  fn asterisk() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Asterisk)
+  }
+  fn plus() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Plus)
+  }
+  fn minus() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Minus)
+  }
+  fn double_colon() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::PathSeparator)
+  }
+  fn fat_arrow() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::FatArrow)
   }
 }
 
