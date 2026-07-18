@@ -14,6 +14,7 @@ pub mod argument;
 pub mod directive;
 pub mod generics;
 pub mod import;
+pub mod selection;
 pub mod ty;
 pub mod value;
 
