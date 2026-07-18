@@ -13,6 +13,7 @@
 //! productions with; the lossless suite (a later wave) drives the *same* fns over a
 //! trivia-surfacing lexer and a `cst::Sink`, swapping `L` and the emitter alone.
 
+pub mod ty;
 pub mod value;
 
 use tokora::{InputRef, Lexer};
