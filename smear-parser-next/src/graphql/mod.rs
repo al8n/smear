@@ -43,3 +43,6 @@ pub struct GraphQL;
 pub mod prelude {
   pub use crate::combinator::*;
 }
+
+#[cfg(test)]
+mod tests;
