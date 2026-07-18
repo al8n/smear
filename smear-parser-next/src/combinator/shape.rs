@@ -14,7 +14,7 @@
 //! the call site, so one atom composes over every lexer, source, and emitter the
 //! substrate admits.
 
-use tokora::{InputRef, Lexer, error::UnexpectedEot};
+use tokora::{InputRef, Lexer, ParseInput, error::UnexpectedEot};
 
 use super::{ErrorOf, LiteralValueToken, ParseCtx, StringOf, try_string};
 
@@ -42,11 +42,11 @@ where
   L: Lexer<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  P: for<'c> FnMut(&mut InputRef<'inp, 'c, L, Ctx, Lang>) -> Result<O, ErrorOf<'inp, L, Ctx, Lang>>,
+  P: ParseInput<'inp, L, O, Ctx, Lang>,
 {
   move |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     let cursor = inp.cursor().clone();
-    let out = p(inp)?;
+    let out = p.parse_input(inp)?;
     let span = inp.span_since(&cursor);
     Ok((out, span))
   }
