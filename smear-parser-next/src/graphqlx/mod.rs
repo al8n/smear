@@ -23,6 +23,7 @@
 //!   [`ParseCtx`](crate::combinator::ParseCtx) error over every lexer and source,
 //! - `prelude` — the generic atom vocabulary, re-exported for productions.
 
+pub mod ast;
 pub mod keyword;
 pub mod kinds;
 
