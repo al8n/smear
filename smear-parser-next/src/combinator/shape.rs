@@ -18,16 +18,15 @@
 //! parses zero-or-more items with no separator, stopping when the caller's `until`
 //! predicate accepts the next token (which it leaves in place) or at end of input.
 //!
-//! [`padded`] and [`padded_skipping`] bridge a trivia-bearing token stream — one
-//! whose lexer surfaces whitespace and comments as ordinary tokens rather than
-//! dropping them. [`padded_skipping`] delegates to tokora's padding combinator,
-//! consuming and discarding the trivia on either side of the sub-parser, for a
-//! consumer that only needs it tolerated. [`padded`] instead *captures* it: it
-//! collects the leading trivia tokens (those [`Token::is_trivia`] accepts), runs
-//! the sub-parser, collects the trailing trivia likewise, and returns a [`Padded`]
-//! whose span covers the whole run — so nothing the sub-parser was wrapped in is
-//! lost. Over a stream that never surfaces trivia both collections come back
-//! empty.
+//! [`padded`] bridges a trivia-bearing token stream — one whose lexer surfaces
+//! whitespace and comments as ordinary tokens rather than dropping them — by
+//! *capturing* the trivia: it collects the leading trivia tokens (those
+//! [`Token::is_trivia`] accepts), runs the sub-parser, collects the trailing
+//! trivia likewise, and returns a [`WithTrivia`] whose span covers the whole run —
+//! so nothing the sub-parser was wrapped in is lost. Over a stream that never
+//! surfaces trivia both collections come back empty. A consumer that only needs
+//! trivia tolerated rather than kept discards it with tokora's own
+//! [padding combinator](ParseInput::padded).
 //!
 //! The higher-order atoms take their sub-parser through a `for<'c> FnMut(&mut
 //! InputRef<…>)` bound, the closure-parameter shape that keeps inference honest at
@@ -36,7 +35,7 @@
 
 use std::vec::Vec;
 
-use tokora::{InputRef, Lexer, ParseInput, Token, error::UnexpectedEot, span::Spanned};
+use tokora::{InputRef, Lexer, ParseInput, Token, span::Spanned};
 
 use super::{ErrorOf, LiteralValueToken, ParseCtx, StringOf, try_string};
 
@@ -90,7 +89,6 @@ where
   L::Token: LiteralValueToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
   opt(try_string)(inp)
 }
@@ -102,16 +100,20 @@ where
 /// token the lexer yielded, and `span` covers the whole run — leading trivia,
 /// value, and trailing trivia. Empty collections mean the stream surfaced no
 /// trivia at that edge. [`Deref`](core::ops::Deref) targets the value, so a
-/// `Padded` stands in for its value where only that is needed.
+/// `WithTrivia` stands in for its value where only that is needed.
+///
+/// The name says what distinguishes it: the value *with* its trivia retained.
+/// tokora's own [`Padded`](tokora::parser::Padded) is the opposite — the
+/// combinator that pads by *discarding* — and shares nothing with this type.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Padded<T, Tok, Span> {
+pub struct WithTrivia<T, Tok, Span> {
   span: Span,
   leading: Vec<Spanned<Tok, Span>>,
   value: T,
   trailing: Vec<Spanned<Tok, Span>>,
 }
 
-impl<T, Tok, Span> core::ops::Deref for Padded<T, Tok, Span> {
+impl<T, Tok, Span> core::ops::Deref for WithTrivia<T, Tok, Span> {
   type Target = T;
 
   #[inline]
@@ -120,7 +122,7 @@ impl<T, Tok, Span> core::ops::Deref for Padded<T, Tok, Span> {
   }
 }
 
-impl<T, Tok, Span> Padded<T, Tok, Span> {
+impl<T, Tok, Span> WithTrivia<T, Tok, Span> {
   /// Returns the span covering the leading trivia, the value, and the trailing
   /// trivia.
   #[inline]
@@ -148,14 +150,14 @@ impl<T, Tok, Span> Padded<T, Tok, Span> {
 }
 
 /// The result the parser [`padded`] builds yields: the value wrapped in a
-/// [`Padded`] carrying the trivia captured on each side, or the propagated error.
+/// [`WithTrivia`] carrying the trivia captured on each side, or the propagated error.
 pub type PaddedOf<'inp, L, Ctx, Lang, O> = Result<
-  Padded<O, <L as Lexer<'inp>>::Token, <L as Lexer<'inp>>::Span>,
+  WithTrivia<O, <L as Lexer<'inp>>::Token, <L as Lexer<'inp>>::Span>,
   ErrorOf<'inp, L, Ctx, Lang>,
 >;
 
 /// Captures the trivia on each side of `p`: collects the leading trivia tokens,
-/// runs `p`, collects the trailing trivia tokens, and returns a [`Padded`] whose
+/// runs `p`, collects the trailing trivia tokens, and returns a [`WithTrivia`] whose
 /// span covers the whole run.
 ///
 /// A token counts as trivia when [`Token::is_trivia`] accepts it — whitespace,
@@ -186,38 +188,13 @@ where
     while let Some(tok) = inp.try_expect(|t| t.data.is_trivia())? {
       trailing.push(tok);
     }
-    Ok(Padded {
+    Ok(WithTrivia {
       span: inp.span_since(&cursor),
       leading,
       value,
       trailing,
     })
   }
-}
-
-/// The result the parser [`padded_skipping`] builds yields: the sub-parser's
-/// output with the surrounding trivia discarded, or the propagated error.
-pub type PaddedSkippingOf<'inp, L, Ctx, Lang, O> = Result<O, ErrorOf<'inp, L, Ctx, Lang>>;
-
-/// Consumes and discards the trivia on each side of `p`, returning only `p`'s
-/// output.
-///
-/// A thin delegate to tokora's [padding combinator](ParseInput::padded): it skips
-/// the leading trivia (those [`Token::is_trivia`] accepts), runs `p`, and skips
-/// the trailing trivia, retaining none of it. For a consumer that only needs
-/// trivia tolerated rather than kept; the capturing counterpart is [`padded`].
-#[inline]
-pub fn padded_skipping<'inp, L, Ctx, Lang, P, O>(
-  p: P,
-) -> impl for<'c> FnMut(&mut InputRef<'inp, 'c, L, Ctx, Lang>) -> PaddedSkippingOf<'inp, L, Ctx, Lang, O>
-where
-  L: Lexer<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
-  Lang: ?Sized,
-  P: for<'c> FnMut(&mut InputRef<'inp, 'c, L, Ctx, Lang>) -> Result<O, ErrorOf<'inp, L, Ctx, Lang>>,
-{
-  let mut inner = p.padded();
-  move |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| inner.parse_input(inp)
 }
 
 #[cfg(test)]
