@@ -14,6 +14,7 @@ pub mod argument;
 pub mod definition;
 pub mod directive;
 pub mod executable;
+pub mod extension;
 pub mod selection;
 pub mod ty;
 pub mod value;
