@@ -44,5 +44,6 @@ where
 = InputRef<'inp, 'input, GraphqlLexer<'inp, Src>, Ctx, GraphQL>;
 
 pub mod argument;
+pub mod directive;
 pub mod ty;
 pub mod value;
