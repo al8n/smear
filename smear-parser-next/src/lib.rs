@@ -18,6 +18,15 @@ pub use smear_scaffold as scaffold;
 
 pub mod combinator;
 
+/// The [`Ident`](ident::Ident) carrier the dialect `Name` node types alias.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod ident;
+
+/// Value-node carriers shared by the dialect ASTs, copied type-only from the
+/// frozen crate.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod value;
+
 /// The GraphQL dialect: productions, syntax kinds, keyword atoms, AST node types,
 /// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
 #[cfg(feature = "graphql")]
