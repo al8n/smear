@@ -113,8 +113,12 @@ where
   Ok(arg)
 }
 
-/// Parses an optional `Arguments` list (`'(' Argument* ')'`), declining to `None`
+/// Parses an optional `Arguments` list (`'(' Argument+ ')'`), declining to `None`
 /// (no tokens consumed) unless the next token is `(`.
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `Arguments : ( Argument+ )` demands one-or-more, so an empty `()` errors
+/// here where frozen's unenforced `+` accepted it.
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production;
@@ -142,10 +146,14 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   let mark = inp.emitter().cst_mark();
-  match try_parens(list_of(
-    argument,
-    <L::Token as PunctuatorTokenExt>::is_close_paren,
-  ))(inp)?
+  match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    // Spec cardinality (`Argument+`): the first argument is committed, so an empty
+    // `()` errors at the `)` exactly as the committed ident atom reports it.
+    let first = argument(inp)?;
+    let mut items = list_of(argument, <L::Token as PunctuatorTokenExt>::is_close_paren)(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)?
   {
     Some(delimited) => {
       let (span, open, close, items) = delimited.into_components();
@@ -165,6 +173,10 @@ where
 }
 
 /// The const twin of [`arguments`]: an optional `ConstArguments` list.
+///
+/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
+/// spec's `Arguments : ( Argument+ )` demands one-or-more, so an empty `()` errors
+/// here where frozen's unenforced `+` accepted it.
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments) (const context).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production;
@@ -192,10 +204,17 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   let mark = inp.emitter().cst_mark();
-  match try_parens(list_of(
-    const_argument,
-    <L::Token as PunctuatorTokenExt>::is_close_paren,
-  ))(inp)?
+  match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    // Spec cardinality (`Argument+`): the first argument is committed, so an empty
+    // `()` errors at the `)` exactly as the committed ident atom reports it.
+    let first = const_argument(inp)?;
+    let mut items = list_of(
+      const_argument,
+      <L::Token as PunctuatorTokenExt>::is_close_paren,
+    )(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)?
   {
     Some(delimited) => {
       let (span, open, close, items) = delimited.into_components();

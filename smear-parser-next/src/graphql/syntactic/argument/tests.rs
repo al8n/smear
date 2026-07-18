@@ -168,15 +168,20 @@ fn arguments_accepts_multiple() {
 }
 
 #[test]
-fn arguments_accepts_empty_parens() {
-  // `list_of` (like the frozen hand-rolled `repeated_while` it ports) puts no
-  // lower bound on the collected items: an empty `()` is accepted with zero
-  // arguments — frozen parity, not a new deviation (frozen never called
-  // `.at_least(1)` either, despite the spec's `Argument+`).
-  fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
-    assert!(a.expect("present").arguments().is_empty());
-  }
-  accept_all!(arguments, "()", check);
+fn arguments_empty_parens_error_per_spec() {
+  // Spec-cardinality rule (plan Amendment 2): `Arguments : ( Argument+ )` demands
+  // one-or-more, so an empty `()` errors — a documented deviation from the frozen
+  // parser, whose unenforced `+` accepted it.
+  reject_all!(arguments, "()");
+  // The rejection is the committed atom's unexpected-token at the `)`.
+  let family = match drive_str(|inp| arguments(inp).map(|_| ()), "()") {
+    Err(errs) => errs
+      .into_iter()
+      .next()
+      .is_some_and(|e| e.data().is_unexpected_token()),
+    Ok(()) => false,
+  };
+  assert!(family);
 }
 
 #[test]
@@ -221,6 +226,12 @@ fn const_arguments_declines_without_leading_paren() {
   assert!(drive_str(const_arguments, "").unwrap().is_none());
 }
 
+#[test]
+fn const_arguments_empty_parens_error_per_spec() {
+  // Spec-cardinality rule (plan Amendment 2), const twin: empty `()` errors.
+  reject_all!(const_arguments, "()");
+}
+
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
 
 /// Accept/reject verdicts the frozen `smear-parser` `parse_argument` produces for
@@ -253,12 +264,13 @@ fn argument_matches_frozen_verdicts() {
   }
 }
 
-/// Accept/reject verdicts for `arguments` — note `()` accepts (see
-/// `arguments_accepts_empty_parens`).
+/// Accept/reject verdicts for `arguments`. The frozen-parity oracle explicitly
+/// EXCLUDES the empty-`()` row: frozen accepts it, parser-next rejects it per the
+/// spec-cardinality rule (plan Amendment 2) — the deviation is pinned by
+/// `arguments_empty_parens_error_per_spec`, not re-blessed here.
 const ARGUMENTS_ORACLE: &[(&str, bool)] = &[
   ("(x: 1)", true),
   ("(a: 1, b: 2)", true),
-  ("()", true),
   ("(x: 1", false),
   ("(x 1)", false),
 ];
