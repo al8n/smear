@@ -1,0 +1,261 @@
+//! `Directive`/`Directives` production tests.
+//!
+//! Mirrors `value`'s, `ty`'s, and `argument`'s test harness: every case drives the
+//! real GraphQL syntactic lexer under a `Fatal<GraphqlErrors>` context, accept cases
+//! run the full source matrix, reject cases assert the error family, and a
+//! table-driven oracle pins the frozen `smear-parser`
+//! `parse_directive`/`parse_directives` verdicts for the same inputs.
+
+use smear_lexer::graphql::syntactic::SyntacticLexer;
+use tokora::{FatalContext, InputRef, Parse, Parser};
+
+use super::{const_directive, const_directives, directive, directives};
+use crate::graphql::{
+  ast::{ConstDirective, Directive, Directives},
+  error::GraphqlErrors,
+};
+
+/// The fatal context a `str`-sourced parse runs under.
+type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;
+/// The fatal context a `[u8]`-sourced parse runs under.
+type SliceCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>>;
+
+/// Drives `f` over a `str` source under `Fatal<GraphqlErrors<&str>>`.
+fn drive_str<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, str>, StrCtx<'inp>>,
+  ) -> Result<O, GraphqlErrors<&'inp str>>,
+  input: &'inp str,
+) -> Result<O, GraphqlErrors<&'inp str>> {
+  Parser::with_parser(f).parse_str(input)
+}
+
+/// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
+fn drive_slice<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+  ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
+  input: &'inp [u8],
+) -> Result<O, GraphqlErrors<&'inp [u8]>> {
+  Parser::with_parser(f).parse_slice(input)
+}
+
+#[cfg(feature = "bytes")]
+fn drive_bytes<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+  ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
+  input: &'inp ::bytes::Bytes,
+) -> Result<O, GraphqlErrors<&'inp [u8]>> {
+  Parser::with_parser(f).parse_bytes(input)
+}
+
+/// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
+/// applying the generic `check` fn to each accepted AST — the source matrix.
+macro_rules! accept_all {
+  ($parser:expr, $src:expr, $check:path) => {{
+    $check(drive_str($parser, $src).expect(concat!("str accept: ", $src)));
+    $check(drive_slice($parser, $src.as_bytes()).expect(concat!("slice accept: ", $src)));
+    #[cfg(feature = "bytes")]
+    {
+      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      $check(drive_bytes($parser, &owned).expect(concat!("bytes accept: ", $src)));
+    }
+  }};
+}
+
+/// Asserts `parser` rejects `src` over both `str` and `[u8]`.
+macro_rules! reject_all {
+  ($parser:expr, $src:expr) => {{
+    assert!(
+      drive_str(|inp| $parser(inp).map(|_| ()), $src).is_err(),
+      "str should reject: {:?}",
+      $src
+    );
+    assert!(
+      drive_slice(|inp| $parser(inp).map(|_| ()), $src.as_bytes()).is_err(),
+      "slice should reject: {:?}",
+      $src
+    );
+  }};
+}
+
+/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
+/// every source representation.
+fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
+  slice.as_ref()
+}
+
+// ─── directive ───────────────────────────────────────────────────────────────
+
+#[test]
+fn directive_accepts_without_arguments() {
+  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+    assert_eq!(bytes(d.name().source_ref()), b"deprecated");
+    assert!(d.arguments().is_none());
+    assert_eq!(d.span().start(), 0);
+  }
+  accept_all!(directive, "@deprecated", check);
+}
+
+#[test]
+fn directive_accepts_with_arguments() {
+  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+    assert_eq!(bytes(d.name().source_ref()), b"include");
+    let args = d.arguments().expect("present");
+    assert_eq!(args.arguments().len(), 1);
+    assert_eq!(bytes(args.arguments()[0].name().source_ref()), b"if");
+  }
+  accept_all!(directive, "@include(if: true)", check);
+}
+
+#[test]
+fn directive_rejects_missing_at() {
+  reject_all!(directive, "deprecated");
+}
+
+#[test]
+fn directive_rejects_missing_name() {
+  reject_all!(directive, "@");
+  reject_all!(directive, "@(x: 1)");
+}
+
+#[test]
+fn directive_rejects_malformed_arguments() {
+  reject_all!(directive, "@d(x 1)");
+  reject_all!(directive, "@d(x: 1");
+}
+
+// ─── const_directive ─────────────────────────────────────────────────────────
+
+#[test]
+fn const_directive_accepts_and_rejects_variable() {
+  fn check<S: AsRef<[u8]>>(d: ConstDirective<S>) {
+    assert_eq!(bytes(d.name().source_ref()), b"d");
+  }
+  accept_all!(const_directive, "@d(x: 1)", check);
+  reject_all!(const_directive, "@d(x: $v)");
+}
+
+// ─── directives ──────────────────────────────────────────────────────────────
+
+#[test]
+fn directives_accepts_single() {
+  fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
+    let ds = ds.expect("present");
+    assert_eq!(ds.directives().len(), 1);
+    assert_eq!(bytes(ds.directives()[0].name().source_ref()), b"deprecated");
+  }
+  accept_all!(directives, "@deprecated", check);
+}
+
+#[test]
+fn directives_accepts_multiple() {
+  fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
+    let ds = ds.expect("present");
+    assert_eq!(ds.directives().len(), 2);
+    assert_eq!(bytes(ds.directives()[0].name().source_ref()), b"a");
+    assert_eq!(bytes(ds.directives()[1].name().source_ref()), b"b");
+  }
+  accept_all!(directives, "@a @b", check);
+}
+
+#[test]
+fn directives_declines_without_at() {
+  // No tokens consumed: a following production sees the identifier untouched.
+  let ok = drive_str(
+    |inp| {
+      let ds = directives(inp)?;
+      let leftover = crate::combinator::ident(inp)?;
+      Ok::<_, GraphqlErrors<&str>>(ds.is_none() && *leftover.source_ref() == "x")
+    },
+    "x",
+  )
+  .unwrap();
+  assert!(ok);
+}
+
+#[test]
+fn directives_declines_on_empty_input() {
+  assert!(drive_str(directives, "").unwrap().is_none());
+  assert!(drive_slice(directives, b"").unwrap().is_none());
+}
+
+#[test]
+fn directives_rejects_malformed_directive_mid_run() {
+  // The first directive commits the `@`; a malformed follow-on directive is an
+  // error, not a decline back to a shorter accepted run.
+  reject_all!(directives, "@a @");
+}
+
+// ─── const_directives ────────────────────────────────────────────────────────
+
+#[test]
+fn const_directives_accepts_and_rejects_variable() {
+  fn check<S: AsRef<[u8]>>(ds: Option<crate::graphql::ast::ConstDirectives<S>>) {
+    assert_eq!(ds.expect("present").directives().len(), 1);
+  }
+  accept_all!(const_directives, "@d(x: 1)", check);
+  reject_all!(const_directives, "@d(x: $v)");
+}
+
+#[test]
+fn const_directives_declines_on_empty_input() {
+  assert!(drive_str(const_directives, "").unwrap().is_none());
+}
+
+// ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
+
+/// Accept/reject verdicts the frozen `smear-parser` `parse_directive` produces for
+/// the same inputs.
+const DIRECTIVE_ORACLE: &[(&str, bool)] = &[
+  ("@deprecated", true),
+  ("@include(if: true)", true),
+  ("@d(a: 1, b: 2)", true),
+  ("deprecated", false),
+  ("@", false),
+  ("@d(x 1)", false),
+  ("", false),
+];
+
+#[test]
+fn directive_matches_frozen_verdicts() {
+  for (src, accept) in DIRECTIVE_ORACLE {
+    assert_eq!(
+      drive_str(|inp| directive(inp).map(|_| ()), src).is_ok(),
+      *accept,
+      "str directive({src:?})"
+    );
+    assert_eq!(
+      drive_slice(|inp| directive(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      *accept,
+      "slice directive({src:?})"
+    );
+  }
+}
+
+/// Accept/reject verdicts for `directives` (a missing `@` declines rather than
+/// erroring, so it is not itself a "reject" row here — see
+/// `directives_declines_without_at`).
+const DIRECTIVES_ORACLE: &[(&str, bool)] = &[
+  ("@a", true),
+  ("@a @b", true),
+  ("@a(x: 1) @b", true),
+  ("@a @", false),
+];
+
+#[test]
+fn directives_matches_frozen_verdicts() {
+  for (src, accept) in DIRECTIVES_ORACLE {
+    assert_eq!(
+      drive_str(|inp| directives(inp).map(|_| ()), src).is_ok(),
+      *accept,
+      "str directives({src:?})"
+    );
+    assert_eq!(
+      drive_slice(|inp| directives(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      *accept,
+      "slice directives({src:?})"
+    );
+  }
+}
