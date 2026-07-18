@@ -27,6 +27,7 @@ pub mod ast;
 pub mod error;
 pub mod keyword;
 pub mod kinds;
+pub mod syntactic;
 
 /// The GraphQLx dialect marker.
 ///
