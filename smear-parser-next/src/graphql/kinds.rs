@@ -20,7 +20,7 @@
 ///
 /// Discriminants are the declaration index (default `#[repr(u16)]` numbering), so
 /// [`raw`](Self::raw) is a plain cast and the space round-trips through a
-/// declaration-order array — the property [`kind_decl_index_is_stable`] pins.
+/// declaration-order array — the property `kind_decl_index_is_stable` pins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
