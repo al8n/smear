@@ -23,6 +23,8 @@
 //!   [`ParseCtx`](crate::combinator::ParseCtx) error over every lexer and source,
 //! - `prelude` — the generic atom vocabulary, re-exported for productions.
 
+pub mod kinds;
+
 /// The GraphQLx dialect marker.
 ///
 /// Pins the `Lang` type parameter of every GraphQLx production, atom
