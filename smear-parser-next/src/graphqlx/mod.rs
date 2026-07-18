@@ -24,6 +24,7 @@
 //! - `prelude` — the generic atom vocabulary, re-exported for productions.
 
 pub mod ast;
+pub mod error;
 pub mod keyword;
 pub mod kinds;
 
