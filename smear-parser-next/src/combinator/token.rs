@@ -73,6 +73,17 @@ punct_atoms!(
   lparen / try_lparen => OpenParen,
   rparen / try_rparen => CloseParen,
   spread / try_spread => Spread,
+  // GraphQLx-only punctuators: angle-bracket generics (`<` `>`), the `::` path
+  // separator, the `=>` map arrow, `*` (import wildcard), and the `+`/`-` number
+  // signs. Lego-generic — they name only tokora's punctuator structs, and stay
+  // inert over a lexer (e.g. GraphQL) whose token declines each kind.
+  asterisk / try_asterisk => Asterisk,
+  langle / try_langle => OpenAngle,
+  rangle / try_rangle => CloseAngle,
+  path_sep / try_path_sep => DoubleColon,
+  fat_arrow / try_fat_arrow => FatArrow,
+  plus / try_plus => Plus,
+  minus / try_minus => Hyphen,
 );
 
 /// The identifier lexer `L` yields, over its source slice and span, tagged with
