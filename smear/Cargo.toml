@@ -40,7 +40,7 @@ bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = "0.8"
 apollo-parser = "0.8"
 graphql-parser = "0.4"
 async-graphql-parser = "7"
