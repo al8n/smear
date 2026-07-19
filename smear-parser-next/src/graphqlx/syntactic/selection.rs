@@ -67,8 +67,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, fragment_name, ident, spread, try_colon,
-    try_path_sep,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, fragment_name, ident, spread,
+    try_colon, try_path_sep,
   },
   graphqlx::{
     ast::{Field, FragmentTypePath, Name, Path, Selection, SelectionSet, TypeCondition},
@@ -102,7 +102,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -181,7 +181,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -232,7 +232,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -265,7 +265,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -355,7 +355,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

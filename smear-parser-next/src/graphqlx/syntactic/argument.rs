@@ -37,7 +37,7 @@ use tokora::{
 
 use super::value::{const_value, value};
 use crate::{
-  combinator::{ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, ident},
+  combinator::{Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, ident},
   graphqlx::{
     ast::{Argument, Arguments, ConstArgument, ConstArguments, Name},
     kinds::SyntaxKind as K,
@@ -64,7 +64,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -102,7 +102,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -146,7 +146,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -204,7 +204,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

@@ -6,7 +6,7 @@
 //! cases assert the error family.
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{const_directives, directive, directives};
 use crate::graphqlx::error::GraphqlxErrors;
@@ -76,24 +76,18 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── directive ───────────────────────────────────────────────────────────────
 
 #[test]
 fn directive_bare_and_with_arguments() {
   fn bare<S: AsRef<[u8]>>(d: crate::graphqlx::ast::Directive<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"deprecated");
+    assert!("deprecated".equivalent(d.name().source_ref()));
     assert!(d.arguments().is_none());
   }
   accept_all!(directive, "@deprecated", bare);
 
   fn with_args<S: AsRef<[u8]>>(d: crate::graphqlx::ast::Directive<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"skip");
+    assert!("skip".equivalent(d.name().source_ref()));
     let args = d.arguments().expect("arguments present");
     assert_eq!(args.arguments().len(), 1);
   }

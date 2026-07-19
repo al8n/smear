@@ -7,7 +7,7 @@
 //! `0013`) are the grammar arbiter.
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{import_clause, import_definition, import_list, named_specifier, wildcard_specifier};
 use crate::graphqlx::error::GraphqlxErrors;
@@ -77,18 +77,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── named_specifier / wildcard_specifier ────────────────────────────────────
 
 #[test]
 fn named_specifier_plain_and_aliased() {
   fn plain<S: AsRef<[u8]>>(s: crate::graphqlx::ast::NamedSpecifier<S>) {
-    assert_eq!(bytes(s.name().source_ref()), b"User");
+    assert!("User".equivalent(s.name().source_ref()));
     assert!(s.alias().is_none());
   }
   accept_all!(named_specifier, "User", plain);
@@ -96,12 +90,12 @@ fn named_specifier_plain_and_aliased() {
   // Fixture `0003_import_with_alias`: `User as UserType`; the alias is a full
   // `::`-path.
   fn aliased<S: AsRef<[u8]>>(s: crate::graphqlx::ast::NamedSpecifier<S>) {
-    assert_eq!(bytes(s.name().source_ref()), b"User");
+    assert!("User".equivalent(s.name().source_ref()));
     let alias = s.alias().expect("alias present");
     let segs = alias.segments_slice();
     assert_eq!(segs.len(), 2);
-    assert_eq!(bytes(segs[0].source_ref()), b"types");
-    assert_eq!(bytes(segs[1].source_ref()), b"UserType");
+    assert!("types".equivalent(segs[0].source_ref()));
+    assert!("UserType".equivalent(segs[1].source_ref()));
   }
   accept_all!(named_specifier, "User as types::UserType", aliased);
 }
@@ -123,7 +117,7 @@ fn wildcard_specifier_plain_and_aliased() {
   // Fixture `0013_complex_import`: `* as utils`.
   fn aliased<S: AsRef<[u8]>>(s: crate::graphqlx::ast::WildcardSpecifier<S>) {
     let alias = s.alias().expect("alias present");
-    assert_eq!(bytes(alias.segments_slice()[0].source_ref()), b"utils");
+    assert!("utils".equivalent(alias.segments_slice()[0].source_ref()));
   }
   accept_all!(wildcard_specifier, "* as utils", aliased);
 }
@@ -175,7 +169,7 @@ fn import_definition_named_fixture() {
   fn check<S: AsRef<[u8]>>(d: crate::graphqlx::ast::ImportDefinition<S>) {
     let clause = d.clause();
     assert!(clause.is_list());
-    assert_eq!(bytes(d.file_path().source_ref()), b"\"./types.graphqlx\"");
+    assert!("\"./types.graphqlx\"".equivalent(d.file_path().source_ref()));
   }
   accept_all!(
     import_definition,

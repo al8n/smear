@@ -81,7 +81,9 @@ use tokora::{
 
 use super::ty::{ty, type_path};
 use crate::{
-  combinator::{ErrorOf, ParseCtx, SliceOf, colon, fragment_name, ident, try_ampersand, try_equal},
+  combinator::{
+    Equivalent, ErrorOf, ParseCtx, SliceOf, colon, fragment_name, ident, try_ampersand, try_equal,
+  },
   graphqlx::{
     ast::{
       DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam, ExecutableDefinitionName,
@@ -365,7 +367,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

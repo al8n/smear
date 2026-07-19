@@ -8,7 +8,7 @@
 //! flow through the shared argument shape.
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{argument, arguments, const_argument, const_arguments};
 use crate::graphqlx::error::GraphqlxErrors;
@@ -78,18 +78,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── argument / const_argument ───────────────────────────────────────────────
 
 #[test]
 fn argument_int_and_variable_values() {
   fn int<S: AsRef<[u8]>>(a: crate::graphqlx::ast::Argument<S>) {
-    assert_eq!(bytes(a.name().source_ref()), b"answer");
+    assert!("answer".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
   }
   accept_all!(argument, "answer: 0x2A", int);

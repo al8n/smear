@@ -8,7 +8,7 @@
 //! arbiter (plan Wave 8a).
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{
   definition_name, definition_type_param, executable_definition_name, extension_type_param,
@@ -82,18 +82,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── definition_type_param ───────────────────────────────────────────────────
 
 #[test]
 fn definition_type_param_without_default() {
   fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::DefinitionTypeParam<S>) {
-    assert_eq!(bytes(p.ident().source_ref()), b"T");
+    assert!("T".equivalent(p.ident().source_ref()));
     assert!(p.default().is_none());
   }
   accept_all!(definition_type_param, "T", check);
@@ -103,13 +97,10 @@ fn definition_type_param_without_default() {
 fn definition_type_param_with_default_type() {
   // Fixture `0010_generics_with_default`: `Response<T = String>`.
   fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::DefinitionTypeParam<S>) {
-    assert_eq!(bytes(p.ident().source_ref()), b"T");
+    assert!("T".equivalent(p.ident().source_ref()));
     let default = p.default().expect("default type present");
     let path = default.unwrap_path_ref();
-    assert_eq!(
-      bytes(path.path().segments_slice()[0].source_ref()),
-      b"String"
-    );
+    assert!("String".equivalent(path.path().segments_slice()[0].source_ref()));
   }
   accept_all!(definition_type_param, "T = String", check);
 }
@@ -146,7 +137,7 @@ fn definition_type_generics_single_param() {
     let g = unwrap_def_generics(g);
     let params = g.params_slice();
     assert_eq!(params.len(), 1);
-    assert_eq!(bytes(params[0].ident().source_ref()), b"T");
+    assert!("T".equivalent(params[0].ident().source_ref()));
   }
   accept_all!(try_definition_type_generics, "<T>", check);
 }
@@ -158,9 +149,9 @@ fn definition_type_generics_multiple_params_with_default() {
     let g = unwrap_def_generics(g);
     let params = g.params_slice();
     assert_eq!(params.len(), 2);
-    assert_eq!(bytes(params[0].ident().source_ref()), b"K");
+    assert!("K".equivalent(params[0].ident().source_ref()));
     assert!(params[0].default().is_none());
-    assert_eq!(bytes(params[1].ident().source_ref()), b"V");
+    assert!("V".equivalent(params[1].ident().source_ref()));
     assert!(params[1].default().is_some());
   }
   accept_all!(try_definition_type_generics, "<K, V = String>", check);
@@ -196,8 +187,8 @@ fn extension_type_generics_params() {
     let g = g.expect("generics present");
     let params = g.params_slice();
     assert_eq!(params.len(), 2);
-    assert_eq!(bytes(params[0].ident().source_ref()), b"T");
-    assert_eq!(bytes(params[1].ident().source_ref()), b"U");
+    assert!("T".equivalent(params[0].ident().source_ref()));
+    assert!("U".equivalent(params[1].ident().source_ref()));
   }
   accept_all!(try_extension_type_generics, "<T, U>", check);
 }
@@ -212,7 +203,7 @@ fn extension_type_generics_reject_empty_and_defaults() {
 #[test]
 fn extension_type_param_is_a_bare_name() {
   fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::ExtensionTypeParam<S>) {
-    assert_eq!(bytes(p.ident().source_ref()), b"T");
+    assert!("T".equivalent(p.ident().source_ref()));
   }
   accept_all!(extension_type_param, "T", check);
 }
@@ -226,8 +217,8 @@ fn executable_definition_type_generics_params() {
     let g = g.expect("generics present");
     let params = g.params_slice();
     assert_eq!(params.len(), 2);
-    assert_eq!(bytes(params[0].source_ref()), b"K");
-    assert_eq!(bytes(params[1].source_ref()), b"V");
+    assert!("K".equivalent(params[0].source_ref()));
+    assert!("V".equivalent(params[1].source_ref()));
   }
   accept_all!(try_executable_definition_type_generics, "<K, V>", check);
 }
@@ -259,14 +250,14 @@ fn executable_definition_type_generics_declines_without_angle() {
 #[test]
 fn definition_name_plain_and_generic() {
   fn plain<S: AsRef<[u8]>>(n: crate::graphqlx::ast::DefinitionName<S>) {
-    assert_eq!(bytes(n.name().source_ref()), b"Response");
+    assert!("Response".equivalent(n.name().source_ref()));
     assert!(n.generics().is_none());
   }
   accept_all!(definition_name, "Response", plain);
 
   // Fixture `0010_generics_with_default`: `Response<T = String>`.
   fn generic<S: AsRef<[u8]>>(n: crate::graphqlx::ast::DefinitionName<S>) {
-    assert_eq!(bytes(n.name().source_ref()), b"Response");
+    assert!("Response".equivalent(n.name().source_ref()));
     let generics = n.generics().expect("generics present");
     assert_eq!(generics.params_slice().len(), 1);
     assert!(generics.params_slice()[0].default().is_some());
@@ -278,15 +269,15 @@ fn definition_name_plain_and_generic() {
 fn executable_definition_name_plain_and_generic() {
   // Fixture `0016_operation_with_generics`: `ItemFragment<T>`.
   fn generic<S: AsRef<[u8]>>(n: crate::graphqlx::ast::ExecutableDefinitionName<S>) {
-    assert_eq!(bytes(n.ident().source_ref()), b"ItemFragment");
+    assert!("ItemFragment".equivalent(n.ident().source_ref()));
     let generics = n.generics().expect("generics present");
     assert_eq!(generics.params_slice().len(), 1);
-    assert_eq!(bytes(generics.params_slice()[0].source_ref()), b"T");
+    assert!("T".equivalent(generics.params_slice()[0].source_ref()));
   }
   accept_all!(executable_definition_name, "ItemFragment<T>", generic);
 
   fn plain<S: AsRef<[u8]>>(n: crate::graphqlx::ast::ExecutableDefinitionName<S>) {
-    assert_eq!(bytes(n.ident().source_ref()), b"PostPreview");
+    assert!("PostPreview".equivalent(n.ident().source_ref()));
     assert!(n.generics().is_none());
   }
   accept_all!(executable_definition_name, "PostPreview", plain);
@@ -305,16 +296,10 @@ fn executable_definition_name_rejects_on_per_spec() {
 fn where_predicate_single_bound() {
   // Fixture `0006_where_clause_simple`: `where T: Node`.
   fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::WherePredicate<S>) {
-    assert_eq!(
-      bytes(p.bounded_type().path().segments_slice()[0].source_ref()),
-      b"T"
-    );
+    assert!("T".equivalent(p.bounded_type().path().segments_slice()[0].source_ref()));
     let bounds = p.bounds_slice();
     assert_eq!(bounds.len(), 1);
-    assert_eq!(
-      bytes(bounds[0].path().segments_slice()[0].source_ref()),
-      b"Node"
-    );
+    assert!("Node".equivalent(bounds[0].path().segments_slice()[0].source_ref()));
   }
   accept_all!(where_predicate, "T: Node", check);
 }
@@ -325,14 +310,8 @@ fn where_predicate_multiple_bounds() {
   fn check<S: AsRef<[u8]>>(p: crate::graphqlx::ast::WherePredicate<S>) {
     let bounds = p.bounds_slice();
     assert_eq!(bounds.len(), 2);
-    assert_eq!(
-      bytes(bounds[0].path().segments_slice()[0].source_ref()),
-      b"Node"
-    );
-    assert_eq!(
-      bytes(bounds[1].path().segments_slice()[0].source_ref()),
-      b"Timestamped"
-    );
+    assert!("Node".equivalent(bounds[0].path().segments_slice()[0].source_ref()));
+    assert!("Timestamped".equivalent(bounds[1].path().segments_slice()[0].source_ref()));
   }
   accept_all!(where_predicate, "T: Node & Timestamped", check);
 }
@@ -374,15 +353,9 @@ fn where_clause_multiple_predicates_without_separators() {
     let c = c.expect("clause present");
     let preds = c.predicates_slice();
     assert_eq!(preds.len(), 2);
-    assert_eq!(
-      bytes(preds[0].bounded_type().path().segments_slice()[0].source_ref()),
-      b"T"
-    );
+    assert!("T".equivalent(preds[0].bounded_type().path().segments_slice()[0].source_ref()));
     assert_eq!(preds[0].bounds_slice().len(), 2);
-    assert_eq!(
-      bytes(preds[1].bounded_type().path().segments_slice()[0].source_ref()),
-      b"U"
-    );
+    assert!("U".equivalent(preds[1].bounded_type().path().segments_slice()[0].source_ref()));
   }
   accept_all!(
     try_where_clause,

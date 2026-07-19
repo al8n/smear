@@ -397,7 +397,7 @@ fn ty_span_covers_bang() {
 fn type_path_plain_multi_segment_and_generic() {
   fn plain<S: AsRef<[u8]>>(tp: crate::graphqlx::ast::TypePath<S>) {
     assert_eq!(tp.path().segments_slice().len(), 1);
-    assert_eq!(bytes(tp.path().segments_slice()[0].source_ref()), b"Node");
+    assert!("Node".equivalent(tp.path().segments_slice()[0].source_ref()));
     assert!(tp.type_generics().is_none());
   }
   accept_all!(type_path, "Node", plain);
@@ -407,8 +407,8 @@ fn type_path_plain_multi_segment_and_generic() {
   fn generic<S: AsRef<[u8]>>(tp: crate::graphqlx::ast::TypePath<S>) {
     let segs = tp.path().segments_slice();
     assert_eq!(segs.len(), 2);
-    assert_eq!(bytes(segs[0].source_ref()), b"ns");
-    assert_eq!(bytes(segs[1].source_ref()), b"Connection");
+    assert!("ns".equivalent(segs[0].source_ref()));
+    assert!("Connection".equivalent(segs[1].source_ref()));
     let generics = tp.type_generics().expect("generic arguments present");
     assert_eq!(generics.params().len(), 2);
   }

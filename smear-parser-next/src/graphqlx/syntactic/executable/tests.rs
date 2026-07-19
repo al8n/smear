@@ -9,7 +9,7 @@
 //! run lands with the Wave 8b entry runner).
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{
   described_executable_definition, executable_definition, executable_document, fragment_definition,
@@ -85,12 +85,6 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── variable_definition / variables_definition ──────────────────────────────
 
 #[test]
@@ -98,7 +92,7 @@ fn variable_definition_basic_and_full() {
   fn basic<S: AsRef<[u8]>>(d: crate::graphqlx::ast::DescribedVariableDefinition<S>) {
     assert!(d.description().is_none());
     let def = d.node();
-    assert_eq!(bytes(def.variable().name().source_ref()), b"id");
+    assert!("id".equivalent(def.variable().name().source_ref()));
     assert!(def.default_value().is_none());
   }
   accept_all!(variable_definition, "$id: ID!", basic);
@@ -187,7 +181,7 @@ fn operation_shorthand_and_named() {
   fn named<S: AsRef<[u8]>>(o: OperationDefinition<S>) {
     let named = o.unwrap_named();
     let name = named.name().expect("name present");
-    assert_eq!(bytes(name.name().source_ref()), b"GetData");
+    assert!("GetData".equivalent(name.name().source_ref()));
     let generics = name.generics().expect("generic parameters present");
     assert_eq!(generics.params_slice().len(), 1);
     assert!(named.selection_set().where_clause().is_none());
@@ -226,7 +220,7 @@ fn operation_named_where_parses_greedily() {
   fn check<S: AsRef<[u8]>>(o: OperationDefinition<S>) {
     let named = o.unwrap_named();
     let name = named.name().expect("name present");
-    assert_eq!(bytes(name.name().source_ref()), b"where");
+    assert!("where".equivalent(name.name().source_ref()));
     assert!(named.selection_set().where_clause().is_none());
   }
   accept_all!(operation_definition, "query where { x }", check);
@@ -235,10 +229,7 @@ fn operation_named_where_parses_greedily() {
   // the clause.
   fn both<S: AsRef<[u8]>>(o: OperationDefinition<S>) {
     let named = o.unwrap_named();
-    assert_eq!(
-      bytes(named.name().expect("name present").name().source_ref()),
-      b"where"
-    );
+    assert!("where".equivalent(named.name().expect("name present").name().source_ref()));
     assert!(named.selection_set().where_clause().is_some());
   }
   accept_all!(
@@ -263,7 +254,7 @@ fn fragment_plain_and_generic() {
   fn plain<S: AsRef<[u8]>>(f: crate::graphqlx::ast::FragmentDefinition<S>) {
     let (impl_generics, name) = (f.name().first(), f.name().second());
     assert!(impl_generics.is_none());
-    assert_eq!(bytes(name.ident().source_ref()), b"PostPreview");
+    assert!("PostPreview".equivalent(name.ident().source_ref()));
     assert!(name.generics().is_none());
     assert!(f.selection_set().where_clause().is_none());
   }
@@ -278,13 +269,10 @@ fn fragment_plain_and_generic() {
     let impl_generics = f.name().first().as_ref().expect("impl generics present");
     assert_eq!(impl_generics.params_slice().len(), 1);
     let name = f.name().second();
-    assert_eq!(bytes(name.ident().source_ref()), b"ItemFragment");
+    assert!("ItemFragment".equivalent(name.ident().source_ref()));
     assert!(name.generics().is_some());
     let tc = f.type_condition();
-    assert_eq!(
-      bytes(tc.name().path().segments_slice()[0].source_ref()),
-      b"Item"
-    );
+    assert!("Item".equivalent(tc.name().path().segments_slice()[0].source_ref()));
     assert!(tc.name().type_generics().is_some());
   }
   accept_all!(

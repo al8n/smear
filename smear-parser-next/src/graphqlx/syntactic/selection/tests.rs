@@ -7,7 +7,7 @@
 //! GraphQLx-specific rows: generic fragment spreads and generic type conditions.
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{field, selection, selection_set};
 use crate::graphqlx::error::GraphqlxErrors;
@@ -77,19 +77,13 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── field ───────────────────────────────────────────────────────────────────
 
 #[test]
 fn field_plain_aliased_and_full() {
   fn plain<S: AsRef<[u8]>>(f: crate::graphqlx::ast::Field<S>) {
     assert!(f.alias().is_none());
-    assert_eq!(bytes(f.name().source_ref()), b"id");
+    assert!("id".equivalent(f.name().source_ref()));
     assert!(f.arguments().is_none());
     assert!(f.selection_set().is_none());
   }
@@ -98,8 +92,8 @@ fn field_plain_aliased_and_full() {
   // Fixture `0022`: `typename: __typename` — the two-name alias lookahead.
   fn aliased<S: AsRef<[u8]>>(f: crate::graphqlx::ast::Field<S>) {
     let alias = f.alias().expect("alias present");
-    assert_eq!(bytes(alias.name().source_ref()), b"typename");
-    assert_eq!(bytes(f.name().source_ref()), b"__typename");
+    assert!("typename".equivalent(alias.name().source_ref()));
+    assert!("__typename".equivalent(f.name().source_ref()));
   }
   accept_all!(field, "typename: __typename", aliased);
 
@@ -147,10 +141,7 @@ fn fragment_spread_with_generic_arguments() {
   fn check<S: AsRef<[u8]>>(s: crate::graphqlx::ast::Selection<S>) {
     let spread = s.unwrap_fragment_spread();
     let name = spread.name();
-    assert_eq!(
-      bytes(name.path().segments_slice()[0].source_ref()),
-      b"ConnectionFields"
-    );
+    assert!("ConnectionFields".equivalent(name.path().segments_slice()[0].source_ref()));
     let generics = name.type_generics().expect("generic arguments present");
     assert_eq!(generics.params().len(), 2);
   }
@@ -174,10 +165,7 @@ fn inline_fragment_generic_type_condition() {
   fn check<S: AsRef<[u8]>>(s: crate::graphqlx::ast::Selection<S>) {
     let inline = s.unwrap_inline_fragment();
     let tc = inline.type_condition().expect("type condition present");
-    assert_eq!(
-      bytes(tc.name().path().segments_slice()[0].source_ref()),
-      b"Document"
-    );
+    assert!("Document".equivalent(tc.name().path().segments_slice()[0].source_ref()));
     assert!(tc.name().type_generics().is_some());
   }
   accept_all!(selection, "... on Document<T> { title }", check);
