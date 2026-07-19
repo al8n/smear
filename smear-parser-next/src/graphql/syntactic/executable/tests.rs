@@ -8,7 +8,7 @@
 //! is not (see the module deviation note).
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{
   executable_definition, executable_document, fragment_definition, operation_definition,
@@ -87,19 +87,13 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── variable_definition ─────────────────────────────────────────────────────
 
 #[test]
 fn variable_definition_accepts_minimal() {
   fn check<S: AsRef<[u8]>>(v: DescribedVariableDefinition<S>) {
     assert!(v.description().is_none());
-    assert_eq!(bytes(v.variable().name().source_ref()), b"x");
+    assert!("x".equivalent(v.variable().name().source_ref()));
     assert!(v.default_value().is_none());
     assert!(v.directives().is_none());
   }
@@ -120,7 +114,7 @@ fn variable_definition_accepts_default_and_directives() {
 fn variable_definition_accepts_inline_description() {
   fn check<S: AsRef<[u8]>>(v: DescribedVariableDefinition<S>) {
     assert!(v.description().is_some());
-    assert_eq!(bytes(v.variable().name().source_ref()), b"id");
+    assert!("id".equivalent(v.variable().name().source_ref()));
   }
   accept_all!(variable_definition, "\"the id\" $id: ID!", check);
 }
@@ -196,7 +190,7 @@ fn operation_definition_accepts_named_query() {
   fn check<S: AsRef<[u8]>>(op: OperationDefinition<S>) {
     let named = op.unwrap_named_ref();
     assert!(named.operation_type().is_query());
-    assert_eq!(bytes(named.name().expect("name").source_ref()), b"GetUser");
+    assert!("GetUser".equivalent(named.name().expect("name").source_ref()));
     assert!(named.variable_definitions().is_some());
     assert!(named.directives().is_some());
     assert_eq!(named.selection_set().selections().len(), 1);
@@ -235,7 +229,7 @@ fn operation_definition_allows_on_as_name_deviation() {
   // accepted (spec-correct). Frozen excludes it via `!peek_keyword("on")`.
   fn check<S: AsRef<[u8]>>(op: OperationDefinition<S>) {
     let named = op.unwrap_named_ref();
-    assert_eq!(bytes(named.name().expect("name").source_ref()), b"on");
+    assert!("on".equivalent(named.name().expect("name").source_ref()));
   }
   accept_all!(operation_definition, "query on { id }", check);
 }
@@ -252,8 +246,8 @@ fn operation_definition_rejects_bad_type_or_missing_set() {
 #[test]
 fn fragment_definition_accepts() {
   fn check<S: AsRef<[u8]>>(f: FragmentDefinition<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"UserFields");
-    assert_eq!(bytes(f.type_condition().name().source_ref()), b"User");
+    assert!("UserFields".equivalent(f.name().source_ref()));
+    assert!("User".equivalent(f.type_condition().name().source_ref()));
     assert!(f.directives().is_none());
     assert_eq!(f.selection_set().selections().len(), 2);
   }
@@ -304,10 +298,10 @@ fn fragment_named_on_error_per_spec() {
   // (the `enum_value` exclusions do not cross over), and a type NAMED `on` is legal
   // (`NamedType` carries no exclusion).
   fn named_true<S: AsRef<[u8]>>(f: FragmentDefinition<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"true");
+    assert!("true".equivalent(f.name().source_ref()));
   }
   fn on_typed<S: AsRef<[u8]>>(f: FragmentDefinition<S>) {
-    assert_eq!(bytes(f.type_condition().name().source_ref()), b"on");
+    assert!("on".equivalent(f.type_condition().name().source_ref()));
   }
   accept_all!(
     fragment_definition,

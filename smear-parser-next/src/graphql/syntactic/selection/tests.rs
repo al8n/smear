@@ -9,7 +9,7 @@
 //! rejects per the spec-cardinality rule (plan Amendment 2).
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{field, selection, selection_set};
 use crate::graphql::{
@@ -82,19 +82,13 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── field ─────────────────────────────────────────────────────────────────────
 
 #[test]
 fn field_accepts_bare_name() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
     assert!(f.alias().is_none());
-    assert_eq!(bytes(f.name().source_ref()), b"name");
+    assert!("name".equivalent(f.name().source_ref()));
     assert!(f.arguments().is_none());
     assert!(f.directives().is_none());
     assert!(f.selection_set().is_none());
@@ -107,8 +101,8 @@ fn field_accepts_bare_name() {
 fn field_accepts_alias() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
     let alias = f.alias().expect("alias present");
-    assert_eq!(bytes(alias.name().source_ref()), b"user");
-    assert_eq!(bytes(f.name().source_ref()), b"profile");
+    assert!("user".equivalent(alias.name().source_ref()));
+    assert!("profile".equivalent(f.name().source_ref()));
   }
   accept_all!(field, "user: profile", check);
 }
@@ -116,7 +110,7 @@ fn field_accepts_alias() {
 #[test]
 fn field_accepts_arguments_and_directives() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"user");
+    assert!("user".equivalent(f.name().source_ref()));
     assert_eq!(f.arguments().expect("args").arguments().len(), 1);
     assert_eq!(f.directives().expect("dirs").directives().len(), 1);
   }
@@ -135,8 +129,8 @@ fn field_accepts_nested_selection_set() {
 #[test]
 fn field_accepts_alias_with_everything() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
-    assert_eq!(bytes(f.alias().expect("alias").name().source_ref()), b"u");
-    assert_eq!(bytes(f.name().source_ref()), b"user");
+    assert!("u".equivalent(f.alias().expect("alias").name().source_ref()));
+    assert!("user".equivalent(f.name().source_ref()));
     assert!(f.arguments().is_some());
     assert!(f.directives().is_some());
     assert_eq!(f.selection_set().expect("ss").selections().len(), 1);
@@ -171,7 +165,7 @@ fn selection_dispatches_field() {
 fn selection_dispatches_fragment_spread() {
   fn check<S: AsRef<[u8]>>(s: Selection<S>) {
     let fs = s.unwrap_fragment_spread_ref();
-    assert_eq!(bytes(fs.name().source_ref()), b"UserFields");
+    assert!("UserFields".equivalent(fs.name().source_ref()));
   }
   accept_all!(selection, "...UserFields", check);
 }
@@ -190,7 +184,7 @@ fn selection_dispatches_inline_fragment_with_type_condition() {
   fn check<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert_eq!(bytes(tc.name().source_ref()), b"User");
+    assert!("User".equivalent(tc.name().source_ref()));
     assert_eq!(ifr.selection_set().selections().len(), 1);
   }
   accept_all!(selection, "... on User { id }", check);
@@ -255,12 +249,12 @@ fn fragment_spread_named_on_is_unrepresentable() {
   fn tc_x<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert_eq!(bytes(tc.name().source_ref()), b"X");
+    assert!("X".equivalent(tc.name().source_ref()));
   }
   fn tc_on<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert_eq!(bytes(tc.name().source_ref()), b"on");
+    assert!("on".equivalent(tc.name().source_ref()));
   }
   accept_all!(selection, "... on X { f }", tc_x);
   accept_all!(selection, "... on on { f }", tc_on);

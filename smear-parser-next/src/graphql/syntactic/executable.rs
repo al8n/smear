@@ -68,8 +68,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, fragment_name, ident,
-    try_description, try_ident,
+    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon,
+    fragment_name, ident, try_description, try_ident,
   },
   graphql::{
     ast::{
@@ -123,10 +123,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -187,10 +186,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -229,9 +227,8 @@ pub fn operation_type<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: KeywordToken<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -270,10 +267,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -327,10 +323,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -364,10 +359,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -412,10 +406,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -455,10 +448,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

@@ -204,8 +204,11 @@ where
 /// Returns `true` for the one spelling the spec excludes from `FragmentName`:
 /// `on`.
 #[inline]
-fn is_excluded_from_fragment_name(text: &[u8]) -> bool {
-  matches!(text, b"on")
+fn is_excluded_from_fragment_name<S>(text: &S) -> bool
+where
+  S: Equivalent<str>,
+{
+  text.equivalent("on")
 }
 
 /// Commits to a `FragmentName`: a `Name` that is not `on`. This is the other of
@@ -231,13 +234,13 @@ where
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
 {
   match inp.next()? {
     Some(spanned) => {
       if spanned.data().is_identifier() {
         let text = inp.slice();
-        if is_excluded_from_fragment_name(text.as_ref()) {
+        if is_excluded_from_fragment_name(&text) {
           let (span, tok) = spanned.into_components();
           Err(UnexpectedToken::of(span).with_found(tok).into())
         } else {
