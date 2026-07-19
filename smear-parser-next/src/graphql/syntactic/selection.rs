@@ -25,25 +25,13 @@
 //! selection is committed before the `list_of` rest, so an empty `{}` errors — a
 //! documented deviation from the frozen parser, whose `while` loop accepted it. The
 //! regression is `selection_set_empty_braces_error_per_spec`.
-//!
-//! # Node placement
-//!
-//! [`field`] retro-wraps `K::Field` around the whole field and, when a `:` follows
-//! the first name, `K::Alias` around that name and colon — both content-dependent
-//! (Amendment 1), so both use the manual `cst_mark`/`cst_start_at`/`cst_finish`
-//! idiom rather than [`node`]. The fragment fork retro-wraps
-//! `K::FragmentSpread`/`K::InlineFragment` likewise, since the node kind is only
-//! known after the lookahead. [`selection_set`] opens `K::SelectionSet` up front
-//! with [`node`] over the `braces` region. [`selection`] itself opens no node — the
-//! committed arm's own node kind is the selection's, per the sum-type convention.
 
 use smear_lexer::{LitBlockStr, LitInlineStr};
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{braces, list_of, node},
+  parser::{braces, list_of},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
   utils::IntoComponents,
@@ -52,13 +40,12 @@ use tokora::{
 use super::{argument::arguments, directive::directives, peeks_where};
 use crate::{
   combinator::{
-    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, SliceOf, fragment_name, ident, spread,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, fragment_name, ident, spread,
     try_colon,
   },
   graphql::{
     ast::{Field, FragmentName, Name, Selection, SelectionSet},
     keyword::try_on,
-    kinds::SyntaxKind as K,
   },
 };
 
@@ -84,25 +71,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
-  // Speculative alias mark: minted before the first name so `K::Alias` can wrap the
-  // name and colon retroactively if a `:` follows; left unspent (no node) otherwise.
-  let alias_mark = inp.emitter().cst_mark();
   let (name1_span, name1_src) = ident(inp)?.into_components();
   let name1 = Name::new(name1_span, name1_src);
   let (alias, name) = match try_colon(inp)? {
     ParseAttempt::Accept(_colon) => {
       let alias_span = inp.span_since(&cursor);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(alias_mark, K::Alias.raw());
-      emitter.cst_finish();
       let (name2_span, name2_src) = ident(inp)?.into_components();
       (
         Some(scaffold::Alias::new(alias_span, name1)),
@@ -120,17 +100,13 @@ where
   };
   let span = inp.span_since(&cursor);
   let field = scaffold::Field::new(span, alias, name, args, dirs, ss);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Field.raw());
-  emitter.cst_finish();
   Ok(field.into())
 }
 
 /// Parses a `Selection` — a field, a fragment spread, or an inline fragment.
 ///
 /// One-token dispatch: a non-`...` head is a [`field`]; a `...` head hands off to
-/// the fragment fork (`spread_selection`). No wrapper node of its own — the
-/// committed arm's kind is the selection's (sum-type convention).
+/// the fragment fork (`spread_selection`).
 ///
 /// Spec: [Selection](https://spec.graphql.org/draft/#Selection).
 pub fn selection<'inp, L, Ctx, Lang>(
@@ -148,7 +124,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -163,8 +139,7 @@ where
 
 /// The `...` fork of [`selection`]: consumes the spread, then disambiguates on a
 /// one-token lookahead into an `InlineFragment` (with or without a type condition)
-/// or a `FragmentSpread`, retro-wrapping the resolved node kind over the whole
-/// region (`...` included).
+/// or a `FragmentSpread`.
 fn spread_selection<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Selection<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -180,13 +155,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   spread(inp)?;
   match try_on(inp)? {
@@ -200,9 +174,6 @@ where
       let dirs = directives(inp)?;
       let ss = selection_set(inp)?;
       let span = inp.span_since(&cursor);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::InlineFragment.raw());
-      emitter.cst_finish();
       Ok(Selection::InlineFragment(scaffold::InlineFragment::new(
         span,
         Some(tc),
@@ -218,9 +189,6 @@ where
         let dirs = directives(inp)?;
         let ss = selection_set(inp)?;
         let span = inp.span_since(&cursor);
-        let emitter = inp.emitter();
-        emitter.cst_start_at(mark, K::InlineFragment.raw());
-        emitter.cst_finish();
         Ok(Selection::InlineFragment(scaffold::InlineFragment::new(
           span, None, dirs, ss,
         )))
@@ -233,9 +201,6 @@ where
         let fname = FragmentName::new(name_span, name_src);
         let dirs = directives(inp)?;
         let span = inp.span_since(&cursor);
-        let emitter = inp.emitter();
-        emitter.cst_start_at(mark, K::FragmentSpread.raw());
-        emitter.cst_finish();
         Ok(Selection::FragmentSpread(scaffold::FragmentSpread::new(
           span, fname, dirs,
         )))
@@ -267,24 +232,20 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  node(
-    K::SelectionSet.raw(),
-    braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-      // Spec cardinality (`Selection+`): the first selection is committed, so an
-      // empty `{}` errors at the `}` exactly as the committed selection reports it.
-      let first = selection(inp)?;
-      let mut items = list_of(selection, <L::Token as PunctuatorTokenExt>::is_close_brace)(inp)?;
-      items.insert(0, first);
-      Ok(items)
-    }),
-  )
-  .parse_input(inp)
+  braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    // Spec cardinality (`Selection+`): the first selection is committed, so an
+    // empty `{}` errors at the `}` exactly as the committed selection reports it.
+    let first = selection(inp)?;
+    let mut items = list_of(selection, <L::Token as PunctuatorTokenExt>::is_close_brace)(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)
   .map(|delimited| {
     let (span, _open, _close, sels) = delimited.into_components();
     scaffold::SelectionSet::new(span, sels)
