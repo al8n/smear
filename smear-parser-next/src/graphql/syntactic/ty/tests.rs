@@ -8,7 +8,7 @@
 //! inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan};
+use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::ty;
 use crate::graphql::{
@@ -81,19 +81,13 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── NamedType ────────────────────────────────────────────────────────────────
 
 #[test]
 fn named_type_accepts() {
   fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
     let nt = t.unwrap_name();
-    assert_eq!(bytes(nt.name().source_ref()), b"Foo");
+    assert!("Foo".equivalent(nt.name().source_ref()));
     assert!(!nt.required());
     assert_eq!(*nt.span(), SimpleSpan::new(0, 3));
   }
@@ -104,7 +98,7 @@ fn named_type_accepts() {
 fn named_type_non_null_accepts() {
   fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
     let nt = t.unwrap_name();
-    assert_eq!(bytes(nt.name().source_ref()), b"Foo");
+    assert!("Foo".equivalent(nt.name().source_ref()));
     assert!(nt.required());
     assert_eq!(*nt.span(), SimpleSpan::new(0, 4));
   }
@@ -131,7 +125,7 @@ fn list_type_accepts() {
     assert!(!lt.required());
     assert_eq!(*lt.span(), SimpleSpan::new(0, 5));
     let inner = lt.ty().unwrap_name_ref();
-    assert_eq!(bytes(inner.name().source_ref()), b"Foo");
+    assert!("Foo".equivalent(inner.name().source_ref()));
     assert!(!inner.required());
   }
   accept_all!(ty, "[Foo]", check);
@@ -176,7 +170,7 @@ fn doubly_nested_list_type() {
     let outer = t.unwrap_list();
     let middle = outer.ty().unwrap_list_ref();
     let inner = middle.ty().unwrap_name_ref();
-    assert_eq!(bytes(inner.name().source_ref()), b"Foo");
+    assert!("Foo".equivalent(inner.name().source_ref()));
   }
   accept_all!(ty, "[[Foo]]", check);
 }

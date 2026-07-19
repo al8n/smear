@@ -7,7 +7,7 @@
 //! `parse_directive`/`parse_directives` verdicts for the same inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{const_directive, const_directives, directive, directives};
 use crate::graphql::{
@@ -80,18 +80,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── directive ───────────────────────────────────────────────────────────────
 
 #[test]
 fn directive_accepts_without_arguments() {
   fn check<S: AsRef<[u8]>>(d: Directive<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"deprecated");
+    assert!("deprecated".equivalent(d.name().source_ref()));
     assert!(d.arguments().is_none());
     assert_eq!(d.span().start(), 0);
   }
@@ -101,10 +95,10 @@ fn directive_accepts_without_arguments() {
 #[test]
 fn directive_accepts_with_arguments() {
   fn check<S: AsRef<[u8]>>(d: Directive<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"include");
+    assert!("include".equivalent(d.name().source_ref()));
     let args = d.arguments().expect("present");
     assert_eq!(args.arguments().len(), 1);
-    assert_eq!(bytes(args.arguments()[0].name().source_ref()), b"if");
+    assert!("if".equivalent(args.arguments()[0].name().source_ref()));
   }
   accept_all!(directive, "@include(if: true)", check);
 }
@@ -131,7 +125,7 @@ fn directive_rejects_malformed_arguments() {
 #[test]
 fn const_directive_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(d: ConstDirective<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"d");
+    assert!("d".equivalent(d.name().source_ref()));
   }
   accept_all!(const_directive, "@d(x: 1)", check);
   reject_all!(const_directive, "@d(x: $v)");
@@ -144,7 +138,7 @@ fn directives_accepts_single() {
   fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
     let ds = ds.expect("present");
     assert_eq!(ds.directives().len(), 1);
-    assert_eq!(bytes(ds.directives()[0].name().source_ref()), b"deprecated");
+    assert!("deprecated".equivalent(ds.directives()[0].name().source_ref()));
   }
   accept_all!(directives, "@deprecated", check);
 }
@@ -154,8 +148,8 @@ fn directives_accepts_multiple() {
   fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
     let ds = ds.expect("present");
     assert_eq!(ds.directives().len(), 2);
-    assert_eq!(bytes(ds.directives()[0].name().source_ref()), b"a");
-    assert_eq!(bytes(ds.directives()[1].name().source_ref()), b"b");
+    assert!("a".equivalent(ds.directives()[0].name().source_ref()));
+    assert!("b".equivalent(ds.directives()[1].name().source_ref()));
   }
   accept_all!(directives, "@a @b", check);
 }

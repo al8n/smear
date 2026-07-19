@@ -35,7 +35,7 @@ use tokora::{
 };
 
 use crate::{
-  combinator::{ErrorOf, ParseCtx, SliceOf, ident, try_bang},
+  combinator::{AssemblyCtx, ErrorOf, ParseCtx, SliceOf, ident, try_bang},
   graphql::{
     ast::{Name, Type},
     kinds::SyntaxKind as K,
@@ -118,9 +118,8 @@ fn list_type_body<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -167,9 +166,8 @@ pub fn ty<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

@@ -7,7 +7,7 @@
 //! verdicts for the same inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{argument, arguments, const_argument, const_arguments};
 use crate::graphql::{
@@ -80,18 +80,12 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── argument ────────────────────────────────────────────────────────────────
 
 #[test]
 fn argument_accepts() {
   fn check<S: AsRef<[u8]>>(a: Argument<S>) {
-    assert_eq!(bytes(a.name().source_ref()), b"x");
+    assert!("x".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
     assert_eq!(a.span().start(), 0);
   }
@@ -137,7 +131,7 @@ fn argument_rejects_missing_name() {
 #[test]
 fn const_argument_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(a: ConstArgument<S>) {
-    assert_eq!(bytes(a.name().source_ref()), b"k");
+    assert!("k".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
   }
   accept_all!(const_argument, "k: 1", check);
@@ -151,7 +145,7 @@ fn arguments_accepts_single() {
   fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
     let args = a.expect("present");
     assert_eq!(args.arguments().len(), 1);
-    assert_eq!(bytes(args.arguments()[0].name().source_ref()), b"x");
+    assert!("x".equivalent(args.arguments()[0].name().source_ref()));
   }
   accept_all!(arguments, "(x: 1)", check);
 }
@@ -161,8 +155,8 @@ fn arguments_accepts_multiple() {
   fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
     let args = a.expect("present");
     assert_eq!(args.arguments().len(), 2);
-    assert_eq!(bytes(args.arguments()[0].name().source_ref()), b"a");
-    assert_eq!(bytes(args.arguments()[1].name().source_ref()), b"b");
+    assert!("a".equivalent(args.arguments()[0].name().source_ref()));
+    assert!("b".equivalent(args.arguments()[1].name().source_ref()));
   }
   accept_all!(arguments, "(a: 1, b: 2)", check);
 }
