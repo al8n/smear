@@ -29,30 +29,13 @@
 //! pipe/amp lists — [`implements`] (`&`), [`union_members`] (`|`),
 //! [`directive_locations`] (`|`) — use [`separated1`]
 //! with `allow_leading` (already non-empty in frozen via `at_least(1)`).
-//!
-//! # Node placement
-//!
-//! Definitions retro-wrap their kind after the body settles (Amendment 1: content is
-//! not known up front). The description-carrying productions ([`input_value_definition`],
-//! [`field_definition`], [`enum_value_definition`]) mint the definition mark first, then
-//! an inner `K::Description` node via [`description`], so the description lands inside
-//! the definition node. The optional list clauses ([`fields_definition`],
-//! [`input_fields_definition`], [`enum_values_definition`], [`implements`],
-//! [`union_members`]) mint the mark before the attempt and spend it only when the clause
-//! is actually present. The committed delimited regions ([`arguments_definition`],
-//! [`root_operation_types_definition`]) open their kind up front with
-//! [`node`] over the delimiter shape. [`type_definition`] adds no
-//! wrapper of its own beyond the resolved arm's kind (sum-type convention), spent by a
-//! content-dependent retro-wrap once the dispatch reveals which arm; [`described_type_definition`]
-//! reuses that dispatch with a leading description landing inside the same node.
 
 use smear_lexer::{LitBlockStr, LitInlineStr, keywords};
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{braces, list_of, node, parens, try_braces},
+  parser::{braces, list_of, parens, try_braces},
   punct::{Ampersand, Pipe},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
@@ -65,8 +48,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at,
-    colon, enum_value, ident, separated1, try_description, try_equal,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at, colon,
+    enum_value, ident, separated1, try_description, try_equal,
   },
   graphql::{
     ast::{
@@ -82,14 +65,13 @@ use crate::{
       schema, try_enum, try_implements, try_input, try_interface, try_repeatable, try_scalar,
       try_type, try_union, r#type as type_kw, union,
     },
-    kinds::SyntaxKind as K,
   },
 };
 
 // ─── shared leaf/error helpers ───────────────────────────────────────────────
 
 /// Parses a bare `Name`, the item shape the `implements` and union-member clauses
-/// separate. No node: a name is a leaf token (the enclosing clause carries the node).
+/// separate.
 fn name<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Name<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -129,14 +111,8 @@ where
 
 // ─── description ─────────────────────────────────────────────────────────────
 
-/// Parses an optional leading `Description` (a string literal), retro-wrapping it as a
-/// `K::Description` node when present and declining to `None` (no tokens consumed)
-/// otherwise.
-///
-/// The description-carrying definitions call this first, minting their own definition
-/// mark before it, so the `K::Description` node nests inside the definition node.
-/// Content is optional, so this uses the manual retro-wrap (Amendment 1) rather than
-/// [`node_opt`](tokora::parser::node_opt).
+/// Parses an optional leading `Description` (a string literal), declining to `None`
+/// (no tokens consumed) otherwise.
 ///
 /// Spec: [Description](https://spec.graphql.org/draft/#Description).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production;
@@ -152,19 +128,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  let mark = inp.emitter().cst_mark();
   match try_description(inp)? {
     Some((lit, dspan)) => {
       let value = match lit {
         StringLiteral::Inline(inline) => StringValue::new(dspan, inline.into()),
         StringLiteral::Block(block) => StringValue::new(dspan, block.into()),
       };
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::Description.raw());
-      emitter.cst_finish();
       Ok(Some(value))
     }
     None => Ok(None),
@@ -193,14 +165,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
   let name = name(inp)?;
@@ -211,9 +182,6 @@ where
   let span = inp.span_since(&cursor);
   let inner = scaffold::InputValueDefinition::new(span, name, ty, default, dirs);
   let described = scaffold::Described::new(span, desc, inner);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::InputValueDefinition.raw());
-  emitter.cst_finish();
   Ok(described)
 }
 
@@ -240,26 +208,22 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  node(
-    K::ArgumentsDefinition.raw(),
-    parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-      let first = input_value_definition(inp)?;
-      let mut items = list_of(
-        input_value_definition,
-        <L::Token as PunctuatorTokenExt>::is_close_paren,
-      )(inp)?;
-      items.insert(0, first);
-      Ok(items)
-    }),
-  )
-  .parse_input(inp)
+  parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    let first = input_value_definition(inp)?;
+    let mut items = list_of(
+      input_value_definition,
+      <L::Token as PunctuatorTokenExt>::is_close_paren,
+    )(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)
   .map(|delimited| {
     let (span, _open, _close, items) = delimited.into_components();
     scaffold::ArgumentsDefinition::new(span, items)
@@ -288,7 +252,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -324,14 +288,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
   let name = name(inp)?;
@@ -342,9 +305,6 @@ where
   let span = inp.span_since(&cursor);
   let inner = scaffold::FieldDefinition::new(span, name, args, ty, dirs);
   let described = scaffold::Described::new(span, desc, inner);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::FieldDefinition.raw());
-  emitter.cst_finish();
   Ok(described)
 }
 
@@ -373,14 +333,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     let first = field_definition(inp)?;
     let mut items = list_of(
@@ -394,9 +353,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, items) = delimited.into_components();
       let fields = scaffold::FieldsDefinition::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::FieldsDefinition.raw());
-      emitter.cst_finish();
       Ok(Some(fields))
     }
     None => Ok(None),
@@ -428,14 +384,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     let first = input_value_definition(inp)?;
     let mut items = list_of(
@@ -449,9 +404,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, items) = delimited.into_components();
       let fields = scaffold::InputFieldsDefinition::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::InputFieldsDefinition.raw());
-      emitter.cst_finish();
       Ok(Some(fields))
     }
     None => Ok(None),
@@ -476,13 +428,12 @@ pub fn implements<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   match try_implements(inp)? {
     ParseAttempt::Accept(_kw) => {
@@ -492,9 +443,6 @@ where
       )(inp)?;
       let span = inp.span_since(&cursor);
       let clause = scaffold::ImplementInterfaces::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::ImplementsInterfaces.raw());
-      emitter.cst_finish();
       Ok(Some(clause))
     }
     ParseAttempt::Decline => Ok(None),
@@ -517,13 +465,12 @@ pub fn union_members<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   match try_equal(inp)? {
     ParseAttempt::Accept(_eq) => {
@@ -533,9 +480,6 @@ where
       )(inp)?;
       let span = inp.span_since(&cursor);
       let clause = scaffold::UnionMemberTypes::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::UnionMemberTypes.raw());
-      emitter.cst_finish();
       Ok(Some(clause))
     }
     ParseAttempt::Decline => Ok(None),
@@ -621,14 +565,13 @@ pub fn directive_locations<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: AsRef<[u8]>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let items = separated1::<Pipe<(), (), Lang>, _, _, _, _, _, _>(
     location,
@@ -636,9 +579,6 @@ where
   )(inp)?;
   let span = inp.span_since(&cursor);
   let clause = scaffold::DirectiveLocations::new(span, items);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::DirectiveLocations.raw());
-  emitter.cst_finish();
   Ok(clause)
 }
 
@@ -671,14 +611,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
   // Headline deviation: the `enum_value` atom excludes `true`/`false`/`null`.
@@ -688,9 +627,6 @@ where
   let span = inp.span_since(&cursor);
   let inner = scaffold::EnumValueDefinition::new(span, name, dirs);
   let described = scaffold::Described::new(span, desc, inner);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumValueDefinition.raw());
-  emitter.cst_finish();
   Ok(described)
 }
 
@@ -719,14 +655,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     let first = enum_value_definition(inp)?;
     let mut items = list_of(
@@ -740,9 +675,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, items) = delimited.into_components();
       let values = scaffold::EnumValuesDefinition::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::EnumValuesDefinition.raw());
-      emitter.cst_finish();
       Ok(Some(values))
     }
     None => Ok(None),
@@ -760,22 +692,18 @@ pub fn root_operation_type_definition<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let op = operation_type(inp)?;
   colon(inp)?;
   let name = name(inp)?;
   let span = inp.span_since(&cursor);
   let def = scaffold::RootOperationTypeDefinition::new(span, op, name);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::RootOperationTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -792,25 +720,21 @@ pub fn root_operation_types_definition<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  node(
-    K::RootOperationTypeDefinitions.raw(),
-    braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-      let first = root_operation_type_definition(inp)?;
-      let mut items = list_of(
-        root_operation_type_definition,
-        <L::Token as PunctuatorTokenExt>::is_close_brace,
-      )(inp)?;
-      items.insert(0, first);
-      Ok(items)
-    }),
-  )
-  .parse_input(inp)
+  braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    let first = root_operation_type_definition(inp)?;
+    let mut items = list_of(
+      root_operation_type_definition,
+      <L::Token as PunctuatorTokenExt>::is_close_brace,
+    )(inp)?;
+    items.insert(0, first);
+    Ok(items)
+  })(inp)
   .map(|delimited| {
     let (span, _open, _close, items) = delimited.into_components();
     scaffold::RootOperationTypesDefinition::new(span, items)
@@ -820,7 +744,7 @@ where
 // ─── type-definition bodies (after the leading keyword) ──────────────────────
 
 /// Parses a scalar type definition's body after its `scalar` keyword, spanning from
-/// `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// `kw_start`.
 fn scalar_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -837,7 +761,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -852,7 +776,7 @@ where
 }
 
 /// Parses an object type definition's body after its `type` keyword, spanning from
-/// `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// `kw_start`.
 fn object_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -869,7 +793,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -888,7 +812,7 @@ where
 }
 
 /// Parses an interface type definition's body after its `interface` keyword, spanning
-/// from `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// from `kw_start`.
 fn interface_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -905,7 +829,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -924,7 +848,7 @@ where
 }
 
 /// Parses a union type definition's body after its `union` keyword, spanning from
-/// `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// `kw_start`.
 fn union_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -941,7 +865,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -959,7 +883,7 @@ where
 }
 
 /// Parses an enum type definition's body after its `enum` keyword, spanning from
-/// `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// `kw_start`.
 fn enum_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -976,7 +900,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -992,7 +916,7 @@ where
 }
 
 /// Parses an input object type definition's body after its `input` keyword, spanning
-/// from `kw_start`. No node: the caller retro-wraps the resolved kind.
+/// from `kw_start`.
 fn input_object_after_kw<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   kw_start: usize,
@@ -1009,7 +933,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -1046,19 +970,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = scalar(inp)?;
   let def = scalar_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ScalarTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1081,19 +1001,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = type_kw(inp)?;
   let def = object_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ObjectTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1116,19 +1032,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = interface(inp)?;
   let def = interface_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::InterfaceTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1150,19 +1062,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = union(inp)?;
   let def = union_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::UnionTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1184,19 +1092,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = enum_kw(inp)?;
   let def = enum_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1219,19 +1123,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = input_kw(inp)?;
   let def = input_object_after_kw(inp, kw.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::InputObjectTypeDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1257,14 +1157,13 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + AsRef<[u8]> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   directive_kw(inp)?;
   at(inp)?;
@@ -1275,9 +1174,6 @@ where
   let locations = directive_locations(inp)?;
   let span = inp.span_since(&cursor);
   let def = scaffold::DirectiveDefinition::new(span, name, args, repeatable, locations);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::DirectiveDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -1299,31 +1195,26 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   schema(inp)?;
   let dirs = const_directives(inp)?;
   let ops = root_operation_types_definition(inp)?;
   let span = inp.span_since(&cursor);
   let def = scaffold::SchemaDefinition::new(span, dirs, ops);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::SchemaDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
 // ─── type-definition dispatch ────────────────────────────────────────────────
 
 /// Dispatches on the leading soft keyword to the matching type-definition body,
-/// consuming the keyword through the declining `try_*` atoms. No node: the caller
-/// retro-wraps the resolved arm's kind (sum-type convention).
+/// consuming the keyword through the declining `try_*` atoms.
 #[allow(clippy::type_complexity)]
 fn dispatch_type_definition<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
@@ -1340,7 +1231,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -1368,24 +1259,8 @@ where
   unexpected(inp)
 }
 
-/// The `K::…` kind the resolved [`TypeDefinition`] arm materializes as.
-fn type_definition_kind<S, Ty>(def: &TypeDefinition<S, Ty>) -> u16 {
-  match def {
-    TypeDefinition::Scalar(_) => K::ScalarTypeDefinition.raw(),
-    TypeDefinition::Object(_) => K::ObjectTypeDefinition.raw(),
-    TypeDefinition::Interface(_) => K::InterfaceTypeDefinition.raw(),
-    TypeDefinition::Union(_) => K::UnionTypeDefinition.raw(),
-    TypeDefinition::Enum(_) => K::EnumTypeDefinition.raw(),
-    TypeDefinition::InputObject(_) => K::InputObjectTypeDefinition.raw(),
-  }
-}
-
 /// Parses a `TypeDefinition` by dispatching on the leading soft keyword
 /// (`scalar`/`type`/`interface`/`union`/`enum`/`input`).
-///
-/// No wrapper node of its own beyond the resolved arm's kind (sum-type convention):
-/// the dispatch reveals which arm, and the mark — minted before the keyword — is spent
-/// as that arm's kind (content-dependent retro-wrap, Amendment 1).
 ///
 /// Spec: [TypeDefinition](https://spec.graphql.org/draft/#TypeDefinition).
 pub fn type_definition<'inp, L, Ctx, Lang>(
@@ -1403,27 +1278,17 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
-  let def = dispatch_type_definition(inp)?;
-  let kind = type_definition_kind(&def);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, kind);
-  emitter.cst_finish();
-  Ok(def)
+  dispatch_type_definition(inp)
 }
 
-/// Parses a `TypeDefinition` preceded by an optional `Description`, the described
-/// dispatch the plan's node-placement convention calls the described-definition
-/// retro-wrap: mark first, then the description (a `K::Description` node), then the
-/// keyword dispatch, then the resolved arm's kind spent over the whole region — so the
-/// description lands inside the definition node.
+/// Parses a `TypeDefinition` preceded by an optional `Description`.
 ///
 /// Spec: [TypeDefinition](https://spec.graphql.org/draft/#TypeDefinition) (described).
 // The `Result<Described<…>, …>` return is inherent to this generic production;
@@ -1447,22 +1312,17 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
   let def = dispatch_type_definition(inp)?;
-  let kind = type_definition_kind(&def);
   let span = inp.span_since(&cursor);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, kind);
-  emitter.cst_finish();
   Ok(scaffold::Described::new(span, desc, def))
 }
 
