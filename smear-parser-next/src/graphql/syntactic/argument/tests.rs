@@ -199,6 +199,28 @@ fn arguments_rejects_malformed_argument() {
   reject_all!(arguments, "(x 1)");
 }
 
+#[test]
+fn arguments_ident_without_colon_errors_at_close_check() {
+  // The list body decides per the two-token FIRST set `Name ':'` (plan Amendment 7).
+  // A bare identifier with no following colon — `(foo)` — does not satisfy the
+  // decision, so the list stops with zero arguments and the `.delimited::<Paren>()`
+  // close-check reports the unexpected `foo` where `)` was expected: an
+  // unexpected-token error at the close-check, not an argument that then fails on a
+  // missing colon.
+  reject_all!(arguments, "(foo)");
+  let is_unexpected = |src: &str| match drive_str(|inp| arguments(inp).map(|_| ()), src) {
+    Err(errs) => errs
+      .into_iter()
+      .next()
+      .is_some_and(|e| e.data().is_unexpected_token()),
+    Ok(()) => false,
+  };
+  assert!(
+    is_unexpected("(foo)"),
+    "`(foo)` should be an unexpected-token error at the delimiter close-check"
+  );
+}
+
 // ─── const_arguments ─────────────────────────────────────────────────────────
 
 #[test]
