@@ -7,42 +7,161 @@
 //! error they name, not by the marker — so the entry runner pins the dialect marker
 //! when it drives them.
 //!
+//! # Committed / attempt pairs
+//!
+//! Following the tokora `json.rs` example, every value production comes as a
+//! committed form and a declining `try_` twin. The committed form consumes and
+//! errors on a wrong head; the `try_` twin obeys the position law — on decline (or
+//! on a multi-token head that does not fully match) it leaves the cursor at its
+//! original position, transactionally (via [`InputRef::attempt`](tokora::InputRef)
+//! for multi-token heads). The committed dispatchers [`value`]/[`const_value`]
+//! *derive* from their attempt twins [`try_value`]/[`try_const_value`]: the twin
+//! peeks the head and runs the committed arm, and the committed form maps a decline
+//! into the shared unexpected-value error.
+//!
 //! # Dispatch discipline
 //!
-//! [`value`] and [`const_value`] peek the next token's kind **once** and match into
-//! committed arms — jump-table style — never a chain of declining attempts.
-//! The committed arm consumes the peeked token and extracts its payload directly
-//! (`inp.next()` + the [`LiteralValueToken`] extractors), exactly like the
-//! `enum_value` atom's body.
+//! [`try_value`] and [`try_const_value`] are the house-way alternation: a tuple of
+//! committed arms behind a [`ParseChoice`] peek dispatch (plan Amendment 7). The
+//! decision peeks the value head via the shared `value_head_kind` classifier — the
+//! single source of truth every value-head decision reuses (the list continuation,
+//! the object-field continuation, the default-value head, and both dispatchers). A
+//! `$` selects the `Variable` arm only when an identifier follows it (its FIRST set
+//! is two tokens, so the dispatch peeks `U2`); a `$` in a constant context, or a
+//! `$` with no name, declines the choice and falls through to the unexpected-token
+//! error the frozen classifier raised.
 //!
 //! On the identifier arm a slice compare resolves `true` / `false` / `null`
 //! **before** the enum fallthrough (frozen `graphql/ast/value.rs` ordering, which
-//! the spec blesses): those three spellings are the sole exclusion the `enum_value`
-//! atom carves out of `Name`, so ruling them out first leaves the `EnumValue` arm
-//! with exactly the atom's admissible set.
+//! the spec blesses): those three spellings are the sole exclusion `EnumValue`
+//! carves out of `Name`, so ruling them out first leaves the `EnumValue` arm with
+//! exactly the admissible set.
+//!
+//! # Lists and objects — the canonical delimited-list law
+//!
+//! `ListValue` and `ObjectValue` are the committed-item / decision-driven-repetition
+//! / strict-close shape (plan Amendments 6–7): a committed opener, the committed
+//! item driven by [`repeated_while`](tokora::ParseInput::repeated_while) over a
+//! positive FIRST-set decision, and a committed close. The brackets/braces are
+//! dropped — parser-next's AST keeps no delimiter tokens, only the whole-node span
+//! (plan Amendment 7); the frozen `scaffold::List`/`scaffold::Object` already store
+//! span + elements only. Empty `[]`/`{}` are accepted (the spec allows them).
+//!
+//! This is deliberately *not* the many-builder's `.delimited::<D>()` chain: an
+//! empirical probe (2026-07-19) showed `repeated_while(..).delimited::<D>().collect()`
+//! accepts unterminated input silently (the EOI-no-close branch in tokora
+//! `parser/many/delim/repeated_while.rs` is a no-op), so it would accept an
+//! unterminated `[ …` against the spec and frozen parity. The committed close atom
+//! (`rbracket`/`rbrace`) is used instead until tokora emits the `Unclosed`
+//! diagnostic through the emitter.
 
 use smear_lexer::{LitBlockStr, LitInlineStr};
 use smear_scaffold::ast as scaffold;
+use std::vec::Vec;
 use tokora::{
-  InputRef, Lexer, SimpleSpan, Token,
+  Accumulator, Branch, InputRef, Lexer, ParseChoice, ParseInput, SimpleSpan, Token, TryParseInput,
+  cache::{Peeked, PeekedTokenExt},
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{braces, brackets, list_of},
+  parser::Action,
   span::AsSpan,
   token::{IdentifierToken, LitToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
-  utils::IntoComponents,
+  utils::{
+    IntoComponents,
+    typenum::{U1, U2, U3},
+  },
 };
 
 use crate::{
   combinator::{
-    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, dollar, ident, try_dollar,
-    try_equal,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, dollar, ident,
+    lbrace, lbracket, rbrace, rbracket, try_colon, try_dollar, try_equal, try_float, try_ident,
+    try_int, try_lbrace, try_lbracket, try_string,
   },
   graphql::ast::{
     BooleanValue, ConstInputValue, ConstObjectField, DefaultInputValue, EnumValue, FloatValue,
     InputValue, IntValue, Name, NullValue, ObjectField, StringValue, VariableValue,
   },
 };
+
+// ─── Shared head classification ──────────────────────────────────────────────
+
+/// The kind of value a single peeked token can begin. The one-token classification
+/// every value-head decision reuses — the list/object continuation decisions, the
+/// default-value head, and the dispatchers' `ParseChoice` peeks — so the admissible
+/// heads have exactly one definition. `Dollar` records only that a `$` is next; the
+/// dispatchers apply the second-token identifier check that a full `Variable` head
+/// needs.
+///
+/// `pub(crate)` so sibling productions whose FIRST set ends in a value head — the
+/// `Argument`/`ObjectField` list decisions — share this one classification.
+#[derive(Clone, Copy)]
+pub(crate) enum HeadKind {
+  Int,
+  Float,
+  Str,
+  Dollar,
+  List,
+  Object,
+  Ident,
+}
+
+/// Classifies a single token into the [`HeadKind`] it begins, or `None` when it
+/// begins no value. The sole source of truth for a value's FIRST set — reused by
+/// the sibling `Argument`/`ObjectField` list decisions (hence `pub(crate)`).
+#[inline]
+pub(crate) fn value_head_kind<'inp, L>(t: &L::Token) -> Option<HeadKind>
+where
+  L: Lexer<'inp>,
+  L::Token: LitToken<'inp> + PunctuatorToken<'inp> + IdentifierToken<'inp>,
+{
+  if <L::Token as LitToken>::is_integer_literal(t) {
+    Some(HeadKind::Int)
+  } else if <L::Token as LitToken>::is_float_literal(t)
+    || <L::Token as LitToken>::is_hex_float_literal(t)
+  {
+    Some(HeadKind::Float)
+  } else if <L::Token as LitToken>::is_string_literal(t) {
+    Some(HeadKind::Str)
+  } else if <L::Token as PunctuatorTokenExt>::is_dollar(t) {
+    Some(HeadKind::Dollar)
+  } else if <L::Token as PunctuatorTokenExt>::is_open_bracket(t) {
+    Some(HeadKind::List)
+  } else if <L::Token as PunctuatorTokenExt>::is_open_brace(t) {
+    Some(HeadKind::Object)
+  } else if <L::Token as IdentifierToken>::is_identifier(t) {
+    Some(HeadKind::Ident)
+  } else {
+    None
+  }
+}
+
+/// The three spellings the spec excludes from `EnumValue`, resolved on the
+/// identifier arm before the enum fallthrough.
+enum Reserved {
+  True,
+  False,
+  Null,
+}
+
+/// Classifies an identifier's slice into a [`Reserved`] spelling, or `None` for an
+/// ordinary enum name. Shared by the identifier dispatch arm and the standalone
+/// `boolean`/`null` builders so the reserved set has one definition.
+#[inline]
+fn reserved_word<S>(slice: &S) -> Option<Reserved>
+where
+  S: Equivalent<str>,
+{
+  if slice.equivalent("true") {
+    Some(Reserved::True)
+  } else if slice.equivalent("false") {
+    Some(Reserved::False)
+  } else if slice.equivalent("null") {
+    Some(Reserved::Null)
+  } else {
+    None
+  }
+}
 
 // ─── Committed leaf builders ─────────────────────────────────────────────────
 
@@ -141,7 +260,96 @@ where
   }
 }
 
-// ─── Variable ────────────────────────────────────────────────────────────────
+/// Consumes the next token as a [`BooleanValue`] (`true` or `false`).
+///
+/// Committed: errors on a non-identifier, on end of input, or on an identifier that
+/// is neither `true` nor `false`. Value dispatch resolves booleans through
+/// `identifier_value`; this standalone builder is the committed leaf the `try_`
+/// twin derives from.
+///
+/// Spec: [BooleanValue](https://spec.graphql.org/draft/#BooleanValue).
+pub fn boolean_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<BooleanValue, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let is_ident = spanned.data().is_identifier();
+      let slice = inp.slice();
+      let (span, token) = spanned.into_components();
+      match is_ident.then(|| reserved_word(&slice)).flatten() {
+        Some(Reserved::True) => Ok(BooleanValue::new(span, true)),
+        Some(Reserved::False) => Ok(BooleanValue::new(span, false)),
+        _ => Err(UnexpectedToken::of(span).with_found(token).into()),
+      }
+    }
+    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
+  }
+}
+
+/// Consumes the next token as a [`NullValue`] (`null`).
+///
+/// Committed, with the same discipline as [`boolean_value`]: errors on anything but
+/// the `null` identifier.
+///
+/// Spec: [NullValue](https://spec.graphql.org/draft/#NullValue).
+pub fn null_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<NullValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let is_ident = spanned.data().is_identifier();
+      let slice = inp.slice();
+      let (span, token) = spanned.into_components();
+      match is_ident.then(|| reserved_word(&slice)).flatten() {
+        Some(Reserved::Null) => Ok(NullValue::new(span, slice)),
+        _ => Err(UnexpectedToken::of(span).with_found(token).into()),
+      }
+    }
+    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
+  }
+}
+
+/// Consumes the next token as an [`EnumValue`]: a `Name` that is not `true`,
+/// `false`, or `null`.
+///
+/// Committed; delegates the exclusion rule to the [`enum_value`](crate::combinator::enum_value)
+/// atom (which backs both this position and `EnumValueDefinition`) and wraps the
+/// admitted name into the AST node.
+///
+/// Spec: [EnumValue](https://spec.graphql.org/draft/#EnumValue).
+pub fn enum_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<EnumValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let (span, src) = crate::combinator::enum_value(inp)?.into_components();
+  Ok(EnumValue::new(span, src))
+}
 
 /// Parses a [`VariableValue`] (`$name`), committed on the leading `$`.
 ///
@@ -164,15 +372,180 @@ where
   Ok(VariableValue::new(span, name))
 }
 
-/// Declines (no tokens consumed) unless the next token is a `$`, in which case it
-/// commits to the following name and yields a [`VariableValue`].
+// ─── try_ leaf twins ─────────────────────────────────────────────────────────
+
+/// Declines (no tokens consumed) unless the next token is an int literal, which it
+/// then consumes as an [`IntValue`].
 ///
-/// The attempt boundary is the `$` alone: once consumed, a missing name is an
-/// error, never a decline.
+/// Spec: [IntValue](https://spec.graphql.org/draft/#IntValue).
+#[allow(clippy::type_complexity)]
+pub fn try_int_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<IntValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: LiteralValueToken<'inp, Int = SliceOf<'inp, L>>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+{
+  Ok(try_int(inp)?.map(|(raw, span)| IntValue::new(span, raw)))
+}
+
+/// Declines (no tokens consumed) unless the next token is a float literal, which it
+/// then consumes as a [`FloatValue`].
+///
+/// Spec: [FloatValue](https://spec.graphql.org/draft/#FloatValue).
+#[allow(clippy::type_complexity)]
+pub fn try_float_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<FloatValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: LiteralValueToken<'inp, Float = SliceOf<'inp, L>>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+{
+  Ok(try_float(inp)?.map(|(raw, span)| FloatValue::new(span, raw)))
+}
+
+/// Declines (no tokens consumed) unless the next token is a string literal — inline
+/// or block — which it then consumes as a [`StringValue`].
+///
+/// Spec: [StringValue](https://spec.graphql.org/draft/#StringValue).
+#[allow(clippy::type_complexity)]
+pub fn try_string_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<StringValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: LiteralValueToken<
+      'inp,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+{
+  Ok(try_string(inp)?.map(|(carrier, span)| match carrier {
+    StringLiteral::Inline(inline) => StringValue::new(span, inline.into()),
+    StringLiteral::Block(block) => StringValue::new(span, block.into()),
+  }))
+}
+
+/// Declines (no tokens consumed) unless the next token is the identifier `true` or
+/// `false`, which it then consumes as a [`BooleanValue`].
+///
+/// The head is a single identifier token whose spelling decides acceptance; a
+/// decline (non-identifier, or an identifier that is not `true`/`false`) leaves the
+/// cursor untouched.
+#[allow(clippy::type_complexity)]
+pub fn try_boolean_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<BooleanValue>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
+{
+  let mut failed = None;
+  let accepted = inp.attempt(|inp| match try_ident(inp) {
+    Ok(ParseAttempt::Accept(id)) => {
+      let (span, src) = id.into_components();
+      match reserved_word(&src) {
+        Some(Reserved::True) => Some(BooleanValue::new(span, true)),
+        Some(Reserved::False) => Some(BooleanValue::new(span, false)),
+        _ => None,
+      }
+    }
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
+    }
+  });
+  match failed {
+    Some(err) => Err(err),
+    None => Ok(match accepted {
+      Some(b) => ParseAttempt::Accept(b),
+      None => ParseAttempt::Decline,
+    }),
+  }
+}
+
+/// Declines (no tokens consumed) unless the next token is the identifier `null`,
+/// which it then consumes as a [`NullValue`].
+#[allow(clippy::type_complexity)]
+pub fn try_null_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<NullValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
+{
+  let mut failed = None;
+  let accepted = inp.attempt(|inp| match try_ident(inp) {
+    Ok(ParseAttempt::Accept(id)) => {
+      let (span, src) = id.into_components();
+      match reserved_word(&src) {
+        Some(Reserved::Null) => Some(NullValue::new(span, src)),
+        _ => None,
+      }
+    }
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
+    }
+  });
+  match failed {
+    Some(err) => Err(err),
+    None => Ok(match accepted {
+      Some(n) => ParseAttempt::Accept(n),
+      None => ParseAttempt::Decline,
+    }),
+  }
+}
+
+/// Declines (no tokens consumed) unless the next token is an `EnumValue`: an
+/// identifier that is not `true`, `false`, or `null`, which it then consumes.
+///
+/// Spec: [EnumValue](https://spec.graphql.org/draft/#EnumValue).
+#[allow(clippy::type_complexity)]
+pub fn try_enum_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<EnumValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
+{
+  Ok(match crate::combinator::try_enum_value(inp)? {
+    ParseAttempt::Accept(id) => {
+      let (span, src) = id.into_components();
+      ParseAttempt::Accept(EnumValue::new(span, src))
+    }
+    ParseAttempt::Decline => ParseAttempt::Decline,
+  })
+}
+
+/// Declines (no tokens consumed) unless the next two tokens are `$` followed by an
+/// identifier, which it then consumes as a [`VariableValue`].
+///
+/// The head is two tokens (`$` and a name), so the attempt is transactional: a `$`
+/// with no name declines and leaves the cursor at the `$` (position law), never
+/// committing to a missing-name error.
 ///
 /// Spec: [Variable](https://spec.graphql.org/draft/#Variable).
-// The `Result<ParseAttempt<…>, …>` return is inherent to a declining generic
-// production; factoring it into an alias would only move the same generics.
 #[allow(clippy::type_complexity)]
 pub fn try_variable_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
@@ -182,78 +555,44 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
-    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
-  match try_dollar(inp)? {
-    ParseAttempt::Accept(dollar) => {
-      let (name_span, name_src) = ident(inp)?.into_components();
-      let name = Name::new(name_span, name_src);
-      let span = SimpleSpan::new(dollar.span().start(), name.span().end());
-      Ok(ParseAttempt::Accept(VariableValue::new(span, name)))
+  let mut failed = None;
+  let accepted = inp.attempt(|inp| match try_dollar(inp) {
+    Ok(ParseAttempt::Accept(dollar)) => match try_ident(inp) {
+      Ok(ParseAttempt::Accept(id)) => {
+        let (name_span, name_src) = id.into_components();
+        let name = Name::new(name_span, name_src);
+        let span = SimpleSpan::new(dollar.span().start(), name.span().end());
+        Some(VariableValue::new(span, name))
+      }
+      Ok(ParseAttempt::Decline) => None,
+      Err(err) => {
+        failed = Some(err);
+        None
+      }
+    },
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
     }
-    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+  });
+  match failed {
+    Some(err) => Err(err),
+    None => Ok(match accepted {
+      Some(v) => ParseAttempt::Accept(v),
+      None => ParseAttempt::Decline,
+    }),
   }
 }
 
-// ─── Dispatch ────────────────────────────────────────────────────────────────
-
-/// The classified head of a value: the token kind the one-token peek resolves to.
-#[derive(Clone, Copy)]
-enum ValueHead {
-  Int,
-  Float,
-  Str,
-  Ident,
-  Dollar,
-  List,
-  Object,
-}
-
-/// Peeks the next token (without consuming it) and classifies it into a
-/// [`ValueHead`]. `Ok(None)` is end of input; `Ok(Some(None))` is a token that
-/// begins no value; `Ok(Some(Some(head)))` is a recognised head, and the token is
-/// still in place for the committed arm.
-fn classify_value_head<'inp, L, Ctx, Lang>(
-  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-) -> Result<Option<Option<ValueHead>>, ErrorOf<'inp, L, Ctx, Lang>>
-where
-  L: Lexer<'inp>,
-  L::Token: LitToken<'inp> + PunctuatorToken<'inp> + IdentifierToken<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
-  Lang: ?Sized,
-{
-  let mut outcome = None;
-  inp.try_expect(|spanned| {
-    let t: &L::Token = spanned.data;
-    let head = if <L::Token as LitToken>::is_integer_literal(t) {
-      Some(ValueHead::Int)
-    } else if <L::Token as LitToken>::is_float_literal(t)
-      || <L::Token as LitToken>::is_hex_float_literal(t)
-    {
-      Some(ValueHead::Float)
-    } else if <L::Token as LitToken>::is_string_literal(t) {
-      Some(ValueHead::Str)
-    } else if <L::Token as PunctuatorTokenExt>::is_dollar(t) {
-      Some(ValueHead::Dollar)
-    } else if <L::Token as PunctuatorTokenExt>::is_open_bracket(t) {
-      Some(ValueHead::List)
-    } else if <L::Token as PunctuatorTokenExt>::is_open_brace(t) {
-      Some(ValueHead::Object)
-    } else if <L::Token as IdentifierToken>::is_identifier(t) {
-      Some(ValueHead::Ident)
-    } else {
-      None
-    };
-    outcome = Some(head);
-    false
-  })?;
-  Ok(outcome)
-}
+// ─── Identifier dispatch arm (true / false / null / enum) ────────────────────
 
 /// Consumes an identifier already peeked as a value head and resolves it, in order,
 /// to `true` / `false` → [`BooleanValue`], `null` → [`NullValue`], otherwise
-/// [`EnumValue`].
+/// [`EnumValue`]. The single-consume classifier the value dispatcher uses for the
+/// identifier arm.
 fn identifier_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<InputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -270,21 +609,15 @@ where
   };
   let slice = inp.slice();
   let (span, _token) = spanned.into_components();
-  let is_true = slice.equivalent("true");
-  let is_false = slice.equivalent("false");
-  let is_null = slice.equivalent("null");
-  Ok(if is_true {
-    InputValue::Boolean(BooleanValue::new(span, true))
-  } else if is_false {
-    InputValue::Boolean(BooleanValue::new(span, false))
-  } else if is_null {
-    InputValue::Null(NullValue::new(span, slice))
-  } else {
-    InputValue::Enum(EnumValue::new(span, slice))
+  Ok(match reserved_word(&slice) {
+    Some(Reserved::True) => InputValue::Boolean(BooleanValue::new(span, true)),
+    Some(Reserved::False) => InputValue::Boolean(BooleanValue::new(span, false)),
+    Some(Reserved::Null) => InputValue::Null(NullValue::new(span, slice)),
+    None => InputValue::Enum(EnumValue::new(span, slice)),
   })
 }
 
-/// The const twin of [`identifier_value`], yielding a [`ConstInputValue`].
+/// The const twin of `identifier_value`, yielding a [`ConstInputValue`].
 fn const_identifier_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<ConstInputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -301,51 +634,166 @@ where
   };
   let slice = inp.slice();
   let (span, _token) = spanned.into_components();
-  let is_true = slice.equivalent("true");
-  let is_false = slice.equivalent("false");
-  let is_null = slice.equivalent("null");
-  Ok(if is_true {
-    ConstInputValue::Boolean(BooleanValue::new(span, true))
-  } else if is_false {
-    ConstInputValue::Boolean(BooleanValue::new(span, false))
-  } else if is_null {
-    ConstInputValue::Null(NullValue::new(span, slice))
-  } else {
-    ConstInputValue::Enum(EnumValue::new(span, slice))
+  Ok(match reserved_word(&slice) {
+    Some(Reserved::True) => ConstInputValue::Boolean(BooleanValue::new(span, true)),
+    Some(Reserved::False) => ConstInputValue::Boolean(BooleanValue::new(span, false)),
+    Some(Reserved::Null) => ConstInputValue::Null(NullValue::new(span, slice)),
+    None => ConstInputValue::Enum(EnumValue::new(span, slice)),
   })
 }
 
-/// The shared error tail of the value dispatchers: reports the offending token as
-/// an unexpected token, or end of input.
-fn unexpected_value<'inp, L, Ctx, T, Lang>(
-  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+// ─── List / object continuation decisions ────────────────────────────────────
+
+/// The list-continuation decision: continue ([`Action::Continue`]) while the next
+/// token begins a value (`value_head_kind`), stop otherwise — at the closing
+/// bracket, at end of input, or on any non-value head. A one-token positive
+/// FIRST-set peek; a mid-item failure (e.g. a lone `$`) is the committed item's
+/// error, not a decline.
+fn decide_value_head<'inp, L, Ctx, Lang>(
+  mut peeked: Peeked<'_, 'inp, L, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, ErrorOf<'inp, L, Ctx, Lang>>
 where
-  L: Lexer<'inp, Span = SimpleSpan>,
+  L: Lexer<'inp>,
+  L::Token: LitToken<'inp> + PunctuatorToken<'inp> + IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
+{
+  Ok(match peeked.pop_front() {
+    Some(tok) if value_head_kind::<L>(tok.token()).is_some() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+/// The object-field-continuation decision: an `ObjectField`'s FIRST set is
+/// `Name ':' Value`, so continue only while the next three tokens are an identifier,
+/// a colon, and a value head (plan Amendment 7, U3 name-colon-value window). Stops
+/// at the closing brace, at end of input, or on any other head — a bare identifier
+/// without a colon included, so `{ a 1 }` stops and is reported by the closing-brace
+/// check.
+fn decide_object_field_head<'inp, L, Ctx, Lang>(
+  mut peeked: Peeked<'_, 'inp, L, U3>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp>,
+  L::Token: LitToken<'inp> + PunctuatorToken<'inp> + IdentifierToken<'inp>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+{
+  let Some(name) = peeked.pop_front() else {
+    return Ok(Action::Stop);
+  };
+  if !name.token().is_identifier() {
+    return Ok(Action::Stop);
+  }
+  let Some(colon) = peeked.pop_front() else {
+    return Ok(Action::Stop);
+  };
+  if !colon.token().is_colon() {
+    return Ok(Action::Stop);
+  }
+  Ok(match peeked.pop_front() {
+    Some(tok) if value_head_kind::<L>(tok.token()).is_some() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+// ─── List values ─────────────────────────────────────────────────────────────
+
+/// Parses a `ListValue` (`'[' Value* ']'`), committed on the leading `[`.
+///
+/// The canonical delimited-list law: the committed [`value`] item driven by
+/// `decide_value_head`, then a committed [`rbracket`] close (an unterminated `[ …`
+/// errors). The brackets are dropped — the AST keeps only the whole-list span (plan
+/// Amendment 7); empty `[]` is accepted (the spec allows it).
+///
+/// Spec: [ListValue](https://spec.graphql.org/draft/#sec-List-Value).
+// The `scaffold::List<InputValue<…>>` return is inherent to the node shape;
+// factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn list_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<scaffold::List<InputValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  match inp.next()? {
-    Some(spanned) => {
-      let (span, token) = spanned.into_components();
-      Err(UnexpectedToken::of(span).with_found(token).into())
+  let cursor = inp.cursor().clone();
+  lbracket(inp)?;
+  let values: Vec<InputValue<SliceOf<'inp, L>>> = value
+    .repeated_while::<_, U1>(decide_value_head::<L, Ctx, Lang>)
+    .collect()
+    .parse_input(inp)?;
+  rbracket(inp)?;
+  Ok(scaffold::List::new(inp.span_since(&cursor), values))
+}
+
+/// Declines (no tokens consumed) unless the next token is `[`, in which case it
+/// commits to the `ListValue` body and a required close (an unterminated `[ …`
+/// errors, never declines).
+///
+/// Spec: [ListValue](https://spec.graphql.org/draft/#sec-List-Value).
+#[allow(clippy::type_complexity)]
+pub fn try_list_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<scaffold::List<InputValue<SliceOf<'inp, L>>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  match try_lbracket(inp)? {
+    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    ParseAttempt::Accept(_open) => {
+      let values: Vec<InputValue<SliceOf<'inp, L>>> = value
+        .repeated_while::<_, U1>(decide_value_head::<L, Ctx, Lang>)
+        .collect()
+        .parse_input(inp)?;
+      rbracket(inp)?;
+      Ok(ParseAttempt::Accept(scaffold::List::new(
+        inp.span_since(&cursor),
+        values,
+      )))
     }
-    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
   }
 }
 
-/// Parses a (non-const) `Value`.
+/// The const twin of [`list_value`]: a `ListValue` of [`const_value`] items.
 ///
-/// One peek, committed arms: `$` → [`VariableValue`], int/float/string literals →
-/// their leaf nodes, an identifier → `true`/`false`/`null`/enum, `[` → a
-/// [`ListValue`](InputValue::List), `{` → an [`ObjectValue`](InputValue::Object).
-///
-/// Spec: [Value](https://spec.graphql.org/draft/#Value).
-pub fn value<'inp, L, Ctx, Lang>(
+/// Spec: [ListValue](https://spec.graphql.org/draft/#sec-List-Value) (const context).
+// The `scaffold::List<ConstInputValue<…>>` return is inherent to the node shape;
+// factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn const_list_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-) -> Result<InputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+) -> Result<scaffold::List<ConstInputValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp>
@@ -363,41 +811,26 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  match classify_value_head(inp)? {
-    Some(Some(ValueHead::Int)) => int_value(inp).map(InputValue::Int),
-    Some(Some(ValueHead::Float)) => float_value(inp).map(InputValue::Float),
-    Some(Some(ValueHead::Str)) => string_value(inp).map(InputValue::String),
-    Some(Some(ValueHead::Dollar)) => variable_value(inp).map(InputValue::Variable),
-    Some(Some(ValueHead::List)) => brackets(list_of(
-      value,
-      <L::Token as PunctuatorTokenExt>::is_close_bracket,
-    ))(inp)
-    .map(|delimited| {
-      let (span, _open, _close, items) = delimited.into_components();
-      InputValue::List(scaffold::List::new(span, items))
-    }),
-    Some(Some(ValueHead::Object)) => braces(list_of(
-      object_field,
-      <L::Token as PunctuatorTokenExt>::is_close_brace,
-    ))(inp)
-    .map(|delimited| {
-      let (span, _open, _close, fields) = delimited.into_components();
-      InputValue::Object(scaffold::Object::new(span, fields))
-    }),
-    Some(Some(ValueHead::Ident)) => identifier_value(inp),
-    _ => unexpected_value(inp),
-  }
+  let cursor = inp.cursor().clone();
+  lbracket(inp)?;
+  let values: Vec<ConstInputValue<SliceOf<'inp, L>>> = const_value
+    .repeated_while::<_, U1>(decide_value_head::<L, Ctx, Lang>)
+    .collect()
+    .parse_input(inp)?;
+  rbracket(inp)?;
+  Ok(scaffold::List::new(inp.span_since(&cursor), values))
 }
 
-/// Parses a `Value` in a constant context — the eight non-variable alternatives.
+/// The const twin of [`try_list_value`].
 ///
-/// Identical dispatch to [`value`] minus the `$` arm: a leading `$` is reported as
-/// an unexpected token (a variable is not a const value).
-///
-/// Spec: [Value](https://spec.graphql.org/draft/#Value) (const context).
-pub fn const_value<'inp, L, Ctx, Lang>(
+/// Spec: [ListValue](https://spec.graphql.org/draft/#sec-List-Value) (const context).
+#[allow(clippy::type_complexity)]
+pub fn try_const_list_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-) -> Result<ConstInputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+) -> Result<
+  ParseAttempt<scaffold::List<ConstInputValue<SliceOf<'inp, L>>>>,
+  ErrorOf<'inp, L, Ctx, Lang>,
+>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp>
@@ -415,34 +848,26 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  match classify_value_head(inp)? {
-    Some(Some(ValueHead::Int)) => int_value(inp).map(ConstInputValue::Int),
-    Some(Some(ValueHead::Float)) => float_value(inp).map(ConstInputValue::Float),
-    Some(Some(ValueHead::Str)) => string_value(inp).map(ConstInputValue::String),
-    Some(Some(ValueHead::List)) => brackets(list_of(
-      const_value,
-      <L::Token as PunctuatorTokenExt>::is_close_bracket,
-    ))(inp)
-    .map(|delimited| {
-      let (span, _open, _close, items) = delimited.into_components();
-      ConstInputValue::List(scaffold::List::new(span, items))
-    }),
-    Some(Some(ValueHead::Object)) => braces(list_of(
-      const_object_field,
-      <L::Token as PunctuatorTokenExt>::is_close_brace,
-    ))(inp)
-    .map(|delimited| {
-      let (span, _open, _close, fields) = delimited.into_components();
-      ConstInputValue::Object(scaffold::Object::new(span, fields))
-    }),
-    Some(Some(ValueHead::Ident)) => const_identifier_value(inp),
-    _ => unexpected_value(inp),
+  let cursor = inp.cursor().clone();
+  match try_lbracket(inp)? {
+    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    ParseAttempt::Accept(_open) => {
+      let values: Vec<ConstInputValue<SliceOf<'inp, L>>> = const_value
+        .repeated_while::<_, U1>(decide_value_head::<L, Ctx, Lang>)
+        .collect()
+        .parse_input(inp)?;
+      rbracket(inp)?;
+      Ok(ParseAttempt::Accept(scaffold::List::new(
+        inp.span_since(&cursor),
+        values,
+      )))
+    }
   }
 }
 
 // ─── Object fields ───────────────────────────────────────────────────────────
 
-/// Parses a (non-const) `ObjectField` (`name : Value`).
+/// Parses a (non-const) `ObjectField` (`name : Value`), committed on the name.
 ///
 /// Spec: [ObjectField](https://spec.graphql.org/draft/#ObjectField).
 pub fn object_field<'inp, L, Ctx, Lang>(
@@ -470,11 +895,72 @@ where
   colon(inp)?;
   let value = value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-  let field = scaffold::ObjectField::new(span, name, value);
-  Ok(field)
+  Ok(scaffold::ObjectField::new(span, name, value))
 }
 
-/// Parses a constant `ObjectField` (`name : ConstValue`).
+/// Declines (no tokens consumed) unless the next two tokens are an identifier
+/// followed by a colon, in which case it commits to the field's [`value`].
+///
+/// The head is `Name ':'`, so the attempt is transactional over both: a name with
+/// no colon declines and leaves the cursor at the name (position law), never
+/// committing to a colon error.
+///
+/// Spec: [ObjectField](https://spec.graphql.org/draft/#ObjectField).
+#[allow(clippy::type_complexity)]
+pub fn try_object_field<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<ObjectField<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mut failed = None;
+  let name = inp.attempt(|inp| match try_ident(inp) {
+    Ok(ParseAttempt::Accept(id)) => match try_colon(inp) {
+      Ok(ParseAttempt::Accept(_colon)) => Some(id),
+      Ok(ParseAttempt::Decline) => None,
+      Err(err) => {
+        failed = Some(err);
+        None
+      }
+    },
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
+    }
+  });
+  if let Some(err) = failed {
+    return Err(err);
+  }
+  match name {
+    None => Ok(ParseAttempt::Decline),
+    Some(id) => {
+      let (name_span, name_src) = id.into_components();
+      let name = Name::new(name_span, name_src);
+      let value = value(inp)?;
+      let span = SimpleSpan::new(name.span().start(), value.as_span().end());
+      Ok(ParseAttempt::Accept(scaffold::ObjectField::new(
+        span, name, value,
+      )))
+    }
+  }
+}
+
+/// Parses a constant `ObjectField` (`name : ConstValue`), committed on the name.
 ///
 /// Spec: [ObjectField](https://spec.graphql.org/draft/#ObjectField) (const context).
 pub fn const_object_field<'inp, L, Ctx, Lang>(
@@ -502,16 +988,561 @@ where
   colon(inp)?;
   let value = const_value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-  let field = scaffold::ObjectField::new(span, name, value);
-  Ok(field)
+  Ok(scaffold::ObjectField::new(span, name, value))
+}
+
+/// The const twin of [`try_object_field`].
+///
+/// Spec: [ObjectField](https://spec.graphql.org/draft/#ObjectField) (const context).
+#[allow(clippy::type_complexity)]
+pub fn try_const_object_field<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<ConstObjectField<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let mut failed = None;
+  let name = inp.attempt(|inp| match try_ident(inp) {
+    Ok(ParseAttempt::Accept(id)) => match try_colon(inp) {
+      Ok(ParseAttempt::Accept(_colon)) => Some(id),
+      Ok(ParseAttempt::Decline) => None,
+      Err(err) => {
+        failed = Some(err);
+        None
+      }
+    },
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
+    }
+  });
+  if let Some(err) = failed {
+    return Err(err);
+  }
+  match name {
+    None => Ok(ParseAttempt::Decline),
+    Some(id) => {
+      let (name_span, name_src) = id.into_components();
+      let name = Name::new(name_span, name_src);
+      let value = const_value(inp)?;
+      let span = SimpleSpan::new(name.span().start(), value.as_span().end());
+      Ok(ParseAttempt::Accept(scaffold::ObjectField::new(
+        span, name, value,
+      )))
+    }
+  }
+}
+
+// ─── Object values ───────────────────────────────────────────────────────────
+
+/// Parses an `ObjectValue` (`'{' ObjectField* '}'`), committed on the leading `{`.
+///
+/// The canonical delimited-list law: the committed [`object_field`] item driven by
+/// `decide_object_field_head`, then a committed [`rbrace`] close. The braces are
+/// dropped — the AST keeps only the whole-object span; empty `{}` is accepted.
+///
+/// Spec: [ObjectValue](https://spec.graphql.org/draft/#sec-Input-Object-Values).
+// The `scaffold::Object<Name<…>, InputValue<…>>` return is inherent to the node
+// shape; factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn object_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<
+  scaffold::Object<Name<SliceOf<'inp, L>>, InputValue<SliceOf<'inp, L>>>,
+  ErrorOf<'inp, L, Ctx, Lang>,
+>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  lbrace(inp)?;
+  let fields: Vec<ObjectField<SliceOf<'inp, L>>> = object_field
+    .repeated_while::<_, U3>(decide_object_field_head::<L, Ctx, Lang>)
+    .collect()
+    .parse_input(inp)?;
+  rbrace(inp)?;
+  Ok(scaffold::Object::new(inp.span_since(&cursor), fields))
+}
+
+/// Declines (no tokens consumed) unless the next token is `{`, in which case it
+/// commits to the `ObjectValue` body and a required close.
+///
+/// Spec: [ObjectValue](https://spec.graphql.org/draft/#sec-Input-Object-Values).
+#[allow(clippy::type_complexity)]
+pub fn try_object_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<
+  ParseAttempt<scaffold::Object<Name<SliceOf<'inp, L>>, InputValue<SliceOf<'inp, L>>>>,
+  ErrorOf<'inp, L, Ctx, Lang>,
+>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  match try_lbrace(inp)? {
+    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    ParseAttempt::Accept(_open) => {
+      let fields: Vec<ObjectField<SliceOf<'inp, L>>> = object_field
+        .repeated_while::<_, U3>(decide_object_field_head::<L, Ctx, Lang>)
+        .collect()
+        .parse_input(inp)?;
+      rbrace(inp)?;
+      Ok(ParseAttempt::Accept(scaffold::Object::new(
+        inp.span_since(&cursor),
+        fields,
+      )))
+    }
+  }
+}
+
+/// The const twin of [`object_value`]: an `ObjectValue` of [`const_object_field`]s.
+///
+/// Spec: [ObjectValue](https://spec.graphql.org/draft/#sec-Input-Object-Values) (const context).
+// The `scaffold::Object<Name<…>, ConstInputValue<…>>` return is inherent to the
+// node shape; factoring it into an alias would only move the same generics.
+#[allow(clippy::type_complexity)]
+pub fn const_object_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<
+  scaffold::Object<Name<SliceOf<'inp, L>>, ConstInputValue<SliceOf<'inp, L>>>,
+  ErrorOf<'inp, L, Ctx, Lang>,
+>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  lbrace(inp)?;
+  let fields: Vec<ConstObjectField<SliceOf<'inp, L>>> = const_object_field
+    .repeated_while::<_, U3>(decide_object_field_head::<L, Ctx, Lang>)
+    .collect()
+    .parse_input(inp)?;
+  rbrace(inp)?;
+  Ok(scaffold::Object::new(inp.span_since(&cursor), fields))
+}
+
+/// The const twin of [`try_object_value`].
+///
+/// Spec: [ObjectValue](https://spec.graphql.org/draft/#sec-Input-Object-Values) (const context).
+#[allow(clippy::type_complexity)]
+pub fn try_const_object_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<
+  ParseAttempt<scaffold::Object<Name<SliceOf<'inp, L>>, ConstInputValue<SliceOf<'inp, L>>>>,
+  ErrorOf<'inp, L, Ctx, Lang>,
+>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  match try_lbrace(inp)? {
+    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    ParseAttempt::Accept(_open) => {
+      let fields: Vec<ConstObjectField<SliceOf<'inp, L>>> = const_object_field
+        .repeated_while::<_, U3>(decide_object_field_head::<L, Ctx, Lang>)
+        .collect()
+        .parse_input(inp)?;
+      rbrace(inp)?;
+      Ok(ParseAttempt::Accept(scaffold::Object::new(
+        inp.span_since(&cursor),
+        fields,
+      )))
+    }
+  }
+}
+
+// ─── Dispatch arms ───────────────────────────────────────────────────────────
+
+/// Generates a fn-item dispatch arm that runs a committed leaf and lifts it into the
+/// dispatcher's value enum. A plain fn item (not a `.map`ped parser) because `Map`'s
+/// `ParseInput` impl requires a `Sized` `Lang`, which these `Lang: ?Sized`
+/// productions do not have — the same reason `ty.rs`'s choice arms are fn items.
+macro_rules! dispatch_arm {
+  ($name:ident, $out:ident :: $variant:ident, $leaf:ident) => {
+    fn $name<'inp, L, Ctx, Lang>(
+      inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+    ) -> Result<$out<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+    where
+      L: Lexer<'inp, Span = SimpleSpan>,
+      L::Token: IdentifierToken<'inp>
+        + PunctuatorToken<'inp>
+        + LiteralValueToken<
+          'inp,
+          Int = SliceOf<'inp, L>,
+          Float = SliceOf<'inp, L>,
+          InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+          BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+        >,
+      Ctx: ParseCtx<'inp, L, Lang>,
+      Lang: ?Sized,
+      SliceOf<'inp, L>: Equivalent<str> + Clone,
+      ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+        + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+    {
+      $leaf(inp).map($out::$variant)
+    }
+  };
+}
+
+dispatch_arm!(arm_int, InputValue::Int, int_value);
+dispatch_arm!(arm_float, InputValue::Float, float_value);
+dispatch_arm!(arm_string, InputValue::String, string_value);
+dispatch_arm!(arm_variable, InputValue::Variable, variable_value);
+dispatch_arm!(arm_list, InputValue::List, list_value);
+dispatch_arm!(arm_object, InputValue::Object, object_value);
+
+dispatch_arm!(arm_const_int, ConstInputValue::Int, int_value);
+dispatch_arm!(arm_const_float, ConstInputValue::Float, float_value);
+dispatch_arm!(arm_const_string, ConstInputValue::String, string_value);
+dispatch_arm!(arm_const_list, ConstInputValue::List, const_list_value);
+dispatch_arm!(
+  arm_const_object,
+  ConstInputValue::Object,
+  const_object_value
+);
+
+// ─── Dispatchers ─────────────────────────────────────────────────────────────
+
+/// The shared error tail of the value dispatchers: reports the offending token as
+/// an unexpected token, or end of input.
+fn unexpected_value<'inp, L, Ctx, T, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let (span, token) = spanned.into_components();
+      Err(UnexpectedToken::of(span).with_found(token).into())
+    }
+    None => Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
+  }
+}
+
+/// Attempts a (non-const) `Value`, declining (no tokens consumed) when the next
+/// token begins no value.
+///
+/// The house-way dispatch: a tuple of committed arms behind a [`ParseChoice`] peek.
+/// The decision peeks the value head via `value_head_kind`; a `$` selects the
+/// variable arm only when an identifier follows (the FIRST set is two tokens, so
+/// the peek window is `U2`), and any other head — or a `$` with no name — declines.
+///
+/// Spec: [Value](https://spec.graphql.org/draft/#Value).
+#[allow(clippy::type_complexity)]
+pub fn try_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<InputValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  (
+    arm_int::<L, Ctx, Lang>,
+    arm_float::<L, Ctx, Lang>,
+    arm_string::<L, Ctx, Lang>,
+    arm_variable::<L, Ctx, Lang>,
+    arm_list::<L, Ctx, Lang>,
+    arm_object::<L, Ctx, Lang>,
+    identifier_value::<L, Ctx, Lang>,
+  )
+    .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, L, U2>, _emitter| {
+      let Some(head) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      Ok(match value_head_kind::<L>(head.token()) {
+        Some(HeadKind::Int) => Some(Branch::B0),
+        Some(HeadKind::Float) => Some(Branch::B1),
+        Some(HeadKind::Str) => Some(Branch::B2),
+        Some(HeadKind::Dollar) => match peeked.pop_front() {
+          Some(next) if next.token().is_identifier() => Some(Branch::B3),
+          _ => None,
+        },
+        Some(HeadKind::List) => Some(Branch::B4),
+        Some(HeadKind::Object) => Some(Branch::B5),
+        Some(HeadKind::Ident) => Some(Branch::B6),
+        None => None,
+      })
+    })
+    .try_parse_input(inp)
+}
+
+/// Parses a (non-const) `Value`.
+///
+/// Derives from [`try_value`]: the attempt peeks the head and runs the committed
+/// arm; a decline (no value head) maps to the shared unexpected-token / end-of-input
+/// error the frozen classifier raised.
+///
+/// Spec: [Value](https://spec.graphql.org/draft/#Value).
+pub fn value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<InputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match try_value(inp)? {
+    ParseAttempt::Accept(value) => Ok(value),
+    ParseAttempt::Decline => unexpected_value(inp),
+  }
+}
+
+/// Attempts a `Value` in a constant context — the non-variable alternatives —
+/// declining when the next token begins no const value.
+///
+/// Identical dispatch to [`try_value`] minus the `$` arm: a leading `$` declines the
+/// choice (the peek window is `U1`; a variable is not a const value), so the
+/// committed [`const_value`] reports it as an unexpected token.
+///
+/// Spec: [Value](https://spec.graphql.org/draft/#Value) (const context).
+#[allow(clippy::type_complexity)]
+pub fn try_const_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<ConstInputValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  (
+    arm_const_int::<L, Ctx, Lang>,
+    arm_const_float::<L, Ctx, Lang>,
+    arm_const_string::<L, Ctx, Lang>,
+    arm_const_list::<L, Ctx, Lang>,
+    arm_const_object::<L, Ctx, Lang>,
+    const_identifier_value::<L, Ctx, Lang>,
+  )
+    .peek_then_try_choice::<_, U1>(|mut peeked: Peeked<'_, 'inp, L, U1>, _emitter| {
+      let Some(head) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      Ok(match value_head_kind::<L>(head.token()) {
+        Some(HeadKind::Int) => Some(Branch::B0),
+        Some(HeadKind::Float) => Some(Branch::B1),
+        Some(HeadKind::Str) => Some(Branch::B2),
+        Some(HeadKind::List) => Some(Branch::B3),
+        Some(HeadKind::Object) => Some(Branch::B4),
+        Some(HeadKind::Ident) => Some(Branch::B5),
+        Some(HeadKind::Dollar) | None => None,
+      })
+    })
+    .try_parse_input(inp)
+}
+
+/// Parses a `Value` in a constant context — the non-variable alternatives.
+///
+/// Derives from [`try_const_value`]: a leading `$` is reported as an unexpected
+/// token (a variable is not a const value).
+///
+/// Spec: [Value](https://spec.graphql.org/draft/#Value) (const context).
+pub fn const_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ConstInputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  match try_const_value(inp)? {
+    ParseAttempt::Accept(value) => Ok(value),
+    ParseAttempt::Decline => unexpected_value(inp),
+  }
 }
 
 // ─── Default value ───────────────────────────────────────────────────────────
 
+/// Attempts a `DefaultValue` (`= ConstValue`), declining (no tokens consumed) unless
+/// the next two tokens are `=` followed by a value head (plan Amendment 7, U2
+/// `=`-then-value-head window).
+///
+/// The head is transactional: an `=` with no value head declines and leaves the
+/// cursor at the `=` (position law). Once the head matches, the const value is
+/// committed — `= $v` commits and then errors (a variable is not a const value).
+///
+/// Spec: [DefaultValue](https://spec.graphql.org/draft/#DefaultValue).
+#[allow(clippy::type_complexity)]
+pub fn try_default_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<ParseAttempt<DefaultInputValue<SliceOf<'inp, L>>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  let mut failed = None;
+  let committed = inp.attempt(|inp| match try_equal(inp) {
+    Ok(ParseAttempt::Accept(_equal)) => {
+      let mut is_head = false;
+      if let Err(err) = inp.try_expect(|spanned| {
+        is_head = value_head_kind::<L>(spanned.data).is_some();
+        false
+      }) {
+        failed = Some(err);
+        return None;
+      }
+      is_head.then_some(())
+    }
+    Ok(ParseAttempt::Decline) => None,
+    Err(err) => {
+      failed = Some(err);
+      None
+    }
+  });
+  if let Some(err) = failed {
+    return Err(err);
+  }
+  match committed {
+    None => Ok(ParseAttempt::Decline),
+    Some(()) => {
+      let value = const_value(inp)?;
+      let span = inp.span_since(&cursor);
+      Ok(ParseAttempt::Accept(DefaultInputValue::new(span, value)))
+    }
+  }
+}
+
 /// Parses an optional `DefaultValue` (`= ConstValue`).
 ///
-/// Declines to `None` (no tokens consumed) unless the next token is `=`, in which
-/// case it commits to the following const value.
+/// Derives from [`try_default_value`]: an `=` followed by a value head yields the
+/// default; anything else (no `=`, or `=` with no value head) declines to `None`
+/// with the cursor left in place.
 ///
 /// Spec: [DefaultValue](https://spec.graphql.org/draft/#DefaultValue).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production.
@@ -536,16 +1567,10 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let cursor = inp.cursor().clone();
-  match try_equal(inp)? {
-    ParseAttempt::Accept(_equal) => {
-      let value = const_value(inp)?;
-      let span = inp.span_since(&cursor);
-      let default = DefaultInputValue::new(span, value);
-      Ok(Some(default))
-    }
-    ParseAttempt::Decline => Ok(None),
-  }
+  Ok(match try_default_value(inp)? {
+    ParseAttempt::Accept(default) => Some(default),
+    ParseAttempt::Decline => None,
+  })
 }
 
 #[cfg(test)]

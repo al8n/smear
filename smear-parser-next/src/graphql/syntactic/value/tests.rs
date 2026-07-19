@@ -16,8 +16,10 @@ use smear_lexer::graphql::syntactic::SyntacticLexer;
 use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{
-  const_object_field, const_value, default_value, float_value, int_value, object_field,
-  string_value, try_variable_value, value, variable_value,
+  boolean_value, const_object_field, const_value, default_value, enum_value, float_value,
+  int_value, null_value, object_field, string_value, try_boolean_value, try_const_value,
+  try_enum_value, try_float_value, try_int_value, try_list_value, try_null_value, try_object_field,
+  try_object_value, try_string_value, try_value, try_variable_value, value, variable_value,
 };
 use crate::graphql::{
   ast::{ConstInputValue, DefaultInputValue, InputValue},
@@ -514,9 +516,204 @@ fn default_value_absent_without_equal() {
 
 #[test]
 fn default_value_rejects_bad_const_value() {
-  // `=` commits; a following non-const-value is an error, not a decline.
-  reject_all!(default_value, "= }");
+  // `= $v` has a value head (`$`), so the `=` commits and the following variable is
+  // rejected in a constant context — an error, not a decline.
   reject_all!(default_value, "= $v");
+}
+
+#[test]
+fn default_value_eq_without_value_declines_and_leaves() {
+  // Amendment 7 U2 window: `=` followed by a non-value head declines to `None` and
+  // leaves the `=` in place (position law), rather than committing on `=` and then
+  // erroring. This is a leniency delta from the frozen parser (which commits on `=`
+  // and errors on a missing const value) — see the value-production return notes.
+  let (absent, leftover_is_error) = drive_str(
+    |inp| {
+      let default = default_value(inp)?;
+      // The `=` is untouched, so a value parse over it errors (`=` is no value head).
+      let after = value(inp).is_err();
+      Ok::<_, GraphqlErrors<&str>>((default.is_none(), after))
+    },
+    "= }",
+  )
+  .unwrap();
+  assert!(absent);
+  assert!(leftover_is_error);
+  // Over both source flavors `= }` is accepted-as-absent (declines to `None`).
+  assert!(drive_str(default_value, "= }").unwrap().is_none());
+  assert!(drive_slice(default_value, b"= }").unwrap().is_none());
+}
+
+// ─── try_ twins: the committed/attempt pairs ─────────────────────────────────
+
+/// After a declining `try_` twin, the whole input is still available — a plain
+/// `value` parse recovers the token the twin left untouched (the position law).
+macro_rules! try_declines_leaving {
+  ($try_fn:ident, $src:literal) => {{
+    let (declined, recovered) = drive_str(
+      |inp| {
+        let attempt = $try_fn(inp)?;
+        let recovered = value(inp).is_ok();
+        Ok::<_, GraphqlErrors<&str>>((attempt.is_decline(), recovered))
+      },
+      $src,
+    )
+    .unwrap();
+    assert!(
+      declined,
+      concat!(stringify!($try_fn), " should decline on ", $src)
+    );
+    assert!(
+      recovered,
+      concat!(stringify!($try_fn), " should leave the input on ", $src)
+    );
+  }};
+}
+
+#[test]
+fn try_leaf_twins_decline_and_leave() {
+  try_declines_leaving!(try_int_value, "true");
+  try_declines_leaving!(try_float_value, "42");
+  try_declines_leaving!(try_string_value, "42");
+  try_declines_leaving!(try_boolean_value, "ACTIVE");
+  try_declines_leaving!(try_null_value, "ACTIVE");
+  try_declines_leaving!(try_enum_value, "true"); // reserved spelling → not an enum
+  try_declines_leaving!(try_list_value, "42");
+  try_declines_leaving!(try_object_value, "42");
+  try_declines_leaving!(try_object_field, "42"); // no name
+  try_declines_leaving!(try_object_field, "a"); // name without colon (U2 transactional)
+}
+
+#[test]
+fn try_leaf_twins_accept() {
+  assert!(matches!(
+    drive_str(try_int_value, "42").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_float_value, "3.14").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_string_value, "\"hi\"").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_boolean_value, "true").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_null_value, "null").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_enum_value, "ACTIVE").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_list_value, "[1]").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_object_value, "{ a: 1 }").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+  assert!(matches!(
+    drive_str(try_object_field, "a: 1").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+}
+
+#[test]
+fn boolean_value_committed_accepts_and_rejects() {
+  assert!(drive_str(boolean_value, "true").unwrap().value());
+  assert!(!drive_str(boolean_value, "false").unwrap().value());
+  reject_all!(boolean_value, "null");
+  reject_all!(boolean_value, "ACTIVE");
+  reject_all!(boolean_value, "42");
+}
+
+#[test]
+fn null_value_committed_accepts_and_rejects() {
+  assert!("null".equivalent(drive_str(null_value, "null").unwrap().source_ref()));
+  reject_all!(null_value, "true");
+  reject_all!(null_value, "ACTIVE");
+}
+
+#[test]
+fn enum_value_committed_excludes_reserved() {
+  assert!("ACTIVE".equivalent(drive_str(enum_value, "ACTIVE").unwrap().source_ref()));
+  // Soft keywords are enums; the three reserved spellings are excluded.
+  assert!(drive_str(enum_value, "type").is_ok());
+  reject_all!(enum_value, "true");
+  reject_all!(enum_value, "false");
+  reject_all!(enum_value, "null");
+}
+
+// ─── window regressions (Amendment 7) ────────────────────────────────────────
+
+#[test]
+fn variable_dollar_without_name_declines_and_leaves() {
+  // `try_variable_value`'s head is `$`+name (U2): a lone `$` declines and leaves the
+  // cursor at the `$` (position law), never committing to a missing-name error.
+  let (declined, leftover_is_error) = drive_str(
+    |inp| {
+      let attempt = try_variable_value(inp)?;
+      let after = value(inp).is_err();
+      Ok::<_, GraphqlErrors<&str>>((attempt.is_decline(), after))
+    },
+    "$",
+  )
+  .unwrap();
+  assert!(declined);
+  assert!(leftover_is_error);
+  // Through the value dispatcher a lone `$` is an unexpected-token error (the U2
+  // variable arm is not selected), not the committed leaf's missing-name EOT.
+  let is_unexpected = match drive_str(|inp| value(inp).map(|_| ()), "$") {
+    Err(errs) => errs
+      .into_iter()
+      .next()
+      .is_some_and(|e| e.data().is_unexpected_token()),
+    Ok(()) => false,
+  };
+  assert!(is_unexpected);
+}
+
+#[test]
+fn try_value_declines_on_non_value_head() {
+  let declined = drive_str(
+    |inp| Ok::<_, GraphqlErrors<&str>>(try_value(inp)?.is_decline()),
+    "}",
+  )
+  .unwrap();
+  assert!(declined);
+  assert!(matches!(
+    drive_str(try_value, "42").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
+}
+
+#[test]
+fn try_const_value_declines_on_variable_and_non_value_head() {
+  // `$` is not a const value head → decline (the committed `const_value` then errors).
+  assert!(
+    drive_str(
+      |inp| Ok::<_, GraphqlErrors<&str>>(try_const_value(inp)?.is_decline()),
+      "$x"
+    )
+    .unwrap()
+  );
+  assert!(
+    drive_str(
+      |inp| Ok::<_, GraphqlErrors<&str>>(try_const_value(inp)?.is_decline()),
+      "}"
+    )
+    .unwrap()
+  );
+  assert!(matches!(
+    drive_str(try_const_value, "42").unwrap(),
+    ParseAttempt::Accept(_)
+  ));
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
