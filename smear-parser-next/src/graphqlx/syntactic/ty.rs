@@ -141,7 +141,7 @@ where
 
 /// Parses an optional `<Type, …>` generic-**argument** list (a generic
 /// *application*, `Container<String!>` — not the parameter declarations a
-/// definition introduces), retro-wrapped as a `TypeGenerics` node when present.
+/// definition introduces).
 ///
 /// Declines to `None` (no tokens consumed) unless the next token is `<`. Once the
 /// `<` commits, at least one type is required — an empty `<>` is a rejection
@@ -200,8 +200,7 @@ where
 }
 
 /// Parses a `TypePath` in a *bounded* position — a `::`-path optionally applied to
-/// a `<…>` generic-argument list, with **no** trailing `!` participating — wrapped
-/// as a `TypePath` node.
+/// a `<…>` generic-argument list, with **no** trailing `!` participating.
 ///
 /// This is the shape a where-predicate's bounded type and bounds and a fragment
 /// type condition name (`on Item<T>`): the un-flagged
@@ -216,24 +215,17 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  node(
-    K::TypePath.raw(),
-    |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-      let cursor = inp.cursor().clone();
-      let (path, generics) = type_path_body(inp)?;
-      let span = inp.span_since(&cursor);
-      Ok(GenericTypePath::new(span, path, generics))
-    },
-  )
-  .parse_input(inp)
+  let cursor = inp.cursor().clone();
+  let (path, generics) = type_path_body(inp)?;
+  let span = inp.span_since(&cursor);
+  Ok(GenericTypePath::new(span, path, generics))
 }
 
-/// Parses the `[ Type ]` region of a `ListType` — the [`node`]-wrapped region covers
-/// the brackets and the recursively-parsed element, never a trailing `!`.
+/// Parses the `[ Type ]` region of a `ListType` — the brackets and the
+/// recursively-parsed element, never a trailing `!`.
 fn list_type_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Type<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>

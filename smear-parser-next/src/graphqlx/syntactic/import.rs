@@ -27,24 +27,12 @@
 //! Wave 6 substrate grammar pins `+` (its `ImportList` rustdoc), overriding the
 //! scaffold's stale `importedMember*` comment; the first member commits, the rest
 //! collect via `list_of`.
-//!
-//! # Node placement
-//!
-//! Specifiers and the definition retro-wrap their kinds after their optional
-//! tails settle (Amendment 1: content-dependent spans); the alias path inside a
-//! specifier is a [`node`]-bracketed `K::Path` exactly as in type positions.
-//! [`import_list`] opens `K::ImportList` up front over the `{ … }` region.
-//! [`import_clause`] adds no wrapper node — the committed arm's kind is the
-//! clause's (sum-type convention; `K::ImportClause` stays declared-but-unopened
-//! exactly like `K::ExecutableDefinition`).
 
 use smear_lexer::keywords::Import;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{braces, list_of, node},
+  parser::{braces, list_of},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
   utils::IntoComponents,
@@ -59,15 +47,14 @@ use crate::{
       NamedSpecifier, Path, WildcardSpecifier,
     },
     keyword::{from, import, try_as},
-    kinds::SyntaxKind as K,
   },
 };
 
 /// Parses the optional `'as' Path` alias tail shared by both specifiers,
 /// declining to `None` (no tokens consumed) unless the soft `as` keyword is next.
 ///
-/// The alias is a full `::`-path (`* as helpers`, `User as types::User`), wrapped
-/// as a `K::Path` node exactly as in type positions.
+/// The alias is a full `::`-path (`* as helpers`, `User as types::User`), exactly
+/// as in type positions.
 // The `Option<Path<…>>` return is inherent to the optional alias.
 #[allow(clippy::type_complexity)]
 fn try_alias<'inp, L, Ctx, Lang>(
@@ -78,12 +65,11 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   match try_as(inp)? {
-    ParseAttempt::Accept(_kw) => Ok(Some(node(K::Path.raw(), path).parse_input(inp)?)),
+    ParseAttempt::Accept(_kw) => Ok(Some(path(inp)?)),
     ParseAttempt::Decline => Ok(None),
   }
 }
@@ -101,11 +87,9 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   let alias = try_alias(inp)?;
@@ -115,9 +99,6 @@ where
   };
   let span = SimpleSpan::new(name.span().start(), end);
   let specifier = NamedSpecifier::new(span, name, alias);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::NamedImportSpecifier.raw());
-  emitter.cst_finish();
   Ok(specifier)
 }
 
@@ -134,11 +115,9 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let star = asterisk(inp)?;
   let alias = try_alias(inp)?;
   let end = match &alias {
@@ -147,15 +126,11 @@ where
   };
   let span = SimpleSpan::new(star.span().start(), end);
   let specifier = WildcardSpecifier::new(span, alias);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::WildcardImportSpecifier.raw());
-  emitter.cst_finish();
   Ok(specifier)
 }
 
 /// Parses one `ImportMember` — a [`wildcard_specifier`] when the next token is
-/// `*`, otherwise a [`named_specifier`]. No wrapper node of its own (sum-type
-/// convention).
+/// `*`, otherwise a [`named_specifier`].
 fn import_member<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<ImportMember<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -164,7 +139,6 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -189,25 +163,20 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  node(
-    K::ImportList.raw(),
-    braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-      // Spec cardinality (`ImportMember+`): the first member is committed, so an
-      // empty `{}` errors at the `}` exactly as the committed member reports it.
-      let first = import_member(inp)?;
-      let mut members = list_of(
-        import_member,
-        <L::Token as PunctuatorTokenExt>::is_close_brace,
-      )(inp)?;
-      members.insert(0, first);
-      Ok(members)
-    }),
-  )
-  .parse_input(inp)
+  braces(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
+    // Spec cardinality (`ImportMember+`): the first member is committed, so an
+    // empty `{}` errors at the `}` exactly as the committed member reports it.
+    let first = import_member(inp)?;
+    let mut members = list_of(
+      import_member,
+      <L::Token as PunctuatorTokenExt>::is_close_brace,
+    )(inp)?;
+    members.insert(0, first);
+    Ok(members)
+  })(inp)
   .map(|delimited| {
     let (span, _open, _close, members) = delimited.into_components();
     ImportList::new(span, members)
@@ -216,7 +185,7 @@ where
 
 /// Parses an `ImportClause` — the brace [`import_list`] when the next token is
 /// `{`, a bare [`wildcard_specifier`] when it is `*`, and an error otherwise.
-/// No wrapper node of its own (sum-type convention).
+///
 ///
 /// Grammar: `ImportClause : ImportList | WildcardSpecifier`.
 pub fn import_clause<'inp, L, Ctx, Lang>(
@@ -227,7 +196,6 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -273,14 +241,13 @@ where
 }
 
 /// Parses the body of an import definition after the `import` keyword has been
-/// consumed, spending `mark` as `K::ImportDefinition` over the whole definition.
+/// consumed.
 ///
-/// Shared by [`import_definition`] (which mints `mark` and consumes the keyword)
+/// Shared by [`import_definition`] (which consumes the keyword)
 /// and the document-level dispatch (which consumes the soft keyword as its
-/// dispatch and hands the keyword and its pre-keyword mark here).
+/// dispatch and hands the keyword here).
 pub(super) fn import_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   kw: Import,
 ) -> Result<ImportDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -291,7 +258,6 @@ where
     + LiteralValueToken<'inp, InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -300,9 +266,6 @@ where
   let file = import_file_path(inp)?;
   let span = SimpleSpan::new(kw.span().start(), file.span().end());
   let def = ImportDefinition::new(span, file, clause);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ImportDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
@@ -321,13 +284,11 @@ where
     + LiteralValueToken<'inp, InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = import(inp)?;
-  import_definition_body(inp, mark, kw)
+  import_definition_body(inp, kw)
 }
 
 #[cfg(test)]

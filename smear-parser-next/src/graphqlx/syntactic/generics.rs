@@ -49,29 +49,13 @@
 //! clause while `u::V<W>: X` must continue it. The loop therefore probes with
 //! [`InputRef::try_attempt`]: it speculatively parses `TypePath ':'` and, on any
 //! failure, rolls the probe back — tokens, diagnostics, and emitted events alike
-//! (the checkpoint carries the emitter's emission mark) — and ends the clause. A
+//! — and ends the clause. A
 //! probe that commits hands its bounded type to the committed predicate tail, so a
 //! true malformation *after* the `:` (`U:` with no bound) is still an error, never
 //! a silent stop.
-//!
-//! # Node placement
-//!
-//! Parameter lists retro-wrap their kind over the whole `< … >` region when
-//! present (`try_` productions decline without a node); a definition parameter
-//! retro-wraps `K::DefinitionTypeParam` after its optional default settles
-//! (Amendment 1: content-dependent spans use the manual
-//! `cst_mark`/`cst_start_at`/`cst_finish` idiom). The name carriers wrap
-//! `K::DefinitionName` / `K::ExecutableDefinitionName` around the identifier and
-//! any parameter list. Each predicate retro-wraps `K::WherePredicate` (its mark
-//! minted inside the probe, before the bounded type, so a committed probe's events
-//! nest correctly and a rolled-back probe's mark vanishes with the rollback);
-//! [`try_where_clause`] retro-wraps `K::WhereClause` around the keyword and every
-//! predicate.
 
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{list_of, try_angles},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
@@ -91,7 +75,6 @@ use crate::{
       WhereClause, WherePredicate,
     },
     keyword::try_where,
-    kinds::SyntaxKind as K,
   },
 };
 
@@ -108,11 +91,9 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
@@ -122,9 +103,6 @@ where
   };
   let span = inp.span_since(&cursor);
   let param = DefinitionTypeParam::new(span, name, default);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::DefinitionTypeParam.raw());
-  emitter.cst_finish();
   Ok(param)
 }
 
@@ -132,8 +110,7 @@ where
 /// '>'`), declining to `None` (no tokens consumed) unless the next token is `<`.
 ///
 /// Once the `<` commits, at least one parameter is required — an empty `<>`
-/// rejects (Amendment 2). Retro-wrapped as `K::DefinitionTypeGenerics` when
-/// present.
+/// rejects (Amendment 2).
 // The `Option<DefinitionTypeGenerics<…>>` return is inherent to the optional list.
 #[allow(clippy::type_complexity)]
 pub fn try_definition_type_generics<'inp, L, Ctx, Lang>(
@@ -144,11 +121,9 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_angles(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`DefinitionTypeParam+`): the first parameter commits, so an
     // empty `<>` errors at the `>` exactly as the committed ident atom reports it.
@@ -164,9 +139,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, params) = delimited.into_components();
       let generics = DefinitionTypeGenerics::new(span, params);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::DefinitionTypeGenerics.raw());
-      emitter.cst_finish();
       Ok(Some(generics))
     }
     None => Ok(None),
@@ -186,16 +158,11 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let param = ExtensionTypeParam::new(name_span, Name::new(name_span, name_src));
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ExtensionTypeParam.raw());
-  emitter.cst_finish();
   Ok(param)
 }
 
@@ -204,7 +171,7 @@ where
 ///
 /// Once the `<` commits, at least one parameter is required — an empty `<>`
 /// rejects (Amendment 2) — and a `= Type` default rejects (extension parameters
-/// carry none). Retro-wrapped as `K::ExtensionTypeGenerics` when present.
+/// carry none).
 // The `Option<ExtensionTypeGenerics<…>>` return is inherent to the optional list.
 #[allow(clippy::type_complexity)]
 pub fn try_extension_type_generics<'inp, L, Ctx, Lang>(
@@ -215,11 +182,9 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_angles(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`ExtensionTypeParam+`): the first parameter commits.
     let first = extension_type_param(inp)?;
@@ -234,9 +199,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, params) = delimited.into_components();
       let generics = ExtensionTypeGenerics::new(span, params);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::ExtensionTypeGenerics.raw());
-      emitter.cst_finish();
       Ok(Some(generics))
     }
     None => Ok(None),
@@ -248,8 +210,7 @@ where
 ///
 /// The parameters are bare names (leaf tokens — no per-parameter node, and no
 /// defaults: `<T = X>` rejects). Once the `<` commits, at least one name is
-/// required — an empty `<>` rejects (Amendment 2). Retro-wrapped as
-/// `K::ExecutableDefinitionTypeGenerics` when present.
+/// required — an empty `<>` rejects (Amendment 2).
 // The `Option<ExecutableDefinitionTypeGenerics<…>>` return is inherent to the
 // optional list.
 #[allow(clippy::type_complexity)]
@@ -261,11 +222,9 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_angles(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`Name+`): the first parameter commits.
     let (first_span, first_src) = ident(inp)?.into_components();
@@ -284,9 +243,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, params) = delimited.into_components();
       let generics = ExecutableDefinitionTypeGenerics::new(span, params);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::ExecutableDefinitionTypeGenerics.raw());
-      emitter.cst_finish();
       Ok(Some(generics))
     }
     None => Ok(None),
@@ -294,14 +250,13 @@ where
 }
 
 /// Parses the tail of a `DefinitionName` whose leading identifier the caller has
-/// already consumed (`name` here, its speculative `mark` minted before it):
+/// already consumed (`name` here):
 /// the optional parameter list, the node spend, and the carrier construction.
 ///
 /// Shared by [`definition_name`] and the operation production, whose name is
 /// optional (a `try_ident` decides whether a name exists before this tail runs).
 pub(super) fn definition_name_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   name: Name<SliceOf<'inp, L>>,
 ) -> Result<DefinitionName<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -309,7 +264,6 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -320,9 +274,6 @@ where
   };
   let span = SimpleSpan::new(name.span().start(), end);
   let def_name = DefinitionName::new(span, name, generics);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::DefinitionName.raw());
-  emitter.cst_finish();
   Ok(def_name)
 }
 
@@ -340,13 +291,11 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
-  definition_name_body(inp, mark, Name::new(name_span, name_src))
+  definition_name_body(inp, Name::new(name_span, name_src))
 }
 
 /// Parses an `ExecutableDefinitionName`
@@ -366,12 +315,10 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = fragment_name(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   let generics = try_executable_definition_type_generics(inp)?;
@@ -381,15 +328,11 @@ where
   };
   let span = SimpleSpan::new(name.span().start(), end);
   let def_name = ExecutableDefinitionName::new(span, name, generics);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ExecutableDefinitionName.raw());
-  emitter.cst_finish();
   Ok(def_name)
 }
 
 /// Parses the bounds and construction tail of a where predicate whose
-/// `TypePath ':'` head the caller has already consumed (`bounded` here, its
-/// speculative `mark` minted before it).
+/// `TypePath ':'` head the caller has already consumed (`bounded` here).
 ///
 /// The bounds are `TypePath (& TypePath)*` — the first commits (Amendment 2:
 /// one-or-more), the rest continue on a `try_ampersand` commit-first loop.
@@ -397,7 +340,6 @@ where
 /// probe loop (speculative head).
 fn where_predicate_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   bounded: TypePath<SliceOf<'inp, L>>,
 ) -> Result<WherePredicate<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -405,7 +347,6 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -418,9 +359,6 @@ where
   let end = bounds.last().expect("at least one bound").span().end();
   let span = SimpleSpan::new(bounded.span().start(), end);
   let predicate = WherePredicate::new(span, bounded, bounds);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::WherePredicate.raw());
-  emitter.cst_finish();
   Ok(predicate)
 }
 
@@ -438,14 +376,12 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let bounded = type_path(inp)?;
   colon(inp)?;
-  where_predicate_body(inp, mark, bounded)
+  where_predicate_body(inp, bounded)
 }
 
 /// Parses an optional `WhereClause` (`'where' WherePredicate+`), declining to
@@ -454,7 +390,7 @@ where
 /// Once `where` commits, at least one predicate is required (Amendment 2); the
 /// rest continue while a speculative `TypePath ':'` probe commits (see the module
 /// note on the predicate probe — the clause ends at the first non-predicate,
-/// whatever construct follows). Retro-wrapped as `K::WhereClause` when present.
+/// whatever construct follows).
 // The `Option<WhereClause<…>>` return is inherent to an optional generic
 // production; factoring it into an alias would only move the same generics.
 #[allow(clippy::type_complexity)]
@@ -466,11 +402,9 @@ where
   L::Token: IdentifierToken<'inp> + KeywordToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = match try_where(inp)? {
     ParseAttempt::Accept(kw) => kw,
     ParseAttempt::Decline => return Ok(None),
@@ -485,15 +419,14 @@ where
   loop {
     let probed = inp.try_attempt(
       |inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| -> Result<_, ErrorOf<'inp, L, Ctx, Lang>> {
-        let mark = inp.emitter().cst_mark();
         let bounded = type_path(inp)?;
         colon(inp)?;
-        Ok((mark, bounded))
+        Ok(bounded)
       },
     );
     match probed {
-      Ok((pred_mark, bounded)) => {
-        predicates.push(where_predicate_body(inp, pred_mark, bounded)?);
+      Ok(bounded) => {
+        predicates.push(where_predicate_body(inp, bounded)?);
       }
       Err(_not_a_predicate) => break,
     }
@@ -506,9 +439,6 @@ where
     .end();
   let span = SimpleSpan::new(kw.span().start(), end);
   let clause = WhereClause::new(span, predicates);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::WhereClause.raw());
-  emitter.cst_finish();
   Ok(Some(clause))
 }
 

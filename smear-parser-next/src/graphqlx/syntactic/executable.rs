@@ -44,17 +44,6 @@
 //! [`executable_definition_name`] exclusion, so `fragment on on X { … }` errors;
 //! the spread side is structurally unrepresentable (`selection`'s fork).
 //! Regression: `fragment_named_on_error_per_spec`.
-//!
-//! # Node placement
-//!
-//! Every materialising definition retro-wraps its kind after the body settles
-//! (Amendment 1); a described definition's mark is minted *before* the optional
-//! description, so `K::OperationDefinition` / `K::FragmentDefinition` cover the
-//! description (which is itself a `K::Description` node) — the plan's
-//! described-definition convention. [`operation_type`] wraps `K::OperationType`
-//! around the keyword. [`executable_definition`] and
-//! [`import_or_executable_definition`] add no wrapper node — the committed arm's
-//! kind is the item's (sum-type convention).
 
 use smear_lexer::{
   LitBlockStr, LitInlineStr,
@@ -64,8 +53,6 @@ use smear_lexer::{
 use smear_scaffold::ast as scaffold;
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{list_of, try_parens},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
@@ -97,7 +84,6 @@ use crate::{
       Name, OperationDefinition, OperationType, StringValue, VariablesDefinition,
     },
     keyword::{on, try_fragment, try_import, try_mutation, try_query, try_subscription},
-    kinds::SyntaxKind as K,
   },
 };
 
@@ -149,25 +135,18 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
-  // Optional leading description; `K::Description` wraps it when present, else the
-  // speculative mark is left unspent (no node).
-  let desc_mark = inp.emitter().cst_mark();
+  // Optional leading description, carried exactly as the frozen crate does.
   let description = match try_description(inp)? {
     Some((lit, dspan)) => {
       let value = match lit {
         StringLiteral::Inline(inline) => StringValue::new(dspan, inline.into()),
         StringLiteral::Block(block) => StringValue::new(dspan, block.into()),
       };
-      let emitter = inp.emitter();
-      emitter.cst_start_at(desc_mark, K::Description.raw());
-      emitter.cst_finish();
       Some(value)
     }
     None => None,
@@ -180,9 +159,6 @@ where
   let span = inp.span_since(&cursor);
   let def = scaffold::VariableDefinition::new(span, var, ty, dirs, default);
   let described = scaffold::Described::new(span, description, def);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::VariableDefinition.raw());
-  emitter.cst_finish();
   Ok(described)
 }
 
@@ -214,12 +190,10 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`VariableDefinition+`): the first is committed, so an empty
     // `()` errors at the `)` exactly as the committed variable reports it.
@@ -235,9 +209,6 @@ where
     Some(delimited) => {
       let (span, _open, _close, items) = delimited.into_components();
       let vars = scaffold::VariablesDefinition::new(span, items);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::VariablesDefinition.raw());
-      emitter.cst_finish();
       Ok(Some(vars))
     }
     None => Ok(None),
@@ -245,8 +216,7 @@ where
 }
 
 /// Parses an `OperationType` (`query` / `mutation` / `subscription`), soft
-/// keywords resolved by slice compare, wrapping the keyword in a
-/// `K::OperationType` node.
+/// keywords resolved by slice compare.
 ///
 /// Spec: [OperationType](https://spec.graphql.org/draft/#OperationType).
 pub fn operation_type<'inp, L, Ctx, Lang>(
@@ -257,11 +227,9 @@ where
   L::Token: KeywordToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let op = if let ParseAttempt::Accept(kw) = try_query(inp)? {
     OperationType::Query(kw)
   } else if let ParseAttempt::Accept(kw) = try_mutation(inp)? {
@@ -271,9 +239,6 @@ where
   } else {
     return unexpected(inp);
   };
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::OperationType.raw());
-  emitter.cst_finish();
   Ok(op)
 }
 
@@ -296,7 +261,6 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -334,21 +298,16 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
-  operation_definition_body(inp, mark)
+  operation_definition_body(inp)
 }
 
-/// Parses an operation definition, spending the caller-minted `mark` as
-/// `K::OperationDefinition` over the whole definition (the description lands
-/// inside when a described dispatch minted the mark first).
+/// Parses an operation definition.
 pub(super) fn operation_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
 ) -> Result<OperationDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
@@ -364,30 +323,24 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  // Query-shorthand: a bare selection set is an operation definition too, wrapped
-  // in `K::OperationDefinition` over its `K::SelectionSet`.
+  // Query-shorthand: a bare selection set is an operation definition too.
   if peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let ss = selection_set(inp)?;
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::OperationDefinition.raw());
-    emitter.cst_finish();
     return Ok(OperationDefinition::Shorthand(ss));
   }
   let cursor = inp.cursor().clone();
   let op = operation_type(inp)?;
   // Optional name with optional generic parameters: any identifier — including
   // the soft `where` (greedy name resolution; see the module deviation note) —
-  // then `DefinitionTypeGenerics?`, wrapped as `K::DefinitionName`.
-  let name_mark = inp.emitter().cst_mark();
+  // then `DefinitionTypeGenerics?`.
   let name = match try_ident(inp)? {
     ParseAttempt::Accept(id) => {
       let (span, src) = id.into_components();
-      Some(definition_name_body(inp, name_mark, Name::new(span, src))?)
+      Some(definition_name_body(inp, Name::new(span, src))?)
     }
     ParseAttempt::Decline => None,
   };
@@ -396,9 +349,6 @@ where
   let constrained = constrained_selection_set(inp)?;
   let span = inp.span_since(&cursor);
   let named = scaffold::NamedOperationDefinition::new(span, op, name, vars, dirs, constrained);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::OperationDefinition.raw());
-  emitter.cst_finish();
   Ok(OperationDefinition::Named(named))
 }
 
@@ -425,26 +375,21 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = crate::graphqlx::keyword::fragment(inp)?;
-  fragment_definition_body(inp, mark, kw)
+  fragment_definition_body(inp, kw)
 }
 
 /// Parses the body of a fragment definition after the `fragment` keyword has
-/// been consumed, spending `mark` as `K::FragmentDefinition` over the whole
-/// definition.
+/// been consumed.
 ///
-/// Shared by [`fragment_definition`] (which mints `mark` and consumes the
-/// keyword), [`executable_definition`], and the described dispatch — since a
+/// Shared by [`fragment_definition`] (which consumes the keyword), [`executable_definition`], and the described dispatch — since a
 /// soft keyword cannot be peeked without consuming, they converge on this tail.
 pub(super) fn fragment_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   kw: Fragment,
 ) -> Result<FragmentDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -461,7 +406,6 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -476,26 +420,20 @@ where
   };
   let and_span = SimpleSpan::new(and_start, name.span().end());
   let name_slot = scaffold::And::new(and_span, impl_generics, name);
-  // Type condition (`on TypePath`, generic application allowed): the mark is
   // minted before the committed `on`.
-  let tc_mark = inp.emitter().cst_mark();
   let on_kw = on(inp)?;
-  let tc = type_condition_body(inp, tc_mark, on_kw)?;
+  let tc = type_condition_body(inp, on_kw)?;
   let dirs = directives(inp)?;
   let constrained = constrained_selection_set(inp)?;
   let span = SimpleSpan::new(kw.span().start(), constrained.span().end());
   let def = scaffold::FragmentDefinition::new(span, name_slot, tc, dirs, constrained);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::FragmentDefinition.raw());
-  emitter.cst_finish();
   Ok(def)
 }
 
 /// Parses an `ExecutableDefinition` — an operation or a fragment.
 ///
 /// The leading `fragment` soft keyword selects a fragment definition; anything
-/// else is an operation definition. No wrapper node of its own — the committed
-/// arm's kind is the definition's (sum-type convention).
+/// else is an operation definition.
 ///
 /// Spec:
 /// [ExecutableDefinition](https://spec.graphql.org/draft/#ExecutableDefinition)
@@ -517,30 +455,24 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  // Mint the fragment node's mark before the dispatch consumes the soft
-  // `fragment` keyword; on the operation arm it is left unspent (no wrapper node).
-  let mark = inp.emitter().cst_mark();
   match try_fragment(inp)? {
     ParseAttempt::Accept(kw) => {
-      fragment_definition_body(inp, mark, kw).map(ExecutableDefinition::Fragment)
+      fragment_definition_body(inp, kw).map(ExecutableDefinition::Fragment)
     }
     ParseAttempt::Decline => operation_definition(inp).map(ExecutableDefinition::Operation),
   }
 }
 
-/// Parses the described-definition tail from a caller-minted `mark`: the
-/// optional leading description (its own `K::Description` node), then the
-/// operation-or-fragment dispatch whose committed arm spends `mark` as its
+/// Parses the described-definition tail: the optional leading description, then
+/// the operation-or-fragment dispatch whose committed arm builds its
 /// definition kind — the description lands *inside* the definition node (the
 /// plan's described-definition convention).
 fn described_executable_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
 ) -> Result<DescribedExecutableDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
@@ -556,31 +488,24 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   let cursor = inp.cursor().clone();
-  let desc_mark = inp.emitter().cst_mark();
   let description = match try_description(inp)? {
     Some((lit, dspan)) => {
       let value = match lit {
         StringLiteral::Inline(inline) => StringValue::new(dspan, inline.into()),
         StringLiteral::Block(block) => StringValue::new(dspan, block.into()),
       };
-      let emitter = inp.emitter();
-      emitter.cst_start_at(desc_mark, K::Description.raw());
-      emitter.cst_finish();
       Some(value)
     }
     None => None,
   };
   let def = match try_fragment(inp)? {
-    ParseAttempt::Accept(kw) => {
-      ExecutableDefinition::Fragment(fragment_definition_body(inp, mark, kw)?)
-    }
-    ParseAttempt::Decline => ExecutableDefinition::Operation(operation_definition_body(inp, mark)?),
+    ParseAttempt::Accept(kw) => ExecutableDefinition::Fragment(fragment_definition_body(inp, kw)?),
+    ParseAttempt::Decline => ExecutableDefinition::Operation(operation_definition_body(inp)?),
   };
   let span = inp.span_since(&cursor);
   Ok(scaffold::Described::new(span, description, def))
@@ -605,18 +530,15 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
-  described_executable_definition_body(inp, mark)
+  described_executable_definition_body(inp)
 }
 
 /// Parses one executable-document item — an import definition when the soft
-/// `import` keyword is next, otherwise a described executable definition. No
-/// wrapper node of its own (sum-type convention).
+/// `import` keyword is next, otherwise a described executable definition.
 ///
 /// A top-level `import` commits to the import arm: no executable definition can
 /// begin with that bare identifier, exactly the frozen
@@ -638,18 +560,16 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_import(inp)? {
     ParseAttempt::Accept(kw) => {
-      import_definition_body(inp, mark, kw).map(ImportOrExecutableDefinition::Import)
+      import_definition_body(inp, kw).map(ImportOrExecutableDefinition::Import)
     }
     ParseAttempt::Decline => {
-      described_executable_definition_body(inp, mark).map(ImportOrExecutableDefinition::Executable)
+      described_executable_definition_body(inp).map(ImportOrExecutableDefinition::Executable)
     }
   }
 }
@@ -680,12 +600,10 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   // Spec cardinality (`ImportOrExecutableDefinition+`): the first item is
   // committed, so an empty input errors as end of input; the rest collect until
@@ -695,9 +613,6 @@ where
   items.insert(0, first);
   let span = inp.span_since(&cursor);
   let doc = scaffold::Document::new(span, items);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ExecutableDocument.raw());
-  emitter.cst_finish();
   Ok(doc)
 }
 
