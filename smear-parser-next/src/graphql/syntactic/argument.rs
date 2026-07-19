@@ -1,10 +1,12 @@
 //! GraphQL `Argument`/`Arguments` productions — executable and constant.
 //!
 //! [`argument`] and [`const_argument`] parse one `Name ':' Value` pair; [`arguments`]
-//! and [`const_arguments`] parse the optional parenthesised `Argument+` list a field
-//! or directive may carry, declining to `None` (no tokens consumed) unless the next
-//! token is `(`. The const twins thread [`const_value`] instead of [`value`],
-//! exactly mirroring the frozen crate's split.
+//! and [`const_arguments`] parse the optional parenthesised argument list a field or
+//! directive may carry, declining to `None` (no tokens consumed) unless the next
+//! token is `(`. The spec grammar is `Arguments : ( Argument+ )`, but parser-next
+//! stays lenient and accepts an empty `()` (user ruling, plan Amendment 5 — frozen
+//! parity; see the fns' doc notes). The const twins thread [`const_value`] instead
+//! of [`value`], exactly mirroring the frozen crate's split.
 
 use smear_lexer::{
   LitBlockStr, LitInlineStr,
@@ -90,12 +92,20 @@ where
   Ok(arg)
 }
 
-/// Parses an optional `Arguments` list (`'(' Argument+ ')'`), declining to `None`
+/// Parses an optional `Arguments` list (`'(' Argument* ')'`), declining to `None`
 /// (no tokens consumed) unless the next token is `(`.
 ///
-/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
-/// spec's `Arguments : ( Argument+ )` demands one-or-more, so an empty `()` errors
-/// here where frozen's unenforced `+` accepted it.
+/// Leniency deviation from the spec (user ruling, plan Amendment 5 — REVERSES the
+/// Amendment-2 entry for this site): the spec's `Arguments : ( Argument+ )` demands
+/// one-or-more, but parser-next stays lenient and accepts an empty `()` here,
+/// matching the frozen parser's unenforced `+` (frozen parity). All other
+/// Amendment-2 cardinality sites keep their spec enforcement.
+///
+/// Composition: [`try_parens`] supplies the declining outer region (the many-builder
+/// surface's own `.repeated().delimited::<D>()` has no declining twin — a missing
+/// opener there is a hard error, not a decline — so the single-region attempt shape
+/// is the right tool here); [`list_of`] collects zero-or-more arguments up to the
+/// `)`, itself a `repeated_while(..).collect()` composition over the element parser.
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production;
@@ -121,14 +131,10 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-    // Spec cardinality (`Argument+`): the first argument is committed, so an empty
-    // `()` errors at the `)` exactly as the committed ident atom reports it.
-    let first = argument(inp)?;
-    let mut items = list_of(argument, <L::Token as PunctuatorTokenExt>::is_close_paren)(inp)?;
-    items.insert(0, first);
-    Ok(items)
-  })(inp)?
+  match try_parens(list_of(
+    argument,
+    <L::Token as PunctuatorTokenExt>::is_close_paren,
+  ))(inp)?
   {
     Some(delimited) => {
       let (span, open, close, items) = delimited.into_components();
@@ -146,9 +152,13 @@ where
 
 /// The const twin of [`arguments`]: an optional `ConstArguments` list.
 ///
-/// Deviation from the frozen parser (spec-cardinality rule, plan Amendment 2): the
-/// spec's `Arguments : ( Argument+ )` demands one-or-more, so an empty `()` errors
-/// here where frozen's unenforced `+` accepted it.
+/// Leniency deviation from the spec (user ruling, plan Amendment 5 — REVERSES the
+/// Amendment-2 entry for this site): the spec's `Arguments : ( Argument+ )` demands
+/// one-or-more, but parser-next stays lenient and accepts an empty `()` here,
+/// matching the frozen parser's unenforced `+` (frozen parity). All other
+/// Amendment-2 cardinality sites keep their spec enforcement.
+///
+/// Same [`try_parens`] + [`list_of`] composition as [`arguments`].
 ///
 /// Spec: [Arguments](https://spec.graphql.org/draft/#Arguments) (const context).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production;
@@ -174,17 +184,10 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
-    // Spec cardinality (`Argument+`): the first argument is committed, so an empty
-    // `()` errors at the `)` exactly as the committed ident atom reports it.
-    let first = const_argument(inp)?;
-    let mut items = list_of(
-      const_argument,
-      <L::Token as PunctuatorTokenExt>::is_close_paren,
-    )(inp)?;
-    items.insert(0, first);
-    Ok(items)
-  })(inp)?
+  match try_parens(list_of(
+    const_argument,
+    <L::Token as PunctuatorTokenExt>::is_close_paren,
+  ))(inp)?
   {
     Some(delimited) => {
       let (span, open, close, items) = delimited.into_components();

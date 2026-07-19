@@ -162,20 +162,16 @@ fn arguments_accepts_multiple() {
 }
 
 #[test]
-fn arguments_empty_parens_error_per_spec() {
-  // Spec-cardinality rule (plan Amendment 2): `Arguments : ( Argument+ )` demands
-  // one-or-more, so an empty `()` errors — a documented deviation from the frozen
-  // parser, whose unenforced `+` accepted it.
-  reject_all!(arguments, "()");
-  // The rejection is the committed atom's unexpected-token at the `)`.
-  let family = match drive_str(|inp| arguments(inp).map(|_| ()), "()") {
-    Err(errs) => errs
-      .into_iter()
-      .next()
-      .is_some_and(|e| e.data().is_unexpected_token()),
-    Ok(()) => false,
-  };
-  assert!(family);
+fn arguments_accepts_empty_parens() {
+  // Leniency deviation from the spec (plan Amendment 5, REVERSES the Amendment-2
+  // entry for this site): `Arguments : ( Argument+ )` demands one-or-more, but
+  // parser-next stays lenient and accepts an empty `()` here, matching the frozen
+  // parser's unenforced `+`.
+  fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
+    let args = a.expect("present");
+    assert!(args.arguments().is_empty());
+  }
+  accept_all!(arguments, "()", check);
 }
 
 #[test]
@@ -221,9 +217,14 @@ fn const_arguments_declines_without_leading_paren() {
 }
 
 #[test]
-fn const_arguments_empty_parens_error_per_spec() {
-  // Spec-cardinality rule (plan Amendment 2), const twin: empty `()` errors.
-  reject_all!(const_arguments, "()");
+fn const_arguments_accepts_empty_parens() {
+  // Const twin of `arguments_accepts_empty_parens` (plan Amendment 5): empty `()`
+  // is accepted, matching frozen parity.
+  fn check<S: AsRef<[u8]>>(a: Option<crate::graphql::ast::ConstArguments<S>>) {
+    let args = a.expect("present");
+    assert!(args.arguments().is_empty());
+  }
+  accept_all!(const_arguments, "()", check);
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
@@ -258,13 +259,13 @@ fn argument_matches_frozen_verdicts() {
   }
 }
 
-/// Accept/reject verdicts for `arguments`. The frozen-parity oracle explicitly
-/// EXCLUDES the empty-`()` row: frozen accepts it, parser-next rejects it per the
-/// spec-cardinality rule (plan Amendment 2) — the deviation is pinned by
-/// `arguments_empty_parens_error_per_spec`, not re-blessed here.
+/// Accept/reject verdicts for `arguments`. Includes the empty-`()` row: frozen
+/// accepts it, and parser-next now matches (plan Amendment 5, frozen parity) —
+/// pinned by `arguments_accepts_empty_parens`.
 const ARGUMENTS_ORACLE: &[(&str, bool)] = &[
   ("(x: 1)", true),
   ("(a: 1, b: 2)", true),
+  ("()", true),
   ("(x: 1", false),
   ("(x 1)", false),
 ];
