@@ -5,7 +5,8 @@
 //! over the GraphQLx shapes, with the dialect's four twists:
 //!
 //! - **Generics on names.** An operation's optional name is a
-//!   [`definition_name`] (`query GetData<T, U = String>` — parameters with
+//!   [`definition_name`](super::generics::definition_name)
+//!   (`query GetData<T, U = String>` — parameters with
 //!   defaults); a fragment carries generics twice, impl generics on the keyword
 //!   and an [`executable_definition_name`] on the fragment itself
 //!   (`fragment<T> ItemFragment<T>`, fixtures `0016`/`0022`).

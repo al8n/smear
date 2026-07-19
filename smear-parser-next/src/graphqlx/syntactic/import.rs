@@ -14,11 +14,10 @@
 //! [`named_specifier`] / [`wildcard_specifier`] members (mixed freely, commas are
 //! trivia — fixture `0013_complex_import`). Every keyword (`import` / `from` /
 //! `as`) is soft, resolved by slice compare through the typed keyword atoms; an
-//! `as` alias names a full `::`-[`path`](super::ty::path).
+//! `as` alias names a full `::`-[`path`].
 //!
 //! The file path is an **inline** string only: the frozen model keys
-//! [`ImportDefinition`](crate::graphqlx::ast::ImportDefinition) by
-//! [`InlineStringValue`](crate::graphqlx::ast::InlineStringValue), so a block
+//! [`ImportDefinition`] by [`InlineStringValue`], so a block
 //! string (`"""…"""`) rejects (Deviations Register: type-shape authority; the
 //! fixtures only ever write inline paths).
 //!

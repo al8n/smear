@@ -9,7 +9,7 @@
 //! fragment, and anything else is a fragment spread. The GraphQLx twists:
 //!
 //! - a type condition names a generic-applicable type path (`... on Item<T>`,
-//!   fixture `0016`), parsed by [`type_path`](super::ty::type_path) and wrapped
+//!   fixture `0016`), parsed by [`type_path`] and wrapped
 //!   as a `K::TypeCondition` node;
 //! - a fragment spread names a `FragmentTypePath` — a `::`-path with optional
 //!   generic *arguments* (`...UserFields<T>`, `...ConnectionFields<String,

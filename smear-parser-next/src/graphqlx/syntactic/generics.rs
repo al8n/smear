@@ -43,7 +43,7 @@
 //! # The predicate probe
 //!
 //! Predicates carry no separator (fixture `0020` stacks them on bare newlines), and
-//! a predicate's bounded type is a full [`type_path`](super::ty::type_path) — a
+//! a predicate's bounded type is a full [`type_path`] — a
 //! variable-length head — so "does another predicate follow?" is not decidable by
 //! any fixed-width peek: after `where T: Node`, a following `type Bar` must end the
 //! clause while `u::V<W>: X` must continue it. The loop therefore probes with
