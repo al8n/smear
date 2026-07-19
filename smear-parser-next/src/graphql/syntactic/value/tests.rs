@@ -1,12 +1,10 @@
 //! Value-production tests.
 //!
 //! Every production is driven end to end over the real GraphQL syntactic lexer under
-//! a `Fatal<GraphqlErrors>` context — a no-op [`CstEmitter`](tokora::emitter::CstEmitter),
-//! so these also prove the `node(kind)` brackets compile and run tree-lessly at zero
-//! cost (no rowan anywhere). Each accept case runs the full source matrix (`str`,
-//! `[u8]`, and `Bytes` behind the feature), asserting equal ASTs modulo the slice
-//! type; reject cases assert the error family; and a table-driven oracle pins the
-//! accept/reject verdicts the frozen `smear-parser` crate produces for the same
+//! a `Fatal<GraphqlErrors>` context. Each accept case runs the full source matrix
+//! (`str`, `[u8]`, and `Bytes` behind the feature), asserting equal ASTs modulo the
+//! slice type; reject cases assert the error family; and a table-driven oracle pins
+//! the accept/reject verdicts the frozen `smear-parser` crate produces for the same
 //! inputs (the true/false/null-before-enum ordering included).
 //!
 //! The productions are `Lang`-generic, so — exactly as the frozen crate's
