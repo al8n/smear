@@ -10,7 +10,7 @@
 //! entry 1 — the `enum_value` exclusion — where frozen accepted them).
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{
   arguments_definition, described_type_definition, directive_definition, directive_locations,
@@ -97,12 +97,6 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 /// Asserts the first error's data is an unexpected-token (the house rejection family
 /// the cardinality and exclusion deviations report).
 fn first_is_unexpected_token<'inp>(
@@ -143,7 +137,7 @@ fn description_declines_on_non_string() {
 fn input_value_definition_accepts_minimal() {
   fn check<S: AsRef<[u8]>>(v: InputValueDefinition<S>) {
     assert!(v.description().is_none());
-    assert_eq!(bytes(v.name().source_ref()), b"x");
+    assert!("x".equivalent(v.name().source_ref()));
     assert!(v.default_value().is_none());
     assert!(v.directives().is_none());
   }
@@ -223,7 +217,7 @@ fn opt_arguments_definition_declines_without_paren() {
 fn field_definition_accepts_minimal() {
   fn check<S: AsRef<[u8]>>(f: FieldDefinition<S>) {
     assert!(f.description().is_none());
-    assert_eq!(bytes(f.name().source_ref()), b"name");
+    assert!("name".equivalent(f.name().source_ref()));
     assert!(f.arguments_definition().is_none());
     assert!(f.directives().is_none());
   }
@@ -386,7 +380,7 @@ fn directive_locations_rejects_unknown_and_empty() {
 fn enum_value_definition_accepts() {
   fn check<S: AsRef<[u8]>>(v: EnumValueDefinition<S>) {
     assert!(v.description().is_none());
-    assert_eq!(bytes(v.value().source_ref()), b"ACTIVE");
+    assert!("ACTIVE".equivalent(v.value().source_ref()));
     assert!(v.directives().is_none());
   }
   fn described<S: AsRef<[u8]>>(v: EnumValueDefinition<S>) {
@@ -478,7 +472,7 @@ fn enum_values_definition_empty_braces_error_per_spec() {
 fn root_operation_type_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: RootOperationTypeDefinition<S>) {
     assert!(d.operation_type().is_query());
-    assert_eq!(bytes(d.name().source_ref()), b"Query");
+    assert!("Query".equivalent(d.name().source_ref()));
   }
   accept_all!(root_operation_type_definition, "query: Query", check);
 }
@@ -513,7 +507,7 @@ fn root_operation_types_definition_empty_braces_error_per_spec() {
 #[test]
 fn scalar_type_definition_accepts_and_rejects() {
   fn check<S: AsRef<[u8]>>(d: ScalarTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"DateTime");
+    assert!("DateTime".equivalent(d.name().source_ref()));
   }
   fn with_dir<S: AsRef<[u8]>>(d: ScalarTypeDefinition<S>) {
     assert!(d.directives().is_some());
@@ -531,7 +525,7 @@ fn scalar_type_definition_accepts_and_rejects() {
 #[test]
 fn object_type_definition_accepts_full() {
   fn check<S: AsRef<[u8]>>(d: ObjectTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"User");
+    assert!("User".equivalent(d.name().source_ref()));
     assert_eq!(d.implements().expect("impls").interfaces().len(), 2);
     assert!(d.directives().is_some());
     assert_eq!(
@@ -564,7 +558,7 @@ fn object_type_definition_accepts_bare_and_rejects_empty_fields() {
 #[test]
 fn interface_type_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: InterfaceTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"Node");
+    assert!("Node".equivalent(d.name().source_ref()));
     assert_eq!(
       d.fields_definition()
         .expect("fields")
@@ -591,7 +585,7 @@ fn interface_type_definition_accepts() {
 #[test]
 fn union_type_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: UnionTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"Pet");
+    assert!("Pet".equivalent(d.name().source_ref()));
     assert_eq!(d.member_types().expect("members").members().len(), 2);
   }
   accept_all!(union_type_definition, "union Pet = Dog | Cat", check);
@@ -605,7 +599,7 @@ fn union_type_definition_accepts() {
 #[test]
 fn enum_type_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: EnumTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"Direction");
+    assert!("Direction".equivalent(d.name().source_ref()));
     assert_eq!(
       d.enum_values_definition()
         .expect("values")
@@ -628,7 +622,7 @@ fn enum_type_definition_accepts() {
 #[test]
 fn input_object_type_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: InputObjectTypeDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"Point");
+    assert!("Point".equivalent(d.name().source_ref()));
     assert_eq!(
       d.fields_definition()
         .expect("fields")
@@ -649,7 +643,7 @@ fn input_object_type_definition_accepts() {
 #[test]
 fn directive_definition_accepts() {
   fn check<S: AsRef<[u8]>>(d: DirectiveDefinition<S>) {
-    assert_eq!(bytes(d.name().source_ref()), b"deprecated");
+    assert!("deprecated".equivalent(d.name().source_ref()));
     assert!(!d.repeatable());
     assert!(d.arguments_definition().is_none());
     assert_eq!(d.locations().locations().len(), 1);
