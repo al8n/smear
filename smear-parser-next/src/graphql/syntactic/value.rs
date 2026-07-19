@@ -7,15 +7,22 @@
 //! error they name, not by the marker — so the entry runner pins the dialect marker
 //! when it drives them.
 //!
-//! # Committed / attempt pairs
+//! # Committed / declining pairs
 //!
 //! Following the tokora `json.rs` example, every value production comes as a
 //! committed form and a declining `try_` twin. The committed form consumes and
-//! errors on a wrong head; the `try_` twin obeys the position law — on decline (or
-//! on a multi-token head that does not fully match) it leaves the cursor at its
-//! original position, transactionally (via [`InputRef::attempt`](tokora::InputRef)
-//! for multi-token heads). The committed dispatchers [`value`]/[`const_value`]
-//! *derive* from their attempt twins [`try_value`]/[`try_const_value`]: the twin
+//! errors on a wrong head; the `try_` twin obeys the position law — on decline it
+//! leaves the cursor at its original position. A fixed multi-token head (`$` + name,
+//! `Name ':'`, `'='` + value-head) decides via a non-consuming [`ParseChoice`] peek
+//! over the exact window the head needs, then runs the committed form on a match:
+//! GraphQL's heads are bounded (at most `U3`), so the decision never reaches for
+//! [`InputRef::attempt`](tokora::InputRef)'s checkpoint/rollback — a decline has
+//! consumed nothing *by construction*, not by rewinding. Only the two single-token
+//! twins whose match turns on an already-consumed identifier's spelling
+//! ([`try_boolean_value`], [`try_null_value`]) still reach for `attempt`, to roll
+//! back an identifier that turned out not to be the reserved spelling they were
+//! checking for. The committed dispatchers [`value`]/[`const_value`] *derive* from
+//! their declining twins [`try_value`]/[`try_const_value`] the same way: the twin
 //! peeks the head and runs the committed arm, and the committed form maps a decline
 //! into the shared unexpected-value error.
 //!
@@ -74,9 +81,9 @@ use tokora::{
 
 use crate::{
   combinator::{
-    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, dollar, ident,
-    lbrace, lbracket, rbrace, rbracket, try_colon, try_dollar, try_equal, try_float, try_ident,
-    try_int, try_lbrace, try_lbracket, try_string,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, colon, dollar, equal,
+    ident, lbrace, lbracket, rbrace, rbracket, try_float, try_ident, try_int, try_lbrace,
+    try_lbracket, try_string,
   },
   graphql::ast::{
     BooleanValue, ConstInputValue, ConstObjectField, DefaultInputValue, EnumValue, FloatValue,
@@ -541,9 +548,10 @@ where
 /// Declines (no tokens consumed) unless the next two tokens are `$` followed by an
 /// identifier, which it then consumes as a [`VariableValue`].
 ///
-/// The head is two tokens (`$` and a name), so the attempt is transactional: a `$`
-/// with no name declines and leaves the cursor at the `$` (position law), never
-/// committing to a missing-name error.
+/// The head is two tokens (`$` and a name): a `U2` [`ParseChoice`] peek decides the
+/// match before anything commits, so a `$` with no name (or any other head)
+/// declines with nothing consumed *by construction* — no checkpoint, no rollback —
+/// never committing to a missing-name error.
 ///
 /// Spec: [Variable](https://spec.graphql.org/draft/#Variable).
 #[allow(clippy::type_complexity)]
@@ -555,36 +563,23 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mut failed = None;
-  let accepted = inp.attempt(|inp| match try_dollar(inp) {
-    Ok(ParseAttempt::Accept(dollar)) => match try_ident(inp) {
-      Ok(ParseAttempt::Accept(id)) => {
-        let (name_span, name_src) = id.into_components();
-        let name = Name::new(name_span, name_src);
-        let span = SimpleSpan::new(dollar.span().start(), name.span().end());
-        Some(VariableValue::new(span, name))
+  (variable_value::<L, Ctx, Lang>,)
+    .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, L, U2>, _emitter| {
+      let Some(dollar) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      if !dollar.token().is_dollar() {
+        return Ok(None);
       }
-      Ok(ParseAttempt::Decline) => None,
-      Err(err) => {
-        failed = Some(err);
-        None
-      }
-    },
-    Ok(ParseAttempt::Decline) => None,
-    Err(err) => {
-      failed = Some(err);
-      None
-    }
-  });
-  match failed {
-    Some(err) => Err(err),
-    None => Ok(match accepted {
-      Some(v) => ParseAttempt::Accept(v),
-      None => ParseAttempt::Decline,
-    }),
-  }
+      Ok(match peeked.pop_front() {
+        Some(name) if name.token().is_identifier() => Some(Branch::B0),
+        _ => None,
+      })
+    })
+    .try_parse_input(inp)
 }
 
 // ─── Identifier dispatch arm (true / false / null / enum) ────────────────────
@@ -901,9 +896,10 @@ where
 /// Declines (no tokens consumed) unless the next two tokens are an identifier
 /// followed by a colon, in which case it commits to the field's [`value`].
 ///
-/// The head is `Name ':'`, so the attempt is transactional over both: a name with
-/// no colon declines and leaves the cursor at the name (position law), never
-/// committing to a colon error.
+/// The head is `Name ':'`: a `U2` [`ParseChoice`] peek decides the match over both
+/// tokens before anything commits, so a name with no colon (or any other head)
+/// declines with nothing consumed *by construction*, never committing to a colon
+/// error.
 ///
 /// Spec: [ObjectField](https://spec.graphql.org/draft/#ObjectField).
 #[allow(clippy::type_complexity)]
@@ -927,37 +923,20 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mut failed = None;
-  let name = inp.attempt(|inp| match try_ident(inp) {
-    Ok(ParseAttempt::Accept(id)) => match try_colon(inp) {
-      Ok(ParseAttempt::Accept(_colon)) => Some(id),
-      Ok(ParseAttempt::Decline) => None,
-      Err(err) => {
-        failed = Some(err);
-        None
+  (object_field::<L, Ctx, Lang>,)
+    .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, L, U2>, _emitter| {
+      let Some(name) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      if !name.token().is_identifier() {
+        return Ok(None);
       }
-    },
-    Ok(ParseAttempt::Decline) => None,
-    Err(err) => {
-      failed = Some(err);
-      None
-    }
-  });
-  if let Some(err) = failed {
-    return Err(err);
-  }
-  match name {
-    None => Ok(ParseAttempt::Decline),
-    Some(id) => {
-      let (name_span, name_src) = id.into_components();
-      let name = Name::new(name_span, name_src);
-      let value = value(inp)?;
-      let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-      Ok(ParseAttempt::Accept(scaffold::ObjectField::new(
-        span, name, value,
-      )))
-    }
-  }
+      Ok(match peeked.pop_front() {
+        Some(colon) if colon.token().is_colon() => Some(Branch::B0),
+        _ => None,
+      })
+    })
+    .try_parse_input(inp)
 }
 
 /// Parses a constant `ObjectField` (`name : ConstValue`), committed on the name.
@@ -1015,37 +994,20 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mut failed = None;
-  let name = inp.attempt(|inp| match try_ident(inp) {
-    Ok(ParseAttempt::Accept(id)) => match try_colon(inp) {
-      Ok(ParseAttempt::Accept(_colon)) => Some(id),
-      Ok(ParseAttempt::Decline) => None,
-      Err(err) => {
-        failed = Some(err);
-        None
+  (const_object_field::<L, Ctx, Lang>,)
+    .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, L, U2>, _emitter| {
+      let Some(name) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      if !name.token().is_identifier() {
+        return Ok(None);
       }
-    },
-    Ok(ParseAttempt::Decline) => None,
-    Err(err) => {
-      failed = Some(err);
-      None
-    }
-  });
-  if let Some(err) = failed {
-    return Err(err);
-  }
-  match name {
-    None => Ok(ParseAttempt::Decline),
-    Some(id) => {
-      let (name_span, name_src) = id.into_components();
-      let name = Name::new(name_span, name_src);
-      let value = const_value(inp)?;
-      let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-      Ok(ParseAttempt::Accept(scaffold::ObjectField::new(
-        span, name, value,
-      )))
-    }
-  }
+      Ok(match peeked.pop_front() {
+        Some(colon) if colon.token().is_colon() => Some(Branch::B0),
+        _ => None,
+      })
+    })
+    .try_parse_input(inp)
 }
 
 // ─── Object values ───────────────────────────────────────────────────────────
@@ -1475,13 +1437,48 @@ where
 
 // ─── Default value ───────────────────────────────────────────────────────────
 
+/// The committed arm [`try_default_value`] dispatches to once its `U2` peek
+/// confirms `=` followed by a value head: consumes the `=` and the committed
+/// [`const_value`], producing the `DefaultInputValue`.
+///
+/// A plain fn item — like the "Dispatch arms" below — because a `.map()`ped closure
+/// would require a `Sized` `Lang`, which these `Lang: ?Sized` productions do not
+/// have.
+fn committed_default_value<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+) -> Result<DefaultInputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+  L::Token: IdentifierToken<'inp>
+    + PunctuatorToken<'inp>
+    + LiteralValueToken<
+      'inp,
+      Int = SliceOf<'inp, L>,
+      Float = SliceOf<'inp, L>,
+      InlineStr = LitInlineStr<SliceOf<'inp, L>>,
+      BlockStr = LitBlockStr<SliceOf<'inp, L>>,
+    >,
+  Ctx: ParseCtx<'inp, L, Lang>,
+  Lang: ?Sized,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
+{
+  let cursor = inp.cursor().clone();
+  equal(inp)?;
+  let value = const_value(inp)?;
+  Ok(DefaultInputValue::new(inp.span_since(&cursor), value))
+}
+
 /// Attempts a `DefaultValue` (`= ConstValue`), declining (no tokens consumed) unless
 /// the next two tokens are `=` followed by a value head (plan Amendment 7, U2
 /// `=`-then-value-head window).
 ///
-/// The head is transactional: an `=` with no value head declines and leaves the
-/// cursor at the `=` (position law). Once the head matches, the const value is
-/// committed — `= $v` commits and then errors (a variable is not a const value).
+/// The window is decided by a [`ParseChoice`] peek, not a checkpoint/rollback
+/// attempt: an `=` with no value head declines with nothing consumed *by
+/// construction*, leaving the cursor at the `=` (position law). Once the head
+/// matches, the const value is committed — `= $v` commits and then errors (a
+/// variable is not a const value).
 ///
 /// Spec: [DefaultValue](https://spec.graphql.org/draft/#DefaultValue).
 #[allow(clippy::type_complexity)]
@@ -1505,37 +1502,20 @@ where
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let cursor = inp.cursor().clone();
-  let mut failed = None;
-  let committed = inp.attempt(|inp| match try_equal(inp) {
-    Ok(ParseAttempt::Accept(_equal)) => {
-      let mut is_head = false;
-      if let Err(err) = inp.try_expect(|spanned| {
-        is_head = value_head_kind::<L>(spanned.data).is_some();
-        false
-      }) {
-        failed = Some(err);
-        return None;
+  (committed_default_value::<L, Ctx, Lang>,)
+    .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, L, U2>, _emitter| {
+      let Some(eq) = peeked.pop_front() else {
+        return Ok(None);
+      };
+      if !eq.token().is_equal() {
+        return Ok(None);
       }
-      is_head.then_some(())
-    }
-    Ok(ParseAttempt::Decline) => None,
-    Err(err) => {
-      failed = Some(err);
-      None
-    }
-  });
-  if let Some(err) = failed {
-    return Err(err);
-  }
-  match committed {
-    None => Ok(ParseAttempt::Decline),
-    Some(()) => {
-      let value = const_value(inp)?;
-      let span = inp.span_since(&cursor);
-      Ok(ParseAttempt::Accept(DefaultInputValue::new(span, value)))
-    }
-  }
+      Ok(match peeked.pop_front() {
+        Some(tok) if value_head_kind::<L>(tok.token()).is_some() => Some(Branch::B0),
+        _ => None,
+      })
+    })
+    .try_parse_input(inp)
 }
 
 /// Parses an optional `DefaultValue` (`= ConstValue`).
