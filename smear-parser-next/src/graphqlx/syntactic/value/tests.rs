@@ -1,9 +1,7 @@
 //! GraphQLx `Value` production tests.
 //!
 //! Every production is driven end to end over the real GraphQLx syntactic lexer
-//! under a `Fatal<GraphqlxErrors>` context — a no-op
-//! [`CstEmitter`](tokora::emitter::CstEmitter), so these also prove the `node(kind)`
-//! brackets compile and run tree-lessly at zero cost. Each accept case runs the full
+//! under a `Fatal<GraphqlxErrors>` context. Each accept case runs the full
 //! source matrix (`str`, `[u8]`, and `Bytes` behind the feature), asserting equal
 //! ASTs modulo the slice type; reject cases assert the error family; and a
 //! table-driven oracle pins the accept/reject verdicts the frozen `smear-parser`

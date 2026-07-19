@@ -1,5 +1,5 @@
 //! GraphQLx `Type` productions — path types with generics, list / set / map types,
-//! and the non-null retro-wrap.
+//! and the trailing bang.
 //!
 //! [`ty`] is the single recursive dispatcher for every `Type` shape: a peeked
 //! identifier commits to a `TypePath` (a `::`-path optionally applied to a `<…>`
@@ -12,40 +12,23 @@
 //! (`DefinitionTypePath` / `ListType` / `SetType` / `MapType` all carry it), so [`ty`]
 //! parses the base shape, then the optional `!`, and bakes the flag into the node it
 //! already built — no separate `NonNullType` AST node.
-//!
-//! # The `NonNullType` retro-wrap
-//!
-//! The CST layer *does* carry a separate `NonNullType` node. [`ty`] mints a mark
-//! before dispatching, lets the base shape's own [`node`] bracket (or, for the
-//! content-dependent set/map fork, a manual `cst_start_at`) record the base region,
-//! and — only when a `!` actually follows — spends the outer mark as
-//! `K::NonNullType`, wrapping the base node and the `!` together. A decline (no `!`)
-//! leaves the mark unspent. This is content-dependent placement (Amendment 1): the
-//! manual `cst_mark`/`cst_start_at`/`cst_finish` retro-wrap, not
-//! [`node_at`](tokora::parser::node_at), which cannot decide *whether* to wrap.
 
 use smear_scaffold::ast::{
   ListType, MapType, SetType,
   generic::{DefinitionTypePath, TypeGenerics},
 };
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{angles, brackets, list_of, node, try_angles},
+  parser::{angles, brackets, list_of, try_angles},
   token::{IdentifierToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
   utils::IntoComponents,
 };
 
 use crate::{
-  combinator::{
-    AssemblyCtx, ErrorOf, ParseCtx, SliceOf, ident, try_bang, try_fat_arrow, try_path_sep,
-  },
-  graphqlx::{
-    ast::{Name, Path, Type},
-    kinds::SyntaxKind as K,
-  },
+  combinator::{ErrorOf, ParseCtx, SliceOf, ident, try_bang, try_fat_arrow, try_path_sep},
+  graphqlx::ast::{Name, Path, Type},
 };
 
 /// The classified head of a `Type`: which base shape the one-token peek resolves to.
@@ -106,8 +89,7 @@ enum TypeCore<S> {
 /// relative). Segments after the first are gathered by a commit-first `try_path_sep`
 /// loop, never a separated1 with an identifier follow-set (the W5 bug class).
 ///
-/// The `Path<SliceOf<…>>` return names the shared path node; a caller wraps it in a
-/// [`node`] of the kind that owns it (`K::Path`).
+/// The `Path<SliceOf<…>>` return names the shared path node.
 pub fn path<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Path<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -130,8 +112,8 @@ where
   Ok(Path::new(span, segments, false))
 }
 
-/// Parses the `path (<…>)?` body of a `TypePath` — the [`node`]-wrapped region covers
-/// the path and any generic arguments, never a trailing `!`.
+/// Parses the `path (<…>)?` body of a `TypePath` — the path and any generic
+/// arguments, never a trailing `!`.
 // The nested `Option<TypeGenerics<…>>` return is inherent to the optional generic
 // arguments; factoring it into an alias would only move the same generics.
 #[allow(clippy::type_complexity)]
@@ -147,18 +129,17 @@ fn type_path_body<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let path = node(K::Path.raw(), path).parse_input(inp)?;
+  let path = path(inp)?;
   let generics = try_type_generics(inp)?;
   Ok((path, generics))
 }
 
-/// Parses an optional `<Type, …>` generic-argument list, retro-wrapped as a
-/// `TypeGenerics` node when present.
+/// Parses an optional `<Type, …>` generic-argument list.
 ///
 /// Declines to `None` (no tokens consumed) unless the next token is `<`. Once the
 /// `<` commits, at least one type is required — an empty `<>` is a rejection
@@ -174,19 +155,15 @@ fn try_type_generics<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_angles(generic_args_body)(inp)? {
     Some(delimited) => {
       let (span, _open, _close, params) = delimited.into_components();
       let generics = TypeGenerics::new(span, params);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::TypeGenerics.raw());
-      emitter.cst_finish();
       Ok(Some(generics))
     }
     None => Ok(None),
@@ -204,7 +181,7 @@ fn generic_args_body<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -215,15 +192,15 @@ where
   Ok(params)
 }
 
-/// Parses the `[ Type ]` region of a `ListType` — the [`node`]-wrapped region covers
-/// the brackets and the recursively-parsed element, never a trailing `!`.
+/// Parses the `[ Type ]` region of a `ListType` — the brackets and the
+/// recursively-parsed element, never a trailing `!`.
 fn list_type_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Type<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -241,7 +218,7 @@ fn angle_body<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -289,7 +266,7 @@ where
 /// `!`.
 ///
 /// One peek, committed arms; the trailing `!` folds into the resolved node's
-/// `required` flag and retro-wraps the CST region as `NonNullType`.
+/// `required` flag.
 ///
 /// Spec: [Type](https://spec.graphql.org/draft/#sec-Type-References) (GraphQLx).
 pub fn ty<'inp, L, Ctx, Lang>(
@@ -298,34 +275,21 @@ pub fn ty<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let core = match classify_type_head(inp)? {
     Some(Some(TypeHead::Path)) => {
-      let (path, generics) = node(K::TypePath.raw(), type_path_body).parse_input(inp)?;
+      let (path, generics) = type_path_body(inp)?;
       TypeCore::Path(path, generics)
     }
-    Some(Some(TypeHead::List)) => {
-      TypeCore::List(node(K::ListType.raw(), list_type_body).parse_input(inp)?)
-    }
+    Some(Some(TypeHead::List)) => TypeCore::List(list_type_body(inp)?),
     Some(Some(TypeHead::Angle)) => {
-      // Content-dependent kind (set vs map): a manual retro-wrap, chosen after the
-      // body reveals whether a `=>` was present (Amendment 1).
-      let inner_mark = inp.emitter().cst_mark();
       let delimited = angles(angle_body)(inp)?;
       let (_span, _open, _close, body) = delimited.into_components();
-      let kind = match &body {
-        AngleBody::Set(_) => K::SetType,
-        AngleBody::Map(_, _) => K::MapType,
-      };
-      let emitter = inp.emitter();
-      emitter.cst_start_at(inner_mark, kind.raw());
-      emitter.cst_finish();
       match body {
         AngleBody::Set(inner) => TypeCore::Set(inner),
         AngleBody::Map(key, val) => TypeCore::Map(key, val),
@@ -343,11 +307,6 @@ where
     TypeCore::Set(inner) => Type::from(SetType::new(span, inner, required)),
     TypeCore::Map(key, val) => Type::from(MapType::new(span, key, val, required)),
   };
-  if required {
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::NonNullType.raw());
-    emitter.cst_finish();
-  }
   Ok(out)
 }
 

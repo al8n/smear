@@ -4,9 +4,6 @@
 //! ([`graphql::syntactic::value`](crate::graphql::syntactic::value)): free fns
 //! generic over `L: Lexer<'inp>` and the language marker `Lang`, bounded only by
 //! tokora capability traits and the [`ParseCtx`] bundle, with `Span = SimpleSpan`.
-//! Each materialising node is bracketed with a [`node`] event that is a no-op on the
-//! syntactic (`Fatal`/`Verbose`) emitters and records a lossless CST node on a
-//! recording sink.
 //!
 //! GraphQLx adds four things to the shared value core:
 //!
@@ -34,10 +31,9 @@ use smear_lexer::{
 };
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{braces, brackets, list_of, node},
+  parser::{braces, brackets, list_of},
   span::AsSpan,
   token::{IdentifierToken, LitToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
@@ -47,16 +43,13 @@ use tokora::{
 use super::peeks_where;
 use crate::{
   combinator::{
-    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, dollar,
-    fat_arrow, ident, path_sep, try_dollar, try_equal, try_path_sep,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, dollar, fat_arrow, ident,
+    path_sep, try_dollar, try_equal, try_path_sep,
   },
-  graphqlx::{
-    ast::{
-      BooleanValue, ConstInputValue, ConstMapEntry, ConstObjectField, DefaultInputValue, EnumValue,
-      FloatValue, InputValue, IntValue, MapEntry, Name, NullValue, ObjectField, Path, StringValue,
-      VariableValue,
-    },
-    kinds::SyntaxKind as K,
+  graphqlx::ast::{
+    BooleanValue, ConstInputValue, ConstMapEntry, ConstObjectField, DefaultInputValue, EnumValue,
+    FloatValue, InputValue, IntValue, MapEntry, Name, NullValue, ObjectField, Path, StringValue,
+    VariableValue,
   },
 };
 
@@ -279,8 +272,7 @@ where
 /// Consumes an identifier already peeked as a value head and resolves it, in order:
 /// `true` / `false` → [`BooleanValue`], `null` → [`NullValue`], `set` / `map`
 /// followed by `{` → the [set](InputValue::Set) / [map](InputValue::Map) composite,
-/// and otherwise a single-segment enum [`Path`] ([`EnumValue`]). Retro-wraps the
-/// region in the resolved node kind.
+/// and otherwise a single-segment enum [`Path`] ([`EnumValue`]).
 fn identifier_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<InputValue<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -295,13 +287,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let spanned = match inp.next()? {
     Some(spanned) => spanned,
     None => return Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
@@ -310,16 +301,10 @@ where
   let (span, _token) = spanned.into_components();
   if slice.equivalent("true") || slice.equivalent("false") {
     let value = InputValue::Boolean(BooleanValue::new(span, slice.equivalent("true")));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::BooleanValue.raw());
-    emitter.cst_finish();
     return Ok(value);
   }
   if slice.equivalent("null") {
     let value = InputValue::Null(NullValue::new(span, slice));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::NullValue.raw());
-    emitter.cst_finish();
     return Ok(value);
   }
   if slice.equivalent("set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
@@ -330,9 +315,6 @@ where
     let (body_span, _open, _close, items) = delimited.into_components();
     let full = SimpleSpan::new(span.start(), body_span.end());
     let out = InputValue::Set(scaffold::Set::new(full, items));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::SetValue.raw());
-    emitter.cst_finish();
     return Ok(out);
   }
   if slice.equivalent("map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
@@ -343,17 +325,11 @@ where
     let (body_span, _open, _close, entries) = delimited.into_components();
     let full = SimpleSpan::new(span.start(), body_span.end());
     let out = InputValue::Map(scaffold::Map::new(full, entries));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::MapValue.raw());
-    emitter.cst_finish();
     return Ok(out);
   }
   // Bare identifier (including `set` / `map` not followed by `{`): a single-segment
   // relative enum path (frozen `graphqlx/ast/value.rs` — no `::` continuation here).
   let out = InputValue::Enum(EnumValue::new(Path::from(Name::new(span, slice))));
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumValue.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -372,13 +348,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let spanned = match inp.next()? {
     Some(spanned) => spanned,
     None => return Err(UnexpectedEot::eot_of(inp.offset().clone()).into()),
@@ -387,16 +362,10 @@ where
   let (span, _token) = spanned.into_components();
   if slice.equivalent("true") || slice.equivalent("false") {
     let value = ConstInputValue::Boolean(BooleanValue::new(span, slice.equivalent("true")));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::BooleanValue.raw());
-    emitter.cst_finish();
     return Ok(value);
   }
   if slice.equivalent("null") {
     let value = ConstInputValue::Null(NullValue::new(span, slice));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::NullValue.raw());
-    emitter.cst_finish();
     return Ok(value);
   }
   if slice.equivalent("set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
@@ -407,9 +376,6 @@ where
     let (body_span, _open, _close, items) = delimited.into_components();
     let full = SimpleSpan::new(span.start(), body_span.end());
     let out = ConstInputValue::Set(scaffold::Set::new(full, items));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::SetValue.raw());
-    emitter.cst_finish();
     return Ok(out);
   }
   if slice.equivalent("map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
@@ -420,15 +386,9 @@ where
     let (body_span, _open, _close, entries) = delimited.into_components();
     let full = SimpleSpan::new(span.start(), body_span.end());
     let out = ConstInputValue::Map(scaffold::Map::new(full, entries));
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::MapValue.raw());
-    emitter.cst_finish();
     return Ok(out);
   }
   let out = ConstInputValue::Enum(EnumValue::new(Path::from(Name::new(span, slice))));
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumValue.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -436,19 +396,18 @@ where
 ///
 /// Committed on the `::`; the segments after it are gathered by a commit-first
 /// `try_path_sep` loop (never a separated1 with an identifier follow-set — the
-/// W5 bug class). Retro-wraps the whole path as an [`EnumValue`] node.
+/// W5 bug class).
 fn leading_enum_value<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Path<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   path_sep(inp)?;
   let mut segments = alloc_segments(inp)?;
@@ -458,9 +417,6 @@ where
   }
   let span = inp.span_since(&cursor);
   let path = Path::new(span, segments, true);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumValue.raw());
-  emitter.cst_finish();
   Ok(path)
 }
 
@@ -527,48 +483,32 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   match classify_value_head(inp)? {
-    Some(Some(ValueHead::Int)) => node(K::IntValue.raw(), int_value)
-      .parse_input(inp)
-      .map(InputValue::Int),
-    Some(Some(ValueHead::Float)) => node(K::FloatValue.raw(), float_value)
-      .parse_input(inp)
-      .map(InputValue::Float),
-    Some(Some(ValueHead::Str)) => node(K::StringValue.raw(), string_value)
-      .parse_input(inp)
-      .map(InputValue::String),
-    Some(Some(ValueHead::Dollar)) => node(K::Variable.raw(), variable_value)
-      .parse_input(inp)
-      .map(InputValue::Variable),
+    Some(Some(ValueHead::Int)) => int_value(inp).map(InputValue::Int),
+    Some(Some(ValueHead::Float)) => float_value(inp).map(InputValue::Float),
+    Some(Some(ValueHead::Str)) => string_value(inp).map(InputValue::String),
+    Some(Some(ValueHead::Dollar)) => variable_value(inp).map(InputValue::Variable),
     Some(Some(ValueHead::PathSep)) => {
       leading_enum_value(inp).map(|p| InputValue::Enum(EnumValue::new(p)))
     }
-    Some(Some(ValueHead::List)) => node(
-      K::ListValue.raw(),
-      brackets(list_of(
-        value,
-        <L::Token as PunctuatorTokenExt>::is_close_bracket,
-      )),
-    )
-    .parse_input(inp)
+    Some(Some(ValueHead::List)) => brackets(list_of(
+      value,
+      <L::Token as PunctuatorTokenExt>::is_close_bracket,
+    ))(inp)
     .map(|delimited| {
       let (span, _open, _close, items) = delimited.into_components();
       InputValue::List(scaffold::List::new(span, items))
     }),
-    Some(Some(ValueHead::Object)) => node(
-      K::ObjectValue.raw(),
-      braces(list_of(
-        object_field,
-        <L::Token as PunctuatorTokenExt>::is_close_brace,
-      )),
-    )
-    .parse_input(inp)
+    Some(Some(ValueHead::Object)) => braces(list_of(
+      object_field,
+      <L::Token as PunctuatorTokenExt>::is_close_brace,
+    ))(inp)
     .map(|delimited| {
       let (span, _open, _close, fields) = delimited.into_components();
       InputValue::Object(scaffold::Object::new(span, fields))
@@ -598,45 +538,31 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
   match classify_value_head(inp)? {
-    Some(Some(ValueHead::Int)) => node(K::IntValue.raw(), int_value)
-      .parse_input(inp)
-      .map(ConstInputValue::Int),
-    Some(Some(ValueHead::Float)) => node(K::FloatValue.raw(), float_value)
-      .parse_input(inp)
-      .map(ConstInputValue::Float),
-    Some(Some(ValueHead::Str)) => node(K::StringValue.raw(), string_value)
-      .parse_input(inp)
-      .map(ConstInputValue::String),
+    Some(Some(ValueHead::Int)) => int_value(inp).map(ConstInputValue::Int),
+    Some(Some(ValueHead::Float)) => float_value(inp).map(ConstInputValue::Float),
+    Some(Some(ValueHead::Str)) => string_value(inp).map(ConstInputValue::String),
     Some(Some(ValueHead::PathSep)) => {
       leading_enum_value(inp).map(|p| ConstInputValue::Enum(EnumValue::new(p)))
     }
-    Some(Some(ValueHead::List)) => node(
-      K::ListValue.raw(),
-      brackets(list_of(
-        const_value,
-        <L::Token as PunctuatorTokenExt>::is_close_bracket,
-      )),
-    )
-    .parse_input(inp)
+    Some(Some(ValueHead::List)) => brackets(list_of(
+      const_value,
+      <L::Token as PunctuatorTokenExt>::is_close_bracket,
+    ))(inp)
     .map(|delimited| {
       let (span, _open, _close, items) = delimited.into_components();
       ConstInputValue::List(scaffold::List::new(span, items))
     }),
-    Some(Some(ValueHead::Object)) => node(
-      K::ObjectValue.raw(),
-      braces(list_of(
-        const_object_field,
-        <L::Token as PunctuatorTokenExt>::is_close_brace,
-      )),
-    )
-    .parse_input(inp)
+    Some(Some(ValueHead::Object)) => braces(list_of(
+      const_object_field,
+      <L::Token as PunctuatorTokenExt>::is_close_brace,
+    ))(inp)
     .map(|delimited| {
       let (span, _open, _close, fields) = delimited.into_components();
       ConstInputValue::Object(scaffold::Object::new(span, fields))
@@ -665,22 +591,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   colon(inp)?;
   let value = value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
   let field = scaffold::ObjectField::new(span, name, value);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ObjectField.raw());
-  emitter.cst_finish();
   Ok(field)
 }
 
@@ -701,22 +623,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   colon(inp)?;
   let value = const_value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
   let field = scaffold::ObjectField::new(span, name, value);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ObjectField.raw());
-  emitter.cst_finish();
   Ok(field)
 }
 
@@ -744,21 +662,17 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let key = value(inp)?;
   fat_arrow(inp)?;
   let val = value(inp)?;
   let span = SimpleSpan::new(key.as_span().start(), val.as_span().end());
   let entry = scaffold::MapEntry::new(span, key, val);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::MapEntry.raw());
-  emitter.cst_finish();
   Ok(entry)
 }
 
@@ -779,21 +693,17 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let key = const_value(inp)?;
   fat_arrow(inp)?;
   let val = const_value(inp)?;
   let span = SimpleSpan::new(key.as_span().start(), val.as_span().end());
   let entry = scaffold::MapEntry::new(span, key, val);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::MapEntry.raw());
-  emitter.cst_finish();
   Ok(entry)
 }
 
@@ -802,8 +712,7 @@ where
 /// Parses an optional `DefaultValue` (`= ConstValue`).
 ///
 /// Declines to `None` (no tokens consumed) unless the next token is `=`, in which
-/// case it commits to the following const value and wraps the whole `= value` in a
-/// [`DefaultValue`](crate::graphqlx::kinds::SyntaxKind::DefaultValue) node.
+/// case it commits to the following const value.
 ///
 /// Spec: [DefaultValue](https://spec.graphql.org/draft/#DefaultValue).
 // The `Result<Option<…>, …>` return is inherent to an optional generic production.
@@ -822,24 +731,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  // Retro-wrap: mark before the `=`, so a present default wraps `= ConstValue`; a
-  // decline (no `=`) leaves the tombstone unspent — no node — and consumes nothing.
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   match try_equal(inp)? {
     ParseAttempt::Accept(_equal) => {
       let value = const_value(inp)?;
       let span = inp.span_since(&cursor);
       let default = DefaultInputValue::new(span, value);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::DefaultValue.raw());
-      emitter.cst_finish();
       Ok(Some(default))
     }
     ParseAttempt::Decline => Ok(None),
