@@ -12,6 +12,7 @@
 
 pub mod argument;
 pub mod directive;
+pub mod executable;
 pub mod generics;
 pub mod import;
 pub mod selection;
