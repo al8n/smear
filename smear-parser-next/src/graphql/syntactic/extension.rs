@@ -48,20 +48,11 @@
 //! anchored the span *after* `extend` (at the shape keyword), contradicting the
 //! scaffold contract; parser-next follows the scaffold contract, consistent with the
 //! Wave-4 definitions whose spans start at their leading keyword.
-//!
-//! # Node placement
-//!
-//! Extensions retro-wrap their kind after the body settles (Amendment 1): the mark is
-//! minted before `extend`, so the extension node covers the whole `extend …` region.
-//! The dispatches add no wrapper of their own beyond the resolved arm's kind
-//! (sum-type convention).
 
 use smear_lexer::{LitBlockStr, LitInlineStr};
 use smear_scaffold::ast as scaffold;
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   punct::{Ampersand, Pipe},
   token::{IdentifierToken, KeywordToken, PunctuatorToken, PunctuatorTokenExt},
@@ -78,7 +69,7 @@ use super::{
   peeks_where,
 };
 use crate::{
-  combinator::{AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, ident},
+  combinator::{Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, ident},
   graphql::{
     ast::{
       EnumTypeExtension, InputObjectTypeExtension, InterfaceTypeExtension, Name,
@@ -89,13 +80,12 @@ use crate::{
       r#enum as enum_kw, extend, input as input_kw, interface, scalar, schema, try_enum, try_input,
       try_interface, try_scalar, try_schema, try_type, try_union, r#type as type_kw, union,
     },
-    kinds::SyntaxKind as K,
   },
 };
 
 // ─── shared leaf/error helpers ───────────────────────────────────────────────
 
-/// Parses a bare `Name` (the extended type's name). No node: a name is a leaf token.
+/// Parses a bare `Name` (the extended type's name).
 fn name<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Name<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -136,7 +126,7 @@ where
 // ─── extension bodies (after `extend` + the shape keyword) ───────────────────
 
 /// Parses a scalar type extension's body after `extend scalar`, spanning from
-/// `ext_start` (the `extend` keyword). No node: the caller retro-wraps the kind.
+/// `ext_start` (the `extend` keyword).
 ///
 /// Deviation (spec-cardinality audit): the spec form `extend scalar Name
 /// Directives[Const]` REQUIRES the directives, so their absence errors here — the
@@ -158,7 +148,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -177,7 +167,7 @@ where
 }
 
 /// Parses an object type extension's body after `extend type`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// At least one of implements/directives/fields must be present (the spec's three
 /// "one of" forms); the implements-only form is accepted (spec-correct relaxation —
@@ -198,7 +188,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -228,7 +218,7 @@ where
 }
 
 /// Parses an interface type extension's body after `extend interface`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// Same "one of" audit as [`object_extension_body`], including the accepted
 /// implements-only form.
@@ -248,7 +238,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -278,7 +268,7 @@ where
 }
 
 /// Parses a union type extension's body after `extend union`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// At least one of directives/member types must be present (frozen parity).
 fn union_extension_body<'inp, L, Ctx, Lang>(
@@ -297,7 +287,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -321,7 +311,7 @@ where
 }
 
 /// Parses an enum type extension's body after `extend enum`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// At least one of directives/values must be present (frozen parity). The values
 /// block inherits the Wave-4 `enum_value` exclusion (`extend enum E { true }` errors).
@@ -341,7 +331,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -362,7 +352,7 @@ where
 }
 
 /// Parses an input object type extension's body after `extend input`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// At least one of directives/fields must be present (frozen parity).
 fn input_object_extension_body<'inp, L, Ctx, Lang>(
@@ -381,7 +371,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -404,7 +394,7 @@ where
 }
 
 /// Parses a schema extension's body after `extend schema`, spanning from
-/// `ext_start`. No node: the caller retro-wraps the kind.
+/// `ext_start`.
 ///
 /// At least one of directives/root-operation-types must be present (frozen parity);
 /// the `{ RootOperationTypeDefinition+ }` block's non-emptiness rides
@@ -425,7 +415,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -475,20 +465,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   scalar(inp)?;
   let out = scalar_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ScalarTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -513,20 +499,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   type_kw(inp)?;
   let out = object_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::ObjectTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -551,20 +533,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   interface(inp)?;
   let out = interface_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::InterfaceTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -587,20 +565,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   union(inp)?;
   let out = union_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::UnionTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -623,20 +597,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   enum_kw(inp)?;
   let out = enum_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::EnumTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -659,20 +629,16 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   input_kw(inp)?;
   let out = input_object_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::InputObjectTypeExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
@@ -695,28 +661,23 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
   schema(inp)?;
   let out = schema_extension_body(inp, ext.span().start())?;
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::SchemaExtension.raw());
-  emitter.cst_finish();
   Ok(out)
 }
 
 // ─── extension dispatches ────────────────────────────────────────────────────
 
 /// Dispatches on the soft keyword after `extend` to the matching type-extension
-/// body, consuming the keyword through the declining `try_*` atoms. No node: the
-/// caller retro-wraps the resolved arm's kind (sum-type convention).
+/// body, consuming the keyword through the declining `try_*` atoms.
 fn dispatch_type_extension<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   ext_start: usize,
@@ -733,7 +694,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -761,23 +722,8 @@ where
   unexpected(inp)
 }
 
-/// The `K::…` kind the resolved [`TypeExtension`] arm materializes as.
-fn type_extension_kind<S, Ty>(ext: &TypeExtension<S, Ty>) -> u16 {
-  match ext {
-    TypeExtension::Scalar(_) => K::ScalarTypeExtension.raw(),
-    TypeExtension::Object(_) => K::ObjectTypeExtension.raw(),
-    TypeExtension::Interface(_) => K::InterfaceTypeExtension.raw(),
-    TypeExtension::Union(_) => K::UnionTypeExtension.raw(),
-    TypeExtension::Enum(_) => K::EnumTypeExtension.raw(),
-    TypeExtension::InputObject(_) => K::InputObjectTypeExtension.raw(),
-  }
-}
-
 /// Parses a `TypeExtension` (`extend` + one of the six type-extension shapes),
 /// dispatching on the soft keyword after `extend`.
-///
-/// No wrapper node of its own beyond the resolved arm's kind (sum-type convention):
-/// the mark — minted before `extend` — is spent as that arm's kind.
 ///
 /// Spec: [TypeExtension](https://spec.graphql.org/draft/#TypeExtension).
 pub fn type_extension<'inp, L, Ctx, Lang>(
@@ -795,33 +741,25 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
-  let out = dispatch_type_extension(inp, ext.span().start())?;
-  let kind = type_extension_kind(&out);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, kind);
-  emitter.cst_finish();
-  Ok(out)
+  dispatch_type_extension(inp, ext.span().start())
 }
 
-/// Parses a `TypeSystemExtension`'s body after `extend` has been consumed, spending
-/// `mark` (minted before `extend`) as the resolved arm's kind.
+/// Parses a `TypeSystemExtension`'s body after `extend` has been consumed.
 ///
-/// Shared by [`type_system_extension`] (which mints the mark and consumes `extend`)
-/// and the document-level definition-or-extension dispatches (which consume `extend`
-/// as their dispatch and hand the keyword's start and their pre-keyword mark here) —
-/// the W3 `fragment_definition_body` convergence pattern.
+/// Shared by [`type_system_extension`] (which consumes `extend`) and the
+/// document-level definition-or-extension dispatches (which consume `extend` as
+/// their dispatch and hand the keyword's start here) — the W3
+/// `fragment_definition_body` convergence pattern.
 pub(super) fn type_system_extension_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   ext_start: usize,
 ) -> Result<TypeSystemExtension<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -836,7 +774,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -845,23 +783,14 @@ where
 {
   if let ParseAttempt::Accept(_kw) = try_schema(inp)? {
     let ext = schema_extension_body(inp, ext_start)?;
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, K::SchemaExtension.raw());
-    emitter.cst_finish();
     return Ok(TypeSystemExtension::Schema(ext));
   }
   let ext = dispatch_type_extension(inp, ext_start)?;
-  let kind = type_extension_kind(&ext);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, kind);
-  emitter.cst_finish();
   Ok(TypeSystemExtension::Type(ext))
 }
 
 /// Parses a `TypeSystemExtension` (`extend` + a schema extension or one of the six
 /// type-extension shapes).
-///
-/// No wrapper node of its own beyond the resolved arm's kind (sum-type convention).
 ///
 /// Spec: [TypeSystemExtension](https://spec.graphql.org/draft/#TypeSystemExtension).
 pub fn type_system_extension<'inp, L, Ctx, Lang>(
@@ -879,16 +808,15 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let ext = extend(inp)?;
-  type_system_extension_body(inp, mark, ext.span().start())
+  type_system_extension_body(inp, ext.span().start())
 }
 
 #[cfg(test)]

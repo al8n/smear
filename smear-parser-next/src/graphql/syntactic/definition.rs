@@ -32,31 +32,12 @@
 //! in frozen via `at_least(1)`): `separated1`'s peek-driven continuation treats an
 //! adjacent identifier as a missing separator, but at these list tails an adjacent
 //! identifier legitimately starts the NEXT definition.
-//!
-//! # Node placement
-//!
-//! Definitions retro-wrap their kind after the body settles (Amendment 1: content is
-//! not known up front). The description-carrying productions ([`input_value_definition`],
-//! [`field_definition`], [`enum_value_definition`]) mint the definition mark first, then
-//! an inner `K::Description` node via [`description`], so the description lands inside
-//! the definition node. The optional list clauses ([`fields_definition`],
-//! [`input_fields_definition`], [`enum_values_definition`], [`implements`],
-//! [`union_members`]) mint the mark before the attempt and spend it only when the clause
-//! is actually present. The committed delimited regions ([`arguments_definition`],
-//! [`root_operation_types_definition`]) open their kind up front with
-//! [`node`] over the delimiter shape. [`type_definition`] adds no
-//! wrapper of its own beyond the resolved arm's kind (sum-type convention), spent by a
-//! content-dependent retro-wrap once the dispatch reveals which arm; [`described_type_definition`]
-//! reuses that dispatch with a leading description landing inside the same node.
-
 use std::vec::Vec;
 
 use smear_lexer::{LitBlockStr, LitInlineStr, keywords};
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{braces, list_of, parens, try_braces},
   punct::{Ampersand, Pipe},
@@ -71,8 +52,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at,
-    colon, enum_value, ident, try_ampersand, try_description, try_equal, try_pipe,
+    Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, StringLiteral, at, colon,
+    enum_value, ident, try_ampersand, try_description, try_equal, try_pipe,
   },
   graphql::{
     ast::{
@@ -1230,21 +1211,18 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = directive_kw(inp)?;
-  directive_definition_body(inp, mark, kw.span().start())
+  directive_definition_body(inp, kw.span().start())
 }
 
 /// Parses a directive definition's body after its `directive` keyword has been
-/// consumed, spending `mark` as `K::DirectiveDefinition` over the whole definition
-/// (the description lands inside when a described dispatch minted the mark first).
+/// consumed.
 ///
 /// Shared by [`directive_definition`] and the document-level definition dispatches
 /// (the W3 `fragment_definition_body` convergence pattern — a soft keyword cannot be
 /// peeked without consuming).
 pub(super) fn directive_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   kw_start: usize,
 ) -> Result<DirectiveDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -1259,7 +1237,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -1303,20 +1281,16 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   let kw = schema(inp)?;
-  schema_definition_body(inp, mark, kw.span().start())
+  schema_definition_body(inp, kw.span().start())
 }
 
-/// Parses a schema definition's body after its `schema` keyword has been consumed,
-/// spending `mark` as `K::SchemaDefinition` over the whole definition (the
-/// description lands inside when a described dispatch minted the mark first).
+/// Parses a schema definition's body after its `schema` keyword has been consumed.
 ///
 /// Shared by [`schema_definition`] and the document-level definition dispatches
 /// (the W3 `fragment_definition_body` convergence pattern).
 pub(super) fn schema_definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
   kw_start: usize,
 ) -> Result<SchemaDefinition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
@@ -1331,7 +1305,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -1350,8 +1324,7 @@ where
 
 /// Dispatches on the leading soft keyword to the matching type-definition body,
 /// consuming the keyword through the declining `try_*` atoms, declining to `None`
-/// (no tokens consumed) when the next token opens none of the six shapes. No node:
-/// the caller retro-wraps the resolved arm's kind (sum-type convention).
+/// (no tokens consumed) when the next token opens none of the six shapes.
 // The `Result<Option<…>, …>` return is inherent to a declining generic dispatch.
 #[allow(clippy::type_complexity)]
 pub(super) fn try_dispatch_type_definition<'inp, L, Ctx, Lang>(
@@ -1369,7 +1342,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -1436,18 +1409,6 @@ where
   match try_dispatch_type_definition(inp)? {
     Some(def) => Ok(def),
     None => unexpected(inp),
-  }
-}
-
-/// The `K::…` kind the resolved [`TypeDefinition`] arm materializes as.
-pub(super) fn type_definition_kind<S, Ty>(def: &TypeDefinition<S, Ty>) -> u16 {
-  match def {
-    TypeDefinition::Scalar(_) => K::ScalarTypeDefinition.raw(),
-    TypeDefinition::Object(_) => K::ObjectTypeDefinition.raw(),
-    TypeDefinition::Interface(_) => K::InterfaceTypeDefinition.raw(),
-    TypeDefinition::Union(_) => K::UnionTypeDefinition.raw(),
-    TypeDefinition::Enum(_) => K::EnumTypeDefinition.raw(),
-    TypeDefinition::InputObject(_) => K::InputObjectTypeDefinition.raw(),
   }
 }
 
@@ -1518,13 +1479,11 @@ where
   Ok(scaffold::Described::new(span, desc, def))
 }
 
-/// Declares one keyword-committed described standalone production: mark →
-/// description → the committed shape keyword → the shared `*_after_kw` body → the
-/// definition's kind spent over the whole region (description landing inside) —
-/// the described-definition retro-wrap at a FIXED shape, mirroring the frozen
+/// Declares one keyword-committed described standalone production: description →
+/// the committed shape keyword → the shared `*_after_kw` body, mirroring the frozen
 /// crate's standalone `parse_described_*` entry roots.
 macro_rules! described_standalone {
-  ($(#[$meta:meta])* $name:ident => $kw:ident, $body:ident, $kind:ident, $out:ident) => {
+  ($(#[$meta:meta])* $name:ident => $kw:ident, $body:ident, $out:ident) => {
     $(#[$meta])*
     // The `Result<Described<…>, …>` return is inherent to this generic production.
     #[allow(clippy::type_complexity)]
@@ -1543,34 +1502,28 @@ macro_rules! described_standalone {
           InlineStr = LitInlineStr<SliceOf<'inp, L>>,
           BlockStr = LitBlockStr<SliceOf<'inp, L>>,
         >,
-      Ctx: AssemblyCtx<'inp, L, Lang>,
+      Ctx: ParseCtx<'inp, L, Lang>,
       Lang: ?Sized,
       SliceOf<'inp, L>: Equivalent<str> + Clone,
       ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
         + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
       <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
     {
-      let mark = inp.emitter().cst_mark();
       let cursor = inp.cursor().clone();
       let desc = description(inp)?;
       let kw = $kw(inp)?;
       let def = $body(inp, kw.span().start())?;
       let span = inp.span_since(&cursor);
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::$kind.raw());
-      emitter.cst_finish();
       Ok(scaffold::Described::new(span, desc, def))
     }
   };
 }
 
 described_standalone!(
-  /// Parses a described `ObjectTypeDefinition` (`Description? type Name …`) — the
-  /// keyword-committed standalone form of the described retro-wrap family.
+  /// Parses a described `ObjectTypeDefinition` (`Description? type Name …`).
   ///
   /// Spec: [ObjectTypeDefinition](https://spec.graphql.org/draft/#ObjectTypeDefinition).
-  described_object_type_definition => type_kw, object_after_kw, ObjectTypeDefinition,
-  DescribedObjectTypeDefinition
+  described_object_type_definition => type_kw, object_after_kw, DescribedObjectTypeDefinition
 );
 
 described_standalone!(
@@ -1578,15 +1531,14 @@ described_standalone!(
   ///
   /// Spec: [InterfaceTypeDefinition](https://spec.graphql.org/draft/#InterfaceTypeDefinition).
   described_interface_type_definition => interface, interface_after_kw,
-  InterfaceTypeDefinition, DescribedInterfaceTypeDefinition
+  DescribedInterfaceTypeDefinition
 );
 
 described_standalone!(
   /// Parses a described `EnumTypeDefinition` (`Description? enum Name …`).
   ///
   /// Spec: [EnumTypeDefinition](https://spec.graphql.org/draft/#EnumTypeDefinition).
-  described_enum_type_definition => enum_kw, enum_after_kw, EnumTypeDefinition,
-  DescribedEnumTypeDefinition
+  described_enum_type_definition => enum_kw, enum_after_kw, DescribedEnumTypeDefinition
 );
 
 described_standalone!(
@@ -1594,7 +1546,7 @@ described_standalone!(
   ///
   /// Spec: [InputObjectTypeDefinition](https://spec.graphql.org/draft/#InputObjectTypeDefinition).
   described_input_object_type_definition => input_kw, input_object_after_kw,
-  InputObjectTypeDefinition, DescribedInputObjectTypeDefinition
+  DescribedInputObjectTypeDefinition
 );
 
 #[cfg(test)]

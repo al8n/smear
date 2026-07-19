@@ -19,24 +19,11 @@
 //! [`type_system_document`] — a documented deviation from the frozen parser, whose
 //! unenforced `repeated_while` accepted zero definitions (the same class as Wave 3's
 //! `executable_document` entry).
-//!
-//! # Node placement
-//!
-//! The described dispatches follow the described-definition retro-wrap convention:
-//! ONE mark minted before the description, spent as the resolved definition's kind
-//! by the shared `*_body` productions — so the `K::Description` node lands INSIDE
-//! the definition node, for every arm including the executable ones. The `extend`
-//! arm hands the same pre-keyword mark to
-//! [`type_system_extension_body`](super::extension) (extension kinds cover the
-//! `extend` keyword). The documents wrap the whole run in `K::Document` /
-//! `K::TypeSystemDocument`.
 
 use smear_lexer::{LitBlockStr, LitInlineStr};
 use smear_scaffold::ast as scaffold;
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  cst::event::EventMark,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::list_of,
   punct::{Ampersand, Pipe},
@@ -47,20 +34,18 @@ use tokora::{
 use super::{
   definition::{
     description, directive_definition_body, schema_definition_body, try_dispatch_type_definition,
-    type_definition_kind,
   },
   executable::{fragment_definition_body, operation_definition_body},
   extension::type_system_extension_body,
 };
 use crate::{
-  combinator::{AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf},
+  combinator::{Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf},
   graphql::{
     ast::{
       Definition, DefinitionOrExtension, Document, TypeSystemDefinition,
       TypeSystemDefinitionOrExtension, TypeSystemDocument,
     },
     keyword::{try_directive, try_extend, try_fragment, try_schema},
-    kinds::SyntaxKind as K,
   },
 };
 
@@ -85,15 +70,13 @@ where
   }
 }
 
-/// Parses a `Definition`'s body, spending the caller-minted `mark` as the resolved
-/// definition's kind (every arm routes through a shared `*_body` production, so a
-/// described dispatch's leading description lands inside the definition node).
+/// Parses a `Definition`'s body (every arm routes through a shared `*_body`
+/// production, converging with the standalone forms).
 ///
 /// Decision order (frozen parity): `schema` → `directive` → the six type-definition
 /// keywords → `fragment` → operation (keyword or query-shorthand).
 fn definition_body<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
-  mark: EventMark,
 ) -> Result<Definition<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
@@ -107,7 +90,7 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
@@ -115,33 +98,27 @@ where
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
   if let ParseAttempt::Accept(kw) = try_schema(inp)? {
-    return schema_definition_body(inp, mark, kw.span().start())
+    return schema_definition_body(inp, kw.span().start())
       .map(|d| Definition::TypeSystem(TypeSystemDefinition::Schema(d)));
   }
   if let ParseAttempt::Accept(kw) = try_directive(inp)? {
-    return directive_definition_body(inp, mark, kw.span().start())
+    return directive_definition_body(inp, kw.span().start())
       .map(|d| Definition::TypeSystem(TypeSystemDefinition::Directive(d)));
   }
   if let Some(def) = try_dispatch_type_definition(inp)? {
-    let kind = type_definition_kind(&def);
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, kind);
-    emitter.cst_finish();
     return Ok(Definition::TypeSystem(TypeSystemDefinition::Type(def)));
   }
   if let ParseAttempt::Accept(kw) = try_fragment(inp)? {
-    return fragment_definition_body(inp, mark, kw)
+    return fragment_definition_body(inp, kw)
       .map(|d| Definition::Executable(scaffold::ExecutableDefinition::Fragment(d)));
   }
-  operation_definition_body(inp, mark)
+  operation_definition_body(inp)
     .map(|d| Definition::Executable(scaffold::ExecutableDefinition::Operation(d)))
 }
 
 /// Parses a `Definition` — a type-system definition (schema, directive, or type) or
 /// an executable definition (operation or fragment), without a leading description
 /// (frozen parity: the description belongs to the document-level described forms).
-///
-/// No wrapper node of its own beyond the resolved arm's kind (sum-type convention).
 ///
 /// Spec: [Definition](https://spec.graphql.org/draft/#Definition).
 pub fn definition<'inp, L, Ctx, Lang>(
@@ -159,15 +136,14 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
-  definition_body(inp, mark)
+  definition_body(inp)
 }
 
 /// Parses a `DefinitionOrExtension` — a `TypeSystemExtension` when `extend` leads,
@@ -191,21 +167,20 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   if let ParseAttempt::Accept(kw) = try_extend(inp)? {
-    return type_system_extension_body(inp, mark, kw.span().start())
+    return type_system_extension_body(inp, kw.span().start())
       .map(DefinitionOrExtension::Extension);
   }
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
-  let def = definition_body(inp, mark)?;
+  let def = definition_body(inp)?;
   let span = inp.span_since(&cursor);
   Ok(DefinitionOrExtension::Definition(scaffold::Described::new(
     span, desc, def,
@@ -232,29 +207,24 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  let mark = inp.emitter().cst_mark();
   if let ParseAttempt::Accept(kw) = try_extend(inp)? {
-    return type_system_extension_body(inp, mark, kw.span().start())
+    return type_system_extension_body(inp, kw.span().start())
       .map(TypeSystemDefinitionOrExtension::Extension);
   }
   let cursor = inp.cursor().clone();
   let desc = description(inp)?;
   let def = if let ParseAttempt::Accept(kw) = try_schema(inp)? {
-    TypeSystemDefinition::Schema(schema_definition_body(inp, mark, kw.span().start())?)
+    TypeSystemDefinition::Schema(schema_definition_body(inp, kw.span().start())?)
   } else if let ParseAttempt::Accept(kw) = try_directive(inp)? {
-    TypeSystemDefinition::Directive(directive_definition_body(inp, mark, kw.span().start())?)
+    TypeSystemDefinition::Directive(directive_definition_body(inp, kw.span().start())?)
   } else if let Some(def) = try_dispatch_type_definition(inp)? {
-    let kind = type_definition_kind(&def);
-    let emitter = inp.emitter();
-    emitter.cst_start_at(mark, kind);
-    emitter.cst_finish();
     TypeSystemDefinition::Type(def)
   } else {
     return unexpected(inp);
@@ -266,22 +236,19 @@ where
 }
 
 /// Wraps a described-or-extension entry parser into its document production: the
-/// first entry is committed (spec `+`), the rest collect to end of input, the whole
-/// run wrapped in `kind`.
+/// first entry is committed (spec `+`), the rest collect to end of input.
 // The fn-pointer parameter spells the full generic parser shape; an alias would
 // only move the same generics.
 #[allow(clippy::type_complexity)]
 fn document_of<'inp, L, Ctx, Lang, T>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   entry: fn(&mut InputRef<'inp, '_, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
-  kind: u16,
 ) -> Result<scaffold::Document<T>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   // Spec cardinality (`+`): the first entry is committed, so an empty input errors
   // as end of input; the rest collect until end of input (a document has no closing
@@ -291,9 +258,6 @@ where
   defs.insert(0, first);
   let span = inp.span_since(&cursor);
   let doc = scaffold::Document::new(span, defs);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, kind);
-  emitter.cst_finish();
   Ok(doc)
 }
 
@@ -320,14 +284,14 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  document_of(inp, definition_or_extension, K::Document.raw())
+  document_of(inp, definition_or_extension)
 }
 
 /// Parses a `TypeSystemDocument` (`TypeSystemDefinitionOrExtension+`), running to
@@ -353,18 +317,14 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
 {
-  document_of(
-    inp,
-    type_system_definition_or_extension,
-    K::TypeSystemDocument.raw(),
-  )
+  document_of(inp, type_system_definition_or_extension)
 }
 
 #[cfg(test)]
