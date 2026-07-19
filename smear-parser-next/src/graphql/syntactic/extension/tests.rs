@@ -9,7 +9,7 @@
 
 use smear_lexer::graphql::syntactic::SyntacticLexer;
 use smear_scaffold::ast as scaffold;
-use tokora::{FatalContext, InputRef, Parse, Parser};
+use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{
   enum_type_extension, input_object_type_extension, interface_type_extension,
@@ -89,12 +89,6 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 /// Asserts the first error's data is an unexpected-token (the house rejection family
 /// the cardinality and audit deviations report).
 fn first_is_unexpected_token<'inp>(
@@ -134,7 +128,7 @@ fn first_is_end_of_input<'inp>(
 #[test]
 fn scalar_type_extension_accepts_directives() {
   fn check<S: AsRef<[u8]>>(e: ScalarTypeExtension<S>) {
-    assert_eq!(bytes(e.name().source_ref()), b"DateTime");
+    assert!("DateTime".equivalent(e.name().source_ref()));
     assert_eq!(e.directives().directives().len(), 2);
     // Span note ruling: the extension span starts at `extend` (the scaffold
     // contract), not at the shape keyword as frozen anchored it.
@@ -179,7 +173,7 @@ fn scalar_type_extension_rejects_missing_parts() {
 #[test]
 fn object_type_extension_accepts_fields_form() {
   fn check<S: AsRef<[u8]>>(e: ObjectTypeExtension<S>) {
-    assert_eq!(bytes(e.name().source_ref()), b"User");
+    assert!("User".equivalent(e.name().source_ref()));
     assert!(matches!(
       e.data(),
       scaffold::ObjectTypeExtensionData::Fields { .. }

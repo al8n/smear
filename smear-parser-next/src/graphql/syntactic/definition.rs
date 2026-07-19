@@ -531,29 +531,43 @@ where
 
 /// Classifies one directive-location spelling against the spec's 19 fixed names,
 /// building the typed [`Location`]; `None` for any other identifier.
-fn classify_location(text: &[u8], span: SimpleSpan) -> Option<Location> {
-  Some(match text {
-    b"QUERY" => keywords::QueryLocation::new(span).into(),
-    b"MUTATION" => keywords::MutationLocation::new(span).into(),
-    b"SUBSCRIPTION" => keywords::SubscriptionLocation::new(span).into(),
-    b"FIELD" => keywords::FieldLocation::new(span).into(),
-    b"FRAGMENT_DEFINITION" => keywords::FragmentDefinitionLocation::new(span).into(),
-    b"FRAGMENT_SPREAD" => keywords::FragmentSpreadLocation::new(span).into(),
-    b"INLINE_FRAGMENT" => keywords::InlineFragmentLocation::new(span).into(),
-    b"VARIABLE_DEFINITION" => keywords::VariableDefinitionLocation::new(span).into(),
-    b"SCHEMA" => keywords::SchemaLocation::new(span).into(),
-    b"SCALAR" => keywords::ScalarLocation::new(span).into(),
-    b"OBJECT" => keywords::ObjectLocation::new(span).into(),
-    b"FIELD_DEFINITION" => keywords::FieldDefinitionLocation::new(span).into(),
-    b"ARGUMENT_DEFINITION" => keywords::ArgumentDefinitionLocation::new(span).into(),
-    b"INTERFACE" => keywords::InterfaceLocation::new(span).into(),
-    b"UNION" => keywords::UnionLocation::new(span).into(),
-    b"ENUM_VALUE" => keywords::EnumValueLocation::new(span).into(),
-    b"ENUM" => keywords::EnumLocation::new(span).into(),
-    b"INPUT_OBJECT" => keywords::InputObjectLocation::new(span).into(),
-    b"INPUT_FIELD_DEFINITION" => keywords::InputFieldDefinitionLocation::new(span).into(),
-    _ => return None,
-  })
+fn classify_location<S>(text: &S, span: SimpleSpan) -> Option<Location>
+where
+  S: Equivalent<str>,
+{
+  // Each spec spelling maps to its typed location; `equivalent` compares the source
+  // slice against the spelling across flavors, so no `AsRef<[u8]>` pins the source.
+  macro_rules! classify {
+    ($($spelling:literal => $loc:ident),+ $(,)?) => {{
+      $(
+        if text.equivalent($spelling) {
+          return Some(keywords::$loc::new(span).into());
+        }
+      )+
+      None
+    }};
+  }
+  classify! {
+    "QUERY" => QueryLocation,
+    "MUTATION" => MutationLocation,
+    "SUBSCRIPTION" => SubscriptionLocation,
+    "FIELD" => FieldLocation,
+    "FRAGMENT_DEFINITION" => FragmentDefinitionLocation,
+    "FRAGMENT_SPREAD" => FragmentSpreadLocation,
+    "INLINE_FRAGMENT" => InlineFragmentLocation,
+    "VARIABLE_DEFINITION" => VariableDefinitionLocation,
+    "SCHEMA" => SchemaLocation,
+    "SCALAR" => ScalarLocation,
+    "OBJECT" => ObjectLocation,
+    "FIELD_DEFINITION" => FieldDefinitionLocation,
+    "ARGUMENT_DEFINITION" => ArgumentDefinitionLocation,
+    "INTERFACE" => InterfaceLocation,
+    "UNION" => UnionLocation,
+    "ENUM_VALUE" => EnumValueLocation,
+    "ENUM" => EnumLocation,
+    "INPUT_OBJECT" => InputObjectLocation,
+    "INPUT_FIELD_DEFINITION" => InputFieldDefinitionLocation,
+  }
 }
 
 /// Parses one directive `Location`: an identifier matched against the spec's fixed
@@ -569,7 +583,7 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -579,7 +593,7 @@ where
       if spanned.data().is_identifier() {
         let span = spanned.span();
         let text = inp.slice();
-        match classify_location(text.as_ref(), span) {
+        match classify_location(&text, span) {
           Some(loc) => Ok(loc),
           None => {
             let (span, tok) = spanned.into_components();
@@ -611,7 +625,7 @@ where
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  SliceOf<'inp, L>: AsRef<[u8]>,
+  SliceOf<'inp, L>: Equivalent<str>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -1211,7 +1225,7 @@ where
     >,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  SliceOf<'inp, L>: Equivalent<str> + AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -1245,10 +1259,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -1318,10 +1331,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -1357,10 +1369,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -1532,10 +1543,9 @@ macro_rules! described_standalone {
           InlineStr = LitInlineStr<SliceOf<'inp, L>>,
           BlockStr = LitBlockStr<SliceOf<'inp, L>>,
         >,
-      Ctx: ParseCtx<'inp, L, Lang>,
+      Ctx: AssemblyCtx<'inp, L, Lang>,
       Lang: ?Sized,
-      Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-      SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+      SliceOf<'inp, L>: Equivalent<str> + Clone,
       ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
         + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
       <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,

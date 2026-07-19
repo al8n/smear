@@ -53,7 +53,7 @@ use super::{
   extension::type_system_extension_body,
 };
 use crate::{
-  combinator::{ErrorOf, LiteralValueToken, ParseCtx, SliceOf},
+  combinator::{AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf},
   graphql::{
     ast::{
       Definition, DefinitionOrExtension, Document, TypeSystemDefinition,
@@ -107,10 +107,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -160,10 +159,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -193,10 +191,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -235,10 +232,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -282,9 +278,8 @@ fn document_of<'inp, L, Ctx, Lang, T>(
 ) -> Result<scaffold::Document<T>, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp, Span = SimpleSpan>,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
 {
   let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
@@ -325,10 +320,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,
@@ -359,10 +353,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   <L::Token as Token<'inp>>::Kind: From<Ampersand<(), (), ()>> + From<Pipe<(), (), ()>>,

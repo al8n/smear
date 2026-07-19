@@ -270,10 +270,9 @@ where
       InlineStr = smear_lexer::LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = smear_lexer::LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
