@@ -35,6 +35,9 @@ use tokora::{
   utils::CowStr,
 };
 
+// Only the `tests` submodule references `super::GraphQLx`; a plain top-level import
+// reads as unused under `-Dwarnings` in non-test builds, so gate it to `test`.
+#[cfg(test)]
 use super::GraphQLx;
 
 /// Hints for parsing a variable value.
