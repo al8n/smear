@@ -5,15 +5,6 @@
 //! or directive may carry, declining to `None` (no tokens consumed) unless the next
 //! token is `(`. The const twins thread [`const_value`] instead of [`value`],
 //! exactly mirroring the frozen crate's split.
-//!
-//! # Node placement
-//!
-//! `Argument`'s kind is known up front, but its span is not settled until the value
-//! is parsed, so — like `value`'s `object_field` — it uses the manual
-//! `cst_mark`/`cst_start_at`/`cst_finish` retro-wrap rather than [`node`](tokora::parser::node).
-//! `Arguments` is optional (Amendment 1: optional node kinds retro-wrap manually,
-//! not [`node_opt`](tokora::parser::node_opt)): the mark is minted before the
-//! attempt and spent only when the parens are actually present.
 
 use smear_lexer::{
   LitBlockStr, LitInlineStr,
@@ -22,7 +13,6 @@ use smear_lexer::{
 use smear_scaffold::ast as scaffold;
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{list_of, try_parens},
   span::{AsSpan, IntoSpan},
@@ -32,11 +22,8 @@ use tokora::{
 
 use super::value::{const_value, value};
 use crate::{
-  combinator::{AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, SliceOf, colon, ident},
-  graphql::{
-    ast::{Argument, Arguments, ConstArgument, ConstArguments, Name},
-    kinds::SyntaxKind as K,
-  },
+  combinator::{Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, ident},
+  graphql::ast::{Argument, Arguments, ConstArgument, ConstArguments, Name},
 };
 
 /// Parses an `Argument` (`Name ':' Value`).
@@ -56,22 +43,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   colon(inp)?;
   let value = value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
   let arg = scaffold::Argument::new(span, name, value);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Argument.raw());
-  emitter.cst_finish();
   Ok(arg)
 }
 
@@ -92,22 +75,18 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let (name_span, name_src) = ident(inp)?.into_components();
   let name = Name::new(name_span, name_src);
   colon(inp)?;
   let value = const_value(inp)?;
   let span = SimpleSpan::new(name.span().start(), value.as_span().end());
   let arg = scaffold::Argument::new(span, name, value);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Argument.raw());
-  emitter.cst_finish();
   Ok(arg)
 }
 
@@ -136,13 +115,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`Argument+`): the first argument is committed, so an empty
     // `()` errors at the `)` exactly as the committed ident atom reports it.
@@ -160,9 +138,6 @@ where
         items,
         RParen::new(close.into_span()),
       );
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::Arguments.raw());
-      emitter.cst_finish();
       Ok(Some(args))
     }
     None => Ok(None),
@@ -193,13 +168,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   match try_parens(|inp: &mut InputRef<'inp, '_, L, Ctx, Lang>| {
     // Spec cardinality (`Argument+`): the first argument is committed, so an empty
     // `()` errors at the `)` exactly as the committed ident atom reports it.
@@ -220,9 +194,6 @@ where
         items,
         RParen::new(close.into_span()),
       );
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::Arguments.raw());
-      emitter.cst_finish();
       Ok(Some(args))
     }
     None => Ok(None),

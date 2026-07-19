@@ -5,21 +5,11 @@
 //! `None` (no tokens consumed) when the next token is not `@`. The const twins
 //! thread [`const_arguments`] instead of [`arguments`], exactly mirroring the
 //! frozen crate's split.
-//!
-//! # Node placement
-//!
-//! Both kinds are known up front, but neither uses [`node`](tokora::parser::node)/
-//! [`node_opt`](tokora::parser::node_opt) directly: `Directive`'s span is not
-//! settled until the optional arguments are parsed, and `Directives` is itself
-//! optional and its emptiness is only known after the collecting loop runs — both
-//! content-dependent shapes per Amendment 1, so both retro-wrap manually via
-//! `cst_mark`/`cst_start_at`/`cst_finish`, exactly like `argument`/`arguments`.
 
 use smear_lexer::{LitBlockStr, LitInlineStr};
 use smear_scaffold::ast as scaffold;
 use tokora::{
   InputRef, Lexer, SimpleSpan, Token,
-  emitter::CstEmitter,
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::list_of,
   token::{IdentifierToken, PunctuatorToken, PunctuatorTokenExt},
@@ -28,11 +18,8 @@ use tokora::{
 
 use super::argument::{arguments, const_arguments};
 use crate::{
-  combinator::{AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, SliceOf, at, ident},
-  graphql::{
-    ast::{ConstDirective, ConstDirectives, Directive, Directives, Name},
-    kinds::SyntaxKind as K,
-  },
+  combinator::{Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, at, ident},
+  graphql::ast::{ConstDirective, ConstDirectives, Directive, Directives, Name},
 };
 
 /// Parses a `Directive` (`'@' Name Arguments?`).
@@ -52,13 +39,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   at(inp)?;
   let (name_span, name_src) = ident(inp)?.into_components();
@@ -66,9 +52,6 @@ where
   let args = arguments(inp)?;
   let span = inp.span_since(&cursor);
   let directive = scaffold::Directive::new(span, name, args);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Directive.raw());
-  emitter.cst_finish();
   Ok(directive)
 }
 
@@ -89,13 +72,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   at(inp)?;
   let (name_span, name_src) = ident(inp)?.into_components();
@@ -103,9 +85,6 @@ where
   let args = const_arguments(inp)?;
   let span = inp.span_since(&cursor);
   let directive = scaffold::Directive::new(span, name, args);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Directive.raw());
-  emitter.cst_finish();
   Ok(directive)
 }
 
@@ -130,13 +109,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let ds = list_of(directive, |t: &L::Token| {
     !<L::Token as PunctuatorTokenExt>::is_at(t)
@@ -146,9 +124,6 @@ where
   }
   let span = inp.span_since(&cursor);
   let directives = scaffold::Directives::new(span, ds);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Directives.raw());
-  emitter.cst_finish();
   Ok(Some(directives))
 }
 
@@ -172,13 +147,12 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let ds = list_of(const_directive, |t: &L::Token| {
     !<L::Token as PunctuatorTokenExt>::is_at(t)
@@ -188,9 +162,6 @@ where
   }
   let span = inp.span_since(&cursor);
   let directives = scaffold::Directives::new(span, ds);
-  let emitter = inp.emitter();
-  emitter.cst_start_at(mark, K::Directives.raw());
-  emitter.cst_finish();
   Ok(Some(directives))
 }
 
