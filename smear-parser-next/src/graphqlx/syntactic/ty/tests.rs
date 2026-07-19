@@ -9,7 +9,7 @@
 //! (plan Wave 7).
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan};
+use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{path, ty};
 use crate::graphqlx::{ast::Type, error::GraphqlxErrors};
@@ -79,12 +79,6 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── path (standalone) ───────────────────────────────────────────────────────
 
 #[test]
@@ -92,14 +86,14 @@ fn path_single_and_multi_segment() {
   fn single<S: AsRef<[u8]>>(p: crate::graphqlx::ast::Path<S>) {
     assert!(!p.is_fully_qualified());
     assert_eq!(p.segments_slice().len(), 1);
-    assert_eq!(bytes(p.segments_slice()[0].source_ref()), b"Foo");
+    assert!("Foo".equivalent(p.segments_slice()[0].source_ref()));
   }
   accept_all!(path, "Foo", single);
   fn multi<S: AsRef<[u8]>>(p: crate::graphqlx::ast::Path<S>) {
     let segs = p.segments_slice();
     assert_eq!(segs.len(), 2);
-    assert_eq!(bytes(segs[0].source_ref()), b"user");
-    assert_eq!(bytes(segs[1].source_ref()), b"Profile");
+    assert!("user".equivalent(segs[0].source_ref()));
+    assert!("Profile".equivalent(segs[1].source_ref()));
   }
   accept_all!(path, "user::Profile", multi);
 }
@@ -113,7 +107,7 @@ fn type_path_plain() {
     assert!(!p.required());
     assert!(p.type_generics().is_none());
     assert_eq!(p.path().segments_slice().len(), 1);
-    assert_eq!(bytes(p.path().segments_slice()[0].source_ref()), b"Foo");
+    assert!("Foo".equivalent(p.path().segments_slice()[0].source_ref()));
   }
   accept_all!(ty, "Foo", check);
 }
@@ -155,10 +149,7 @@ fn type_path_with_generics() {
     assert_eq!(g.params_slice().len(), 1);
     let arg = g.params_slice()[0].unwrap_path_ref();
     assert!(arg.required());
-    assert_eq!(
-      bytes(arg.path().segments_slice()[0].source_ref()),
-      b"String"
-    );
+    assert!("String".equivalent(arg.path().segments_slice()[0].source_ref()));
   }
   accept_all!(ty, "Container<String!>!", check);
 }
@@ -179,10 +170,7 @@ fn type_path_nested_generics() {
   fn check<S: AsRef<[u8]>>(t: Type<S>) {
     let outer = t.unwrap_path();
     let inner_arg = outer.type_generics().unwrap().params_slice()[0].unwrap_path_ref();
-    assert_eq!(
-      bytes(inner_arg.path().segments_slice()[0].source_ref()),
-      b"Box"
-    );
+    assert!("Box".equivalent(inner_arg.path().segments_slice()[0].source_ref()));
     assert_eq!(inner_arg.type_generics().unwrap().params_slice().len(), 1);
   }
   accept_all!(ty, "Container<Box<T>>", check);
@@ -280,10 +268,7 @@ fn map_type() {
   fn check<S: AsRef<[u8]>>(t: Type<S>) {
     let m = t.unwrap_map();
     assert!(!m.required());
-    assert_eq!(
-      bytes(m.key().unwrap_path_ref().path().segments_slice()[0].source_ref()),
-      b"String"
-    );
+    assert!("String".equivalent(m.key().unwrap_path_ref().path().segments_slice()[0].source_ref()));
     assert!(m.value().is_path());
   }
   accept_all!(ty, "<String! => String!>", check);

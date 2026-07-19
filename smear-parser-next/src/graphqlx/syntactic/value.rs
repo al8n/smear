@@ -47,8 +47,8 @@ use tokora::{
 use super::peeks_where;
 use crate::{
   combinator::{
-    ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, dollar, fat_arrow, ident, path_sep,
-    try_dollar, try_equal, try_path_sep,
+    AssemblyCtx, Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, dollar,
+    fat_arrow, ident, path_sep, try_dollar, try_equal, try_path_sep,
   },
   graphqlx::{
     ast::{
@@ -295,10 +295,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -309,22 +308,21 @@ where
   };
   let slice = inp.slice();
   let (span, _token) = spanned.into_components();
-  let bytes = slice.as_ref();
-  if matches!(bytes, b"true" | b"false") {
-    let value = InputValue::Boolean(BooleanValue::new(span, matches!(bytes, b"true")));
+  if slice.equivalent("true") || slice.equivalent("false") {
+    let value = InputValue::Boolean(BooleanValue::new(span, slice.equivalent("true")));
     let emitter = inp.emitter();
     emitter.cst_start_at(mark, K::BooleanValue.raw());
     emitter.cst_finish();
     return Ok(value);
   }
-  if matches!(bytes, b"null") {
+  if slice.equivalent("null") {
     let value = InputValue::Null(NullValue::new(span, slice));
     let emitter = inp.emitter();
     emitter.cst_start_at(mark, K::NullValue.raw());
     emitter.cst_finish();
     return Ok(value);
   }
-  if matches!(bytes, b"set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
+  if slice.equivalent("set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let delimited = braces(list_of(
       value,
       <L::Token as PunctuatorTokenExt>::is_close_brace,
@@ -337,7 +335,7 @@ where
     emitter.cst_finish();
     return Ok(out);
   }
-  if matches!(bytes, b"map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
+  if slice.equivalent("map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let delimited = braces(list_of(
       map_entry,
       <L::Token as PunctuatorTokenExt>::is_close_brace,
@@ -374,10 +372,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -388,22 +385,21 @@ where
   };
   let slice = inp.slice();
   let (span, _token) = spanned.into_components();
-  let bytes = slice.as_ref();
-  if matches!(bytes, b"true" | b"false") {
-    let value = ConstInputValue::Boolean(BooleanValue::new(span, matches!(bytes, b"true")));
+  if slice.equivalent("true") || slice.equivalent("false") {
+    let value = ConstInputValue::Boolean(BooleanValue::new(span, slice.equivalent("true")));
     let emitter = inp.emitter();
     emitter.cst_start_at(mark, K::BooleanValue.raw());
     emitter.cst_finish();
     return Ok(value);
   }
-  if matches!(bytes, b"null") {
+  if slice.equivalent("null") {
     let value = ConstInputValue::Null(NullValue::new(span, slice));
     let emitter = inp.emitter();
     emitter.cst_start_at(mark, K::NullValue.raw());
     emitter.cst_finish();
     return Ok(value);
   }
-  if matches!(bytes, b"set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
+  if slice.equivalent("set") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let delimited = braces(list_of(
       const_value,
       <L::Token as PunctuatorTokenExt>::is_close_brace,
@@ -416,7 +412,7 @@ where
     emitter.cst_finish();
     return Ok(out);
   }
-  if matches!(bytes, b"map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
+  if slice.equivalent("map") && peeks_where(inp, <L::Token as PunctuatorTokenExt>::is_open_brace)? {
     let delimited = braces(list_of(
       const_map_entry,
       <L::Token as PunctuatorTokenExt>::is_close_brace,
@@ -447,9 +443,8 @@ fn leading_enum_value<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -532,10 +527,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -604,10 +598,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -672,10 +665,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -709,10 +701,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -753,10 +744,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -789,10 +779,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
@@ -833,10 +822,9 @@ where
       InlineStr = LitInlineStr<SliceOf<'inp, L>>,
       BlockStr = LitBlockStr<SliceOf<'inp, L>>,
     >,
-  Ctx: ParseCtx<'inp, L, Lang>,
+  Ctx: AssemblyCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
-  SliceOf<'inp, L>: AsRef<[u8]> + Clone,
+  SliceOf<'inp, L>: Equivalent<str> + Clone,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {

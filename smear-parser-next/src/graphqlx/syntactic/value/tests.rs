@@ -14,7 +14,10 @@
 //! *through* the productions, not just at the atom layer.
 
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt};
+use tokora::{
+  FatalContext, InputRef, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt,
+  utils::cmp::Equivalent,
+};
 
 use super::{
   const_map_entry, const_object_field, const_value, default_value, float_value, int_value,
@@ -90,19 +93,13 @@ macro_rules! reject_all {
   }};
 }
 
-/// Views a slice (`&str` or `&[u8]`) as bytes, so one assertion body reads across
-/// every source representation.
-fn bytes<S: AsRef<[u8]>>(slice: &S) -> &[u8] {
-  slice.as_ref()
-}
-
 // ─── Leaf builders (driven standalone) ───────────────────────────────────────
 
 #[test]
 fn int_value_accepts_decimal() {
   fn check<S: AsRef<[u8]>>(v: crate::graphqlx::ast::IntValue<S>) {
     assert!(v.value_ref().is_decimal());
-    assert_eq!(bytes(v.value_ref().source_ref()), b"42");
+    assert!("42".equivalent(v.value_ref().source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(int_value, "42", check);
@@ -118,7 +115,7 @@ fn int_value_rejects_non_int() {
 fn float_value_accepts_decimal() {
   fn check<S: AsRef<[u8]>>(v: crate::graphqlx::ast::FloatValue<S>) {
     assert!(v.value_ref().is_decimal());
-    assert_eq!(bytes(v.value_ref().source_ref()), b"3.14");
+    assert!("3.14".equivalent(v.value_ref().source_ref()));
   }
   accept_all!(float_value, "3.14", check);
 }
@@ -126,11 +123,11 @@ fn float_value_accepts_decimal() {
 #[test]
 fn string_value_accepts_inline_and_block() {
   fn check_inline<S: AsRef<[u8]>>(v: crate::graphqlx::ast::StringValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"\"hi\"");
+    assert!("\"hi\"".equivalent(v.source_ref()));
   }
   accept_all!(string_value, "\"hi\"", check_inline);
   fn check_block<S: AsRef<[u8]>>(v: crate::graphqlx::ast::StringValue<S>) {
-    assert_eq!(bytes(v.source_ref()), b"\"\"\"hi\"\"\"");
+    assert!("\"\"\"hi\"\"\"".equivalent(v.source_ref()));
   }
   accept_all!(string_value, "\"\"\"hi\"\"\"", check_block);
 }
@@ -158,12 +155,12 @@ fn int_value_preserves_radix() {
 
   fn decimal_neg<S: AsRef<[u8]>>(v: crate::graphqlx::ast::IntValue<S>) {
     assert!(v.value_ref().is_decimal());
-    assert_eq!(bytes(v.value_ref().source_ref()), b"-5");
+    assert!("-5".equivalent(v.value_ref().source_ref()));
   }
   accept_all!(int_value, "-5", decimal_neg);
 
   fn underscore<S: AsRef<[u8]>>(v: crate::graphqlx::ast::IntValue<S>) {
-    assert_eq!(bytes(v.value_ref().source_ref()), b"1_000");
+    assert!("1_000".equivalent(v.value_ref().source_ref()));
   }
   accept_all!(int_value, "1_000", underscore);
 }
@@ -187,7 +184,7 @@ fn float_value_preserves_radix() {
 #[test]
 fn variable_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphqlx::ast::VariableValue<S>) {
-    assert_eq!(bytes(v.name().source_ref()), b"userId");
+    assert!("userId".equivalent(v.name().source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 7));
   }
   accept_all!(variable_value, "$userId", check);
@@ -279,7 +276,7 @@ fn value_enum_single_segment() {
     assert!(!e.value().is_fully_qualified());
     let segs = e.value().segments_slice();
     assert_eq!(segs.len(), 1);
-    assert_eq!(bytes(segs[0].source_ref()), b"Color");
+    assert!("Color".equivalent(segs[0].source_ref()));
   }
   accept_all!(value, "Color", check);
 }
@@ -303,8 +300,8 @@ fn value_enum_leading_path_is_fully_qualified() {
     assert!(e.value().is_fully_qualified());
     let segs = e.value().segments_slice();
     assert_eq!(segs.len(), 3);
-    assert_eq!(bytes(segs[0].source_ref()), b"a");
-    assert_eq!(bytes(segs[2].source_ref()), b"C");
+    assert!("a".equivalent(segs[0].source_ref()));
+    assert!("C".equivalent(segs[2].source_ref()));
   }
   accept_all!(value, "::a::b::C", check);
 }
@@ -439,7 +436,7 @@ fn const_value_accepts_composites() {
 #[test]
 fn object_field_accepts() {
   fn check<S: AsRef<[u8]>>(f: crate::graphqlx::ast::ObjectField<S>) {
-    assert_eq!(bytes(f.name().source_ref()), b"a");
+    assert!("a".equivalent(f.name().source_ref()));
     assert!(f.value().is_int());
   }
   accept_all!(object_field, "a: 1", check);
