@@ -1,4 +1,4 @@
-//! GraphQL `Type` productions — named types, list types, and the non-null retro-wrap.
+//! GraphQL `Type` productions — named types, list types, and the trailing bang.
 //!
 //! [`ty`] is the single recursive dispatcher for every `Type` shape: a peeked `[`
 //! commits to the `ListType` body (recursing into `ty` for the element), a peeked
@@ -7,39 +7,22 @@
 //! separate AST node for a trailing `!`: the frozen [`Type`] enum folds it into a
 //! `required: bool` field on the same `NamedType`/`ListType`, so [`ty`] parses the
 //! bang after the base shape and bakes it into the node it already built.
-//!
-//! # The `NonNullType` retro-wrap
-//!
-//! The CST layer *does* carry the spec's separate `NonNullType` production
-//! (`NamedType !` | `ListType !`). [`ty`] mints a mark before dispatching, lets the
-//! base shape's own [`node`] bracket record just the name or the bracketed region,
-//! and — only when a `!` actually follows — spends the outer mark as
-//! `K::NonNullType`, wrapping the base node and the `!` token together. A decline
-//! (no `!`) leaves the mark unspent, so the base node stands alone. This is
-//! content-dependent placement (Amendment 1): the manual `cst_mark`/`cst_start_at`/
-//! `cst_finish` retro-wrap, not [`node_at`](tokora::parser::node_at) — `node_at`
-//! wraps unconditionally on a successful sub-parse and cannot itself decide
-//! *whether* to wrap based on what that sub-parse found.
 
 use std::boxed::Box;
 
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  InputRef, Lexer, ParseInput, SimpleSpan, Token,
-  emitter::CstEmitter,
+  InputRef, Lexer, SimpleSpan, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{brackets, node},
+  parser::brackets,
   token::{IdentifierToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
   utils::IntoComponents,
 };
 
 use crate::{
-  combinator::{AssemblyCtx, ErrorOf, ParseCtx, SliceOf, ident, try_bang},
-  graphql::{
-    ast::{Name, Type},
-    kinds::SyntaxKind as K,
-  },
+  combinator::{ErrorOf, ParseCtx, SliceOf, ident, try_bang},
+  graphql::ast::{Name, Type},
 };
 
 /// The classified head of a `Type`: which base shape the one-token peek resolves to.
@@ -90,8 +73,8 @@ enum TypeCore<S> {
   List(Type<Name<S>>),
 }
 
-/// Parses just the `Name` of a `NamedType` — the [`node`]-wrapped region covers
-/// only the identifier, never a trailing `!` ([`ty`] retro-wraps that separately).
+/// Parses just the `Name` of a `NamedType` — never a trailing `!` ([`ty`] folds
+/// that into the node it builds).
 fn named_type_name<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
 ) -> Result<Name<SliceOf<'inp, L>>, ErrorOf<'inp, L, Ctx, Lang>>
@@ -107,8 +90,8 @@ where
   Ok(Name::new(span, src))
 }
 
-/// Parses the `[ Type ]` region of a `ListType` — the [`node`]-wrapped region
-/// covers the brackets and the recursively-parsed element, never a trailing `!`.
+/// Parses the `[ Type ]` region of a `ListType` — the brackets and the
+/// recursively-parsed element, never a trailing `!`.
 // The nested `Type<Name<SliceOf<…>>>` return is inherent to the recursive `Type`
 // shape; factoring it into an alias would only move the same generics.
 #[allow(clippy::type_complexity)]
@@ -118,7 +101,7 @@ fn list_type_body<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
@@ -153,8 +136,7 @@ where
 ///
 /// One peek, committed arms — `[` → `ListType` (recursing into `ty` for the
 /// element), an identifier → `NamedType` — then an optional trailing `!` folds
-/// into the resolved node's `required` flag and retro-wraps the CST region as
-/// `NonNullType`.
+/// into the resolved node's `required` flag.
 ///
 /// Spec: [Type](https://spec.graphql.org/draft/#sec-Type-References).
 // The nested `Type<Name<SliceOf<…>>>` return is inherent to the recursive `Type`
@@ -166,20 +148,15 @@ pub fn ty<'inp, L, Ctx, Lang>(
 where
   L: Lexer<'inp, Span = SimpleSpan>,
   L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
-  Ctx: AssemblyCtx<'inp, L, Lang>,
+  Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
   ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  let mark = inp.emitter().cst_mark();
   let cursor = inp.cursor().clone();
   let core = match classify_type_head(inp)? {
-    Some(Some(TypeHead::Name)) => {
-      TypeCore::Name(node(K::NamedType.raw(), named_type_name).parse_input(inp)?)
-    }
-    Some(Some(TypeHead::List)) => {
-      TypeCore::List(node(K::ListType.raw(), list_type_body).parse_input(inp)?)
-    }
+    Some(Some(TypeHead::Name)) => TypeCore::Name(named_type_name(inp)?),
+    Some(Some(TypeHead::List)) => TypeCore::List(list_type_body(inp)?),
     _ => return unexpected_type(inp),
   };
   match try_bang(inp)? {
@@ -189,9 +166,6 @@ where
         TypeCore::Name(name) => Type::Name(scaffold::NamedType::new(span, name, true)),
         TypeCore::List(inner) => Type::List(Box::new(scaffold::ListType::new(span, inner, true))),
       };
-      let emitter = inp.emitter();
-      emitter.cst_start_at(mark, K::NonNullType.raw());
-      emitter.cst_finish();
       Ok(out)
     }
     ParseAttempt::Decline => {
