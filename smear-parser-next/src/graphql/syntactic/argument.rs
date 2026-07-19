@@ -40,12 +40,12 @@ use tokora::{
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   span::AsSpan,
-  token::{IdentifierToken, PunctuatorToken, PunctuatorTokenExt},
+  token::{IdentifierToken, LitToken, PunctuatorToken, PunctuatorTokenExt},
   try_parse_input::ParseAttempt,
-  utils::{IntoComponents, typenum::U2},
+  utils::{IntoComponents, typenum::U3},
 };
 
-use super::value::{const_value, value};
+use super::value::{const_value, value, value_head_kind};
 use crate::{
   combinator::{
     Equivalent, ErrorOf, LiteralValueToken, ParseCtx, SliceOf, colon, ident, rparen, try_lparen,
@@ -118,18 +118,21 @@ where
 }
 
 /// The list-continuation decision for [`arguments`]/[`const_arguments`]: an
-/// `Argument`'s FIRST set is `Name ':'`, so the list continues
-/// ([`Action::Continue`]) only while the next two tokens are an identifier followed
-/// by a colon, and stops ([`Action::Stop`]) otherwise — at the closing `)`, at end
-/// of input, or on any other head (a bare identifier without a colon included, so
-/// `( foo )` stops the list and is reported by the closing-paren check).
+/// `Argument`'s FIRST set is `Name ':' Value`, so the list continues
+/// ([`Action::Continue`]) only while the next three tokens are an identifier, a
+/// colon, and a value head (plan Amendment 7, U3 name-colon-value window), and stops
+/// ([`Action::Stop`]) otherwise — at the closing `)`, at end of input, or on any
+/// other head (a bare identifier without a colon included, so `( foo )` stops the
+/// list and is reported by the closing-paren check). The value-head classification
+/// is shared with the value dispatcher ([`value_head_kind`](super::value::value_head_kind)),
+/// one source of truth.
 fn decide_argument_head<'inp, L, Ctx, Lang>(
-  mut peeked: Peeked<'_, 'inp, L, U2>,
+  mut peeked: Peeked<'_, 'inp, L, U3>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, ErrorOf<'inp, L, Ctx, Lang>>
 where
   L: Lexer<'inp>,
-  L::Token: IdentifierToken<'inp> + PunctuatorToken<'inp>,
+  L::Token: LitToken<'inp> + IdentifierToken<'inp> + PunctuatorToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
@@ -139,13 +142,15 @@ where
   if !head.token().is_identifier() {
     return Ok(Action::Stop);
   }
-  let Some(after) = peeked.pop_front() else {
+  let Some(colon) = peeked.pop_front() else {
     return Ok(Action::Stop);
   };
-  Ok(if after.token().is_colon() {
-    Action::Continue
-  } else {
-    Action::Stop
+  if !colon.token().is_colon() {
+    return Ok(Action::Stop);
+  }
+  Ok(match peeked.pop_front() {
+    Some(value) if value_head_kind::<L>(value.token()).is_some() => Action::Continue,
+    _ => Action::Stop,
   })
 }
 
@@ -188,7 +193,7 @@ where
     ParseAttempt::Decline => Ok(None),
     ParseAttempt::Accept(_open) => {
       let items: Vec<Argument<SliceOf<'inp, L>>> = argument
-        .repeated_while::<_, U2>(decide_argument_head::<L, Ctx, Lang>)
+        .repeated_while::<_, U3>(decide_argument_head::<L, Ctx, Lang>)
         .collect()
         .parse_input(inp)?;
       rparen(inp)?;
@@ -233,7 +238,7 @@ where
     ParseAttempt::Decline => Ok(None),
     ParseAttempt::Accept(_open) => {
       let items: Vec<ConstArgument<SliceOf<'inp, L>>> = const_argument
-        .repeated_while::<_, U2>(decide_argument_head::<L, Ctx, Lang>)
+        .repeated_while::<_, U3>(decide_argument_head::<L, Ctx, Lang>)
         .collect()
         .parse_input(inp)?;
       rparen(inp)?;
