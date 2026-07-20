@@ -359,7 +359,7 @@ jobs:
           command: tarpaulin
           args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: ${{ github.repository }}
