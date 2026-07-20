@@ -19,6 +19,9 @@ use tokora::{
 /// [`tokora::state::recursion_tracker::RecursionLimiter`].
 pub const DEFAULT_RECURSION_LIMIT: usize = 500;
 
+pub(crate) type LogosSourceOf<'inp, T> =
+  <<T as FromLogos<'inp>>::Logos as tokora::logos::Logos<'inp>>::Source;
+
 /// Outcome of delegating one token to a Logos lexer via [`delegate_to_logos`].
 ///
 /// The two variants carry exactly what the caller must fold back into its own
@@ -56,13 +59,19 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
 /// returned [`Delegated`] outcome back into its cursor/span/state.
 #[cfg_attr(not(tarpaulin), inline(always))]
 pub(crate) fn delegate_to_logos<'inp, T>(
-  scan_primitive: &'inp <LogosLexer<'inp, T> as Lexer<'inp>>::Source,
+  scan_primitive: &'inp LogosSourceOf<'inp, T>,
   cursor: usize,
   state: RecursionLimiter,
 ) -> Option<Delegated<'inp, T>>
 where
   T: FromLogos<'inp>,
-  LogosLexer<'inp, T>: Lexer<'inp, State = RecursionLimiter, Token = T, Offset = usize>,
+  LogosLexer<'inp, T>: Lexer<
+      'inp,
+      State = RecursionLimiter,
+      Source = LogosSourceOf<'inp, T>,
+      Token = T,
+      Offset = usize,
+    >,
 {
   let mut logos = LogosLexer::with_state(scan_primitive, state);
   logos.bump(&cursor);
@@ -149,4 +158,3 @@ pub(crate) fn memchr_newline(input: &[u8]) -> Option<usize> {
 pub(crate) mod scan;
 
 pub(crate) use scan::{NumberKind, scan_number};
-

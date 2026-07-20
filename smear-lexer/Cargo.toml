@@ -22,6 +22,7 @@ smallvec = ["dep:smallvec"]
 bytes = ["dep:bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "tokora/bstr_1"]
 hipstr = ["dep:hipstr", "tokora/hipstr_0_8"]
+smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
 
 [dependencies]
 derive_more.workspace = true
@@ -33,6 +34,7 @@ memspan = { version = "0.1", default-features = false, features = ["std"] }
 
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }
+smol-bytes = { workspace = true, optional = true }
 bstr = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
 

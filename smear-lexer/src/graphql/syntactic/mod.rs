@@ -14,7 +14,8 @@ use crate::{
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::DelegateStringError,
   simd::{
-    Delegated, NumberKind, memchr_newline, scan_identifier, scan_number, skip_ws_and_comma,
+    Delegated, LogosSourceOf, NumberKind, memchr_newline, scan_identifier, scan_number,
+    skip_ws_and_comma,
   },
 };
 
@@ -567,22 +568,24 @@ pub struct SyntacticLexer<'inp, S: ?Sized = str> {
 impl<'inp, S> Lexer<'inp> for SyntacticLexer<'inp, S>
 where
   SyntacticToken<S::Slice<'inp>>:
-    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  S: Source<usize> + ?Sized + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
+    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>
+    + From<NumberToken<S::Slice<'inp>>>,
+  S: Source<usize>
+    + AsRef<LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>>
+    + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>
+    + ?Sized,
   S::Slice<'inp>: AsRef<[u8]>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
-  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
   LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
       'inp,
       State = RecursionLimiter,
+      Source = LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>,
       Token = NumberToken<S::Slice<'inp>>,
-      Source = S,
       Offset = usize,
     >,
   NumberToken<S::Slice<'inp>>:
+    FromLogos<'inp> +
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
-  
 {
   type State = RecursionLimiter;
 
@@ -968,14 +971,14 @@ where
   LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
       'inp,
       State = RecursionLimiter,
+      Source = LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>,
       Token = NumberToken<S::Slice<'inp>>,
-      Source = S,
       Offset = usize,
     >,
   NumberToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
-  S: Source<usize> + ?Sized,
+  S: Source<usize> + AsRef<LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>> + ?Sized,
 {
   /// Cold, out-of-line constructor for the recursion-limit error a token
   /// emission yields when the depth is over the limit (the `finish!` gate's
@@ -1041,7 +1044,7 @@ where
     >,
   > {
     match crate::simd::delegate_to_logos::<NumberToken<S::Slice<'inp>>>(
-      self.src,
+      self.src.as_ref(),
       self.cursor,
       self.state,
     )? {
