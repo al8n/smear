@@ -2,11 +2,11 @@ use tokora::lexer::Lexer;
 
 use crate::{
   LitInlineStr,
-  graphql::syntactic::{SimdSyntacticLexer, SyntacticToken},
+  graphql::syntactic::{SyntacticLexer, SyntacticToken},
 };
 
 fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+  let mut lexer = SyntacticLexer::<[u8]>::new(src);
   let mut out = Vec::new();
   while let Some(tok) = lexer.lex() {
     out.push(tok.unwrap());
@@ -60,7 +60,7 @@ fn inline_string_in_query() {
 
 #[test]
 fn lone_quote_at_eof_is_error() {
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"\"");
+  let mut lexer = SyntacticLexer::<[u8]>::new(b"\"");
   let tok = lexer.lex().unwrap();
   assert!(tok.is_err());
   assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 1)));
@@ -72,7 +72,7 @@ fn span_and_slice_track_error_token() {
   // like `LogosLexer` — not the previous valid token. error_span() reports the
   // same span too.
   let src = b"hello \"unterminated";
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+  let mut lexer = SyntacticLexer::<[u8]>::new(src);
 
   // First token: identifier "hello" at 0..5.
   let first = lexer.lex().unwrap();

@@ -5,7 +5,7 @@ use super::*;
 use crate::{
   LitInlineStr, LitPlainStr,
   graphql::{
-    syntactic::SimdSyntacticLexer,
+    syntactic::SyntacticLexer,
     tests::{self, TestToken},
   },
 };
@@ -167,7 +167,7 @@ fn test_bom_lexing() {
   let input = "\u{feff}";
 
   // The SIMD lexer skips the BOM as trivia and reaches EOF immediately.
-  let mut lexer = SimdSyntacticLexer::<str>::new(input);
+  let mut lexer = SyntacticLexer::<str>::new(input);
 
   assert!(lexer.lex().is_none());
 }
@@ -178,7 +178,7 @@ fn test_recursion_limit() {
   let field = "a {".repeat(depth) + &"}".repeat(depth);
   let query = field.replace("{}", "{b}").to_string();
 
-  let mut lexer = SimdSyntacticLexer::<str>::with_state(
+  let mut lexer = SyntacticLexer::<str>::with_state(
     query.as_str(),
     RecursionLimiter::with_limitation(depth - 1),
   );

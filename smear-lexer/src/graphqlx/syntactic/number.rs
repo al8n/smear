@@ -16,8 +16,8 @@
 //! number regexes coexist here exactly as they do in the full grammar.
 //!
 //! The SIMD lexer routes a malformed/ambiguous number opener here via
-//! `SimdSyntacticLexer::delegate_number_to_logos` (instantiating
-//! `simd_common::delegate_to_logos::<NumberToken<S::Slice>>`) and maps the
+//! `SyntacticLexer::delegate_number_to_logos` (instantiating
+//! `simd::delegate_to_logos::<NumberToken<S::Slice>>`) and maps the
 //! result through [`SyntacticToken::from`]. `NumberToken`'s `Error` is the SAME
 //! `LexerErrors<Char, RecursionLimitExceeded>` `SyntacticToken` uses, so the
 //! `Delegated::Error` arm needs zero conversion.

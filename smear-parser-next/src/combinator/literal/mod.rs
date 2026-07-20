@@ -64,6 +64,9 @@ pub trait LiteralValueToken<'inp>: LitToken<'inp> {
   fn into_block_str(self) -> Result<Self::BlockStr, Self>
   where
     Self: Sized;
+
+  /// Returns `true` when the token is any literal (int, float, or string).
+  fn is_literal(&self) -> bool;
 }
 
 /// The inline-or-block payload [`try_string`] yields: the inline carrier or the

@@ -8,8 +8,8 @@
 //! any diagnostic.
 //!
 //! The SIMD lexer delegates a malformed number to this grammar via
-//! `SimdSyntacticLexer::delegate_number_to_logos` (instantiating
-//! `simd_common::delegate_to_logos::<NumberToken<S::Slice>>`) and maps the
+//! `SyntacticLexer::delegate_number_to_logos` (instantiating
+//! `simd::delegate_to_logos::<NumberToken<S::Slice>>`) and maps the
 //! result through [`SyntacticToken::from`]. `NumberToken`'s `Error` is the SAME
 //! `LexerErrors<Char, RecursionLimitExceeded>` `SyntacticToken` uses, so the
 //! `Delegated::Error` arm needs zero conversion.

@@ -10,12 +10,12 @@
 
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::syntactic::SimdSyntacticLexer;
+use crate::graphqlx::syntactic::SyntacticLexer;
 
 /// Render every token of a drive: `is_err`, `span()`, `slice()` at each step,
 /// plus `check()` whenever that step is an error. Panics if the drive never
 /// produces an error.
-fn render_error_path(mut lex: SimdSyntacticLexer<'_, str>, src: &str) -> String {
+fn render_error_path(mut lex: SyntacticLexer<'_, str>, src: &str) -> String {
   use std::fmt::Write as _;
   let mut out = String::new();
   let mut saw_error = false;
@@ -82,7 +82,7 @@ fn error_path_span_slice_check_match_logos() {
   ];
 
   for (src, expected) in CASES {
-    let simd = SimdSyntacticLexer::<str>::new(src);
+    let simd = SyntacticLexer::<str>::new(src);
     assert_eq!(
       &render_error_path(simd, src),
       expected,
@@ -143,6 +143,6 @@ fn recursion_limit_region_matches_logos() {
 #20 is_err=false span=SimpleSpan { start: 20, end: 21 } slice=\")\"
 ";
   let simd =
-    SimdSyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit));
+    SyntacticLexer::<str>::with_state(src.as_str(), RecursionLimiter::with_limitation(limit));
   assert_eq!(render_error_path(simd, &src), expected);
 }

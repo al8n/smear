@@ -20,7 +20,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use smear_lexer::{
   graphql::{
     lossless::{LosslessLexer, LosslessLexerErrors, LosslessToken},
-    syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
   tokora::lexer::Lexer as _,
 };
@@ -91,7 +91,7 @@ fn lossless_count(input: &str) -> usize {
 /// + inline punct + Logos delegation for everything else.
 #[inline(always)]
 fn simd_count(input: &str) -> usize {
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(input.as_bytes());
+  let mut lexer = SyntacticLexer::<[u8]>::new(input.as_bytes());
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {
     let _ = black_box(result);
@@ -102,7 +102,7 @@ fn simd_count(input: &str) -> usize {
 
 #[inline(always)]
 fn simd_collect(input: &str) -> Vec<Result<SyntacticToken<&[u8]>, SyntacticLexerErrors<u8>>> {
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(input.as_bytes());
+  let mut lexer = SyntacticLexer::<[u8]>::new(input.as_bytes());
   let mut tokens: Vec<Result<SyntacticToken<&[u8]>, SyntacticLexerErrors<u8>>> = Vec::new();
   while let Some(result) = lexer.lex() {
     tokens.push(result);
@@ -138,8 +138,8 @@ fn gx_lossless_count(input: &str) -> usize {
 /// GraphQLx SIMD syntactic lexer token count, mirroring `simd_count`.
 #[inline(always)]
 fn gx_simd_count(input: &str) -> usize {
-  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(input.as_bytes());
+  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
+  let mut lexer = SyntacticLexer::<[u8]>::new(input.as_bytes());
   let mut count = 0usize;
   while let Some(result) = lexer.lex() {
     let _ = black_box(result);

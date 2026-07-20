@@ -2,7 +2,7 @@
 //! SIMD lexers.
 //!
 //! These are the byte-category fast paths (trivia, identifiers), the
-//! source-abstraction traits ([`AsBytes`], [`ScanSource`]) that let a lexer run
+//! source-abstraction traits ([`AsBytes`]) that let a lexer run
 //! over `str`, `[u8]`, and the owned/shared source wrappers alike, and the
 //! [`delegate_to_logos`] slow-path fallback that hands an unrecognized token to
 //! a per-dialect Logos lexer. The dialect-specific dispatch loop (punctuation,
@@ -10,7 +10,7 @@
 //! these.
 
 use tokora::{
-  Lexer, SimpleSpan, Source, Token,
+  Lexer, SimpleSpan, Token,
   lexer::{FromLogos, LogosLexer},
   state::recursion_tracker::RecursionLimiter,
 };
@@ -18,158 +18,6 @@ use tokora::{
 /// Maximum byte recursion depth — matches the default in
 /// [`tokora::state::recursion_tracker::RecursionLimiter`].
 pub const DEFAULT_RECURSION_LIMIT: usize = 500;
-
-/// Borrow a source slice as raw bytes for SIMD scanning.
-///
-/// The SIMD fast paths operate on `&[u8]` regardless of a source's primitive
-/// type, so every source-slice type the lexer accepts implements this as a
-/// zero-cost deref to its underlying bytes.
-pub trait AsBytes {
-  /// Returns the underlying bytes of this slice.
-  fn as_bytes(&self) -> &[u8];
-}
-
-impl<T: ?Sized> AsBytes for &T
-where
-  T: AsBytes,
-{
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    (*self).as_bytes()
-  }
-}
-
-impl AsBytes for str {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    str::as_bytes(self)
-  }
-}
-
-impl AsBytes for [u8] {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-// Each of these is `tokora::Source::Slice` for an owned or shared source type
-// (`bytes::Bytes`, `bstr::BStr`, `hipstr::HipStr`, `hipstr::HipByt` — see
-// tokora's `src/source/{bytes_1,bstr_1,hipstr_0_8}.rs`), so implementing
-// `AsBytes` for them is what lets a SIMD lexer run over those source types,
-// exactly as it already does for `str`/`[u8]` above. Every impl is a trivial
-// deref to `&[u8]` — no allocation, no copying.
-
-#[cfg(feature = "bytes")]
-impl AsBytes for bytes::Bytes {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bstr")]
-impl AsBytes for bstr::BStr {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl AsBytes for hipstr::HipStr<'_> {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    // `HipStr` derefs to `str`, not `[u8]` directly, so route through
-    // `str::as_bytes` (same call as the `str` impl above; the `&HipStr ->
-    // &str` coercion happens at the argument site).
-    str::as_bytes(self)
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl AsBytes for hipstr::HipByt<'_> {
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn as_bytes(&self) -> &[u8] {
-    self
-  }
-}
-
-/// The primitive `str`/`[u8]` source that Logos actually scans for a source
-/// `S`, plus how to borrow `S` as it.
-///
-/// The `token!`-generated Logos enums always scan `str`/`[u8]` and convert each
-/// matched primitive slice up to `S::Slice` via `IntoEquivalent`, so
-/// `LogosLexer`'s `Source` is always the primitive — never the owned/shared
-/// wrapper. `delegate_to_logos` builds its `LogosLexer` over this primitive
-/// view; the tokens it produces are still parameterized over `S::Slice` and
-/// compare content-equal to the fast path's.
-pub trait ScanSource: Source<usize> {
-  /// The `str`/`[u8]` primitive Logos scans for this source. Identity for
-  /// `str`/`[u8]`; the wrapper's deref target otherwise.
-  type ScanPrimitive: Source<usize> + ?Sized;
-
-  /// Borrow this source as the primitive Logos scans.
-  fn scan_primitive(&self) -> &Self::ScanPrimitive;
-}
-
-impl ScanSource for str {
-  type ScanPrimitive = str;
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &str {
-    self
-  }
-}
-
-impl ScanSource for [u8] {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bytes")]
-impl ScanSource for bytes::Bytes {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "bstr")]
-impl ScanSource for bstr::BStr {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl ScanSource for hipstr::HipStr<'_> {
-  type ScanPrimitive = str;
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &str {
-    self
-  }
-}
-
-#[cfg(feature = "hipstr")]
-impl ScanSource for hipstr::HipByt<'_> {
-  type ScanPrimitive = [u8];
-
-  #[cfg_attr(not(tarpaulin), inline(always))]
-  fn scan_primitive(&self) -> &[u8] {
-    self
-  }
-}
 
 /// Outcome of delegating one token to a Logos lexer via [`delegate_to_logos`].
 ///
@@ -302,5 +150,3 @@ pub(crate) mod scan;
 
 pub(crate) use scan::{NumberKind, scan_number};
 
-#[cfg(test)]
-mod tests;

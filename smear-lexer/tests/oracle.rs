@@ -214,7 +214,7 @@ const EDGES: &[(&str, &str)] = &[
 
 // ─── SIMD-vs-golden parity (phase 1b Task 2) ──────────────────────────────
 //
-// `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
+// `SyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
 // what these golden files were originally captured from via a live
 // Logos-backed lexer over the full `SyntacticToken` grammar (that
 // differential test, `graphql_syntactic_oracle`, was deleted in Task 4 of the
@@ -222,16 +222,16 @@ const EDGES: &[(&str, &str)] = &[
 // thing more directly; see git history for the deleted test) -- so its render
 // is byte-for-byte identical to the golden files. No conversion is needed
 // (contrast the phase 1a version of this test, which could only drive
-// `SimdSyntacticLexer::<[u8]>` and had to paper over the resulting `Char = u8`
+// `SyntacticLexer::<[u8]>` and had to paper over the resulting `Char = u8`
 // vs. `Char = char` `Debug` mismatch with a pair of text-rewriting hacks).
 
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_syntactic_simd_oracle() {
-  use smear_lexer::graphql::syntactic::SimdSyntacticLexer;
+  use smear_lexer::graphql::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
+    let rendered = render_stream!(SyntacticLexer::<str>::new(src));
     check("graphql-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
@@ -359,7 +359,7 @@ fn graphql_syntactic_simd_low_recursion_parity() {
   ];
 
   for (src, expected) in CASES {
-    let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
+    let simd = render_stream!(SyntacticLexer::<str>::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));
@@ -369,7 +369,7 @@ fn graphql_syntactic_simd_low_recursion_parity() {
 
 // ─── SIMD source matrix: `<[u8]>` vs `<str>` (Task 2) ──────────────────────
 //
-// `graphql_syntactic_simd_oracle` above proves `SimdSyntacticLexer::<str>`
+// `graphql_syntactic_simd_oracle` above proves `SyntacticLexer::<str>`
 // matches the golden files byte-for-byte. The byte-flavored sources
 // (`Char = u8`) can't be compared against those same golden files with
 // `render_stream!`: `{:?}` renders `Char = u8` differently from `Char = char`
@@ -408,23 +408,14 @@ use smear_lexer::{
   },
 };
 // GraphQL-only: the token/error types themselves, plus the GraphQL-flavored
-// `SimdSyntacticLexer` used as the `<str>` reference lexer in the matrix
+// `SyntacticLexer` used as the `<str>` reference lexer in the matrix
 // tests below.
 #[cfg(feature = "graphql")]
 use smear_lexer::graphql::{
   error::{DecimalError, FloatError},
-  syntactic::SimdSyntacticLexer,
+  syntactic::SyntacticLexer,
   syntactic::{SyntacticLexerError, SyntacticLexerErrorData, SyntacticLexerErrors, SyntacticToken},
 };
-// `AsBytes` is dialect-agnostic (it's `crate::simd_common::AsBytes` under the
-// hood) but only re-exported publicly through each dialect's `simd` module;
-// `same_inline_str`/`same_block_str` below need it regardless of which
-// dialect is active, so pick it up from whichever is available, preferring
-// `graphql` when both are on (the two paths name the same type).
-#[cfg(feature = "graphql")]
-use smear_lexer::graphql::syntactic::AsBytes;
-#[cfg(all(feature = "graphqlx", not(feature = "graphql")))]
-use smear_lexer::graphqlx::syntactic::AsBytes;
 use tokora::{
   error::UnexpectedLexeme,
   utils::{Lexeme, PositionedChar},
@@ -554,7 +545,7 @@ fn same_string_error(byte: &StringError<u8>, str_: &StringError<char>) -> bool {
     (StringError::Unicode(b), StringError::Unicode(s)) => same_unicode_error(b, s),
     (StringError::Other(b), StringError::Other(s)) => b == s,
     // `Unopened` (`UnexpectedLexeme<Option<Char>, _>`) is structurally
-    // unreachable from `SimdSyntacticLexer::lex()` (the only entry into
+    // unreachable from `SyntacticLexer::lex()` (the only entry into
     // string lexing is the `b'"'` dispatch arm) and no fixture exercises it;
     // falling through to the mismatch case below rather than adding an
     // `Option<Char>`-flavored comparator for zero coverage.
@@ -626,8 +617,8 @@ fn same_lexer_errors(byte: &SyntacticLexerErrors<u8>, str_: &SyntacticLexerError
 /// (`required_capacity`). Comparing only the span text would miss a lexer
 /// that classifies the same bytes differently or derives different
 /// metadata for them, so every accessor is checked, not just the source.
-fn same_inline_str<B: AsBytes>(byte: &LitInlineStr<B>, str_: &LitInlineStr<&str>) -> bool {
-  if byte.source_ref().as_bytes() != str_.source_ref().as_bytes() {
+fn same_inline_str<B: AsRef<[u8]>>(byte: &LitInlineStr<B>, str_: &LitInlineStr<&str>) -> bool {
+  if byte.source_ref().as_ref() != str_.source_ref().as_bytes() {
     return false;
   }
   if byte.is_plain() != str_.is_plain() || byte.is_complex() != str_.is_complex() {
@@ -650,8 +641,8 @@ fn same_inline_str<B: AsBytes>(byte: &LitInlineStr<B>, str_: &LitInlineStr<&str>
 /// (`string_lexer/block/str.rs` for `<str>`, `block/u8_slice.rs` for
 /// `<[u8]>` -- the latter has no unit tests of its own), so this is the one
 /// place that proves they agree on more than just the matched span text.
-fn same_block_str<B: AsBytes>(byte: &LitBlockStr<B>, str_: &LitBlockStr<&str>) -> bool {
-  if byte.source_ref().as_bytes() != str_.source_ref().as_bytes() {
+fn same_block_str<B: AsRef<[u8]>>(byte: &LitBlockStr<B>, str_: &LitBlockStr<&str>) -> bool {
+  if byte.source_ref().as_ref() != str_.source_ref().as_bytes() {
     return false;
   }
   if byte.is_plain() != str_.is_plain() || byte.is_complex() != str_.is_complex() {
@@ -682,7 +673,7 @@ fn same_block_str<B: AsBytes>(byte: &LitBlockStr<B>, str_: &LitBlockStr<&str>) -
 /// particular can share a span yet disagree on classification or metadata if
 /// the two hand-written lexers (str vs. `[u8]`) diverge.
 #[cfg(feature = "graphql")]
-fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>) -> bool {
+fn same_token<B: AsRef<[u8]>>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>) -> bool {
   use SyntacticToken as Tok;
   if byte.kind() != str_.kind() {
     return false;
@@ -690,7 +681,7 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
   match (byte, str_) {
     (Tok::Identifier(b), Tok::Identifier(s))
     | (Tok::LitInt(b), Tok::LitInt(s))
-    | (Tok::LitFloat(b), Tok::LitFloat(s)) => b.as_bytes() == s.as_bytes(),
+    | (Tok::LitFloat(b), Tok::LitFloat(s)) => b.as_ref() == s.as_bytes(),
     (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => same_inline_str(b, s),
     (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => same_block_str(b, s),
     // Every other variant carries no payload; the `kind()` check above
@@ -699,7 +690,7 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
   }
 }
 
-/// Drives an owned/shared-source `SimdSyntacticLexer` and the reference
+/// Drives an owned/shared-source `SyntacticLexer` and the reference
 /// `<str>`-flavored one over the same fixture text, in lockstep, asserting
 /// every token/error pair is source-agnostically equivalent (see `same_token`
 /// / `same_lexer_errors` above). `$label` identifies the flavor in failure
@@ -710,7 +701,7 @@ fn same_token<B: AsBytes>(byte: &SyntacticToken<B>, str_: &SyntacticToken<&str>)
 macro_rules! assert_matches_str_stream {
   ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {{
     let mut byte_lex = $byte_lexer;
-    let mut str_lex = SimdSyntacticLexer::<str>::new($str_src);
+    let mut str_lex = SyntacticLexer::<str>::new($str_src);
     let mut idx = 0usize;
     loop {
       match (byte_lex.lex(), str_lex.lex()) {
@@ -755,7 +746,7 @@ fn graphql_syntactic_simd_source_matrix_u8() {
     assert_matches_str_stream!(
       "[u8]",
       name,
-      SimdSyntacticLexer::<[u8]>::new(src.as_bytes()),
+      SyntacticLexer::<[u8]>::new(src.as_bytes()),
       src,
       same_lexer_errors
     );
@@ -770,7 +761,7 @@ fn graphql_syntactic_simd_source_matrix_bytes() {
     assert_matches_str_stream!(
       "Bytes",
       name,
-      SimdSyntacticLexer::<bytes::Bytes>::new(&owned),
+      SyntacticLexer::<bytes::Bytes>::new(&owned),
       src,
       same_lexer_errors
     );
@@ -784,7 +775,7 @@ fn graphql_syntactic_simd_source_matrix_bstr() {
     assert_matches_str_stream!(
       "BStr",
       name,
-      SimdSyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(src.as_bytes())),
+      SyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(src.as_bytes())),
       src,
       same_lexer_errors
     );
@@ -804,7 +795,7 @@ fn graphql_syntactic_simd_source_matrix_hipstr() {
     assert_matches_str_stream!(
       "HipStr",
       name,
-      SimdSyntacticLexer::<hipstr::HipStr<'_>>::new(&owned),
+      SyntacticLexer::<hipstr::HipStr<'_>>::new(&owned),
       src,
       eq_char
     );
@@ -819,7 +810,7 @@ fn graphql_syntactic_simd_source_matrix_hipbyt() {
     assert_matches_str_stream!(
       "HipByt",
       name,
-      SimdSyntacticLexer::<hipstr::HipByt<'_>>::new(&owned),
+      SyntacticLexer::<hipstr::HipByt<'_>>::new(&owned),
       src,
       same_lexer_errors
     );
@@ -890,7 +881,7 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
   ("gx_unknown_byte", "{ a ? b }"),
 ];
 
-// `SimdSyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
+// `SyntacticLexer::<str>` produces `Char = char` tokens/errors -- exactly
 // what these golden files were originally captured from via a live
 // Logos-backed lexer over the full `SyntacticToken` grammar (that
 // differential test, `graphqlx_syntactic_oracle`, was deleted in Task 4 of
@@ -901,10 +892,10 @@ const GRAPHQLX_SIMD_EXTRA: &[(&str, &str)] = &[
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_oracle() {
-  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
+  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let rendered = render_stream!(SimdSyntacticLexer::<str>::new(src));
+    let rendered = render_stream!(SyntacticLexer::<str>::new(src));
     check("graphqlx-syntactic", name, &rendered, &mut mismatches);
   }
   assert_no_mismatches(&mismatches);
@@ -925,7 +916,7 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear_lexer::graphqlx::syntactic::SimdSyntacticLexer;
+  use smear_lexer::graphqlx::syntactic::SyntacticLexer;
   use tokora::state::recursion_tracker::RecursionLimiter;
 
   const CASES: &[(&str, &str)] = &[
@@ -1029,7 +1020,7 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
   ];
 
   for (src, expected) in CASES {
-    let simd = render_stream!(SimdSyntacticLexer::<str>::with_state(
+    let simd = render_stream!(SyntacticLexer::<str>::with_state(
       src,
       RecursionLimiter::with_limitation(0),
     ));
@@ -1057,7 +1048,7 @@ use smear_lexer::graphqlx::{
     HexFloatError, LexerError as GxLexerError, LexerErrorData as GxErrorData,
     LexerErrors as GxLexerErrors, OctalError,
   },
-  syntactic::SimdSyntacticLexer as GxSimd,
+  syntactic::SyntacticLexer as GxSimd,
   syntactic::SyntacticToken as GxToken,
 };
 #[cfg(feature = "graphqlx")]
@@ -1178,34 +1169,34 @@ fn same_gx_lexer_errors(
 // same way (radix is a pure function of the bytes, but the variant match makes
 // any divergence a hard mismatch rather than a silent pass).
 #[cfg(feature = "graphqlx")]
-fn same_gx_lit_int<B: AsBytes>(byte: &LitInt<B>, str_: &LitInt<&str>) -> bool {
+fn same_gx_lit_int<B: AsRef<[u8]>>(byte: &LitInt<B>, str_: &LitInt<&str>) -> bool {
   match (byte, str_) {
     (LitInt::Decimal(b), LitInt::Decimal(s))
     | (LitInt::Hex(b), LitInt::Hex(s))
     | (LitInt::Binary(b), LitInt::Binary(s))
-    | (LitInt::Octal(b), LitInt::Octal(s)) => b.as_bytes() == s.as_bytes(),
+    | (LitInt::Octal(b), LitInt::Octal(s)) => b.as_ref() == s.as_bytes(),
     _ => false,
   }
 }
 
 #[cfg(feature = "graphqlx")]
-fn same_gx_lit_float<B: AsBytes>(byte: &LitFloat<B>, str_: &LitFloat<&str>) -> bool {
+fn same_gx_lit_float<B: AsRef<[u8]>>(byte: &LitFloat<B>, str_: &LitFloat<&str>) -> bool {
   match (byte, str_) {
     (LitFloat::Decimal(b), LitFloat::Decimal(s)) | (LitFloat::Hex(b), LitFloat::Hex(s)) => {
-      b.as_bytes() == s.as_bytes()
+      b.as_ref() == s.as_bytes()
     }
     _ => false,
   }
 }
 
 #[cfg(feature = "graphqlx")]
-fn same_gx_token<B: AsBytes>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
+fn same_gx_token<B: AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
   use GxToken as Tok;
   if byte.kind() != str_.kind() {
     return false;
   }
   match (byte, str_) {
-    (Tok::Identifier(b), Tok::Identifier(s)) => b.as_bytes() == s.as_bytes(),
+    (Tok::Identifier(b), Tok::Identifier(s)) => b.as_ref() == s.as_bytes(),
     (Tok::LitInt(b), Tok::LitInt(s)) => same_gx_lit_int(b, s),
     (Tok::LitFloat(b), Tok::LitFloat(s)) => same_gx_lit_float(b, s),
     (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => same_inline_str(b, s),
@@ -1216,7 +1207,7 @@ fn same_gx_token<B: AsBytes>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
   }
 }
 
-/// Drives a byte-sourced GraphQLx `SimdSyntacticLexer` and the reference
+/// Drives a byte-sourced GraphQLx `SyntacticLexer` and the reference
 /// `<str>`-flavored one over the same fixture text, in lockstep, asserting
 /// every token/error pair is source-agnostically equivalent.
 #[cfg(feature = "graphqlx")]

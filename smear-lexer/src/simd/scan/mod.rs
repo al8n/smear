@@ -28,7 +28,7 @@
 //! `syntactic/mod.rs`: `Some((kind, len))` becomes an inline decimal
 //! `LitInt`/`LitFloat` (no Logos involved), and `None` delegates the whole
 //! token to that dialect's focused `NumberToken` Logos grammar via
-//! `SimdSyntacticLexer::delegate_number_to_logos`.
+//! `SyntacticLexer::delegate_number_to_logos`.
 
 /// The two GraphQL numeric literal shapes [`scan_number`] can recognize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub(crate) enum NumberKind {
 
 /// Below this many remaining bytes, a tight scalar loop beats dispatching
 /// into `memspan`'s SIMD digit scanner — mirrors the short/long split in
-/// `scan_identifier` (`crate::simd_common`). GraphQL numbers are almost always
+/// `scan_identifier` (`crate::simd`). GraphQL numbers are almost always
 /// a handful of digits, so this is the overwhelmingly common branch; the
 /// SIMD path exists for pathological long digit runs (huge synthetic IDs,
 /// timestamps, etc. encoded as decimal).
