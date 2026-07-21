@@ -299,8 +299,7 @@ fn full_trait_parity_low_recursion_limit() {
   );
 
   let simd_panicked = panics(|| {
-    let mut simd =
-      SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
+    let mut simd = SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
     while simd.lex().is_some() {}
     simd.bump(&1usize);
   });

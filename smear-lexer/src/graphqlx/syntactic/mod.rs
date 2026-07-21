@@ -15,7 +15,7 @@ use crate::{
   string_lexer::DelegateStringError,
 };
 
-use self::number::NumberToken;
+use self::number::NumberLexerToken;
 
 use crate::simd::{
   Delegated, LogosSourceOf, NumberKind, memchr_newline, scan_identifier, scan_number,
@@ -407,21 +407,20 @@ where
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   S: Source<usize>
-    + AsRef<LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>>
+    + AsRef<LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>>
     + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>
     + ?Sized,
   S::Slice<'inp>: AsRef<[u8]>,
-  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
       State = RecursionLimiter,
-      Source = LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>,
-      Token = NumberToken<S::Slice<'inp>>,
+      Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
+      Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,
     >,
-  NumberToken<S::Slice<'inp>>:
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
   type State = RecursionLimiter;
@@ -811,29 +810,29 @@ where
 // `Span = SimpleSpan` and `S::Slice<'inp>: AsRef<[u8]>`, neither of which
 // `delegate_number_to_logos` touches (it builds `SimpleSpan` directly and reads
 // the wrapped Logos lexer's own span, never `Self::Span` or `.as_bytes()`).
-// Its return type names the concrete `SyntacticToken`/`Error` types, which
-// requires the `Token<'inp, Error = ..>` + `From<NumberToken>` bounds. Every
-// caller is inside `lex()` above, where the trait impl's full bound set already
-// holds, so this is never more restrictive in practice than the trait impl.
+// Its return type names the concrete `SyntacticToken`/`Error` types. Every caller
+// is inside `lex()` above, where the trait impl's full bound set already holds,
+// so this is never more restrictive in practice than the trait impl.
 //
-// `NumberToken` is a crate-internal delegation carrier (`pub(crate)`); it
+// `NumberLexerToken` is a crate-internal delegation adapter (`pub(crate)`); it
 // appears here only as a bound on a private method, never as nameable API, so
 // silence `private_bounds` rather than widen the type's visibility.
 #[allow(private_bounds)]
 impl<'inp, S> SyntacticLexer<'inp, S>
 where
-  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
       State = RecursionLimiter,
-      Source = LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>,
-      Token = NumberToken<S::Slice<'inp>>,
+      Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
+      Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,
     >,
-  NumberToken<S::Slice<'inp>>:
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
-  S: Source<usize> + AsRef<LogosSourceOf<'inp, NumberToken<S::Slice<'inp>>>> + ?Sized,
+  S: Source<usize>
+    + AsRef<LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>>
+    + ?Sized,
 {
   /// Cold, out-of-line constructor for the recursion-limit error a token
   /// emission yields when the depth is over the limit (the `finish!` gate's
@@ -876,12 +875,12 @@ where
   ///
   /// The number, `-`, and `.`-led-float arms route here. GraphQLx has no
   /// valid-number fast path, so a *valid* literal is produced by the delegated
-  /// grammar too (mapped through [`SyntacticToken::from`]); a bare `-` before a
+  /// grammar too (mapped with its original source slice); a bare `-` before a
   /// non-digit returns `NumberToken::Minus` -> `SyntacticToken::Minus`; every
   /// anomaly (leading `0x`/`0o`/`0b` with no digits, an illegal suffix, an empty
   /// fraction/exponent, a `.`-led float missing its integer part, ...) returns
-  /// the exact error. `NumberToken`'s `Error` is this lexer's error type, so the
-  /// [`Delegated::Error`] arm needs no conversion.
+  /// the exact error. `NumberLexerToken`'s `Error` is this lexer's error type,
+  /// so the [`Delegated::Error`] arm needs no conversion.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
   // shape; clippy can't see through the associated-type projections, so silence
   // its type-complexity lint here.
@@ -896,16 +895,18 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    match crate::simd::delegate_to_logos::<NumberToken<S::Slice<'inp>>>(
+    match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
       self.src.as_ref(),
       self.cursor,
       self.state,
     )? {
       Delegated::Token { token, end, state } => {
+        let number = token.into_number_token();
+        let slice = self.src.slice(&token_start..&end)?;
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
         self.state = state;
-        Some(Ok(SyntacticToken::from(token)))
+        Some(Ok(number.into_syntactic_token(slice)))
       }
       Delegated::Error { error, span } => {
         self.cursor = span.end();
@@ -957,9 +958,7 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    let (errors, end) = self
-      .src
-      .delegate_string_error(token_start, block);
+    let (errors, end) = self.src.delegate_string_error(token_start, block);
     let span = SimpleSpan::new(token_start, end);
     self.cursor = end;
     self.last_span = span;

@@ -460,7 +460,7 @@ const _: () = {
 
 #[cfg(feature = "hipstr")]
 const _: () = {
-  use hipstr::{HipStr, HipByt};
+  use hipstr::{HipByt, HipStr};
 
   impl DelegateStringError for HipByt<'_> {
     type Char = u8;
@@ -475,13 +475,16 @@ const _: () = {
     type Char = char;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<char>, usize) {
+    fn delegate_string_error(
+      &self,
+      token_start: usize,
+      block: bool,
+    ) -> (StringErrors<char>, usize) {
       let s: &str = self.as_ref();
       s.delegate_string_error(token_start, block)
     }
   }
 };
-
 
 #[cfg(feature = "bstr")]
 const _: () = {

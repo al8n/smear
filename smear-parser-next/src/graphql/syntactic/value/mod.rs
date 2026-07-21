@@ -62,12 +62,15 @@
 //! (`rbracket`/`rbrace`) is used instead until tokora emits the `Unclosed`
 //! diagnostic through the emitter.
 
-use smear_lexer::{LitBlockStr, LitInlineStr, graphql::syntactic::{SyntacticLexer, SyntacticToken}};
+use smear_lexer::{
+  LitBlockStr, LitInlineStr,
+  graphql::syntactic::{SyntacticLexer, SyntacticToken},
+};
 use smear_scaffold::ast as scaffold;
 use std::vec::Vec;
 use tokora::{
-  Accumulator, Branch, InputRef, Lexer, ParseChoice, ParseInput, SimpleSpan, Token, TryParseInput,
-  Source,
+  Accumulator, Branch, InputRef, Lexer, ParseChoice, ParseInput, SimpleSpan, Source, Token,
+  TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::Action,
@@ -184,7 +187,7 @@ where
 //     ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
 //       + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 //   {
-//     todo!() 
+//     todo!()
 //   }
 // }
 
