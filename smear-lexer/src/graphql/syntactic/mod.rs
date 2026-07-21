@@ -3,7 +3,9 @@ use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
+  punct::*,
   state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  token::*,
   utils::{CharLen, cmp::Equivalent},
 };
 
@@ -225,15 +227,9 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
   }
 }
 
-// `SyntacticToken`'s public token/keyword/punctuator surface — the SIMD lexer's
-// `Token` associated type and the parser's keyword/punctuator queries — NOT
-// Logos-derive machinery. `S: Slice<'a>` supplies the `Char` for the frozen
-// `Error` type, and `S::Char`/`Clone` reproduce each flavor's bounds exactly
-// (str/HipStr -> char, &[u8]/Bytes/HipByt -> u8).
-
 impl<'a, S> tokora::Token<'a> for SyntacticToken<S>
 where
-  S: tokora::Slice<'a> + Clone + 'a,
+  S: Slice<'a> + Clone + 'a,
 {
   type Kind = SyntacticTokenKind;
   type Error = error::LexerErrors<S::Char, RecursionLimitExceeded>;
@@ -249,9 +245,9 @@ where
   }
 }
 
-impl<'a, S> tokora::token::KeywordToken<'a> for SyntacticToken<S>
+impl<'a, S> KeywordToken<'a> for SyntacticToken<S>
 where
-  S: tokora::Slice<'a> + Clone + 'a,
+  S: Slice<'a> + Clone + 'a,
   str: Equivalent<S>,
 {
   fn keyword(&self) -> Option<&'static str> {
@@ -259,9 +255,9 @@ where
   }
 }
 
-impl<'a, S> tokora::token::IdentifierToken<'a> for SyntacticToken<S>
+impl<'a, S> IdentifierToken<'a> for SyntacticToken<S>
 where
-  S: tokora::Slice<'a> + Clone + 'a,
+  S: Slice<'a> + Clone + 'a,
 {
   #[inline(always)]
   fn is_identifier(&self) -> bool {
@@ -269,9 +265,10 @@ where
   }
 }
 
-impl<'a, S> tokora::token::LitToken<'a> for SyntacticToken<S>
+impl<'a, S> LitToken<'a> for SyntacticToken<S>
 where
-  S: tokora::Slice<'a> + Clone + 'a,
+  S: Slice<'a> + Clone + 'a,
+  str: Equivalent<S>,
 {
   #[inline(always)]
   fn is_decimal_literal(&self) -> bool {
@@ -297,11 +294,26 @@ where
   fn is_multiline_string_literal(&self) -> bool {
     matches!(self, Self::LitBlockStr(_))
   }
+
+  #[inline(always)]
+  fn is_true_literal(&self) -> bool {
+    matches!(self, Self::Identifier(s) if "true".equivalent(s))
+  }
+
+  #[inline(always)]
+  fn is_false_literal(&self) -> bool {
+    matches!(self, Self::Identifier(s) if "false".equivalent(s))
+  }
+
+  #[inline(always)]
+  fn is_null_literal(&self) -> bool {
+    matches!(self, Self::Identifier(s) if "null".equivalent(s))
+  }
 }
 
-impl<'a, S> tokora::token::PunctuatorToken<'a> for SyntacticToken<S>
+impl<'a, S> PunctuatorToken<'a> for SyntacticToken<S>
 where
-  S: tokora::Slice<'a> + Clone + 'a,
+  S: Slice<'a> + Clone + 'a,
 {
   #[inline(always)]
   fn pipe() -> Option<Self::Kind> {
@@ -374,96 +386,52 @@ where
   }
 }
 
-impl From<tokora::punct::Pipe<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Pipe<(), (), ()>) -> Self {
-    Self::Pipe
+impl<S> SyntacticToken<S> {
+  /// Returns `true` if the token is a GraphQL enum value, which is defined as an identifier that is not a reserved keyword.
+  pub fn is_enum_value_literal(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    match self {
+      Self::Identifier(s) => {
+        !("true".equivalent(s) || "false".equivalent(s) || "null".equivalent(s))
+      }
+      _ => false,
+    }
   }
 }
 
-impl From<tokora::punct::Ampersand<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Ampersand<(), (), ()>) -> Self {
-    Self::Ampersand
-  }
+macro_rules! into_token_kind {
+  ($($ty:ident::$kind:ident),* $(,)?) => {
+    $(
+      impl<S, C, L> From<$ty<S, C, L>> for SyntacticTokenKind
+      where
+        L: ?Sized,
+      {
+        #[inline(always)]
+        fn from(_: $ty<S, C, L>) -> Self {
+          Self::$kind
+        }
+      }
+    )*
+  };
 }
 
-impl From<tokora::punct::At<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::At<(), (), ()>) -> Self {
-    Self::At
-  }
-}
-
-impl From<tokora::punct::Colon<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Colon<(), (), ()>) -> Self {
-    Self::Colon
-  }
-}
-
-impl From<tokora::punct::OpenParen<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::OpenParen<(), (), ()>) -> Self {
-    Self::LParen
-  }
-}
-
-impl From<tokora::punct::CloseParen<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::CloseParen<(), (), ()>) -> Self {
-    Self::RParen
-  }
-}
-
-impl From<tokora::punct::OpenBrace<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::OpenBrace<(), (), ()>) -> Self {
-    Self::LBrace
-  }
-}
-
-impl From<tokora::punct::CloseBrace<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::CloseBrace<(), (), ()>) -> Self {
-    Self::RBrace
-  }
-}
-
-impl From<tokora::punct::OpenBracket<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::OpenBracket<(), (), ()>) -> Self {
-    Self::LBracket
-  }
-}
-
-impl From<tokora::punct::CloseBracket<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::CloseBracket<(), (), ()>) -> Self {
-    Self::RBracket
-  }
-}
-
-impl From<tokora::punct::Equal<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Equal<(), (), ()>) -> Self {
-    Self::Equal
-  }
-}
-
-impl From<tokora::punct::Exclamation<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Exclamation<(), (), ()>) -> Self {
-    Self::Bang
-  }
-}
-
-impl From<tokora::punct::Dollar<(), (), ()>> for SyntacticTokenKind {
-  #[inline]
-  fn from(_: tokora::punct::Dollar<(), (), ()>) -> Self {
-    Self::Dollar
-  }
-}
+into_token_kind!(
+  Pipe::Pipe,
+  Ampersand::Ampersand,
+  At::At,
+  Colon::Colon,
+  OpenParen::LParen,
+  CloseParen::RParen,
+  OpenBrace::LBrace,
+  CloseBrace::RBrace,
+  OpenBracket::LBracket,
+  CloseBracket::RBracket,
+  Equal::Equal,
+  Exclamation::Bang,
+  Dollar::Dollar
+);
 
 /// The kind of a [`SyntacticToken`], without the associated source data.
 ///

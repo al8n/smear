@@ -30,12 +30,8 @@
 //! against a spelling (`slice.equivalent("true")`) without an `AsRef<[u8]>`
 //! detour that pins the source representation.
 
-mod literal;
-mod shape;
 mod token;
 
-pub use literal::*;
-pub use shape::*;
 pub use token::*;
 pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf, utils::cmp::Equivalent};
 

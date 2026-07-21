@@ -28,7 +28,7 @@ use smear_scaffold::hints::{
 use tokora::{
   SimpleSpan as Span,
   error::{
-    UnexpectedEot,
+    Unclosed as TokoraUnclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
   },
@@ -629,6 +629,20 @@ impl<S, Lang: ?Sized> From<UnexpectedEot<usize, Lang>> for GraphqlErrors<S> {
   fn from(err: UnexpectedEot<usize, Lang>) -> Self {
     let off = err.offset();
     GraphqlError::unexpected_end_of_input(Span::new(off, off)).into()
+  }
+}
+
+impl<S> From<TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>> for GraphqlErrors<S> {
+  #[inline]
+  fn from(err: TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>) -> Self {
+    GraphqlError::unclosed_list(err.span()).into()
+  }
+}
+
+impl<S> From<TokoraUnclosed<tokora::punct::Brace, Span, GraphQL>> for GraphqlErrors<S> {
+  #[inline]
+  fn from(err: TokoraUnclosed<tokora::punct::Brace, Span, GraphQL>) -> Self {
+    GraphqlError::unclosed_object(err.span()).into()
   }
 }
 
