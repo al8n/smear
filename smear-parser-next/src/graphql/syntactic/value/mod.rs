@@ -21,7 +21,7 @@ use tokora::{
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket},
-  span::AsSpan,
+  span::{AsSpan, Spanned},
   token::LitToken,
   try_parse_input::ParseAttempt,
   utils::{
@@ -656,13 +656,13 @@ value_parser!(
   scaffold::List<InputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    let cursor = *inp.cursor();
-    let values: Vec<InputValue<GraphqlSlice<'inp, Src>>> = value::<Src, Ctx>
-      .repeated_while::<_, U1>(decide_value_head::<Src, Ctx>)
+    value
+      .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited::<Bracket>()
-      .collect()
-      .parse_input(inp)?;
-    Ok(scaffold::List::new(inp.span_since(&cursor), values))
+      .collect_with(Vec::new())
+      .spanned()
+      .parse_input(inp)
+      .map(|Spanned { span, data: values }| scaffold::List::new(span, values))
   }
 );
 
@@ -672,13 +672,13 @@ value_parser!(
   scaffold::List<ConstInputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    let cursor = *inp.cursor();
-    let values: Vec<ConstInputValue<GraphqlSlice<'inp, Src>>> = const_value::<Src, Ctx>
-      .repeated_while::<_, U1>(decide_value_head::<Src, Ctx>)
+    const_value
+      .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited::<Bracket>()
-      .collect()
-      .parse_input(inp)?;
-    Ok(scaffold::List::new(inp.span_since(&cursor), values))
+      .collect_with(Vec::new())
+      .spanned()
+      .parse_input(inp)
+      .map(|Spanned { span, data: values }| scaffold::List::new(span, values))
   }
 );
 
@@ -718,13 +718,13 @@ value_parser!(
   scaffold::Object<Name<GraphqlSlice<'inp, Src>>, InputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    let cursor = *inp.cursor();
-    let fields: Vec<ObjectField<GraphqlSlice<'inp, Src>>> = object_field::<Src, Ctx>
-      .repeated_while::<_, U3>(decide_object_field_head::<Src, Ctx>)
+    object_field
+      .repeated_while::<_, U3>(decide_object_field_head::<_, Ctx>)
       .delimited::<Brace>()
-      .collect()
-      .parse_input(inp)?;
-    Ok(scaffold::Object::new(inp.span_since(&cursor), fields))
+      .collect_with(Vec::new())
+      .spanned()
+      .parse_input(inp)
+      .map(|Spanned { span, data: fields}| scaffold::Object::new(span, fields))
   }
 );
 
@@ -734,14 +734,13 @@ value_parser!(
   scaffold::Object<Name<GraphqlSlice<'inp, Src>>, ConstInputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    let cursor = *inp.cursor();
-    let fields: Vec<ConstObjectField<GraphqlSlice<'inp, Src>>> =
-      const_object_field::<Src, Ctx>
-        .repeated_while::<_, U3>(decide_object_field_head::<Src, Ctx>)
-        .delimited::<Brace>()
-        .collect()
-        .parse_input(inp)?;
-    Ok(scaffold::Object::new(inp.span_since(&cursor), fields))
+    const_object_field
+      .repeated_while::<_, U3>(decide_object_field_head::<_, Ctx>)
+      .delimited::<Brace>()
+      .collect_with(Vec::new())
+      .spanned()
+      .parse_input(inp)
+      .map(|Spanned { span, data: fields}| scaffold::Object::new(span, fields))
   }
 );
 
