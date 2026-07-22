@@ -168,7 +168,7 @@ directive_parser!(
         } else {
           Some(arguments)
         };
-        Directive::new(span, name, arguments)
+        ConstDirective::new(span, name, arguments)
       })
       .parse_input(inp)
   }
@@ -227,7 +227,7 @@ directive_parser!(
     })
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data }| Directives::new(span, data))
+      .map(|Spanned { span, data }| ConstDirectives::new(span, data))
   }
 );
 
@@ -272,7 +272,7 @@ directive_parser!(
       .try_parse_input(inp)
       .map(|attempt| match attempt {
         ParseAttempt::Accept(directives) => directives,
-        ParseAttempt::Decline => Directives::new(SimpleSpan::new(start, start), Vec::new()),
+        ParseAttempt::Decline => ConstDirectives::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
 );
@@ -333,7 +333,7 @@ impl_directive_graphql!(
   /// Parses one committed constant GraphQL directive.
   ///
   /// See [`const_directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-  Directive<S, crate::graphql::ast::ConstArguments<S>>,
+  ConstDirective<S>,
   const_directive
 );
 
@@ -351,7 +351,7 @@ impl_directive_graphql!(
   /// without consuming when `@` is absent.
   ///
   /// See [`const_directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
-  Directives<S, ConstDirective<S>>,
+  ConstDirectives<S>,
   const_directives
 );
 

@@ -19,6 +19,16 @@ pub use smear_scaffold as scaffold;
 
 pub mod combinator;
 
+/// Argument-node carriers shared by the dialect ASTs, copied type-only from the
+/// frozen crate.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod argument;
+
+/// Directive-node carriers shared by the dialect ASTs, copied type-only from the
+/// frozen crate.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod directive;
+
 /// Value-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]

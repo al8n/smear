@@ -181,7 +181,7 @@ argument_parser!(
         ConstInputValue::graphql(inp)
       })
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
+      .map(|Spanned { span, data: (name, value) }| ConstArgument::new(span, name, value))
       .parse_input(inp)
   }
 );
@@ -360,7 +360,7 @@ impl_argument_graphql!(
   /// Parses one committed constant GraphQL argument.
   ///
   /// See [`const_argument`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
-  Argument<S, ConstInputValue<S>>,
+  ConstArgument<S>,
   const_argument,
   []
 );
@@ -383,7 +383,7 @@ impl_argument_graphql!(
   /// without consuming when `(` is absent.
   ///
   /// See [`const_arguments`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
-  ArgumentList<Argument<S, ConstInputValue<S>>>,
+  ArgumentList<ConstArgument<S>>,
   const_arguments,
   [
     GraphqlError<'inp, Src, Ctx>:
