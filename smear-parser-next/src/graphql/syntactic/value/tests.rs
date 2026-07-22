@@ -160,11 +160,11 @@ fn int_value_graphql_does_not_require_equivalent() {
   // witness type-checks only while the direct integer API stays independent of
   // identifier spelling classification.
   #[allow(dead_code)]
-  fn parse_numeric_slice<'inp, Src: ?Sized, NumericSlice, Ctx>(
+  fn parse_numeric_slice<'inp, Src, NumericSlice, Ctx>(
     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   ) -> Result<IntValue<NumericSlice>, GraphqlError<'inp, Src, Ctx>>
   where
-    Src: Source<usize, Slice<'inp> = NumericSlice>,
+    Src: Source<usize, Slice<'inp> = NumericSlice> + ?Sized,
     NumericSlice: tokora::Slice<'inp> + Clone + 'inp,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,

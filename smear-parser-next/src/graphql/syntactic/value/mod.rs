@@ -16,12 +16,13 @@
 use smear_scaffold::ast as scaffold;
 use std::vec::Vec;
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Source, Token, TryParseInput,
+  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket},
-  span::{AsSpan, Spanned},
+  span::Spanned,
   token::LitToken,
   try_parse_input::ParseAttempt,
   utils::{
@@ -99,7 +100,7 @@ macro_rules! value_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -161,7 +162,7 @@ macro_rules! value_try_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -213,7 +214,7 @@ macro_rules! value_eot_parser {
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
     where
       Src: Source<usize> + ?Sized,
-      GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+      GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -415,12 +416,9 @@ value_try_parser!(
   {
     inp.try_expect(|t| t.data().is_lit_float()).map(|opt| {
       opt
-        .map(|spanned| {
-          let (span, token) = spanned.into_components();
-          match token {
-            GraphqlToken::<'inp, Src>::LitFloat(value) => FloatValue::new(span, value),
-            other => unreachable!("unexpected token in try_float_value: {:?}", other),
-          }
+        .map(|Spanned { span, data: token }| match token {
+          GraphqlToken::<'inp, Src>::LitFloat(value) => FloatValue::new(span, value),
+          other => unreachable!("unexpected token in try_float_value: {:?}", other),
         })
         .into()
     })
@@ -442,15 +440,10 @@ value_try_parser!(
       })
       .map(|opt| {
         opt
-          .map(|spanned| {
-            let (span, token) = spanned.into_components();
-            match token {
-              GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
-                StringValue::new(span, value.into())
-              }
-              GraphqlToken::<'inp, Src>::LitBlockStr(value) => StringValue::new(span, value.into()),
-              other => unreachable!("unexpected token in try_string_value: {:?}", other),
-            }
+          .map(|Spanned { span, data: token }| match token {
+            GraphqlToken::<'inp, Src>::LitInlineStr(value) => StringValue::new(span, value.into()),
+            GraphqlToken::<'inp, Src>::LitBlockStr(value) => StringValue::new(span, value.into()),
+            other => unreachable!("unexpected token in try_string_value: {:?}", other),
           })
           .into()
       })
@@ -476,10 +469,7 @@ value_eot_parser!(
       })
       .map(|opt| {
         opt
-          .map(|(val, spanned)| {
-            let (span, _) = spanned.into_components();
-            BooleanValue::new(span, val)
-          })
+          .map(|(val, Spanned { span, data: _ })| BooleanValue::new(span, val))
           .into()
       })
   }
@@ -495,12 +485,9 @@ value_eot_parser!(
       .try_expect(|t| t.into_data().is_null_literal())
       .map(|opt| {
         opt
-          .map(|spanned| {
-            let (span, token) = spanned.into_components();
-            match token {
-              GraphqlToken::<'inp, Src>::Identifier(s) => NullValue::new(span, s),
-              other => unreachable!("unexpected token in try_null_value: {:?}", other),
-            }
+          .map(|Spanned { span, data: token }| match token {
+            GraphqlToken::<'inp, Src>::Identifier(s) => NullValue::new(span, s),
+            other => unreachable!("unexpected token in try_null_value: {:?}", other),
           })
           .into()
       })
@@ -517,12 +504,9 @@ value_eot_parser!(
       .try_expect(|t| t.into_data().is_enum_value_literal())
       .map(|opt| {
         opt
-          .map(|spanned| {
-            let (span, token) = spanned.into_components();
-            match token {
-              GraphqlToken::<'inp, Src>::Identifier(s) => EnumValue::new(span, s),
-              other => unreachable!("unexpected token in try_enum_value: {:?}", other),
-            }
+          .map(|Spanned { span, data: token }| match token {
+            GraphqlToken::<'inp, Src>::Identifier(s) => EnumValue::new(span, s),
+            other => unreachable!("unexpected token in try_enum_value: {:?}", other),
           })
           .into()
       })
@@ -555,7 +539,7 @@ value_parser!(
 );
 
 #[derive(Clone, Copy)]
-enum HeadKind {
+pub(crate) enum HeadKind {
   Int,
   Float,
   InlineStr,
@@ -573,10 +557,10 @@ enum HeadKind {
 /// begins no value. The sole source of truth for a value's FIRST set — reused by
 /// the sibling `Argument`/`ObjectField` list decisions (hence `pub(crate)`).
 #[inline]
-fn value_head_kind<'inp, Src>(t: &GraphqlToken<'inp, Src>) -> Option<HeadKind>
+pub(crate) fn value_head_kind<'inp, Src>(t: &GraphqlToken<'inp, Src>) -> Option<HeadKind>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   str: Equivalent<GraphqlSlice<'inp, Src>>,
 {
   Some(match t {
@@ -602,13 +586,13 @@ where
   })
 }
 
-fn decide_value_head<'inp, Src, Ctx>(
+pub(crate) fn decide_value_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -620,13 +604,13 @@ where
   })
 }
 
-fn decide_object_field_head<'inp, Src, Ctx>(
+pub(crate) fn decide_object_field_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U3>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   str: Equivalent<GraphqlSlice<'inp, Src>>,
@@ -688,12 +672,15 @@ value_parser!(
   ObjectField<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
-    let (name_span, name_source) = ident(inp)?.into_components();
-    let name = Name::new(name_span, name_source);
-    colon(inp)?;
-    let value = value(inp)?;
-    let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-    Ok(scaffold::ObjectField::new(span, name, value))
+    ident
+      .then_ignore(colon)
+      .then(value)
+      .spanned()
+      .map(|Spanned { span, data: (name, value) }| {
+        let (name_span, name_source) = name.into_components();
+        let name = Name::new(name_span, name_source);
+        scaffold::ObjectField::new(span, name, value)
+      }).parse_input(inp)
   }
 );
 
@@ -703,12 +690,16 @@ value_parser!(
   ConstObjectField<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
-    let (name_span, name_source) = ident(inp)?.into_components();
-    let name = Name::new(name_span, name_source);
-    colon(inp)?;
-    let value = const_value(inp)?;
-    let span = SimpleSpan::new(name.span().start(), value.as_span().end());
-    Ok(scaffold::ObjectField::new(span, name, value))
+    ident
+      .then_ignore(colon)
+      .then(const_value)
+      .spanned()
+      .map(|Spanned { span, data: (name, value) }| {
+        let (name_span, name_source) = name.into_components();
+        let name = Name::new(name_span, name_source);
+        scaffold::ObjectField::new(span, name, value)
+      })
+      .parse_input(inp)
   }
 );
 
@@ -752,10 +743,10 @@ value_parser!(
   {
     let off = *inp.offset();
     (
-      int_value::<Src, Ctx>.map(InputValue::Int),
-      float_value::<Src, Ctx>.map(InputValue::Float),
-      inline_string_value::<Src, Ctx>.map(InputValue::String),
-      block_string_value::<Src, Ctx>.map(InputValue::String),
+      int_value.map(InputValue::Int),
+      float_value.map(InputValue::Float),
+      inline_string_value.map(InputValue::String),
+      block_string_value.map(InputValue::String),
       (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
         let span = inp.next()?.expect("failed to get token").into_span();
         Ok(InputValue::Boolean(BooleanValue::new(span, true)))
@@ -777,9 +768,9 @@ value_parser!(
           _ => unreachable!(),
         }
       }),
-      variable_value::<Src, Ctx>.map(InputValue::Variable),
-      list_value::<Src, Ctx>.map(InputValue::List),
-      object_value::<Src, Ctx>.map(InputValue::Object),
+      variable_value.map(InputValue::Variable),
+      list_value.map(InputValue::List),
+      object_value.map(InputValue::Object),
     )
       .peek_then_choice::<_, U2>(|peeked, _| {
         let Some(head) = peeked.front() else {
@@ -821,10 +812,10 @@ value_parser!(
   {
     let off = *inp.offset();
     (
-      int_value::<Src, Ctx>.map(ConstInputValue::Int),
-      float_value::<Src, Ctx>.map(ConstInputValue::Float),
-      inline_string_value::<Src, Ctx>.map(ConstInputValue::String),
-      block_string_value::<Src, Ctx>.map(ConstInputValue::String),
+      int_value.map(ConstInputValue::Int),
+      float_value.map(ConstInputValue::Float),
+      inline_string_value.map(ConstInputValue::String),
+      block_string_value.map(ConstInputValue::String),
       (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
         let span = inp.next()?.expect("failed to get token").into_span();
         Ok(ConstInputValue::Boolean(BooleanValue::new(span, true)))
@@ -846,8 +837,8 @@ value_parser!(
           _ => unreachable!(),
         }
       }),
-      const_list_value::<Src, Ctx>.map(ConstInputValue::List),
-      const_object_value::<Src, Ctx>.map(ConstInputValue::Object),
+      const_list_value.map(ConstInputValue::List),
+      const_object_value.map(ConstInputValue::Object),
     )
       .peek_then_choice::<_, U2>(|peeked, _| {
         let Some(head) = peeked.front() else {
@@ -929,10 +920,7 @@ value_parser!(
   Option<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    Ok(match try_default_value(inp)? {
-      ParseAttempt::Accept(value) => Some(value),
-      ParseAttempt::Decline => None,
-    })
+    try_default_value(inp).map(Into::into)
   }
 );
 
@@ -976,7 +964,7 @@ macro_rules! graphql_slice_api {
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: tokora::Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp,
         GraphqlLexer<'inp, Src>: Lexer<
             'inp,
             Source = Src,
@@ -1015,7 +1003,7 @@ macro_rules! graphql_slice_api {
       ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
-        $slice: tokora::Slice<'inp> + Clone + 'inp,
+        $slice: Slice<'inp> + Clone + 'inp,
         GraphqlLexer<'inp, Src>: Lexer<
             'inp,
             Source = Src,
@@ -1064,7 +1052,7 @@ impl BooleanValue {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
     str: Equivalent<GraphqlSlice<'inp, Src>>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -1089,7 +1077,7 @@ impl BooleanValue {
   ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: tokora::Slice<'inp> + Clone + 'inp,
+    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
     str: Equivalent<GraphqlSlice<'inp, Src>>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
