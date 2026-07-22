@@ -6,11 +6,32 @@ use tokora::{
 };
 
 use super::{DefaultVec, Name};
+use crate::graphql::GraphQL;
 
-pub use crate::value::{
-  BlockStringValue, BooleanValue, EnumValue, FloatValue, InlineStringValue, IntValue, NullValue,
-  StringValue,
-};
+/// A GraphQL boolean literal.
+pub type BooleanValue<Span = SimpleSpan> = crate::value::BooleanValue<Span, GraphQL>;
+
+/// A GraphQL enum literal.
+pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<S, Span, GraphQL>;
+
+/// A GraphQL floating-point literal.
+pub type FloatValue<S, Span = SimpleSpan> = crate::value::FloatValue<S, Span, GraphQL>;
+
+/// A GraphQL integer literal.
+pub type IntValue<S, Span = SimpleSpan> = crate::value::IntValue<S, Span, GraphQL>;
+
+/// The GraphQL `null` literal.
+pub type NullValue<S, Span = SimpleSpan> = crate::value::NullValue<S, Span, GraphQL>;
+
+/// A GraphQL string literal.
+pub type StringValue<S, Span = SimpleSpan> = crate::value::StringValue<S, Span, GraphQL>;
+
+/// A GraphQL inline string literal.
+pub type InlineStringValue<S, Span = SimpleSpan> =
+  crate::value::InlineStringValue<S, Span, GraphQL>;
+
+/// A GraphQL block string literal.
+pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue<S, Span, GraphQL>;
 
 /// A GraphQL variable value that can appear in queries and mutations.
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;

@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
@@ -10,33 +10,34 @@ use tokora::{
 
 /// A boolean value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BooleanValue<Span = SimpleSpan> {
+pub struct BooleanValue<Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   value: bool,
+  _lang: PhantomData<Lang>,
 }
 
-impl<Span> Display for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> Display for BooleanValue<Span, Lang> {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.value())
   }
 }
 
-impl<Span> AsSpan<Span> for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> AsSpan<Span> for BooleanValue<Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Span> IntoSpan<Span> for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> IntoSpan<Span> for BooleanValue<Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Span> IntoComponents for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> IntoComponents for BooleanValue<Span, Lang> {
   type Components = (Span, bool);
 
   #[inline]
@@ -45,14 +46,14 @@ impl<Span> IntoComponents for BooleanValue<Span> {
   }
 }
 
-impl<Span> AsRef<bool> for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> AsRef<bool> for BooleanValue<Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &bool {
     &self.value
   }
 }
 
-impl<Span> core::ops::Deref for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> core::ops::Deref for BooleanValue<Span, Lang> {
   type Target = bool;
 
   #[inline]
@@ -61,11 +62,15 @@ impl<Span> core::ops::Deref for BooleanValue<Span> {
   }
 }
 
-impl<Span> BooleanValue<Span> {
+impl<Span, Lang: ?Sized> BooleanValue<Span, Lang> {
   /// Creates a new boolean value.
   #[inline]
   pub(crate) const fn new(span: Span, value: bool) -> Self {
-    Self { span, value }
+    Self {
+      span,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the boolean value.
@@ -81,7 +86,7 @@ impl<Span> BooleanValue<Span> {
   }
 }
 
-impl<Span> DisplayCompact for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> DisplayCompact for BooleanValue<Span, Lang> {
   type Options = ();
 
   #[inline]
@@ -90,7 +95,7 @@ impl<Span> DisplayCompact for BooleanValue<Span> {
   }
 }
 
-impl<Span> DisplayPretty for BooleanValue<Span> {
+impl<Span, Lang: ?Sized> DisplayPretty for BooleanValue<Span, Lang> {
   type Options = ();
 
   #[inline]

@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use tokora::{
   SimpleSpan,
@@ -12,12 +12,13 @@ use tokora::{
 
 /// A null value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NullValue<S, Span = SimpleSpan> {
+pub struct NullValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   source: S,
   span: Span,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S, Span> Display for NullValue<S, Span>
+impl<S, Span, Lang: ?Sized> Display for NullValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -27,21 +28,21 @@ where
   }
 }
 
-impl<S, Span> AsSpan<Span> for NullValue<S, Span> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for NullValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Span> IntoSpan<Span> for NullValue<S, Span> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for NullValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Span> IntoComponents for NullValue<S, Span> {
+impl<S, Span, Lang: ?Sized> IntoComponents for NullValue<S, Span, Lang> {
   type Components = (Span, S);
 
   #[inline]
@@ -50,7 +51,7 @@ impl<S, Span> IntoComponents for NullValue<S, Span> {
   }
 }
 
-impl<S, Span> core::ops::Deref for NullValue<S, Span> {
+impl<S, Span, Lang: ?Sized> core::ops::Deref for NullValue<S, Span, Lang> {
   type Target = S;
 
   #[inline]
@@ -59,13 +60,14 @@ impl<S, Span> core::ops::Deref for NullValue<S, Span> {
   }
 }
 
-impl<S, Span> NullValue<S, Span> {
+impl<S, Span, Lang: ?Sized> NullValue<S, Span, Lang> {
   /// Creates a new null value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
     Self {
       source: value,
       span,
+      _lang: PhantomData,
     }
   }
 
@@ -91,7 +93,7 @@ impl<S, Span> NullValue<S, Span> {
   }
 }
 
-impl<S, Span> DisplayCompact for NullValue<S, Span>
+impl<S, Span, Lang: ?Sized> DisplayCompact for NullValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -103,7 +105,7 @@ where
   }
 }
 
-impl<S, Span> DisplayPretty for NullValue<S, Span>
+impl<S, Span, Lang: ?Sized> DisplayPretty for NullValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
