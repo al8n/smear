@@ -380,9 +380,9 @@ value_parser!(
   [],
   {
     dollar
-      .ignore_then(
-        ident::<GraphqlLexer<'inp, Src>, Ctx, GraphQL>.peek_then::<_, U1>(
-          |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| match peeked.pop_front() {
+      .ignore_then(ident.peek_then::<_, U1>(
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
+          match peeked.pop_front() {
             Some(token) if token.token().is_identifier() => Ok(()),
             Some(token) => Err(
               UnexpectedToken::expected_one_with_found(
@@ -393,9 +393,9 @@ value_parser!(
               .into(),
             ),
             None => Ok(()),
-          },
-        ),
-      )
+          }
+        },
+      ))
       .spanned()
       .map(|Spanned { span, data: ident }| VariableValue::new(span, ident))
       .parse_input(inp)
