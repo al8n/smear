@@ -6,48 +6,70 @@
 //! oracle pins the frozen `smear-parser` `parse_argument`/`parse_arguments`
 //! verdicts for the same inputs.
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
+use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{argument, arguments, const_argument, const_arguments};
 use crate::graphql::{
+  GraphQL,
   ast::{Argument, Arguments, ConstArgument},
-  error::GraphqlErrors,
+  error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
+  syntactic::{GraphqlInput, GraphqlLexer},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
-type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;
+type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 /// The fatal context a `[u8]`-sourced parse runs under.
-type SliceCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>>;
+type SliceCtx<'inp> =
+  FatalContext<'inp, GraphqlLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>, GraphQL>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlErrors<&str>>`.
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, str>, StrCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, str, StrCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser(f).parse_str(input)
+  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
+    f,
+  )
+  .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
 fn drive_slice<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_slice(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
 fn drive_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_bytes(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
@@ -126,6 +148,31 @@ fn argument_rejects_missing_name() {
   reject_all!(argument, "");
 }
 
+#[test]
+fn argument_phase_diagnostics_are_typed() {
+  for (src, expected, found) in [
+    (": 1", Expectation::Name, Some(SyntacticTokenKind::Colon)),
+    ("x 1", Expectation::Colon, Some(SyntacticTokenKind::Int)),
+    ("x:", Expectation::InputValue, None),
+    (
+      "x: }",
+      Expectation::InputValue,
+      Some(SyntacticTokenKind::RBrace),
+    ),
+  ] {
+    let error = drive_str(|inp| argument(inp).map(|_| ()), src)
+      .expect_err("malformed argument should fail")
+      .into_iter()
+      .next()
+      .expect("malformed argument should emit an error");
+    assert!(matches!(
+      error.into_data(),
+      ErrorData::UnexpectedToken(unexpected)
+        if unexpected.expected() == &expected && unexpected.found() == found.as_ref()
+    ));
+  }
+}
+
 // ─── const_argument ──────────────────────────────────────────────────────────
 
 #[test]
@@ -192,6 +239,15 @@ fn arguments_declines_without_leading_paren() {
 #[test]
 fn arguments_rejects_unterminated() {
   reject_all!(arguments, "(x: 1");
+  let error = drive_str(|inp| arguments(inp).map(|_| ()), "(x: 1")
+    .expect_err("unterminated arguments should fail")
+    .into_iter()
+    .next()
+    .expect("unterminated arguments should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::Unclosed(Unclosed::Parentheses)
+  ));
 }
 
 #[test]
@@ -200,25 +256,22 @@ fn arguments_rejects_malformed_argument() {
 }
 
 #[test]
-fn arguments_ident_without_colon_errors_at_close_check() {
-  // The list body decides per the two-token FIRST set `Name ':'` (plan Amendment 7).
-  // A bare identifier with no following colon — `(foo)` — does not satisfy the
-  // decision, so the list stops with zero arguments and the `.delimited::<Paren>()`
-  // close-check reports the unexpected `foo` where `)` was expected: an
-  // unexpected-token error at the close-check, not an argument that then fails on a
-  // missing colon.
-  reject_all!(arguments, "(foo)");
-  let is_unexpected = |src: &str| match drive_str(|inp| arguments(inp).map(|_| ()), src) {
-    Err(errs) => errs
+fn arguments_commit_non_closing_heads_to_argument_phases() {
+  for (src, expected, found) in [
+    ("(foo)", Expectation::Colon, SyntacticTokenKind::RParen),
+    ("(x:)", Expectation::InputValue, SyntacticTokenKind::RParen),
+  ] {
+    let error = drive_str(|inp| arguments(inp).map(|_| ()), src)
+      .expect_err("malformed argument list should fail")
       .into_iter()
       .next()
-      .is_some_and(|e| e.data().is_unexpected_token()),
-    Ok(()) => false,
-  };
-  assert!(
-    is_unexpected("(foo)"),
-    "`(foo)` should be an unexpected-token error at the delimiter close-check"
-  );
+      .expect("malformed argument list should emit an error");
+    assert!(matches!(
+      error.into_data(),
+      ErrorData::UnexpectedToken(unexpected)
+        if unexpected.expected() == &expected && unexpected.found() == Some(&found)
+    ));
+  }
 }
 
 // ─── const_arguments ─────────────────────────────────────────────────────────

@@ -749,7 +749,7 @@ value_parser!(
   {
     value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
-      .delimited::<Bracket>()
+      .delimited_by_brackets()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
@@ -765,7 +765,7 @@ value_parser!(
   {
     const_value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
-      .delimited::<Bracket>()
+      .delimited_by_brackets()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
@@ -859,7 +859,7 @@ value_parser!(
   {
     object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
-      .delimited::<Brace>()
+      .delimited_by_braces()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
@@ -875,7 +875,7 @@ value_parser!(
   {
     const_object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
-      .delimited::<Brace>()
+      .delimited_by_braces()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)

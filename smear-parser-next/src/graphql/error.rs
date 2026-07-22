@@ -10,7 +10,7 @@
 //!
 //! The atoms speak tokora's generic error families ([`UnexpectedToken`],
 //! [`SeparatedError`], the container/`TooFew` families, [`UnexpectedEot`], and the
-//! lexer errors). tokora 0.3.0's `ComposableEmitter` bundle and `From*` blankets
+//! lexer errors). tokora's `ComposableEmitter` bundle and `From*` blankets
 //! shrink the old twelve-impl set to the handful of `From` conversions the atoms'
 //! bounds actually demand; each lands here so [`Fatal`](tokora::emitter::Fatal)
 //! over [`GraphqlErrors`] is a complete [`ParseCtx`](crate::combinator::ParseCtx)
@@ -94,6 +94,8 @@ pub enum Expectation {
   ConstInputValue,
   /// Input value was expected.
   InputValue,
+  /// A type reference was expected.
+  Type,
   /// Fragment name was expected.
   FragmentName,
   /// A name was expected.
@@ -192,6 +194,8 @@ impl<S> UnexpectedKeyword<S> {
 /// Represents an unclosed delimiter in GraphQL source.
 #[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Unclosed {
+  /// Unclosed parentheses (missing `)`).
+  Parentheses,
   /// An unclosed list (missing `]`).
   List,
   /// An unclosed object (missing `}`).
@@ -223,7 +227,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// A fragment name is invalid.
   #[from(skip)]
   InvalidFragmentName(S),
-  /// A list or object was not closed.
+  /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// An unexpected token was found.
   UnexpectedToken(UnexpectedToken<T, Exp>),
@@ -415,6 +419,12 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unclosed_list(span: Span) -> Self {
     Self::new(span, ErrorData::Unclosed(Unclosed::List))
+  }
+
+  /// Creates an unclosed-parentheses error.
+  #[inline]
+  pub const fn unclosed_parentheses(span: Span) -> Self {
+    Self::new(span, ErrorData::Unclosed(Unclosed::Parentheses))
   }
 
   /// Creates an unclosed object error.
@@ -646,6 +656,13 @@ impl<S> From<TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>> for GraphqlE
   #[inline]
   fn from(err: TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>) -> Self {
     GraphqlError::unclosed_list(err.span()).into()
+  }
+}
+
+impl<S> From<TokoraUnclosed<tokora::punct::Paren, Span, GraphQL>> for GraphqlErrors<S> {
+  #[inline]
+  fn from(err: TokoraUnclosed<tokora::punct::Paren, Span, GraphQL>) -> Self {
+    GraphqlError::unclosed_parentheses(err.span()).into()
   }
 }
 

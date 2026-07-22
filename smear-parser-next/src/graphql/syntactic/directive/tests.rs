@@ -6,48 +6,70 @@
 //! table-driven oracle pins the frozen `smear-parser`
 //! `parse_directive`/`parse_directives` verdicts for the same inputs.
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
+use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
 
 use super::{const_directive, const_directives, directive, directives};
 use crate::graphql::{
+  GraphQL,
   ast::{ConstDirective, Directive, Directives},
-  error::GraphqlErrors,
+  error::{ErrorData, Expectation, GraphqlErrors},
+  syntactic::{GraphqlInput, GraphqlLexer},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
-type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;
+type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 /// The fatal context a `[u8]`-sourced parse runs under.
-type SliceCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>>;
+type SliceCtx<'inp> =
+  FatalContext<'inp, GraphqlLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>, GraphQL>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlErrors<&str>>`.
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, str>, StrCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, str, StrCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser(f).parse_str(input)
+  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
+    f,
+  )
+  .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
 fn drive_slice<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_slice(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
 fn drive_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_bytes(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
@@ -112,6 +134,50 @@ fn directive_rejects_missing_at() {
 fn directive_rejects_missing_name() {
   reject_all!(directive, "@");
   reject_all!(directive, "@(x: 1)");
+}
+
+#[test]
+fn directive_phase_diagnostics_are_typed_and_leave_wrong_tokens() {
+  for (src, expected, found) in [
+    (
+      "deprecated",
+      Expectation::At,
+      SyntacticTokenKind::Identifier,
+    ),
+    ("@(", Expectation::Name, SyntacticTokenKind::LParen),
+  ] {
+    let (diagnostic_matches, leftover_kind) = drive_str(
+      |inp| {
+        let error = directive(inp)
+          .expect_err("malformed directive should fail")
+          .into_iter()
+          .next()
+          .expect("malformed directive should emit an error");
+        let diagnostic_matches = matches!(
+          error.into_data(),
+          ErrorData::UnexpectedToken(unexpected)
+            if unexpected.expected() == &expected && unexpected.found() == Some(&found)
+        );
+        let leftover_kind = inp.next()?.map(|token| token.data().kind());
+        Ok::<_, GraphqlErrors<&str>>((diagnostic_matches, leftover_kind))
+      },
+      src,
+    )
+    .expect("the rejected token should remain readable");
+    assert!(diagnostic_matches);
+    assert_eq!(leftover_kind, Some(found));
+  }
+
+  let error = drive_str(|inp| directive(inp).map(|_| ()), "@")
+    .expect_err("a directive name is required")
+    .into_iter()
+    .next()
+    .expect("missing directive name should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::Name && unexpected.found().is_none()
+  ));
 }
 
 #[test]
@@ -180,6 +246,16 @@ fn directives_rejects_malformed_directive_mid_run() {
   // The first directive commits the `@`; a malformed follow-on directive is an
   // error, not a decline back to a shorter accepted run.
   reject_all!(directives, "@a @");
+  let error = drive_str(|inp| directives(inp).map(|_| ()), "@a @")
+    .expect_err("a later directive head commits")
+    .into_iter()
+    .next()
+    .expect("the malformed directive should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::Name && unexpected.found().is_none()
+  ));
 }
 
 // ─── const_directives ────────────────────────────────────────────────────────
