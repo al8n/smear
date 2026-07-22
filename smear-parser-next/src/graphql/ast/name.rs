@@ -1,4 +1,6 @@
-use tokora::SimpleSpan;
+use tokora::{SimpleSpan, types::Ident};
+
+use crate::graphql::GraphQL;
 
 /// A GraphQL name identifier.
 ///
@@ -13,4 +15,4 @@ use tokora::SimpleSpan;
 /// ```
 ///
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
-pub type Name<V, S = SimpleSpan> = crate::ident::Ident<V, S>;
+pub type Name<V, S = SimpleSpan> = Ident<V, S, GraphQL>;

@@ -766,33 +766,50 @@ fn enum_value_committed_excludes_reserved() {
   reject_all!(EnumValue::graphql, "null");
 }
 
-// ─── window regressions (Amendment 7) ────────────────────────────────────────
+// ─── variable commitment regressions ─────────────────────────────────────────
 
 #[test]
-fn variable_dollar_without_name_declines_and_leaves() {
-  // `try_variable_value`'s head is `$`+name (U2): a lone `$` declines and leaves the
-  // cursor at the `$` (position law), never committing to a missing-name error.
-  let (declined, leftover_is_error) = drive_str(
+fn variable_dollar_commits_and_reports_missing_name() {
+  // The try parser's U1 head is `$`: once it sees that token, a missing name is a
+  // committed variable error rather than a decline.
+  let (is_eot, at_eot) = drive_str(
     |inp| {
-      let attempt = VariableValue::try_graphql(inp)?;
-      let after = InputValue::graphql(inp).is_err();
-      Ok::<_, GraphqlErrors<&str>>((attempt.is_decline(), after))
+      let is_eot = match VariableValue::try_graphql(inp) {
+        Err(errs) => errs
+          .into_iter()
+          .next()
+          .is_some_and(|error| error.data().is_end_of_input()),
+        Ok(_) => false,
+      };
+      let at_eot = inp.next()?.is_none();
+      Ok::<_, GraphqlErrors<&str>>((is_eot, at_eot))
     },
     "$",
   )
   .unwrap();
-  assert!(declined);
-  assert!(leftover_is_error);
-  // The committed value dispatcher selects the variable arm on `$`, so a lone `$`
-  // reaches that arm's missing-name end-of-input error.
-  let is_eot = match drive_str(|inp| InputValue::graphql(inp).map(|_| ()), "$") {
-    Err(errs) => errs
-      .into_iter()
-      .next()
-      .is_some_and(|e| e.data().is_end_of_input()),
-    Ok(()) => false,
-  };
   assert!(is_eot);
+  assert!(at_eot);
+}
+
+#[test]
+fn variable_wrong_name_token_is_left_for_its_parent() {
+  let (errored, colon_remains) = drive_str(
+    |inp| {
+      let errored = VariableValue::try_graphql(inp).is_err();
+      let colon_remains = matches!(
+        inp
+          .next()?
+          .expect("the wrong name token should remain")
+          .into_data(),
+        GraphqlToken::<'_, str>::Colon
+      );
+      Ok::<_, GraphqlErrors<&str>>((errored, colon_remains))
+    },
+    "$:name",
+  )
+  .unwrap();
+  assert!(errored);
+  assert!(colon_remains);
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────

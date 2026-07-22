@@ -9,9 +9,9 @@
 //!
 //! Every committed parser reports an unexpected token or end of input after it has
 //! committed. Where a `try_` counterpart is available, it declines without
-//! consuming when its head does not match. Multi-token heads (`$ Name`, `Name :
-//! Value`, and `= ConstValue`) are decided with a non-consuming lookahead window,
-//! preserving the position law.
+//! consuming when its head does not match. The variable parser commits on `$` and
+//! validates its name with a single-token lookahead; the remaining multi-token heads
+//! (`Name : Value` and `= ConstValue`) likewise preserve the position law.
 
 use smear_scaffold::ast as scaffold;
 use std::vec::Vec;
@@ -25,11 +25,10 @@ use tokora::{
   span::Spanned,
   token::LitToken,
   try_parse_input::ParseAttempt,
-  utils::{
-    IntoComponents,
-    typenum::{U1, U2, U3},
-  },
+  utils::typenum::{U1, U2, U3},
 };
+
+use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
 use crate::{
@@ -380,11 +379,26 @@ value_parser!(
   VariableValue<GraphqlSlice<'inp, Src>>,
   [],
   {
-    let dollar = dollar(inp)?;
-    let (name_span, name_source) = ident(inp)?.into_components();
-    let name = Name::new(name_span, name_source);
-    let span = SimpleSpan::new(dollar.span().start(), name.span().end());
-    Ok(VariableValue::new(span, name))
+    dollar
+      .ignore_then(
+        ident::<GraphqlLexer<'inp, Src>, Ctx, GraphQL>.peek_then::<_, U1>(
+          |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| match peeked.pop_front() {
+            Some(token) if token.token().is_identifier() => Ok(()),
+            Some(token) => Err(
+              UnexpectedToken::expected_one_with_found(
+                *token.span(),
+                token.token().clone(),
+                SyntacticTokenKind::Identifier,
+              )
+              .into(),
+            ),
+            None => Ok(()),
+          },
+        ),
+      )
+      .spanned()
+      .map(|Spanned { span, data: ident }| VariableValue::new(span, ident))
+      .parse_input(inp)
   }
 );
 
@@ -520,18 +534,15 @@ value_parser!(
   [],
   {
     (variable_value::<Src, Ctx>,)
-      .peek_then_try_choice::<_, U2>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U2>, _| {
+      .peek_then_try_choice::<_, U1>(
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
           let Some(dollar) = peeked.pop_front() else {
             return Ok(None);
           };
           if !dollar.token().is_dollar() {
             return Ok(None);
           }
-          Ok(match peeked.pop_front() {
-            Some(name) if name.token().is_identifier() => Some(Branch::B0),
-            _ => None,
-          })
+          Ok(Some(Branch::B0))
         },
       )
       .try_parse_input(inp)
@@ -676,11 +687,8 @@ value_parser!(
       .then_ignore(colon)
       .then(value)
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| {
-        let (name_span, name_source) = name.into_components();
-        let name = Name::new(name_span, name_source);
-        scaffold::ObjectField::new(span, name, value)
-      }).parse_input(inp)
+      .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
+      .parse_input(inp)
   }
 );
 
@@ -694,11 +702,7 @@ value_parser!(
       .then_ignore(colon)
       .then(const_value)
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| {
-        let (name_span, name_source) = name.into_components();
-        let name = Name::new(name_span, name_source);
-        scaffold::ObjectField::new(span, name, value)
-      })
+      .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
       .parse_input(inp)
   }
 );
