@@ -36,6 +36,10 @@ pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
 /// Constant object field in GraphQL (no variables).
 pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
 
+/// Default value for input fields and arguments, using constant expressions
+/// (`= ConstValue`). Copied type-only from the frozen `graphql/ast/default.rs`.
+pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
+
 /// GraphQL input value (executable context).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]

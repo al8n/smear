@@ -2,12 +2,12 @@ use tokora::Lexer as _;
 
 use crate::graphqlx::{
   LitFloat, LitInt,
-  syntactic::{SimdSyntacticLexer, SyntacticToken},
+  syntactic::{SyntacticLexer, SyntacticToken},
 };
 
 /// Drive a `<str>`-sourced lexer to completion, unwrapping every result.
 fn lex_all(src: &str) -> Vec<SyntacticToken<&str>> {
-  let mut lexer = SimdSyntacticLexer::<str>::new(src);
+  let mut lexer = SyntacticLexer::<str>::new(src);
   let mut out = Vec::new();
   while let Some(tok) = lexer.lex() {
     out.push(tok.unwrap());
@@ -151,14 +151,14 @@ fn dot_forms_delegate_for_the_exact_error() {
   // `..` and a lone `.` are unterminated-spread errors; `.5` is a
   // missing-integer-part float. All are delegated, so the fast path never
   // mis-reports one as another.
-  let mut lexer = SimdSyntacticLexer::<str>::new("..5");
+  let mut lexer = SyntacticLexer::<str>::new("..5");
   let first = lexer.lex().unwrap();
   assert!(first.is_err());
   assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
   let second = lexer.lex().unwrap();
   assert_eq!(second, Ok(SyntacticToken::LitInt(LitInt::Decimal("5"))));
 
-  let mut lexer = SimdSyntacticLexer::<str>::new(".5");
+  let mut lexer = SyntacticLexer::<str>::new(".5");
   assert!(lexer.lex().unwrap().is_err());
   assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
 }
@@ -187,7 +187,7 @@ fn block_string_delegates() {
 fn byte_source_matches_str_shapes() {
   // The `<[u8]>` source drives the same dispatch; spot-check a generic path
   // token and a path separator survive the byte flavor.
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"a::B<C>");
+  let mut lexer = SyntacticLexer::<[u8]>::new(b"a::B<C>");
   let mut kinds = Vec::new();
   while let Some(tok) = lexer.lex() {
     kinds.push(tok.unwrap().kind());

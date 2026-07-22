@@ -12,7 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokora::{Lexer, SimpleSpan};
 
-use crate::graphql::syntactic::{SimdSyntacticLexer, SyntacticToken};
+use crate::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;
@@ -33,7 +33,7 @@ fn valid_bump_grows_span_and_next_lex_matches_logos() {
   // "foo  "; the next token is `Identifier("bar")` at 6..9; the stream ends
   // (`None`) immediately after.
   let src = "foo   bar";
-  let mut simd = SimdSyntacticLexer::<str>::new(src);
+  let mut simd = SyntacticLexer::<str>::new(src);
 
   // Token 0.
   assert_eq!(
@@ -70,7 +70,7 @@ fn bump_after_error_token_matches_logos() {
   // error token's `Debug` text is exactly the constant below; after `bump(1)`
   // the span grows to 0..3 and the slice becomes "..x".
   let src = "..x";
-  let mut simd = SimdSyntacticLexer::<str>::new(src);
+  let mut simd = SyntacticLexer::<str>::new(src);
 
   let s0 = simd.lex();
   assert!(
@@ -103,7 +103,7 @@ fn bump_past_end_panics_like_logos() {
   // logos panics; the SIMD lexer must panic at the same point.
   let src = "ab";
   let simd_panicked = panics(|| {
-    let mut simd = SimdSyntacticLexer::<str>::new(src);
+    let mut simd = SyntacticLexer::<str>::new(src);
     let _ = simd.lex(); // `ab`, span 0..2
     simd.bump(&1usize); // -> 3, past end
   });
@@ -122,7 +122,7 @@ fn bump_into_multibyte_char_panics_like_logos() {
   // too.
   let src = "aé";
   let simd_panicked = panics(|| {
-    let mut simd = SimdSyntacticLexer::<str>::new(src);
+    let mut simd = SyntacticLexer::<str>::new(src);
     let _ = simd.lex();
     simd.bump(&1usize);
   });

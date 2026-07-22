@@ -1,11 +1,11 @@
 //! The GraphQL dialect assembly layer.
 //!
-//! Every GraphQL production is a free fn generic over `L: Lexer<'inp>` — bounded
-//! only by tokora capability traits and the [`ParseCtx`](crate::combinator::ParseCtx)
-//! bundle — with the `Lang` type parameter pinned to the `GraphQL` marker and
-//! `Span = SimpleSpan`. Pinning the marker is what lets the same assemblies serve
-//! the syntactic (trivia-skipped) and lossless (trivia-preserving) suites: swap the
-//! lexer and the emitter, nothing else.
+//! GraphQL syntactic productions are specialized to the concrete
+//! [`syntactic::GraphqlLexer`] and the [`GraphQL`] marker. Local AST value nodes
+//! expose associated `graphql` / `try_graphql` methods; productions whose result is
+//! owned by `smear_scaffold` remain concrete free functions. The generic
+//! [`ParseCtx`](crate::combinator::ParseCtx) bundle still lets those concrete entry
+//! points run over each source flavor supported by the lexer.
 //!
 //! This module carries the dialect substrate the productions build on:
 //!
@@ -22,27 +22,15 @@ pub mod ast;
 pub mod error;
 pub mod keyword;
 pub mod kinds;
+pub mod syntactic;
 
 /// The GraphQL dialect marker.
 ///
-/// Pins the `Lang` type parameter of every GraphQL production, atom
-/// instantiation, and error type, so one set of free-fn assemblies specializes to
-/// GraphQL over any lexer and source. It is a pure type-level tag — never
-/// constructed, only named in type position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GraphQL;
-
-/// The generic atom vocabulary, re-exported for GraphQL productions.
+/// Marks GraphQL parser inputs, contexts, and errors.
 ///
-/// A production writes `use crate::graphql::prelude::*;` to pull in the combinator
-/// atoms it assembles — the [Lego bricks](crate::combinator) that name only
-/// capability traits, the [`ParseCtx`](crate::combinator::ParseCtx) bundle, and the
-/// slice/error projections, never a concrete lexer. The dialect-specific pieces
-/// (`GraphQL`, `kinds`, `ast`, `error`) are named through `super::` at each
-/// production, keeping the marker and the kind space explicit at the use site.
-pub mod prelude {
-  pub use crate::combinator::*;
-}
+/// It is a pure type-level tag — never constructed, only named in type position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GraphQL(());
 
 #[cfg(test)]
 mod tests;

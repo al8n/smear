@@ -141,7 +141,7 @@ mod handlers;
 /// Dialect-agnostic SIMD-lexer primitives shared by the GraphQL and GraphQLx
 /// SIMD lexers.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
-pub(crate) mod simd_common;
+pub(crate) mod simd;
 
 #[doc(hidden)]
 pub mod __private {

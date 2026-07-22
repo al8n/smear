@@ -19,7 +19,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
-use crate::graphqlx::syntactic::SimdSyntacticLexer;
+use crate::graphqlx::syntactic::SyntacticLexer;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
@@ -235,7 +235,7 @@ const INPUTS: &[(&str, &str, &str)] = &[
 fn full_trait_parity_str() {
   for (src, expected, _) in INPUTS {
     assert_eq!(
-      &render_full!(SimdSyntacticLexer::<str>::new(src)),
+      &render_full!(SyntacticLexer::<str>::new(src)),
       expected,
       "mismatch for {src:?}"
     );
@@ -244,7 +244,7 @@ fn full_trait_parity_str() {
     // equals the source length and a post-EOF `bump(1)` always lands past the
     // last byte — the boundary check must panic, for every input.
     let simd_panicked = panics(|| {
-      let mut simd = SimdSyntacticLexer::<str>::new(src);
+      let mut simd = SyntacticLexer::<str>::new(src);
       while simd.lex().is_some() {}
       simd.bump(&1usize);
     });
@@ -258,13 +258,13 @@ fn full_trait_parity_bytes() {
   // byte-flavored frozen renders.
   for (src, _, expected) in INPUTS {
     assert_eq!(
-      &render_full!(SimdSyntacticLexer::<[u8]>::new(src.as_bytes())),
+      &render_full!(SyntacticLexer::<[u8]>::new(src.as_bytes())),
       expected,
       "mismatch for {src:?}"
     );
 
     let simd_panicked = panics(|| {
-      let mut simd = SimdSyntacticLexer::<[u8]>::new(src.as_bytes());
+      let mut simd = SyntacticLexer::<[u8]>::new(src.as_bytes());
       while simd.lex().is_some() {}
       simd.bump(&1usize);
     });
@@ -303,7 +303,7 @@ fn full_trait_parity_low_recursion_limit() {
 #17 lex=None span=SimpleSpan { start: 17, end: 17 } slice=""
 "#;
   assert_eq!(
-    render_full!(SimdSyntacticLexer::<str>::with_state(
+    render_full!(SyntacticLexer::<str>::with_state(
       src,
       RecursionLimiter::with_limitation(limit)
     )),
@@ -311,8 +311,7 @@ fn full_trait_parity_low_recursion_limit() {
   );
 
   let simd_panicked = panics(|| {
-    let mut simd =
-      SimdSyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
+    let mut simd = SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
     while simd.lex().is_some() {}
     simd.bump(&1usize);
   });

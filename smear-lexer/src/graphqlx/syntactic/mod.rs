@@ -1,5 +1,28 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokora::state::recursion_tracker::RecursionLimitExceeded;
+
+use tokora::{
+  Lexer, SimpleSpan, Slice, Source, Token,
+  lexer::{FromLogos, LogosLexer},
+  state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
+  utils::CharLen,
+};
+
+use crate::{
+  LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
+  error::{BadStateError, UnterminatedSpreadOperatorError},
+  graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
+  skip_block_str_from_bytes, skip_inline_str_simd,
+  string_lexer::DelegateStringError,
+};
+
+use self::number::NumberLexerToken;
+
+use crate::simd::{
+  Delegated, LogosSourceOf, NumberKind, memchr_newline, scan_identifier, scan_number,
+  skip_ws_and_comma,
+};
+
+pub use crate::simd::DEFAULT_RECURSION_LIMIT;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -10,13 +33,17 @@ use super::{
 /// sign-ambiguous numbers to; see [`number::NumberToken`].
 pub(crate) mod number;
 
-/// The syntactic GraphQLx lexer — the SIMD-accelerated lexer. Generic over the
-/// *source* type `S` (defaulting to `str`); Logos is used only as an internal
-/// slow-path delegate of the SIMD lexer.
-// ?Sized is required for the default `str` (and `[u8]`) source; the bound is
-// enforced on SimdSyntacticLexer itself.
-#[allow(type_alias_bounds)]
-pub type SyntacticLexer<'a, S: ?Sized = str> = SimdSyntacticLexer<'a, S>;
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod error_parity_tests;
+
+#[cfg(test)]
+mod bump_parity_tests;
+
+#[cfg(test)]
+mod trait_parity_tests;
 
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
@@ -348,80 +375,11 @@ impl core::fmt::Display for SyntacticTokenKind {
   }
 }
 
-// The GraphQLx syntactic lexer: a SIMD-accelerated, streaming, single-pass
-// lexer (hybrid — SIMD fast paths + internal Logos slow-path delegation).
-// This is the GraphQLx `SyntacticLexer`.
-//
-// This mirrors the GraphQL SIMD lexer (`crate::graphql::syntactic`) and shares its
-// dialect-agnostic primitives through `crate::simd_common`: trivia, identifier,
-// and valid-string scanning (inline and block, including block-string
-// normalization) are SIMD-fast-pathed. The cold paths are handled without the
-// full grammar: malformed / sign-ambiguous numbers delegate to the focused
-// `NumberToken` grammar (see `delegate_number_to_logos`), malformed strings to
-// `string_lexer` (see `delegate_string_error`), the unterminated-spread error
-// is emitted inline, and the unknown-byte error is hand-rolled inline in
-// [`lex`](tokora::Lexer::lex). Because the fast path never constructs a source-typed
-// error itself, parity with the pre-SIMD lexer holds by construction.
-//
-// GraphQLx differs from GraphQL in the *dispatch*, not the architecture:
-//
-// - Angle brackets `<`/`>` are `LAngle`/`RAngle` and nest recursion (generics
-//   like `Box<T>`), so they join `{}`/`[]`/`()` as recursion-affecting
-//   punctuation.
-// - `::` (`PathSeparator`) and `=>` (`FatArrow`) are two-byte tokens, peeled
-//   apart from the single-byte `:` (`Colon`) and `=` (`Equal`) by peeking one
-//   byte — the same longest match Logos performs.
-// - `+` is always `Plus`, but `-` is a number *sign* whenever a digit or `.`
-//   directly follows it (`-5` lexes as `Decimal("-5")`, `-.5` as a float), so
-//   `-` is delegated to `NumberToken` alongside the digits rather than
-//   fast-pathed as a bare `Minus` — `NumberToken`'s `#[token("-")] Minus` arm
-//   resolves a `-` before any other byte back to the operator by longest match.
-// - Numbers are radix-prefixed (decimal / hex / binary / octal, plus decimal
-//   and hex floats) and always delegated to `NumberToken` — never hand-rolled.
-
-use tokora::{
-  Lexer, SimpleSpan, Slice, Source, Token,
-  lexer::{FromLogos, LogosLexer},
-  state::recursion_tracker::RecursionLimiter,
-  utils::CharLen,
-};
-
-use crate::{
-  LitComplexBlockStr, LitComplexInlineStr, LitPlainStr,
-  error::{BadStateError, UnterminatedSpreadOperatorError},
-  graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
-  skip_block_str_from_bytes, skip_inline_str_simd,
-  string_lexer::DelegateStringError,
-};
-
-use self::number::NumberToken;
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod error_parity_tests;
-
-#[cfg(test)]
-mod bump_parity_tests;
-
-#[cfg(test)]
-mod trait_parity_tests;
-
-use crate::simd_common::{
-  Delegated, NumberKind, memchr_newline, scan_identifier, scan_number, skip_ws_and_comma,
-};
-
-// Re-exported so the public `graphqlx::syntactic::{AsBytes, ScanSource}` paths
-// and `DEFAULT_RECURSION_LIMIT` stay stable, matching `graphql::syntactic`, now
-// that these dialect-agnostic items live in `crate::simd_common`.
-pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
-
 /// SIMD layer over the GraphQLx syntactic lexer. Streaming, single-pass, one
 /// token per call.
 ///
-/// Construct with [`SimdSyntacticLexer::new`] or
-/// [`SimdSyntacticLexer::with_state`], then call
+/// Construct with [`SyntacticLexer::new`] or
+/// [`SyntacticLexer::with_state`], then call
 /// [`lex`](Lexer::lex) in a loop until it returns `None`.
 ///
 /// Malformed / sign-ambiguous numbers delegate to the focused `NumberToken`
@@ -430,7 +388,7 @@ pub use crate::simd_common::{AsBytes, DEFAULT_RECURSION_LIMIT, ScanSource};
 /// sub-lexer over the full source and bumping it to the current cursor rather
 /// than reusing one across calls; the unterminated-spread and unknown-byte
 /// errors are emitted inline in [`lex`](Lexer::lex).
-pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
+pub struct SyntacticLexer<'inp, S: ?Sized = str> {
   src: &'inp S,
   /// Current scan position. Advanced by trivia-skip, comment-skip, and each
   /// token scan. Never exposed directly — callers see `last_span`.
@@ -444,36 +402,25 @@ pub struct SimdSyntacticLexer<'inp, S: ?Sized = str> {
   state: RecursionLimiter,
 }
 
-impl<'inp, S> Lexer<'inp> for SimdSyntacticLexer<'inp, S>
+impl<'inp, S> Lexer<'inp> for SyntacticLexer<'inp, S>
 where
   SyntacticToken<S::Slice<'inp>>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  S: ScanSource + ?Sized,
-  S::Slice<'inp>: AsBytes,
-  // The string-error slow path (`delegate_string_error`) hands the malformed
-  // literal straight to `string_lexer`'s `lex_*` over this source's scan
-  // primitive; that primitive is always `str`/`[u8]`, both of which impl
-  // `DelegateStringError`, and its `Char` is this lexer's `Slice::Char`.
-  <S as ScanSource>::ScanPrimitive:
-    DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
-  // The number slow path (`delegate_number_to_logos`) delegates malformed and
-  // sign-ambiguous numbers to the focused `NumberToken` grammar, driven over
-  // this source's scan primitive; its `Error` is this lexer's error type, so the
-  // delegated error needs no conversion, and its radix/float/`Minus` variants
-  // map to `SyntacticToken`.
-  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
+  S: Source<usize>
+    + AsRef<LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>>
+    + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>
+    + ?Sized,
+  S::Slice<'inp>: AsRef<[u8]>,
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
       State = RecursionLimiter,
-      Token = NumberToken<S::Slice<'inp>>,
-      Source = <S as ScanSource>::ScanPrimitive,
+      Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
+      Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,
     >,
-  NumberToken<S::Slice<'inp>>:
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
-  // The hand-rolled unknown-byte `_` arm decodes the first char at the cursor
-  // and needs its UTF-8 byte length to size the error span exactly like Logos.
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
   type State = RecursionLimiter;
@@ -623,7 +570,7 @@ where
         return None;
       }
 
-      let bytes = src.as_bytes();
+      let bytes = src.as_ref();
       let b0 = bytes[0];
       match b0 {
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
@@ -860,32 +807,32 @@ where
 }
 
 // This block needs almost the trait impl's bound set — everything except
-// `Span = SimpleSpan` and `S::Slice<'inp>: AsBytes`, neither of which
+// `Span = SimpleSpan` and `S::Slice<'inp>: AsRef<[u8]>`, neither of which
 // `delegate_number_to_logos` touches (it builds `SimpleSpan` directly and reads
 // the wrapped Logos lexer's own span, never `Self::Span` or `.as_bytes()`).
-// Its return type names the concrete `SyntacticToken`/`Error` types, which
-// requires the `Token<'inp, Error = ..>` + `From<NumberToken>` bounds. Every
-// caller is inside `lex()` above, where the trait impl's full bound set already
-// holds, so this is never more restrictive in practice than the trait impl.
+// Its return type names the concrete `SyntacticToken`/`Error` types. Every caller
+// is inside `lex()` above, where the trait impl's full bound set already holds,
+// so this is never more restrictive in practice than the trait impl.
 //
-// `NumberToken` is a crate-internal delegation carrier (`pub(crate)`); it
+// `NumberLexerToken` is a crate-internal delegation adapter (`pub(crate)`); it
 // appears here only as a bound on a private method, never as nameable API, so
 // silence `private_bounds` rather than widen the type's visibility.
 #[allow(private_bounds)]
-impl<'inp, S> SimdSyntacticLexer<'inp, S>
+impl<'inp, S> SyntacticLexer<'inp, S>
 where
-  NumberToken<S::Slice<'inp>>: FromLogos<'inp>,
-  LogosLexer<'inp, NumberToken<S::Slice<'inp>>>: Lexer<
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
       'inp,
       State = RecursionLimiter,
-      Token = NumberToken<S::Slice<'inp>>,
-      Source = <S as ScanSource>::ScanPrimitive,
+      Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
+      Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
       Offset = usize,
     >,
-  NumberToken<S::Slice<'inp>>:
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  SyntacticToken<S::Slice<'inp>>: From<NumberToken<S::Slice<'inp>>>,
-  S: ScanSource + ?Sized,
+  S: Source<usize>
+    + AsRef<LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>>
+    + ?Sized,
 {
   /// Cold, out-of-line constructor for the recursion-limit error a token
   /// emission yields when the depth is over the limit (the `finish!` gate's
@@ -928,12 +875,12 @@ where
   ///
   /// The number, `-`, and `.`-led-float arms route here. GraphQLx has no
   /// valid-number fast path, so a *valid* literal is produced by the delegated
-  /// grammar too (mapped through [`SyntacticToken::from`]); a bare `-` before a
+  /// grammar too (mapped with its original source slice); a bare `-` before a
   /// non-digit returns `NumberToken::Minus` -> `SyntacticToken::Minus`; every
   /// anomaly (leading `0x`/`0o`/`0b` with no digits, an illegal suffix, an empty
   /// fraction/exponent, a `.`-led float missing its integer part, ...) returns
-  /// the exact error. `NumberToken`'s `Error` is this lexer's error type, so the
-  /// [`Delegated::Error`] arm needs no conversion.
+  /// the exact error. `NumberLexerToken`'s `Error` is this lexer's error type,
+  /// so the [`Delegated::Error`] arm needs no conversion.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
   // shape; clippy can't see through the associated-type projections, so silence
   // its type-complexity lint here.
@@ -948,16 +895,18 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    match crate::simd_common::delegate_to_logos::<NumberToken<S::Slice<'inp>>>(
-      self.src.scan_primitive(),
+    match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
+      self.src.as_ref(),
       self.cursor,
       self.state,
     )? {
       Delegated::Token { token, end, state } => {
+        let number = token.into_number_token();
+        let slice = self.src.slice(&token_start..&end)?;
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
         self.state = state;
-        Some(Ok(SyntacticToken::from(token)))
+        Some(Ok(number.into_syntactic_token(slice)))
       }
       Delegated::Error { error, span } => {
         self.cursor = span.end();
@@ -980,11 +929,9 @@ where
 // it appears here only as a bound on a private method, never as nameable API,
 // so silence `private_bounds` rather than widen the trait's visibility.
 #[allow(private_bounds)]
-impl<'inp, S> SimdSyntacticLexer<'inp, S>
+impl<'inp, S> SyntacticLexer<'inp, S>
 where
-  S: ScanSource + ?Sized,
-  <S as ScanSource>::ScanPrimitive:
-    DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
+  S: Source<usize> + ?Sized + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>,
 {
   /// Delegate the malformed string literal opening at `token_start` directly to
   /// the `string_lexer` `lex_*` code — the same path the full grammar reaches
@@ -1011,10 +958,7 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    let (errors, end) = self
-      .src
-      .scan_primitive()
-      .delegate_string_error(token_start, block);
+    let (errors, end) = self.src.delegate_string_error(token_start, block);
     let span = SimpleSpan::new(token_start, end);
     self.cursor = end;
     self.last_span = span;
@@ -1026,7 +970,7 @@ where
   }
 }
 
-impl<S: ?Sized> SimdSyntacticLexer<'_, S> {
+impl<S: ?Sized> SyntacticLexer<'_, S> {
   /// Span of the most recently returned error token, or `None` if no error
   /// has been returned yet.
   #[cfg_attr(not(tarpaulin), inline(always))]
@@ -1035,9 +979,9 @@ impl<S: ?Sized> SimdSyntacticLexer<'_, S> {
   }
 }
 
-impl<'inp, S: Source<usize> + ?Sized> SimdSyntacticLexer<'inp, S>
+impl<'inp, S: Source<usize> + ?Sized> SyntacticLexer<'inp, S>
 where
-  S::Slice<'inp>: AsBytes,
+  S::Slice<'inp>: AsRef<[u8]>,
 {
   /// Skip the single-byte trivia class (space, tab, CR, LF, comma) at the
   /// cursor. Comment bodies and the UTF-8 BOM are handled in the dispatch loop
@@ -1047,7 +991,7 @@ where
     let Some(rest) = self.src.slice(&self.cursor..) else {
       return;
     };
-    let n = skip_ws_and_comma(rest.as_bytes());
+    let n = skip_ws_and_comma(rest.as_ref());
     self.cursor += n;
   }
 
@@ -1057,7 +1001,7 @@ where
     let Some(rest) = self.src.slice(&self.cursor..) else {
       return;
     };
-    let len = match memchr_newline(rest.as_bytes()) {
+    let len = match memchr_newline(rest.as_ref()) {
       Some(n) => n,       // stop AT the newline; loop eats it next
       None => rest.len(), // unterminated -> EOF
     };

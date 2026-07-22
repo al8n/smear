@@ -2,11 +2,11 @@ use tokora::{Lexer as _, SimpleSpan};
 
 use crate::graphql::{
   error::{FloatError, LexerErrorData},
-  syntactic::{SimdSyntacticLexer, SyntacticToken},
+  syntactic::{SyntacticLexer, SyntacticToken},
 };
 
 fn lex_all(src: &[u8]) -> Vec<SyntacticToken<&[u8]>> {
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+  let mut lexer = SyntacticLexer::<[u8]>::new(src);
   let mut out = Vec::new();
   while let Some(tok) = lexer.lex() {
     out.push(tok.unwrap());
@@ -45,7 +45,7 @@ fn number_anomalies_still_delegate_and_error() {
   // still routes them to Logos and gets back an error (the exact shape
   // is already covered byte-for-byte by the oracle tests).
   for src in [b"007" as &[u8], b"123abc", b"-", b"1.5x", b"00.5"] {
-    let mut lexer = SimdSyntacticLexer::<[u8]>::new(src);
+    let mut lexer = SyntacticLexer::<[u8]>::new(src);
     let tok = lexer.lex().expect("one token").expect_err("should error");
     let _ = tok; // shape is oracle-verified; here we only need "it errors".
   }
@@ -56,7 +56,7 @@ fn dot_led_float_delegates_to_missing_integer_part_not_spread_error() {
   // `.5` must NOT be treated as a lone `.` (unterminated spread operator)
   // -- it's a Float literal missing its integer part, and Logos must be
   // the one to say so.
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(b".5");
+  let mut lexer = SyntacticLexer::<[u8]>::new(b".5");
   let err = lexer.lex().unwrap().unwrap_err();
   assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 2)));
   assert!(
@@ -73,7 +73,7 @@ fn dot_dot_and_lone_dot_are_unaffected_by_the_digit_check() {
   // `..` (not `...`) is still the pre-existing unterminated-spread error,
   // and lexing resumes correctly on whatever follows it (the digit `5`
   // is not part of the `..` error -- it's the *next* token).
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(b"..5");
+  let mut lexer = SyntacticLexer::<[u8]>::new(b"..5");
   let first = lexer.lex().unwrap();
   assert!(first.is_err());
   assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 2)));
@@ -82,7 +82,7 @@ fn dot_dot_and_lone_dot_are_unaffected_by_the_digit_check() {
   assert!(matches!(second, Ok(SyntacticToken::LitInt(s)) if s == b"5"));
 
   // A lone `.` followed by a non-digit is still the same error too.
-  let mut lexer = SimdSyntacticLexer::<[u8]>::new(b".x");
+  let mut lexer = SyntacticLexer::<[u8]>::new(b".x");
   let first = lexer.lex().unwrap();
   assert!(first.is_err());
   assert_eq!(lexer.error_span(), Some(SimpleSpan::new(0, 1)));

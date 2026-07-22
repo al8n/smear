@@ -2,6 +2,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, allow(unused_attributes))]
+#![allow(clippy::type_complexity)]
 #![deny(missing_docs)]
 
 #[cfg(not(feature = "std"))]
@@ -17,10 +18,6 @@ pub use smear_lexer as lexer;
 pub use smear_scaffold as scaffold;
 
 pub mod combinator;
-
-/// The [`Ident`](ident::Ident) carrier the dialect `Name` node types alias.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
-mod ident;
 
 /// Value-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.

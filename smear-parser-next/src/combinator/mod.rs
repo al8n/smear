@@ -24,15 +24,16 @@
 //! sub-traits and the context requirements into a single bound apiece, so an
 //! atom's signature carries one `Ctx: ParseCtx<'inp, L>` instead of the whole
 //! ladder.
+//!
+//! [`Equivalent`] is re-exported as the house
+//! cross-flavor comparison trait, so a dispatch can byte-compare a source slice
+//! against a spelling (`slice.equivalent("true")`) without an `AsRef<[u8]>`
+//! detour that pins the source representation.
 
-mod literal;
-mod shape;
 mod token;
 
-pub use literal::*;
-pub use shape::*;
 pub use token::*;
-pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf};
+pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf, utils::cmp::Equivalent};
 
 #[cfg(test)]
 mod tests;

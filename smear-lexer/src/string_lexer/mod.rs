@@ -371,7 +371,7 @@ const VALID_STRING_UNREACHABLE: &str =
 ///
 /// Implemented for the two Logos scan primitives (`str`, `[u8]`). Both dialects'
 /// SIMD lexers call this on the string-error arms of their dispatch loop; it is
-/// the string twin of `simd_common::delegate_to_logos`.
+/// the string twin of `simd::delegate_to_logos`.
 ///
 /// The seek combines the position-0 `TryFrom` idiom above (construct a carrier,
 /// `bump` past the opener) with `delegate_to_logos`'s mid-stream positioning
@@ -443,3 +443,60 @@ impl DelegateStringError for [u8] {
     }
   }
 }
+
+#[cfg(feature = "bytes")]
+const _: () = {
+  use bytes::Bytes;
+
+  impl DelegateStringError for Bytes {
+    type Char = u8;
+
+    #[inline]
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+      self.as_ref().delegate_string_error(token_start, block)
+    }
+  }
+};
+
+#[cfg(feature = "hipstr")]
+const _: () = {
+  use hipstr::{HipByt, HipStr};
+
+  impl DelegateStringError for HipByt<'_> {
+    type Char = u8;
+
+    #[inline]
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+      self.as_ref().delegate_string_error(token_start, block)
+    }
+  }
+
+  impl DelegateStringError for HipStr<'_> {
+    type Char = char;
+
+    #[inline]
+    fn delegate_string_error(
+      &self,
+      token_start: usize,
+      block: bool,
+    ) -> (StringErrors<char>, usize) {
+      let s: &str = self.as_ref();
+      s.delegate_string_error(token_start, block)
+    }
+  }
+};
+
+#[cfg(feature = "bstr")]
+const _: () = {
+  use bstr::BStr;
+
+  impl DelegateStringError for BStr {
+    type Char = u8;
+
+    #[inline]
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+      let s: &[u8] = self.as_ref();
+      s.delegate_string_error(token_start, block)
+    }
+  }
+};

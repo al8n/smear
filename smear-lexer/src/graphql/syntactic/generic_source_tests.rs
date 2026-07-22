@@ -1,5 +1,5 @@
 //! Before the inline-string error path delegated to Logos, the `Lexer` impl's
-//! `S::Slice<'inp>: Slice<'inp, Char = u8>` bound meant `SimdSyntacticLexer::<str>`
+//! `S::Slice<'inp>: Slice<'inp, Char = u8>` bound meant `SyntacticLexer::<str>`
 //! (whose slice is `&str`, `Char = char`) could not satisfy the impl at all, so every
 //! test below was a compile error. Delegating both inline-string error outcomes to
 //! Logos (which builds whatever `Char` type the source needs) let that bound drop,
@@ -9,7 +9,7 @@
 //! test asserting the inline string still emits inline, and a bad-escape test
 //! asserting the delegated error is genuinely `Char = char`) are strictly
 //! subsumed by `graphql_syntactic_simd_oracle` in `tests/oracle.rs`, which
-//! drives `SimdSyntacticLexer::<str>` directly against the golden files (41
+//! drives `SyntacticLexer::<str>` directly against the golden files (41
 //! fixtures, byte-for-byte `Debug` comparison, including `str_bad_escape` and
 //! many valid-query/inline-string fixtures) -- so they were deleted rather
 //! than kept. The one kept below covers a source text (a lone `"` as the
@@ -23,13 +23,13 @@ use crate::{
   error::StringError,
   graphql::{
     error::LexerErrorData,
-    syntactic::{SimdSyntacticLexer, SyntacticLexerErrors, SyntacticToken},
+    syntactic::{SyntacticLexer, SyntacticLexerErrors, SyntacticToken},
   },
 };
 
 /// Drive a `str`-sourced lexer to completion, collecting every result.
 fn lex_all(src: &str) -> Vec<Result<SyntacticToken<&str>, SyntacticLexerErrors>> {
-  let mut lexer = SimdSyntacticLexer::<str>::new(src);
+  let mut lexer = SyntacticLexer::<str>::new(src);
   let mut out = Vec::new();
   while let Some(tok) = lexer.lex() {
     out.push(tok);
