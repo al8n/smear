@@ -1,8 +1,8 @@
 //! GraphQL executable and constant directive productions.
 //!
 //! Singular directives diagnose their committed `@` and name phases locally.
-//! Optional directive runs decline untouched unless the first token is `@`, then
-//! greedily parse every following directive head.
+//! Absent directive runs produce an empty, zero-width collection without consuming;
+//! after an `@` they greedily parse every following directive head.
 
 use std::vec::Vec;
 
@@ -14,6 +14,7 @@ use tokora::{
   parser::Action,
   punct::{Brace, Bracket, Paren},
   span::Spanned,
+  try_parse_input::ParseAttempt,
   utils::typenum::U1,
 };
 
@@ -118,6 +119,11 @@ directive_parser!(
       .then(arguments)
       .spanned()
       .map(|Spanned { span, data: (name, arguments) }| {
+        let arguments = if arguments.arguments().is_empty() {
+          None
+        } else {
+          Some(arguments)
+        };
         scaffold::Directive::new(span, name, arguments)
       })
       .parse_input(inp)
@@ -144,6 +150,11 @@ directive_parser!(
       .then(const_arguments)
       .spanned()
       .map(|Spanned { span, data: (name, arguments) }| {
+        let arguments = if arguments.arguments().is_empty() {
+          None
+        } else {
+          Some(arguments)
+        };
         scaffold::Directive::new(span, name, arguments)
       })
       .parse_input(inp)
@@ -210,24 +221,32 @@ directive_parser!(
 directive_parser!(
   pub directives,
   inp,
-  Option<Directives<GraphqlSlice<'inp, Src>>>,
+  Directives<GraphqlSlice<'inp, Src>>,
   {
-    committed_directives::<Src, Ctx>
+    let start = *inp.offset();
+    committed_directives
       .peek_then_try::<_, U1>(decide_directive_head::<Src, Ctx>)
       .try_parse_input(inp)
-      .map(Into::into)
+      .map(|attempt| match attempt {
+        ParseAttempt::Accept(directives) => directives,
+        ParseAttempt::Decline => scaffold::Directives::new(SimpleSpan::new(start, start), Vec::new()),
+      })
   }
 );
 
 directive_parser!(
   pub const_directives,
   inp,
-  Option<ConstDirectives<GraphqlSlice<'inp, Src>>>,
+  ConstDirectives<GraphqlSlice<'inp, Src>>,
   {
-    committed_const_directives::<Src, Ctx>
+    let start = *inp.offset();
+    committed_const_directives
       .peek_then_try::<_, U1>(decide_directive_head::<Src, Ctx>)
       .try_parse_input(inp)
-      .map(Into::into)
+      .map(|attempt| match attempt {
+        ParseAttempt::Accept(directives) => directives,
+        ParseAttempt::Decline => scaffold::Directives::new(SimpleSpan::new(start, start), Vec::new()),
+      })
   }
 );
 

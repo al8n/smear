@@ -7,7 +7,7 @@
 //! `parse_directive`/`parse_directives` verdicts for the same inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{const_directive, const_directives, directive, directives};
 use crate::graphql::{
@@ -126,6 +126,14 @@ fn directive_accepts_with_arguments() {
 }
 
 #[test]
+fn directive_accepts_empty_arguments_as_none() {
+  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+    assert!(d.arguments().is_none());
+  }
+  accept_all!(directive, "@d()", check);
+}
+
+#[test]
 fn directive_rejects_missing_at() {
   reject_all!(directive, "deprecated");
 }
@@ -201,8 +209,7 @@ fn const_directive_accepts_and_rejects_variable() {
 
 #[test]
 fn directives_accepts_single() {
-  fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
-    let ds = ds.expect("present");
+  fn check<S: AsRef<[u8]>>(ds: Directives<S>) {
     assert_eq!(ds.directives().len(), 1);
     assert!("deprecated".equivalent(ds.directives()[0].name().source_ref()));
   }
@@ -211,8 +218,7 @@ fn directives_accepts_single() {
 
 #[test]
 fn directives_accepts_multiple() {
-  fn check<S: AsRef<[u8]>>(ds: Option<Directives<S>>) {
-    let ds = ds.expect("present");
+  fn check<S: AsRef<[u8]>>(ds: Directives<S>) {
     assert_eq!(ds.directives().len(), 2);
     assert!("a".equivalent(ds.directives()[0].name().source_ref()));
     assert!("b".equivalent(ds.directives()[1].name().source_ref()));
@@ -221,13 +227,17 @@ fn directives_accepts_multiple() {
 }
 
 #[test]
-fn directives_declines_without_at() {
+fn directives_absent_is_empty_zero_width_and_non_consuming() {
   // No tokens consumed: a following production sees the identifier untouched.
   let ok = drive_str(
     |inp| {
       let ds = directives(inp)?;
       let leftover = crate::combinator::ident(inp)?;
-      Ok::<_, GraphqlErrors<&str>>(ds.is_none() && *leftover.source_ref() == "x")
+      Ok::<_, GraphqlErrors<&str>>(
+        ds.directives().is_empty()
+          && *ds.span() == SimpleSpan::new(0, 0)
+          && *leftover.source_ref() == "x",
+      )
     },
     "x",
   )
@@ -236,9 +246,14 @@ fn directives_declines_without_at() {
 }
 
 #[test]
-fn directives_declines_on_empty_input() {
-  assert!(drive_str(directives, "").unwrap().is_none());
-  assert!(drive_slice(directives, b"").unwrap().is_none());
+fn directives_absent_on_empty_input() {
+  let str_directives = drive_str(directives, "").unwrap();
+  assert!(str_directives.directives().is_empty());
+  assert_eq!(*str_directives.span(), SimpleSpan::new(0, 0));
+
+  let slice_directives = drive_slice(directives, b"").unwrap();
+  assert!(slice_directives.directives().is_empty());
+  assert_eq!(*slice_directives.span(), SimpleSpan::new(0, 0));
 }
 
 #[test]
@@ -262,16 +277,18 @@ fn directives_rejects_malformed_directive_mid_run() {
 
 #[test]
 fn const_directives_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(ds: Option<crate::graphql::ast::ConstDirectives<S>>) {
-    assert_eq!(ds.expect("present").directives().len(), 1);
+  fn check<S: AsRef<[u8]>>(ds: crate::graphql::ast::ConstDirectives<S>) {
+    assert_eq!(ds.directives().len(), 1);
   }
   accept_all!(const_directives, "@d(x: 1)", check);
   reject_all!(const_directives, "@d(x: $v)");
 }
 
 #[test]
-fn const_directives_declines_on_empty_input() {
-  assert!(drive_str(const_directives, "").unwrap().is_none());
+fn const_directives_absent_is_empty_and_zero_width() {
+  let directives = drive_str(const_directives, "").unwrap();
+  assert!(directives.directives().is_empty());
+  assert_eq!(*directives.span(), SimpleSpan::new(0, 0));
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
@@ -304,9 +321,9 @@ fn directive_matches_frozen_verdicts() {
   }
 }
 
-/// Accept/reject verdicts for `directives` (a missing `@` declines rather than
-/// erroring, so it is not itself a "reject" row here — see
-/// `directives_declines_without_at`).
+/// Accept/reject verdicts for `directives` (a missing `@` yields an empty
+/// collection rather than erroring, so it is not itself a "reject" row here — see
+/// `directives_absent_is_empty_zero_width_and_non_consuming`).
 const DIRECTIVES_ORACLE: &[(&str, bool)] = &[
   ("@a", true),
   ("@a @b", true),

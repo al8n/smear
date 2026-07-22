@@ -1,8 +1,8 @@
 //! GraphQL executable and constant argument productions.
 //!
 //! Singular arguments are committed `Name ':' Value` parsers with phase-local
-//! diagnostics. Optional argument lists decline without consuming unless their
-//! first token is `(`; after that opener they remain committed through `)`.
+//! diagnostics. Absent argument lists produce an empty, zero-width collection
+//! without consuming; after a `(` opener they remain committed through `)`.
 
 use std::vec::Vec;
 
@@ -14,6 +14,7 @@ use tokora::{
   parser::Action,
   punct::{Brace, Bracket, Paren},
   span::Spanned,
+  try_parse_input::ParseAttempt,
   utils::typenum::U1,
 };
 
@@ -244,26 +245,34 @@ argument_parser!(
 argument_parser!(
   pub arguments,
   inp,
-  Option<Arguments<GraphqlSlice<'inp, Src>>>,
+  Arguments<GraphqlSlice<'inp, Src>>,
   [delimited],
   {
-    committed_arguments::<Src, Ctx>
+    let start = *inp.offset();
+    committed_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)
-      .map(Into::into)
+      .map(|attempt| match attempt {
+        ParseAttempt::Accept(arguments) => arguments,
+        ParseAttempt::Decline => ArgumentList::new(SimpleSpan::new(start, start), Vec::new()),
+      })
   }
 );
 
 argument_parser!(
   pub const_arguments,
   inp,
-  Option<ConstArguments<GraphqlSlice<'inp, Src>>>,
+  ConstArguments<GraphqlSlice<'inp, Src>>,
   [delimited],
   {
-    committed_const_arguments::<Src, Ctx>
+    let start = *inp.offset();
+    committed_const_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)
-      .map(Into::into)
+      .map(|attempt| match attempt {
+        ParseAttempt::Accept(arguments) => arguments,
+        ParseAttempt::Decline => ArgumentList::new(SimpleSpan::new(start, start), Vec::new()),
+      })
   }
 );
 

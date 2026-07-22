@@ -103,7 +103,7 @@ where
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
-  (named_type_core::<Src, Ctx>, list_type_core::<Src, Ctx>)
+  (named_type_core, list_type_core)
     .peek_then_choice::<_, U1>(|peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
       let Some(head) = peeked.front() else {
         return Err(

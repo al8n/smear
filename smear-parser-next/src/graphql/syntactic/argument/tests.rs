@@ -7,7 +7,7 @@
 //! verdicts for the same inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{argument, arguments, const_argument, const_arguments};
 use crate::graphql::{
@@ -189,8 +189,7 @@ fn const_argument_accepts_and_rejects_variable() {
 
 #[test]
 fn arguments_accepts_single() {
-  fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
-    let args = a.expect("present");
+  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
     assert_eq!(args.arguments().len(), 1);
     assert!("x".equivalent(args.arguments()[0].name().source_ref()));
   }
@@ -199,8 +198,7 @@ fn arguments_accepts_single() {
 
 #[test]
 fn arguments_accepts_multiple() {
-  fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
-    let args = a.expect("present");
+  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
     assert_eq!(args.arguments().len(), 2);
     assert!("a".equivalent(args.arguments()[0].name().source_ref()));
     assert!("b".equivalent(args.arguments()[1].name().source_ref()));
@@ -214,21 +212,25 @@ fn arguments_accepts_empty_parens() {
   // entry for this site): `Arguments : ( Argument+ )` demands one-or-more, but
   // parser-next stays lenient and accepts an empty `()` here, matching the frozen
   // parser's unenforced `+`.
-  fn check<S: AsRef<[u8]>>(a: Option<Arguments<S>>) {
-    let args = a.expect("present");
+  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
     assert!(args.arguments().is_empty());
+    assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(arguments, "()", check);
 }
 
 #[test]
-fn arguments_declines_without_leading_paren() {
+fn arguments_absent_is_empty_zero_width_and_non_consuming() {
   // No tokens consumed: a following production sees the identifier untouched.
   let ok = drive_str(
     |inp| {
       let args = arguments(inp)?;
       let leftover = crate::combinator::ident(inp)?;
-      Ok::<_, GraphqlErrors<&str>>(args.is_none() && *leftover.source_ref() == "x")
+      Ok::<_, GraphqlErrors<&str>>(
+        args.arguments().is_empty()
+          && *args.span() == SimpleSpan::new(0, 0)
+          && *leftover.source_ref() == "x",
+      )
     },
     "x",
   )
@@ -278,8 +280,7 @@ fn arguments_commit_non_closing_heads_to_argument_phases() {
 
 #[test]
 fn const_arguments_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(a: Option<crate::graphql::ast::ConstArguments<S>>) {
-    let args = a.expect("present");
+  fn check<S: AsRef<[u8]>>(args: crate::graphql::ast::ConstArguments<S>) {
     assert_eq!(args.arguments().len(), 1);
   }
   accept_all!(const_arguments, "(k: 1)", check);
@@ -287,17 +288,19 @@ fn const_arguments_accepts_and_rejects_variable() {
 }
 
 #[test]
-fn const_arguments_declines_without_leading_paren() {
-  assert!(drive_str(const_arguments, "").unwrap().is_none());
+fn const_arguments_absent_is_empty_and_zero_width() {
+  let args = drive_str(const_arguments, "").unwrap();
+  assert!(args.arguments().is_empty());
+  assert_eq!(*args.span(), SimpleSpan::new(0, 0));
 }
 
 #[test]
 fn const_arguments_accepts_empty_parens() {
   // Const twin of `arguments_accepts_empty_parens` (plan Amendment 5): empty `()`
   // is accepted, matching frozen parity.
-  fn check<S: AsRef<[u8]>>(a: Option<crate::graphql::ast::ConstArguments<S>>) {
-    let args = a.expect("present");
+  fn check<S: AsRef<[u8]>>(args: crate::graphql::ast::ConstArguments<S>) {
     assert!(args.arguments().is_empty());
+    assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(const_arguments, "()", check);
 }
@@ -359,6 +362,6 @@ fn arguments_matches_frozen_verdicts() {
       "slice arguments({src:?})"
     );
   }
-  // A missing `(` declines rather than erroring.
+  // A missing `(` yields an empty collection rather than erroring.
   assert!(drive_str(|inp| arguments(inp).map(|_| ()), "x").is_ok());
 }
