@@ -9,10 +9,9 @@
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
-use super::{argument, arguments, const_argument, const_arguments};
 use crate::graphql::{
   GraphQL,
-  ast::{Argument, Arguments, ConstArgument},
+  ast::{Argument, Arguments, ConstArgument, ConstArguments},
   error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
@@ -111,7 +110,7 @@ fn argument_accepts() {
     assert!(a.value().is_int());
     assert_eq!(a.span().start(), 0);
   }
-  accept_all!(argument, "x: 1", check);
+  accept_all!(Argument::<_>::graphql, "x: 1", check);
 }
 
 #[test]
@@ -119,7 +118,7 @@ fn argument_accepts_variable_value() {
   fn check<S: AsRef<[u8]>>(a: Argument<S>) {
     assert!(a.value().is_variable());
   }
-  accept_all!(argument, "x: $v", check);
+  accept_all!(Argument::<_>::graphql, "x: $v", check);
 }
 
 #[test]
@@ -128,24 +127,24 @@ fn argument_accepts_composite_value() {
     let list = a.value().unwrap_list_ref();
     assert_eq!(list.values().len(), 2);
   }
-  accept_all!(argument, "xs: [1, 2]", check);
+  accept_all!(Argument::<_>::graphql, "xs: [1, 2]", check);
 }
 
 #[test]
 fn argument_rejects_missing_colon() {
-  reject_all!(argument, "x 1");
+  reject_all!(Argument::<_>::graphql, "x 1");
 }
 
 #[test]
 fn argument_rejects_missing_value() {
-  reject_all!(argument, "x:");
-  reject_all!(argument, "x: }");
+  reject_all!(Argument::<_>::graphql, "x:");
+  reject_all!(Argument::<_>::graphql, "x: }");
 }
 
 #[test]
 fn argument_rejects_missing_name() {
-  reject_all!(argument, ": 1");
-  reject_all!(argument, "");
+  reject_all!(Argument::<_>::graphql, ": 1");
+  reject_all!(Argument::<_>::graphql, "");
 }
 
 #[test]
@@ -160,7 +159,7 @@ fn argument_phase_diagnostics_are_typed() {
       Some(SyntacticTokenKind::RBrace),
     ),
   ] {
-    let error = drive_str(|inp| argument(inp).map(|_| ()), src)
+    let error = drive_str(|inp| Argument::<_>::graphql(inp).map(|_| ()), src)
       .expect_err("malformed argument should fail")
       .into_iter()
       .next()
@@ -181,8 +180,8 @@ fn const_argument_accepts_and_rejects_variable() {
     assert!("k".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
   }
-  accept_all!(const_argument, "k: 1", check);
-  reject_all!(const_argument, "k: $v");
+  accept_all!(ConstArgument::<_>::graphql, "k: 1", check);
+  reject_all!(ConstArgument::<_>::graphql, "k: $v");
 }
 
 // ─── arguments ───────────────────────────────────────────────────────────────
@@ -193,7 +192,7 @@ fn arguments_accepts_single() {
     assert_eq!(args.arguments().len(), 1);
     assert!("x".equivalent(args.arguments()[0].name().source_ref()));
   }
-  accept_all!(arguments, "(x: 1)", check);
+  accept_all!(Arguments::<_>::graphql, "(x: 1)", check);
 }
 
 #[test]
@@ -203,7 +202,7 @@ fn arguments_accepts_multiple() {
     assert!("a".equivalent(args.arguments()[0].name().source_ref()));
     assert!("b".equivalent(args.arguments()[1].name().source_ref()));
   }
-  accept_all!(arguments, "(a: 1, b: 2)", check);
+  accept_all!(Arguments::<_>::graphql, "(a: 1, b: 2)", check);
 }
 
 #[test]
@@ -216,7 +215,7 @@ fn arguments_accepts_empty_parens() {
     assert!(args.arguments().is_empty());
     assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }
-  accept_all!(arguments, "()", check);
+  accept_all!(Arguments::<_>::graphql, "()", check);
 }
 
 #[test]
@@ -224,7 +223,7 @@ fn arguments_absent_is_empty_zero_width_and_non_consuming() {
   // No tokens consumed: a following production sees the identifier untouched.
   let ok = drive_str(
     |inp| {
-      let args = arguments(inp)?;
+      let args = Arguments::<_>::graphql(inp)?;
       let leftover = crate::combinator::ident(inp)?;
       Ok::<_, GraphqlErrors<&str>>(
         args.arguments().is_empty()
@@ -240,8 +239,8 @@ fn arguments_absent_is_empty_zero_width_and_non_consuming() {
 
 #[test]
 fn arguments_rejects_unterminated() {
-  reject_all!(arguments, "(x: 1");
-  let error = drive_str(|inp| arguments(inp).map(|_| ()), "(x: 1")
+  reject_all!(Arguments::<_>::graphql, "(x: 1");
+  let error = drive_str(|inp| Arguments::<_>::graphql(inp).map(|_| ()), "(x: 1")
     .expect_err("unterminated arguments should fail")
     .into_iter()
     .next()
@@ -254,7 +253,7 @@ fn arguments_rejects_unterminated() {
 
 #[test]
 fn arguments_rejects_malformed_argument() {
-  reject_all!(arguments, "(x 1)");
+  reject_all!(Arguments::<_>::graphql, "(x 1)");
 }
 
 #[test]
@@ -263,7 +262,7 @@ fn arguments_commit_non_closing_heads_to_argument_phases() {
     ("(foo)", Expectation::Colon, SyntacticTokenKind::RParen),
     ("(x:)", Expectation::InputValue, SyntacticTokenKind::RParen),
   ] {
-    let error = drive_str(|inp| arguments(inp).map(|_| ()), src)
+    let error = drive_str(|inp| Arguments::<_>::graphql(inp).map(|_| ()), src)
       .expect_err("malformed argument list should fail")
       .into_iter()
       .next()
@@ -280,16 +279,16 @@ fn arguments_commit_non_closing_heads_to_argument_phases() {
 
 #[test]
 fn const_arguments_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(args: crate::graphql::ast::ConstArguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: ConstArguments<S>) {
     assert_eq!(args.arguments().len(), 1);
   }
-  accept_all!(const_arguments, "(k: 1)", check);
-  reject_all!(const_arguments, "(k: $v)");
+  accept_all!(ConstArguments::<_>::graphql, "(k: 1)", check);
+  reject_all!(ConstArguments::<_>::graphql, "(k: $v)");
 }
 
 #[test]
 fn const_arguments_absent_is_empty_and_zero_width() {
-  let args = drive_str(const_arguments, "").unwrap();
+  let args = drive_str(ConstArguments::<_>::graphql, "").unwrap();
   assert!(args.arguments().is_empty());
   assert_eq!(*args.span(), SimpleSpan::new(0, 0));
 }
@@ -298,11 +297,11 @@ fn const_arguments_absent_is_empty_and_zero_width() {
 fn const_arguments_accepts_empty_parens() {
   // Const twin of `arguments_accepts_empty_parens` (plan Amendment 5): empty `()`
   // is accepted, matching frozen parity.
-  fn check<S: AsRef<[u8]>>(args: crate::graphql::ast::ConstArguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: ConstArguments<S>) {
     assert!(args.arguments().is_empty());
     assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }
-  accept_all!(const_arguments, "()", check);
+  accept_all!(ConstArguments::<_>::graphql, "()", check);
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
@@ -325,12 +324,16 @@ const ARGUMENT_ORACLE: &[(&str, bool)] = &[
 fn argument_matches_frozen_verdicts() {
   for (src, accept) in ARGUMENT_ORACLE {
     assert_eq!(
-      drive_str(|inp| argument(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| Argument::<_>::graphql(inp).map(|_| ()), src).is_ok(),
       *accept,
       "str argument({src:?})"
     );
     assert_eq!(
-      drive_slice(|inp| argument(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      drive_slice(
+        |inp| Argument::<_>::graphql(inp).map(|_| ()),
+        src.as_bytes()
+      )
+      .is_ok(),
       *accept,
       "slice argument({src:?})"
     );
@@ -352,16 +355,20 @@ const ARGUMENTS_ORACLE: &[(&str, bool)] = &[
 fn arguments_matches_frozen_verdicts() {
   for (src, accept) in ARGUMENTS_ORACLE {
     assert_eq!(
-      drive_str(|inp| arguments(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| Arguments::<_>::graphql(inp).map(|_| ()), src).is_ok(),
       *accept,
       "str arguments({src:?})"
     );
     assert_eq!(
-      drive_slice(|inp| arguments(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      drive_slice(
+        |inp| Arguments::<_>::graphql(inp).map(|_| ()),
+        src.as_bytes()
+      )
+      .is_ok(),
       *accept,
       "slice arguments({src:?})"
     );
   }
   // A missing `(` yields an empty collection rather than erroring.
-  assert!(drive_str(|inp| arguments(inp).map(|_| ()), "x").is_ok());
+  assert!(drive_str(|inp| Arguments::<_>::graphql(inp).map(|_| ()), "x").is_ok());
 }

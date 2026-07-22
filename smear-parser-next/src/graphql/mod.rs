@@ -1,11 +1,12 @@
 //! The GraphQL dialect assembly layer.
 //!
 //! GraphQL syntactic productions are specialized to the concrete
-//! [`syntactic::GraphqlLexer`] and the [`GraphQL`] marker. Local AST value nodes
-//! expose associated `graphql` / `try_graphql` methods; productions whose result is
-//! owned by `smear_scaffold` remain concrete free functions. The generic
-//! [`ParseCtx`](crate::combinator::ParseCtx) bundle still lets those concrete entry
-//! points run over each source flavor supported by the lexer.
+//! [`crate::graphql::syntactic::GraphqlLexer`] and the
+//! [`crate::graphql::GraphQL`] marker. Local AST nodes expose inherent `graphql` /
+//! `try_graphql` methods where available, and free production functions remain
+//! available. The generic [`ParseCtx`](crate::combinator::ParseCtx) bundle still
+//! lets those concrete entry points run over each source flavor supported by the
+//! lexer.
 //!
 //! This module carries the dialect substrate the productions build on:
 //!

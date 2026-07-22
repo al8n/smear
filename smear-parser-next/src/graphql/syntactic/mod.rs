@@ -1,10 +1,9 @@
 //! The GraphQL dialect's grammar productions.
 //!
 //! Productions in this module are specialized to the concrete
-//! [`GraphqlLexer`] and [`GraphQL`](super::GraphQL) marker. The public aliases
-//! below keep their source, token, input, and error signatures consistent while
-//! allowing the lexer to run over `str`, `[u8]`, and the source wrappers it
-//! supports.
+//! [`GraphqlLexer`] and [`GraphQL`] marker. The public aliases below keep their
+//! source, token, input, and error signatures consistent while allowing the lexer
+//! to run over `str`, `[u8]`, and the source wrappers it supports.
 //!
 //! The module name reflects the driving lexer the syntactic suite pairs these
 //! productions with; the productions themselves are purely syntactic — lossless/CST

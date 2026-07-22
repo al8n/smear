@@ -1,8 +1,10 @@
 //! GraphQL type-reference productions over the concrete syntactic lexer.
 //!
-//! The recursive dispatcher is private; consumers parse through
-//! [`Type::graphql`]. A committed one-token choice selects a named or list type,
-//! and a trailing `!` is folded into the selected node's `required` flag.
+//! Consumers can parse through the free [`ty`] parser or [`Type::graphql`]. A
+//! committed one-token choice selects a named or list type, and a trailing `!` is
+//! folded into the selected node's `required` flag.
+//!
+//! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
 use std::boxed::Box;
 
@@ -81,7 +83,14 @@ where
     .map(|delimited| TypeCore::List(delimited.into_data()))
 }
 
-fn ty<'inp, Src, Ctx>(
+/// Parses a committed GraphQL type reference.
+///
+/// The parser accepts named and recursively nested list types, folding a trailing
+/// `!` into the selected node's required flag. An absent or invalid head is an
+/// error expecting a type reference.
+///
+/// See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
+pub fn ty<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<Type<Name<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
 where
@@ -145,7 +154,12 @@ where
 }
 
 impl<S> Type<Name<S>> {
-  /// Parses a GraphQL type reference from the concrete syntactic lexer.
+  /// Parses a committed GraphQL type reference.
+  ///
+  /// This is the inherent form of [`ty`]. It accepts named and recursively nested
+  /// list types and folds a trailing `!` into the selected node's required flag.
+  ///
+  /// See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
   pub fn graphql<'inp, Src, Ctx>(
     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>

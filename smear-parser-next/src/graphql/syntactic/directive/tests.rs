@@ -9,10 +9,9 @@
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
-use super::{const_directive, const_directives, directive, directives};
 use crate::graphql::{
   GraphQL,
-  ast::{ConstDirective, Directive, Directives},
+  ast::{ConstDirective, ConstDirectives, Directive, Directives},
   error::{ErrorData, Expectation, GraphqlErrors},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
@@ -111,7 +110,7 @@ fn directive_accepts_without_arguments() {
     assert!(d.arguments().is_none());
     assert_eq!(d.span().start(), 0);
   }
-  accept_all!(directive, "@deprecated", check);
+  accept_all!(Directive::<_>::graphql, "@deprecated", check);
 }
 
 #[test]
@@ -122,7 +121,7 @@ fn directive_accepts_with_arguments() {
     assert_eq!(args.arguments().len(), 1);
     assert!("if".equivalent(args.arguments()[0].name().source_ref()));
   }
-  accept_all!(directive, "@include(if: true)", check);
+  accept_all!(Directive::<_>::graphql, "@include(if: true)", check);
 }
 
 #[test]
@@ -130,18 +129,18 @@ fn directive_accepts_empty_arguments_as_none() {
   fn check<S: AsRef<[u8]>>(d: Directive<S>) {
     assert!(d.arguments().is_none());
   }
-  accept_all!(directive, "@d()", check);
+  accept_all!(Directive::<_>::graphql, "@d()", check);
 }
 
 #[test]
 fn directive_rejects_missing_at() {
-  reject_all!(directive, "deprecated");
+  reject_all!(Directive::<_>::graphql, "deprecated");
 }
 
 #[test]
 fn directive_rejects_missing_name() {
-  reject_all!(directive, "@");
-  reject_all!(directive, "@(x: 1)");
+  reject_all!(Directive::<_>::graphql, "@");
+  reject_all!(Directive::<_>::graphql, "@(x: 1)");
 }
 
 #[test]
@@ -156,7 +155,7 @@ fn directive_phase_diagnostics_are_typed_and_leave_wrong_tokens() {
   ] {
     let (diagnostic_matches, leftover_kind) = drive_str(
       |inp| {
-        let error = directive(inp)
+        let error = Directive::<_>::graphql(inp)
           .expect_err("malformed directive should fail")
           .into_iter()
           .next()
@@ -176,7 +175,7 @@ fn directive_phase_diagnostics_are_typed_and_leave_wrong_tokens() {
     assert_eq!(leftover_kind, Some(found));
   }
 
-  let error = drive_str(|inp| directive(inp).map(|_| ()), "@")
+  let error = drive_str(|inp| Directive::<_>::graphql(inp).map(|_| ()), "@")
     .expect_err("a directive name is required")
     .into_iter()
     .next()
@@ -190,8 +189,8 @@ fn directive_phase_diagnostics_are_typed_and_leave_wrong_tokens() {
 
 #[test]
 fn directive_rejects_malformed_arguments() {
-  reject_all!(directive, "@d(x 1)");
-  reject_all!(directive, "@d(x: 1");
+  reject_all!(Directive::<_>::graphql, "@d(x 1)");
+  reject_all!(Directive::<_>::graphql, "@d(x: 1");
 }
 
 // ─── const_directive ─────────────────────────────────────────────────────────
@@ -201,8 +200,8 @@ fn const_directive_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(d: ConstDirective<S>) {
     assert!("d".equivalent(d.name().source_ref()));
   }
-  accept_all!(const_directive, "@d(x: 1)", check);
-  reject_all!(const_directive, "@d(x: $v)");
+  accept_all!(ConstDirective::<_>::graphql, "@d(x: 1)", check);
+  reject_all!(ConstDirective::<_>::graphql, "@d(x: $v)");
 }
 
 // ─── directives ──────────────────────────────────────────────────────────────
@@ -213,7 +212,7 @@ fn directives_accepts_single() {
     assert_eq!(ds.directives().len(), 1);
     assert!("deprecated".equivalent(ds.directives()[0].name().source_ref()));
   }
-  accept_all!(directives, "@deprecated", check);
+  accept_all!(Directives::<_>::graphql, "@deprecated", check);
 }
 
 #[test]
@@ -223,7 +222,7 @@ fn directives_accepts_multiple() {
     assert!("a".equivalent(ds.directives()[0].name().source_ref()));
     assert!("b".equivalent(ds.directives()[1].name().source_ref()));
   }
-  accept_all!(directives, "@a @b", check);
+  accept_all!(Directives::<_>::graphql, "@a @b", check);
 }
 
 #[test]
@@ -231,7 +230,7 @@ fn directives_absent_is_empty_zero_width_and_non_consuming() {
   // No tokens consumed: a following production sees the identifier untouched.
   let ok = drive_str(
     |inp| {
-      let ds = directives(inp)?;
+      let ds = Directives::<_>::graphql(inp)?;
       let leftover = crate::combinator::ident(inp)?;
       Ok::<_, GraphqlErrors<&str>>(
         ds.directives().is_empty()
@@ -247,11 +246,11 @@ fn directives_absent_is_empty_zero_width_and_non_consuming() {
 
 #[test]
 fn directives_absent_on_empty_input() {
-  let str_directives = drive_str(directives, "").unwrap();
+  let str_directives = drive_str(Directives::<_>::graphql, "").unwrap();
   assert!(str_directives.directives().is_empty());
   assert_eq!(*str_directives.span(), SimpleSpan::new(0, 0));
 
-  let slice_directives = drive_slice(directives, b"").unwrap();
+  let slice_directives = drive_slice(Directives::<_>::graphql, b"").unwrap();
   assert!(slice_directives.directives().is_empty());
   assert_eq!(*slice_directives.span(), SimpleSpan::new(0, 0));
 }
@@ -260,8 +259,8 @@ fn directives_absent_on_empty_input() {
 fn directives_rejects_malformed_directive_mid_run() {
   // The first directive commits the `@`; a malformed follow-on directive is an
   // error, not a decline back to a shorter accepted run.
-  reject_all!(directives, "@a @");
-  let error = drive_str(|inp| directives(inp).map(|_| ()), "@a @")
+  reject_all!(Directives::<_>::graphql, "@a @");
+  let error = drive_str(|inp| Directives::<_>::graphql(inp).map(|_| ()), "@a @")
     .expect_err("a later directive head commits")
     .into_iter()
     .next()
@@ -277,16 +276,16 @@ fn directives_rejects_malformed_directive_mid_run() {
 
 #[test]
 fn const_directives_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(ds: crate::graphql::ast::ConstDirectives<S>) {
+  fn check<S: AsRef<[u8]>>(ds: ConstDirectives<S>) {
     assert_eq!(ds.directives().len(), 1);
   }
-  accept_all!(const_directives, "@d(x: 1)", check);
-  reject_all!(const_directives, "@d(x: $v)");
+  accept_all!(ConstDirectives::<_>::graphql, "@d(x: 1)", check);
+  reject_all!(ConstDirectives::<_>::graphql, "@d(x: $v)");
 }
 
 #[test]
 fn const_directives_absent_is_empty_and_zero_width() {
-  let directives = drive_str(const_directives, "").unwrap();
+  let directives = drive_str(ConstDirectives::<_>::graphql, "").unwrap();
   assert!(directives.directives().is_empty());
   assert_eq!(*directives.span(), SimpleSpan::new(0, 0));
 }
@@ -309,12 +308,16 @@ const DIRECTIVE_ORACLE: &[(&str, bool)] = &[
 fn directive_matches_frozen_verdicts() {
   for (src, accept) in DIRECTIVE_ORACLE {
     assert_eq!(
-      drive_str(|inp| directive(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| Directive::<_>::graphql(inp).map(|_| ()), src).is_ok(),
       *accept,
       "str directive({src:?})"
     );
     assert_eq!(
-      drive_slice(|inp| directive(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      drive_slice(
+        |inp| Directive::<_>::graphql(inp).map(|_| ()),
+        src.as_bytes()
+      )
+      .is_ok(),
       *accept,
       "slice directive({src:?})"
     );
@@ -335,12 +338,16 @@ const DIRECTIVES_ORACLE: &[(&str, bool)] = &[
 fn directives_matches_frozen_verdicts() {
   for (src, accept) in DIRECTIVES_ORACLE {
     assert_eq!(
-      drive_str(|inp| directives(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| Directives::<_>::graphql(inp).map(|_| ()), src).is_ok(),
       *accept,
       "str directives({src:?})"
     );
     assert_eq!(
-      drive_slice(|inp| directives(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      drive_slice(
+        |inp| Directives::<_>::graphql(inp).map(|_| ()),
+        src.as_bytes()
+      )
+      .is_ok(),
       *accept,
       "slice directives({src:?})"
     );

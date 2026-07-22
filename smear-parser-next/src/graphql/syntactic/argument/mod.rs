@@ -6,7 +6,6 @@
 
 use std::vec::Vec;
 
-use smear_scaffold::ast as scaffold;
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
@@ -34,12 +33,12 @@ use crate::{
 };
 
 macro_rules! argument_parser {
-  ($visibility:vis $name:ident, $input:ident, $output:ty, [], $body:block) => {
-    argument_parser!(@impl $visibility $name, $input, $output, [], $body);
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [], $body:block) => {
+    argument_parser!(@impl $(#[$meta])* $visibility $name, $input, $output, [], $body);
   };
-  ($visibility:vis $name:ident, $input:ident, $output:ty, [delimited], $body:block) => {
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [delimited], $body:block) => {
     argument_parser!(
-      @impl $visibility $name, $input,
+      @impl $(#[$meta])* $visibility $name, $input,
       $output,
       [
         GraphqlError<'inp, Src, Ctx>:
@@ -48,8 +47,8 @@ macro_rules! argument_parser {
       $body
     );
   };
-  (@impl $visibility:vis $name:ident, $input:ident, $output:ty, [$($bounds:tt)*], $body:block) => {
-    #[doc = "Parses this GraphQL argument production with the concrete syntactic lexer."]
+  (@impl $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [$($bounds:tt)*], $body:block) => {
+    $(#[$meta])*
     $visibility fn $name<'inp, Src, Ctx>(
       $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
@@ -116,6 +115,12 @@ where
 }
 
 argument_parser!(
+  /// Parses one executable GraphQL `Argument` production.
+  ///
+  /// This parser is committed: it requires a name, `:`, and an executable input
+  /// value, reporting the phase-specific diagnostic when any part is malformed.
+  ///
+  /// See the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
   pub argument,
   inp,
   Argument<GraphqlSlice<'inp, Src>>,
@@ -140,12 +145,18 @@ argument_parser!(
         InputValue::graphql(inp)
       })
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| scaffold::Argument::new(span, name, value))
+      .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
       .parse_input(inp)
   }
 );
 
 argument_parser!(
+  /// Parses one constant GraphQL `Argument` production.
+  ///
+  /// This parser is committed and rejects variables in the value position while
+  /// retaining the same name and colon diagnostics as [`argument`].
+  ///
+  /// See the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
   pub const_argument,
   inp,
   ConstArgument<GraphqlSlice<'inp, Src>>,
@@ -170,7 +181,7 @@ argument_parser!(
         ConstInputValue::graphql(inp)
       })
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| scaffold::Argument::new(span, name, value))
+      .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
       .parse_input(inp)
   }
 );
@@ -243,6 +254,13 @@ argument_parser!(
 );
 
 argument_parser!(
+  /// Parses an executable GraphQL `Arguments` collection.
+  ///
+  /// If the next token is not `(`, this parser consumes nothing and returns an
+  /// empty collection with a zero-width span. After `(` it is committed through
+  /// `)`. The lenient empty spelling `()` is accepted with its real delimiter span.
+  ///
+  /// See the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
   pub arguments,
   inp,
   Arguments<GraphqlSlice<'inp, Src>>,
@@ -260,6 +278,14 @@ argument_parser!(
 );
 
 argument_parser!(
+  /// Parses a constant GraphQL `Arguments` collection.
+  ///
+  /// If the next token is not `(`, this parser consumes nothing and returns an
+  /// empty collection with a zero-width span. After `(` it is committed through
+  /// `)`, and its argument values reject variables. The lenient empty spelling
+  /// `()` is accepted with its real delimiter span.
+  ///
+  /// See the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
   pub const_arguments,
   inp,
   ConstArguments<GraphqlSlice<'inp, Src>>,
@@ -274,6 +300,95 @@ argument_parser!(
         ParseAttempt::Decline => ArgumentList::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
+);
+
+macro_rules! impl_argument_graphql {
+  (
+    $(#[$meta:meta])*
+    $node:ty,
+    $parser:ident,
+    [$($bounds:tt)*]
+  ) => {
+    impl<S> $node {
+      $(#[$meta])*
+      pub fn graphql<'inp, Src, Ctx>(
+        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+      ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
+      where
+        Src: Source<usize, Slice<'inp> = S> + ?Sized,
+        S: Slice<'inp> + Clone + 'inp,
+        str: Equivalent<S>,
+        GraphqlLexer<'inp, Src>: Lexer<
+          'inp,
+          Source = Src,
+          Token = GraphqlToken<'inp, Src>,
+          Span = SimpleSpan,
+          Offset = usize,
+        >,
+        $($bounds)*
+        Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+          + From<
+            UnexpectedToken<
+              'inp,
+              GraphqlToken<'inp, Src>,
+              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+              SimpleSpan,
+              GraphQL,
+            >,
+          >
+          + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<S>>,
+      {
+        $parser(inp)
+      }
+    }
+  };
+}
+
+impl_argument_graphql!(
+  /// Parses one committed executable GraphQL argument.
+  ///
+  /// See [`argument`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  Argument<S>,
+  argument,
+  []
+);
+
+impl_argument_graphql!(
+  /// Parses one committed constant GraphQL argument.
+  ///
+  /// See [`const_argument`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  Argument<S, ConstInputValue<S>>,
+  const_argument,
+  []
+);
+
+impl_argument_graphql!(
+  /// Parses executable GraphQL arguments, returning an empty zero-width collection
+  /// without consuming when `(` is absent.
+  ///
+  /// See [`arguments`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  ArgumentList<Argument<S>>,
+  arguments,
+  [
+    GraphqlError<'inp, Src, Ctx>:
+      From<tokora::error::Unclosed<Paren, SimpleSpan, GraphQL>>,
+  ]
+);
+
+impl_argument_graphql!(
+  /// Parses constant GraphQL arguments, returning an empty zero-width collection
+  /// without consuming when `(` is absent.
+  ///
+  /// See [`const_arguments`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  ArgumentList<Argument<S, ConstInputValue<S>>>,
+  const_arguments,
+  [
+    GraphqlError<'inp, Src, Ctx>:
+      From<tokora::error::Unclosed<Paren, SimpleSpan, GraphQL>>,
+  ]
 );
 
 #[cfg(test)]

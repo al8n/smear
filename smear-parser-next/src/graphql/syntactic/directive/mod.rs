@@ -6,7 +6,6 @@
 
 use std::vec::Vec;
 
-use smear_scaffold::ast as scaffold;
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
@@ -32,8 +31,8 @@ use crate::{
 };
 
 macro_rules! directive_parser {
-  ($visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
-    #[doc = "Parses this GraphQL directive production with the concrete syntactic lexer."]
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
+    $(#[$meta])*
     $visibility fn $name<'inp, Src, Ctx>(
       $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
     ) -> Result<$output, GraphqlError<'inp, Src, Ctx>>
@@ -100,6 +99,13 @@ where
 }
 
 directive_parser!(
+  /// Parses one executable GraphQL `Directive` production.
+  ///
+  /// This parser is committed: it requires `@` and a directive name, then parses
+  /// arguments when `(` follows. An absent or explicitly empty argument collection
+  /// is stored as `None` on the directive node.
+  ///
+  /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
   pub directive,
   inp,
   Directive<GraphqlSlice<'inp, Src>>,
@@ -124,13 +130,20 @@ directive_parser!(
         } else {
           Some(arguments)
         };
-        scaffold::Directive::new(span, name, arguments)
+        Directive::new(span, name, arguments)
       })
       .parse_input(inp)
   }
 );
 
 directive_parser!(
+  /// Parses one constant GraphQL `Directive` production.
+  ///
+  /// This parser has the same committed `@` and name phases as [`directive`], but
+  /// rejects variables inside directive arguments. Empty arguments are stored as
+  /// `None` on the directive node.
+  ///
+  /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
   pub const_directive,
   inp,
   ConstDirective<GraphqlSlice<'inp, Src>>,
@@ -155,7 +168,7 @@ directive_parser!(
         } else {
           Some(arguments)
         };
-        scaffold::Directive::new(span, name, arguments)
+        Directive::new(span, name, arguments)
       })
       .parse_input(inp)
   }
@@ -194,7 +207,7 @@ directive_parser!(
     })
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data }| scaffold::Directives::new(span, data))
+      .map(|Spanned { span, data }| Directives::new(span, data))
   }
 );
 
@@ -214,11 +227,18 @@ directive_parser!(
     })
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data }| scaffold::Directives::new(span, data))
+      .map(|Spanned { span, data }| Directives::new(span, data))
   }
 );
 
 directive_parser!(
+  /// Parses an executable GraphQL `Directives` collection.
+  ///
+  /// If the next token is not `@`, this parser consumes nothing and returns an
+  /// empty collection with a zero-width span. After `@`, every directive head is
+  /// committed and a malformed directive reports its phase-specific diagnostic.
+  ///
+  /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
   pub directives,
   inp,
   Directives<GraphqlSlice<'inp, Src>>,
@@ -229,12 +249,19 @@ directive_parser!(
       .try_parse_input(inp)
       .map(|attempt| match attempt {
         ParseAttempt::Accept(directives) => directives,
-        ParseAttempt::Decline => scaffold::Directives::new(SimpleSpan::new(start, start), Vec::new()),
+        ParseAttempt::Decline => Directives::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
 );
 
 directive_parser!(
+  /// Parses a constant GraphQL `Directives` collection.
+  ///
+  /// If the next token is not `@`, this parser consumes nothing and returns an
+  /// empty collection with a zero-width span. After `@`, every directive head is
+  /// committed, and argument values reject variables.
+  ///
+  /// See the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
   pub const_directives,
   inp,
   ConstDirectives<GraphqlSlice<'inp, Src>>,
@@ -245,9 +272,87 @@ directive_parser!(
       .try_parse_input(inp)
       .map(|attempt| match attempt {
         ParseAttempt::Accept(directives) => directives,
-        ParseAttempt::Decline => scaffold::Directives::new(SimpleSpan::new(start, start), Vec::new()),
+        ParseAttempt::Decline => Directives::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
+);
+
+macro_rules! impl_directive_graphql {
+  (
+    $(#[$meta:meta])*
+    $node:ty,
+    $parser:ident
+  ) => {
+    impl<S> $node {
+      $(#[$meta])*
+      pub fn graphql<'inp, Src, Ctx>(
+        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+      ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
+      where
+        Src: Source<usize, Slice<'inp> = S> + ?Sized,
+        S: Slice<'inp> + Clone + 'inp,
+        str: Equivalent<S>,
+        GraphqlLexer<'inp, Src>: Lexer<
+          'inp,
+          Source = Src,
+          Token = GraphqlToken<'inp, Src>,
+          Span = SimpleSpan,
+          Offset = usize,
+        >,
+        Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+          + From<
+            UnexpectedToken<
+              'inp,
+              GraphqlToken<'inp, Src>,
+              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+              SimpleSpan,
+              GraphQL,
+            >,
+          >
+          + From<tokora::error::Unclosed<Paren, SimpleSpan, GraphQL>>
+          + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<S>>,
+      {
+        $parser(inp)
+      }
+    }
+  };
+}
+
+impl_directive_graphql!(
+  /// Parses one committed executable GraphQL directive.
+  ///
+  /// See [`directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  Directive<S>,
+  directive
+);
+
+impl_directive_graphql!(
+  /// Parses one committed constant GraphQL directive.
+  ///
+  /// See [`const_directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  Directive<S, crate::graphql::ast::ConstArguments<S>>,
+  const_directive
+);
+
+impl_directive_graphql!(
+  /// Parses executable GraphQL directives, returning an empty zero-width collection
+  /// without consuming when `@` is absent.
+  ///
+  /// See [`directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  Directives<S>,
+  directives
+);
+
+impl_directive_graphql!(
+  /// Parses constant GraphQL directives, returning an empty zero-width collection
+  /// without consuming when `@` is absent.
+  ///
+  /// See [`const_directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  Directives<S, ConstDirective<S>>,
+  const_directives
 );
 
 #[cfg(test)]
