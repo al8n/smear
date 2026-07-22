@@ -442,16 +442,23 @@ fn value_rejects_non_value_heads() {
 }
 
 #[test]
-fn value_unexpected_token_error_family() {
-  let is_unexpected = |src: &str| match drive_str(|inp| InputValue::graphql(inp).map(|_| ()), src) {
-    Err(errs) => errs
+fn value_invalid_head_expects_input_value() {
+  for (src, kind) in [
+    ("}", SyntacticTokenKind::RBrace),
+    ("@", SyntacticTokenKind::At),
+  ] {
+    let error = drive_str(|inp| InputValue::graphql(inp).map(|_| ()), src)
+      .expect_err("a non-value head should fail")
       .into_iter()
       .next()
-      .is_some_and(|e| e.data().is_unexpected_token()),
-    Ok(()) => false,
-  };
-  assert!(is_unexpected("}"));
-  assert!(is_unexpected("@"));
+      .expect("a non-value head should emit an error");
+    assert!(matches!(
+      error.into_data(),
+      ErrorData::UnexpectedToken(unexpected)
+        if unexpected.expected() == &Expectation::InputValue
+          && unexpected.found() == Some(&kind)
+    ));
+  }
 }
 
 #[test]
@@ -534,15 +541,17 @@ fn const_value_list_and_object() {
 #[test]
 fn const_value_rejects_variable() {
   reject_all!(ConstInputValue::graphql, "$x");
-  // The rejection is an unexpected-token, not an end-of-input.
-  let family = match drive_str(|inp| ConstInputValue::graphql(inp).map(|_| ()), "$x") {
-    Err(errs) => errs
-      .into_iter()
-      .next()
-      .is_some_and(|e| e.data().is_unexpected_token()),
-    Ok(()) => false,
-  };
-  assert!(family);
+  let error = drive_str(|inp| ConstInputValue::graphql(inp).map(|_| ()), "$x")
+    .expect_err("variables are not const input values")
+    .into_iter()
+    .next()
+    .expect("a variable head should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::ConstInputValue
+        && unexpected.found() == Some(&SyntacticTokenKind::Dollar)
+  ));
 }
 
 #[test]
