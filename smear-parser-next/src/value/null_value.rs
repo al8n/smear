@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -12,12 +12,12 @@ use tokora::{
 
 /// A null value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NullValue<S> {
+pub struct NullValue<S, Span = SimpleSpan> {
   source: S,
   span: Span,
 }
 
-impl<S> Display for NullValue<S>
+impl<S, Span> Display for NullValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -27,21 +27,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for NullValue<S> {
+impl<S, Span> AsSpan<Span> for NullValue<S, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for NullValue<S> {
+impl<S, Span> IntoSpan<Span> for NullValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for NullValue<S> {
+impl<S, Span> IntoComponents for NullValue<S, Span> {
   type Components = (Span, S);
 
   #[inline]
@@ -50,7 +50,7 @@ impl<S> IntoComponents for NullValue<S> {
   }
 }
 
-impl<S> core::ops::Deref for NullValue<S> {
+impl<S, Span> core::ops::Deref for NullValue<S, Span> {
   type Target = S;
 
   #[inline]
@@ -59,7 +59,7 @@ impl<S> core::ops::Deref for NullValue<S> {
   }
 }
 
-impl<S> NullValue<S> {
+impl<S, Span> NullValue<S, Span> {
   /// Creates a new null value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
@@ -91,7 +91,7 @@ impl<S> NullValue<S> {
   }
 }
 
-impl<S> DisplayCompact for NullValue<S>
+impl<S, Span> DisplayCompact for NullValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -103,7 +103,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for NullValue<S>
+impl<S, Span> DisplayPretty for NullValue<S, Span>
 where
   S: DisplayHuman,
 {

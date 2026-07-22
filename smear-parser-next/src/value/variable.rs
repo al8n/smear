@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -12,26 +12,26 @@ use tokora::{
 
 /// A variable value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VariableValue<Name> {
+pub struct VariableValue<Name, Span = SimpleSpan> {
   span: Span,
   name: Name,
 }
 
-impl<Name> AsSpan<Span> for VariableValue<Name> {
+impl<Name, Span> AsSpan<Span> for VariableValue<Name, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name> IntoSpan<Span> for VariableValue<Name> {
+impl<Name, Span> IntoSpan<Span> for VariableValue<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name> IntoComponents for VariableValue<Name> {
+impl<Name, Span> IntoComponents for VariableValue<Name, Span> {
   type Components = (Span, Name);
 
   #[inline]
@@ -40,7 +40,7 @@ impl<Name> IntoComponents for VariableValue<Name> {
   }
 }
 
-impl<Name> core::ops::Deref for VariableValue<Name> {
+impl<Name, Span> core::ops::Deref for VariableValue<Name, Span> {
   type Target = Name;
 
   #[inline]
@@ -49,7 +49,7 @@ impl<Name> core::ops::Deref for VariableValue<Name> {
   }
 }
 
-impl<Name> Display for VariableValue<Name>
+impl<Name, Span> Display for VariableValue<Name, Span>
 where
   Name: DisplayHuman,
 {
@@ -59,7 +59,7 @@ where
   }
 }
 
-impl<Name> VariableValue<Name> {
+impl<Name, Span> VariableValue<Name, Span> {
   /// Creates a new variable from the given span and name.
   #[inline(always)]
   pub(crate) const fn new(span: Span, name: Name) -> Self {
@@ -79,7 +79,7 @@ impl<Name> VariableValue<Name> {
   }
 }
 
-impl<Name> DisplayCompact for VariableValue<Name>
+impl<Name, Span> DisplayCompact for VariableValue<Name, Span>
 where
   Name: DisplayHuman,
 {
@@ -91,7 +91,7 @@ where
   }
 }
 
-impl<Name> DisplayPretty for VariableValue<Name>
+impl<Name, Span> DisplayPretty for VariableValue<Name, Span>
 where
   Name: DisplayHuman,
 {

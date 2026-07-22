@@ -1,8 +1,8 @@
 use core::fmt::Display;
 
 use tokora::{
-  SimpleSpan as Span,
-  span::{AsSpan, IntoSpan},
+  SimpleSpan,
+  span::{AsSpan, IntoSpan, Span as SpanTrait},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -13,26 +13,26 @@ use tokora::{
 
 /// A floating-point value literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FloatValue<S> {
+pub struct FloatValue<S, Span = SimpleSpan> {
   span: Span,
   value: S,
 }
 
-impl<S> AsSpan<Span> for FloatValue<S> {
+impl<S, Span> AsSpan<Span> for FloatValue<S, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for FloatValue<S> {
+impl<S, Span> IntoSpan<Span> for FloatValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for FloatValue<S> {
+impl<S, Span> IntoComponents for FloatValue<S, Span> {
   type Components = (Span, S);
 
   #[inline]
@@ -41,7 +41,7 @@ impl<S> IntoComponents for FloatValue<S> {
   }
 }
 
-impl<S> Display for FloatValue<S>
+impl<S, Span> Display for FloatValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -51,14 +51,14 @@ where
   }
 }
 
-impl<S> AsRef<S> for FloatValue<S> {
+impl<S, Span> AsRef<S> for FloatValue<S, Span> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S> core::ops::Deref for FloatValue<S> {
+impl<S, Span> core::ops::Deref for FloatValue<S, Span> {
   type Target = S;
 
   #[inline]
@@ -67,7 +67,7 @@ impl<S> core::ops::Deref for FloatValue<S> {
   }
 }
 
-impl<S> FloatValue<S> {
+impl<S, Span> FloatValue<S, Span> {
   /// Creates a new float value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
@@ -96,7 +96,7 @@ impl<S> FloatValue<S> {
   }
 }
 
-impl<S> DisplayCompact for FloatValue<S>
+impl<S, Span> DisplayCompact for FloatValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -108,7 +108,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for FloatValue<S>
+impl<S, Span> DisplayPretty for FloatValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -120,9 +120,11 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for FloatValue<S>
+impl<S, Span> DisplaySyntaxTree for FloatValue<S, Span>
 where
   S: DisplayHuman,
+  Span: SpanTrait,
+  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(

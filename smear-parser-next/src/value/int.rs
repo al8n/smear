@@ -1,8 +1,8 @@
 use core::fmt::Display;
 
 use tokora::{
-  SimpleSpan as Span,
-  span::{AsSpan, IntoSpan},
+  SimpleSpan,
+  span::{AsSpan, IntoSpan, Span as SpanTrait},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -13,12 +13,12 @@ use tokora::{
 
 /// An integer value literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IntValue<S> {
+pub struct IntValue<S, Span = SimpleSpan> {
   span: Span,
   value: S,
 }
 
-impl<S> Display for IntValue<S>
+impl<S, Span> Display for IntValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -28,21 +28,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for IntValue<S> {
+impl<S, Span> AsSpan<Span> for IntValue<S, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for IntValue<S> {
+impl<S, Span> IntoSpan<Span> for IntValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for IntValue<S> {
+impl<S, Span> IntoComponents for IntValue<S, Span> {
   type Components = (Span, S);
 
   #[inline]
@@ -51,7 +51,7 @@ impl<S> IntoComponents for IntValue<S> {
   }
 }
 
-impl<S> core::ops::Deref for IntValue<S> {
+impl<S, Span> core::ops::Deref for IntValue<S, Span> {
   type Target = S;
 
   #[inline]
@@ -60,7 +60,7 @@ impl<S> core::ops::Deref for IntValue<S> {
   }
 }
 
-impl<S> IntValue<S> {
+impl<S, Span> IntValue<S, Span> {
   /// Creates a new int value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
@@ -89,7 +89,7 @@ impl<S> IntValue<S> {
   }
 }
 
-impl<S> DisplayCompact for IntValue<S>
+impl<S, Span> DisplayCompact for IntValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -101,7 +101,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for IntValue<S>
+impl<S, Span> DisplayPretty for IntValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -113,9 +113,11 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for IntValue<S>
+impl<S, Span> DisplaySyntaxTree for IntValue<S, Span>
 where
   S: DisplayHuman,
+  Span: SpanTrait,
+  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(

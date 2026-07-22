@@ -1,7 +1,7 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use smear_scaffold::ast as scaffold;
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
 };
 
@@ -13,7 +13,7 @@ pub use crate::value::{
 };
 
 /// A GraphQL variable value that can appear in queries and mutations.
-pub type VariableValue<S> = crate::value::VariableValue<Name<S>>;
+pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;
 
 /// List value in GraphQL (can contain variables).
 pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
@@ -65,9 +65,9 @@ pub enum InputValue<S> {
   Object(scaffold::Object<Name<S>, InputValue<S>>),
 }
 
-impl<S> AsSpan<Span> for InputValue<S> {
+impl<S> AsSpan<SimpleSpan> for InputValue<S> {
   #[inline]
-  fn as_span(&self) -> &Span {
+  fn as_span(&self) -> &SimpleSpan {
     match self {
       Self::Variable(v) => v.as_span(),
       Self::Boolean(v) => v.as_span(),
@@ -82,9 +82,9 @@ impl<S> AsSpan<Span> for InputValue<S> {
   }
 }
 
-impl<S> IntoSpan<Span> for InputValue<S> {
+impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
   #[inline]
-  fn into_span(self) -> Span {
+  fn into_span(self) -> SimpleSpan {
     match self {
       Self::Variable(v) => v.into_span(),
       Self::Boolean(v) => v.into_span(),
@@ -122,9 +122,9 @@ pub enum ConstInputValue<S> {
   Object(scaffold::Object<Name<S>, ConstInputValue<S>>),
 }
 
-impl<S> AsSpan<Span> for ConstInputValue<S> {
+impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
   #[inline]
-  fn as_span(&self) -> &Span {
+  fn as_span(&self) -> &SimpleSpan {
     match self {
       Self::Boolean(v) => v.as_span(),
       Self::String(v) => v.as_span(),
@@ -138,9 +138,9 @@ impl<S> AsSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<S> IntoSpan<Span> for ConstInputValue<S> {
+impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
   #[inline]
-  fn into_span(self) -> Span {
+  fn into_span(self) -> SimpleSpan {
     match self {
       Self::Boolean(v) => v.into_span(),
       Self::String(v) => v.into_span(),

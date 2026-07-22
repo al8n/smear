@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -12,12 +12,12 @@ use tokora::{
 
 /// An enum value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumValue<S> {
+pub struct EnumValue<S, Span = SimpleSpan> {
   source: S,
   span: Span,
 }
 
-impl<S> Display for EnumValue<S>
+impl<S, Span> Display for EnumValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -27,21 +27,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for EnumValue<S> {
+impl<S, Span> AsSpan<Span> for EnumValue<S, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for EnumValue<S> {
+impl<S, Span> IntoSpan<Span> for EnumValue<S, Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for EnumValue<S> {
+impl<S, Span> IntoComponents for EnumValue<S, Span> {
   type Components = (Span, S);
 
   #[inline]
@@ -50,7 +50,7 @@ impl<S> IntoComponents for EnumValue<S> {
   }
 }
 
-impl<S> core::ops::Deref for EnumValue<S> {
+impl<S, Span> core::ops::Deref for EnumValue<S, Span> {
   type Target = S;
 
   #[inline]
@@ -59,7 +59,7 @@ impl<S> core::ops::Deref for EnumValue<S> {
   }
 }
 
-impl<S> EnumValue<S> {
+impl<S, Span> EnumValue<S, Span> {
   /// Creates a new enum value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
@@ -91,7 +91,7 @@ impl<S> EnumValue<S> {
   }
 }
 
-impl<S> DisplayCompact for EnumValue<S>
+impl<S, Span> DisplayCompact for EnumValue<S, Span>
 where
   S: DisplayHuman,
 {
@@ -103,7 +103,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for EnumValue<S>
+impl<S, Span> DisplayPretty for EnumValue<S, Span>
 where
   S: DisplayHuman,
 {

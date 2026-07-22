@@ -1,6 +1,6 @@
 use core::fmt::Display;
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -10,33 +10,33 @@ use tokora::{
 
 /// A boolean value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BooleanValue {
+pub struct BooleanValue<Span = SimpleSpan> {
   span: Span,
   value: bool,
 }
 
-impl Display for BooleanValue {
+impl<Span> Display for BooleanValue<Span> {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.value())
   }
 }
 
-impl AsSpan<Span> for BooleanValue {
+impl<Span> AsSpan<Span> for BooleanValue<Span> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl IntoSpan<Span> for BooleanValue {
+impl<Span> IntoSpan<Span> for BooleanValue<Span> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl IntoComponents for BooleanValue {
+impl<Span> IntoComponents for BooleanValue<Span> {
   type Components = (Span, bool);
 
   #[inline]
@@ -45,14 +45,14 @@ impl IntoComponents for BooleanValue {
   }
 }
 
-impl AsRef<bool> for BooleanValue {
+impl<Span> AsRef<bool> for BooleanValue<Span> {
   #[inline]
   fn as_ref(&self) -> &bool {
     &self.value
   }
 }
 
-impl core::ops::Deref for BooleanValue {
+impl<Span> core::ops::Deref for BooleanValue<Span> {
   type Target = bool;
 
   #[inline]
@@ -61,7 +61,7 @@ impl core::ops::Deref for BooleanValue {
   }
 }
 
-impl BooleanValue {
+impl<Span> BooleanValue<Span> {
   /// Creates a new boolean value.
   #[inline]
   pub(crate) const fn new(span: Span, value: bool) -> Self {
@@ -81,7 +81,7 @@ impl BooleanValue {
   }
 }
 
-impl DisplayCompact for BooleanValue {
+impl<Span> DisplayCompact for BooleanValue<Span> {
   type Options = ();
 
   #[inline]
@@ -90,7 +90,7 @@ impl DisplayCompact for BooleanValue {
   }
 }
 
-impl DisplayPretty for BooleanValue {
+impl<Span> DisplayPretty for BooleanValue<Span> {
   type Options = ();
 
   #[inline]
