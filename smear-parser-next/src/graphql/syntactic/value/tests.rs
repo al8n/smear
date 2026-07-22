@@ -10,20 +10,22 @@
 //! The productions are fixed to the concrete GraphQL syntactic lexer and `GraphQL`
 //! marker, so the drivers use `Parser::with_parser_of` with that marker explicitly.
 
+use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use smear_scaffold::hints::ObjectFieldValueHint;
 use tokora::{
   FatalContext, Lexer, Parse, Parser, SimpleSpan, Source,
   error::{UnexpectedEot, token::UnexpectedToken},
   utils::cmp::Equivalent,
 };
 
-use super::{const_object_field, default_value, object_field};
+use super::{const_object_field, default_value, object_field, try_default_value};
 use crate::graphql::{
   GraphQL,
   ast::{
     BooleanValue, ConstInputValue, DefaultInputValue, EnumValue, FloatValue, InputValue, IntValue,
     NullValue, StringValue, VariableValue,
   },
-  error::{ErrorData, GraphqlErrors, Unclosed},
+  error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlToken},
 };
 use tokora::try_parse_input::ParseAttempt;
@@ -606,6 +608,219 @@ fn const_object_field_accepts_and_rejects_variable() {
   reject_all!(const_object_field, "k: $v");
 }
 
+#[test]
+fn object_fields_missing_colon_leave_value_token() {
+  let (expects_colon, value_remains) = drive_str(
+    |inp| {
+      let expects_colon = match object_field(inp) {
+        Err(errors) => errors.into_iter().next().is_some_and(|error| {
+          matches!(
+            error.into_data(),
+            ErrorData::UnexpectedToken(unexpected)
+              if unexpected.expected() == &Expectation::Colon
+                && matches!(unexpected.found(), Some(SyntacticTokenKind::Int))
+          )
+        }),
+        Ok(_) => false,
+      };
+      let value_remains = matches!(
+        inp
+          .next()?
+          .expect("the token in place of the colon should remain")
+          .into_data(),
+        GraphqlToken::<'_, str>::LitInt(_)
+      );
+      Ok::<_, GraphqlErrors<&str>>((expects_colon, value_remains))
+    },
+    "name 1",
+  )
+  .unwrap();
+  assert!(expects_colon);
+  assert!(value_remains);
+
+  let (expects_colon, value_remains) = drive_str(
+    |inp| {
+      let expects_colon = match const_object_field(inp) {
+        Err(errors) => errors.into_iter().next().is_some_and(|error| {
+          matches!(
+            error.into_data(),
+            ErrorData::UnexpectedToken(unexpected)
+              if unexpected.expected() == &Expectation::Colon
+                && matches!(unexpected.found(), Some(SyntacticTokenKind::Int))
+          )
+        }),
+        Ok(_) => false,
+      };
+      let value_remains = matches!(
+        inp
+          .next()?
+          .expect("the token in place of the colon should remain")
+          .into_data(),
+        GraphqlToken::<'_, str>::LitInt(_)
+      );
+      Ok::<_, GraphqlErrors<&str>>((expects_colon, value_remains))
+    },
+    "name 1",
+  )
+  .unwrap();
+  assert!(expects_colon);
+  assert!(value_remains);
+}
+
+#[test]
+fn object_fields_eot_after_name_expect_colon() {
+  for is_expected in [
+    drive_str(
+      |inp| {
+        Ok::<_, GraphqlErrors<&str>>(match object_field(inp) {
+          Err(errors) => errors.into_iter().next().is_some_and(|error| {
+            matches!(
+              error.into_data(),
+              ErrorData::UnexpectedEndOfObjectFieldValue(end)
+                if end.hint() == &ObjectFieldValueHint::Colon
+            )
+          }),
+          Ok(_) => false,
+        })
+      },
+      "key ",
+    )
+    .unwrap(),
+    drive_str(
+      |inp| {
+        Ok::<_, GraphqlErrors<&str>>(match const_object_field(inp) {
+          Err(errors) => errors.into_iter().next().is_some_and(|error| {
+            matches!(
+              error.into_data(),
+              ErrorData::UnexpectedEndOfObjectFieldValue(end)
+                if end.hint() == &ObjectFieldValueHint::Colon
+            )
+          }),
+          Ok(_) => false,
+        })
+      },
+      "key ",
+    )
+    .unwrap(),
+  ] {
+    assert!(is_expected);
+  }
+}
+
+#[test]
+fn object_fields_eot_after_colon_expect_value() {
+  for is_expected in [
+    drive_str(
+      |inp| {
+        Ok::<_, GraphqlErrors<&str>>(match object_field(inp) {
+          Err(errors) => errors.into_iter().next().is_some_and(|error| {
+            matches!(
+              error.into_data(),
+              ErrorData::UnexpectedEndOfObjectFieldValue(end)
+                if end.hint() == &ObjectFieldValueHint::Value
+            )
+          }),
+          Ok(_) => false,
+        })
+      },
+      "key: ",
+    )
+    .unwrap(),
+    drive_str(
+      |inp| {
+        Ok::<_, GraphqlErrors<&str>>(match const_object_field(inp) {
+          Err(errors) => errors.into_iter().next().is_some_and(|error| {
+            matches!(
+              error.into_data(),
+              ErrorData::UnexpectedEndOfObjectFieldValue(end)
+                if end.hint() == &ObjectFieldValueHint::Value
+            )
+          }),
+          Ok(_) => false,
+        })
+      },
+      "key: ",
+    )
+    .unwrap(),
+  ] {
+    assert!(is_expected);
+  }
+}
+
+#[test]
+fn object_fields_wrong_value_leave_closing_brace() {
+  let (expects_value, brace_remains) = drive_str(
+    |inp| {
+      let expects_value = match object_field(inp) {
+        Err(errors) => errors.into_iter().next().is_some_and(|error| {
+          matches!(
+            error.into_data(),
+            ErrorData::UnexpectedToken(unexpected)
+              if unexpected.expected() == &Expectation::InputValue
+                && matches!(unexpected.found(), Some(SyntacticTokenKind::RBrace))
+          )
+        }),
+        Ok(_) => false,
+      };
+      let brace_remains = matches!(
+        inp
+          .next()?
+          .expect("the closing brace should remain for the object parser")
+          .into_data(),
+        GraphqlToken::<'_, str>::RBrace
+      );
+      Ok::<_, GraphqlErrors<&str>>((expects_value, brace_remains))
+    },
+    "key:}",
+  )
+  .unwrap();
+  assert!(expects_value);
+  assert!(brace_remains);
+
+  let (expects_value, brace_remains) = drive_str(
+    |inp| {
+      let expects_value = match const_object_field(inp) {
+        Err(errors) => errors.into_iter().next().is_some_and(|error| {
+          matches!(
+            error.into_data(),
+            ErrorData::UnexpectedToken(unexpected)
+              if unexpected.expected() == &Expectation::ConstInputValue
+                && matches!(unexpected.found(), Some(SyntacticTokenKind::RBrace))
+          )
+        }),
+        Ok(_) => false,
+      };
+      let brace_remains = matches!(
+        inp
+          .next()?
+          .expect("the closing brace should remain for the object parser")
+          .into_data(),
+        GraphqlToken::<'_, str>::RBrace
+      );
+      Ok::<_, GraphqlErrors<&str>>((expects_value, brace_remains))
+    },
+    "key:}",
+  )
+  .unwrap();
+  assert!(expects_value);
+  assert!(brace_remains);
+}
+
+#[test]
+fn object_non_terminator_commits_and_expects_name() {
+  let error = drive_str(|inp| InputValue::graphql(inp).map(|_| ()), "{ : 1 }")
+    .expect_err("a non-terminator commits the object-field parser")
+    .into_iter()
+    .next()
+    .expect("the invalid field name should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::Name
+        && matches!(unexpected.found(), Some(SyntacticTokenKind::Colon))
+  ));
+}
+
 // ─── default value ───────────────────────────────────────────────────────────
 
 #[test]
@@ -613,7 +828,7 @@ fn default_value_present() {
   fn check<S: AsRef<[u8]>>(v: Option<DefaultInputValue<S>>) {
     let default = v.expect("present");
     assert!(default.value().is_int());
-    assert_eq!(default.span().start(), 0);
+    assert_eq!(*default.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(default_value, "= 42", check);
 }
@@ -640,34 +855,52 @@ fn default_value_absent_without_equal() {
   assert!(leftover_is_int);
 }
 
-#[test]
-fn default_value_rejects_bad_const_value() {
-  // `= $v` has a value head (`$`), so the `=` commits and the following variable is
-  // rejected in a constant context — an error, not a decline.
-  reject_all!(default_value, "= $v");
+fn assert_try_default_tail_error(src: &'static str, kind: SyntacticTokenKind) {
+  let (diagnostic_matches, leftover_kind) = drive_str(
+    |inp| {
+      let diagnostic_matches = match try_default_value(inp) {
+        Err(errors) => errors.into_iter().next().is_some_and(|error| {
+          matches!(
+            error.into_data(),
+            ErrorData::UnexpectedToken(unexpected)
+              if unexpected.expected() == &Expectation::ConstInputValue
+                && unexpected.found() == Some(&kind)
+          )
+        }),
+        Ok(_) => false,
+      };
+      let leftover_kind = inp.next()?.map(|token| token.into_data().kind());
+      Ok::<_, GraphqlErrors<&str>>((diagnostic_matches, leftover_kind))
+    },
+    src,
+  )
+  .unwrap();
+  assert!(diagnostic_matches);
+  assert_eq!(leftover_kind, Some(kind));
+  assert!(drive_str(default_value, src).is_err());
 }
 
 #[test]
-fn default_value_eq_without_value_declines_and_leaves() {
-  // Amendment 7 U2 window: `=` followed by a non-value head declines to `None` and
-  // leaves the `=` in place (position law), rather than committing on `=` and then
-  // erroring. This is a leniency delta from the frozen parser (which commits on `=`
-  // and errors on a missing const value) — see the value-production return notes.
-  let (absent, leftover_is_error) = drive_str(
-    |inp| {
-      let default = default_value(inp)?;
-      // The `=` is untouched, so a value parse over it errors (`=` is no value head).
-      let after = InputValue::graphql(inp).is_err();
-      Ok::<_, GraphqlErrors<&str>>((default.is_none(), after))
-    },
-    "= }",
-  )
-  .unwrap();
-  assert!(absent);
-  assert!(leftover_is_error);
-  // Over both source flavors `= }` is accepted-as-absent (declines to `None`).
-  assert!(drive_str(default_value, "= }").unwrap().is_none());
-  assert!(drive_slice(default_value, b"= }").unwrap().is_none());
+fn try_default_value_equal_without_tail_expects_const_value() {
+  let error = drive_str(|inp| try_default_value(inp).map(|_| ()), "=")
+    .expect_err("`=` commits even at end of input")
+    .into_iter()
+    .next()
+    .expect("a missing default value should emit an error");
+  assert_eq!(error.span(), SimpleSpan::new(1, 1));
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::ConstInputValue
+        && unexpected.found().is_none()
+  ));
+  assert!(drive_str(default_value, "=").is_err());
+}
+
+#[test]
+fn try_default_value_malformed_tail_commits_and_leaves_token() {
+  assert_try_default_tail_error("= }", SyntacticTokenKind::RBrace);
+  assert_try_default_tail_error("= $v", SyntacticTokenKind::Dollar);
 }
 
 // ─── try_ twins: the committed/attempt pairs ─────────────────────────────────

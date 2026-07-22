@@ -10,10 +10,12 @@
 //! Every committed parser reports an unexpected token or end of input after it has
 //! committed. Where a `try_` counterpart is available, it declines without
 //! consuming when its head does not match. The variable parser commits on `$` and
-//! validates its name with a single-token lookahead; the remaining multi-token heads
-//! (`Name : Value` and `= ConstValue`) likewise preserve the position law.
+//! validates its name with a single-token lookahead. Object field lists stop only at
+//! `}` or end of input; each field validates its name, colon, and value without
+//! consuming a wrong token. Default values commit on `=` and validate the const-value
+//! tail without consuming a wrong token.
 
-use smear_scaffold::ast as scaffold;
+use smear_scaffold::{ast as scaffold, hints::ObjectFieldValueHint};
 use std::vec::Vec;
 use tokora::{
   Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
@@ -25,7 +27,7 @@ use tokora::{
   span::Spanned,
   token::LitToken,
   try_parse_input::ParseAttempt,
-  utils::typenum::{U1, U2, U3},
+  utils::typenum::{U1, U2},
 };
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
@@ -39,6 +41,7 @@ use crate::{
       BooleanValue, ConstInputValue, ConstObjectField, DefaultInputValue, EnumValue, FloatValue,
       InputValue, IntValue, Name, NullValue, ObjectField, StringValue, VariableValue,
     },
+    error::{Expectation, GraphqlError as DialectGraphqlError},
   },
 };
 
@@ -81,7 +84,8 @@ macro_rules! value_parser {
       [
         str: Equivalent<GraphqlSlice<'inp, Src>>,
         GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>,
+          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
       ],
       $body
     );
@@ -597,6 +601,16 @@ where
   })
 }
 
+#[inline]
+fn is_const_value_head<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+{
+  !matches!(value_head_kind::<Src>(token), Some(HeadKind::Dollar) | None)
+}
+
 pub(crate) fn decide_value_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
   _: &mut Ctx::Emitter,
@@ -616,7 +630,7 @@ where
 }
 
 pub(crate) fn decide_object_field_head<'inp, Src, Ctx>(
-  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U3>,
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
@@ -624,25 +638,49 @@ where
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
-  let Some(name) = peeked.pop_front() else {
-    return Ok(Action::Stop);
-  };
-  if !name.token().is_identifier() {
-    return Ok(Action::Stop);
-  }
-  let Some(colon) = peeked.pop_front() else {
-    return Ok(Action::Stop);
-  };
-  if !colon.token().is_colon() {
-    return Ok(Action::Stop);
-  }
   Ok(match peeked.pop_front() {
-    Some(token) if value_head_kind::<Src>(token.token()).is_some() => Action::Continue,
-    _ => Action::Stop,
+    Some(token) if matches!(token.token(), GraphqlToken::<'inp, Src>::RBrace) => Action::Stop,
+    Some(_) => Action::Continue,
+    None => Action::Stop,
   })
+}
+
+fn guard_object_field_phase<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+  eot_hint: ObjectFieldValueHint,
+  mut accepts: impl FnMut(&GraphqlToken<'inp, Src>) -> bool,
+) -> Result<(), GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let off = *inp.offset();
+  let rejected = {
+    let mut peeked = inp.peek::<U1>()?;
+    match peeked.pop_front() {
+      Some(token) if accepts(token.token()) => return Ok(()),
+      Some(token) => Some((*token.span(), token.token().kind())),
+      None => None,
+    }
+  };
+
+  match rejected {
+    Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),
+    None => Err(
+      DialectGraphqlError::unexpected_end_of_object_field_value(
+        eot_hint,
+        SimpleSpan::new(off, off),
+      )
+      .into(),
+    ),
+  }
 }
 
 value_parser!(
@@ -683,9 +721,33 @@ value_parser!(
   ObjectField<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
-    ident
-      .then_ignore(colon)
-      .then(value)
+    (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::Name,
+        ObjectFieldValueHint::Name,
+        |token| token.is_identifier(),
+      )?;
+      ident(inp)
+    })
+      .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        guard_object_field_phase(
+          inp,
+          Expectation::Colon,
+          ObjectFieldValueHint::Colon,
+          |token| token.is_colon(),
+        )?;
+        colon(inp)
+      })
+      .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        guard_object_field_phase(
+          inp,
+          Expectation::InputValue,
+          ObjectFieldValueHint::Value,
+          |token| value_head_kind::<Src>(token).is_some(),
+        )?;
+        value(inp)
+      })
       .spanned()
       .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
       .parse_input(inp)
@@ -698,9 +760,33 @@ value_parser!(
   ConstObjectField<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
-    ident
-      .then_ignore(colon)
-      .then(const_value)
+    (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      guard_object_field_phase(
+        inp,
+        Expectation::Name,
+        ObjectFieldValueHint::Name,
+        |token| token.is_identifier(),
+      )?;
+      ident(inp)
+    })
+      .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        guard_object_field_phase(
+          inp,
+          Expectation::Colon,
+          ObjectFieldValueHint::Colon,
+          |token| token.is_colon(),
+        )?;
+        colon(inp)
+      })
+      .then(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        guard_object_field_phase(
+          inp,
+          Expectation::ConstInputValue,
+          ObjectFieldValueHint::Value,
+          is_const_value_head::<Src>,
+        )?;
+        const_value(inp)
+      })
       .spanned()
       .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
       .parse_input(inp)
@@ -714,12 +800,12 @@ value_parser!(
   [equivalent, delimited],
   {
     object_field
-      .repeated_while::<_, U3>(decide_object_field_head::<_, Ctx>)
+      .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited::<Brace>()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields}| scaffold::Object::new(span, fields))
+      .map(|Spanned { span, data: fields }| scaffold::Object::new(span, fields))
   }
 );
 
@@ -730,12 +816,12 @@ value_parser!(
   [equivalent, delimited],
   {
     const_object_field
-      .repeated_while::<_, U3>(decide_object_field_head::<_, Ctx>)
+      .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited::<Brace>()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields}| scaffold::Object::new(span, fields))
+      .map(|Spanned { span, data: fields }| scaffold::Object::new(span, fields))
   }
 );
 
@@ -888,10 +974,40 @@ value_parser!(
   DefaultInputValue<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
-    let cursor = *inp.cursor();
-    equal(inp)?;
-    let value = const_value(inp)?;
-    Ok(DefaultInputValue::new(inp.span_since(&cursor), value))
+    let validated_const_tail = |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      let off = *inp.offset();
+      const_value
+        .peek_then::<_, U1>(
+          move |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| match peeked
+            .pop_front()
+          {
+            Some(token) if is_const_value_head::<Src>(token.token()) => Ok(()),
+            Some(token) => Err(
+              DialectGraphqlError::unexpected_token(
+                token.token().kind(),
+                Expectation::ConstInputValue,
+                *token.span(),
+              )
+              .into(),
+            ),
+            None => Err(
+              DialectGraphqlError::maybe_unexpected_token(
+                None,
+                Expectation::ConstInputValue,
+                SimpleSpan::new(off, off),
+              )
+              .into(),
+            ),
+          },
+        )
+        .parse_input(inp)
+    };
+
+    equal
+      .ignore_then(validated_const_tail)
+      .spanned()
+      .map(|Spanned { span, data: value }| DefaultInputValue::new(span, value))
+      .parse_input(inp)
   }
 );
 
@@ -901,19 +1017,18 @@ value_parser!(
   ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
   [equivalent, delimited],
   {
-    (committed_default_value::<Src, Ctx>,)
-      .peek_then_try_choice::<_, U2>(|mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U2>, _| {
-        let Some(equal) = peeked.pop_front() else {
-          return Ok(None);
-        };
-        if !equal.token().is_equal() {
-          return Ok(None);
-        }
-        Ok(match peeked.pop_front() {
-          Some(token) if value_head_kind::<Src>(token.token()).is_some() => Some(Branch::B0),
-          _ => None,
-        })
-      })
+    committed_default_value::<Src, Ctx>
+      .peek_then_try::<_, U1>(
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _: &mut Ctx::Emitter| -> Result<
+          Action,
+          GraphqlError<'inp, Src, Ctx>,
+        > {
+          Ok(match peeked.pop_front() {
+            Some(equal) if equal.token().is_equal() => Action::Continue,
+            _ => Action::Stop,
+          })
+        },
+      )
       .try_parse_input(inp)
   }
 );
@@ -947,7 +1062,8 @@ macro_rules! graphql_slice_api {
       [
         str: Equivalent<$slice>,
         GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>,
+          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<$slice>>,
       ]
     );
   };

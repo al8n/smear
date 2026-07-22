@@ -4,8 +4,9 @@
 //! The error family — [`Expectation`], [`Unclosed`], [`ErrorData`], [`Error`], and
 //! the [`Errors`] container — is copied from the frozen `smear-parser` crate
 //! (`graphql/error.rs`), re-keyed to the source slice `S`. [`GraphqlError`] and
-//! [`GraphqlErrors`] pin `S` and the token to the concrete GraphQL syntactic token,
-//! the one dialect-specific instantiation the entry runners and tests name.
+//! [`GraphqlErrors`] pin `S` and the found-token payload to the concrete GraphQL
+//! syntactic token kind, the one dialect-specific instantiation the entry runners
+//! and tests name.
 //!
 //! The atoms speak tokora's generic error families ([`UnexpectedToken`],
 //! [`SeparatedError`], the container/`TooFew` families, [`UnexpectedEot`], and the
@@ -18,7 +19,10 @@
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
-  graphql::{error::LexerErrors, syntactic::SyntacticToken},
+  graphql::{
+    error::LexerErrors,
+    syntactic::{SyntacticToken, SyntacticTokenKind},
+  },
   tokora::error::UnexpectedEnd,
 };
 use smear_scaffold::hints::{
@@ -267,13 +271,19 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self { span, data }
   }
 
+  /// Creates an unexpected token error with an optional found token.
+  #[inline]
+  pub const fn maybe_unexpected_token(found: Option<T>, expected: Exp, span: Span) -> Self {
+    Self::new(
+      span,
+      ErrorData::UnexpectedToken(UnexpectedToken::maybe_found(found, expected)),
+    )
+  }
+
   /// Creates an unexpected token error.
   #[inline]
   pub const fn unexpected_token(found: T, expected: Exp, span: Span) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedToken(UnexpectedToken::with_found(found, expected)),
-    )
+    Self::maybe_unexpected_token(Some(found), expected, span)
   }
 
   /// Creates an unexpected end in variable value error.
@@ -539,19 +549,19 @@ impl<S, T, Char, Exp, StateError> Extend<Error<S, T, Char, Exp, StateError>>
 }
 
 /// The GraphQL dialect error, keyed to the source slice `S` and the concrete
-/// GraphQL syntactic token.
-pub type GraphqlError<S> = Error<S, SyntacticToken<S>, char, Expectation>;
+/// GraphQL syntactic token kind.
+pub type GraphqlError<S> = Error<S, SyntacticTokenKind, char, Expectation>;
 
 /// The GraphQL dialect error container — the error type a
 /// [`ParseCtx`](crate::combinator::ParseCtx) over a GraphQL lexer emits.
-pub type GraphqlErrors<S> = Errors<S, SyntacticToken<S>, char, Expectation>;
+pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 
 // ---- `From` glue -----------------------------------------------------------
 //
 // The atoms bound `ErrorOf: From<…>` over tokora's generic error families; each
 // conversion below lands the dialect side. Kinds and the `Lang` marker stay
 // generic so the bound is satisfied for `Lang = GraphQL` (and any other marker a
-// production pins); the found token and slice are the dialect's concrete types.
+// production pins); found tokens are reduced to the dialect's concrete token kind.
 // Diagnostics-carrying families (missing separator/element, full container, too
 // few, lexer errors) map to `Other` exactly as the frozen glue did — these are
 // emitter paths a `Vec` container and a fail-fast context rarely reach.
@@ -563,7 +573,7 @@ impl<'a, S, Kind: Clone, Lang: ?Sized>
   fn from(err: TokUnexpectedToken<'a, SyntacticToken<S>, Kind, Span, Lang>) -> Self {
     let (span, found, _expected) = err.into_components();
     match found {
-      Some(token) => GraphqlError::unexpected_token(token, Expectation::Name, span).into(),
+      Some(token) => GraphqlError::unexpected_token(token.kind(), Expectation::Name, span).into(),
       None => GraphqlError::unexpected_end_of_input(span).into(),
     }
   }
