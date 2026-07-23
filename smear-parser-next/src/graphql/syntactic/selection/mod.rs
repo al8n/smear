@@ -11,11 +11,13 @@ use std::vec::Vec;
 use smear_lexer::keywords::On;
 use tokora::{
   Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket, Paren},
   span::Spanned,
+  try_parse_input::ParseAttempt,
   utils::typenum::{U1, U2},
 };
 
@@ -237,6 +239,30 @@ selection_parser!(
       .spanned()
       .map(|Spanned { span, data: name }| TypeCondition::new(span, name))
       .parse_input(inp)
+  }
+);
+
+selection_parser!(
+  /// Attempts a GraphQL type condition (`on NamedType`).
+  ///
+  /// Declines without consuming unless the first token is `on`. Once `on` is
+  /// present, parsing commits to the named type.
+  ///
+  /// See the [GraphQL Type Condition specification](https://spec.graphql.org/draft/#TypeCondition).
+  pub try_type_condition,
+  inp,
+  ParseAttempt<TypeCondition<GraphqlSlice<'inp, Src>>>,
+  {
+    (type_condition::<Src, Ctx>,)
+      .peek_then_try_choice::<_, U1>(
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
+          Ok(match peeked.pop_front() {
+            Some(token) if is_on::<Src>(token.token()) => Some(Branch::B0),
+            _ => None,
+          })
+        },
+      )
+      .try_parse_input(inp)
   }
 );
 
@@ -579,6 +605,48 @@ macro_rules! impl_selection_api {
   };
 }
 
+macro_rules! impl_selection_try_api {
+  ($(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident) => {
+    impl<$slice> $node {
+      $(#[$meta])*
+      ///
+      /// The lexer source is inferred from `inp`.
+      pub fn try_graphql<'inp, Src, Ctx>(
+        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+      ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
+      where
+        Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
+        $slice: Slice<'inp> + Clone + 'inp,
+        str: Equivalent<$slice>,
+        GraphqlLexer<'inp, Src>: Lexer<
+          'inp,
+          Source = Src,
+          Token = GraphqlToken<'inp, Src>,
+          Span = SimpleSpan,
+          Offset = usize,
+        >,
+        Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+          + From<
+            UnexpectedToken<
+              'inp,
+              GraphqlToken<'inp, Src>,
+              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+              SimpleSpan,
+              GraphQL,
+            >,
+          >
+          + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<$slice>>,
+      {
+        $parser(inp)
+      }
+    }
+  };
+}
+
 impl_selection_api!(
   /// Parses a committed GraphQL field.
   ///
@@ -595,6 +663,17 @@ impl_selection_api!(
   S,
   TypeCondition<S>,
   type_condition
+);
+
+impl_selection_try_api!(
+  /// Attempts a GraphQL type condition (`on NamedType`).
+  ///
+  /// Declines without consuming on a head mismatch.
+  ///
+  /// See the [GraphQL Type Condition specification](https://spec.graphql.org/draft/#TypeCondition).
+  S,
+  TypeCondition<S>,
+  try_type_condition
 );
 
 impl_selection_api!(

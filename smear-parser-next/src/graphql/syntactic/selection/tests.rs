@@ -8,9 +8,14 @@
 //! `parse_selection_set` verdicts — excluding the empty-`{}` row, which parser-next
 //! rejects per the spec-cardinality rule (plan Amendment 2).
 
-use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
+use tokora::{
+  FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,
+};
 
-use super::{field, fragment_spread, inline_fragment, selection, selection_set, type_condition};
+use super::{
+  field, fragment_spread, inline_fragment, selection, selection_set, try_type_condition,
+  type_condition,
+};
 use crate::graphql::{
   GraphQL,
   ast::{Field, FragmentSpread, InlineFragment, Selection, SelectionSet, TypeCondition},
@@ -244,6 +249,53 @@ fn type_condition_reports_committed_keyword_and_name_phases() {
     Expectation::Name,
     SimpleSpan::new(2, 2),
   );
+}
+
+#[test]
+fn try_type_condition_declines_without_consuming_and_commits_on_keyword() {
+  let accepted = drive_str(try_type_condition, "on User").expect("`on User` should accept");
+  let ParseAttempt::Accept(condition) = accepted else {
+    panic!("`on User` should not decline");
+  };
+  assert!("User".equivalent(condition.name().source()));
+
+  let empty = drive_str(try_type_condition, "").expect("empty input should decline");
+  assert!(empty.is_decline());
+
+  let (declined, recovered) = drive_str(
+    |inp| {
+      let attempt = try_type_condition(inp)?;
+      let recovered = field(inp)?;
+      Ok::<_, GraphqlErrors<&str>>((
+        attempt.is_decline(),
+        "User".equivalent(recovered.name().source()),
+      ))
+    },
+    "User",
+  )
+  .expect("non-`on` identifier should remain available");
+  assert_eq!((declined, recovered), (true, true));
+
+  assert_str_expectation(
+    drive_str(|inp| try_type_condition(inp).map(|_| ()), "on"),
+    Expectation::Name,
+    SimpleSpan::new(2, 2),
+  );
+
+  let result = drive_str(
+    |inp| {
+      let result = try_type_condition(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("wrong type-name token remains available");
+      assert_eq!(tail.span, SimpleSpan::new(3, 4));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::At));
+      Ok(result)
+    },
+    "on @dir",
+  )
+  .expect("inspection parser should consume the retained type-name token");
+  assert_str_expectation(result, Expectation::Name, SimpleSpan::new(3, 4));
 }
 
 #[test]
@@ -678,6 +730,10 @@ fn associated_selection_apis_infer_str_and_byte_slice_sources() {
     drive_str(TypeCondition::<&str>::graphql, "on User").expect("str type condition");
   let _: TypeCondition<&[u8]> =
     drive_slice(TypeCondition::<&[u8]>::graphql, b"on User").expect("slice type condition");
+  let _: ParseAttempt<TypeCondition<&str>> =
+    drive_str(TypeCondition::<&str>::try_graphql, "on User").expect("str try type condition");
+  let _: ParseAttempt<TypeCondition<&[u8]>> =
+    drive_slice(TypeCondition::<&[u8]>::try_graphql, b"on User").expect("slice try type condition");
 
   let _: FragmentSpread<&str> =
     drive_str(FragmentSpread::<&str>::graphql, "...Part").expect("str fragment spread");
