@@ -67,7 +67,7 @@ where
 {
   #[inline]
   fn eq(&self, other: &S) -> bool {
-    self.source_ref().eq(other)
+    self.source().eq(other)
   }
 }
 
@@ -105,6 +105,14 @@ impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
   #[inline]
   pub fn into_ident(self) -> Ident<S, Span, Lang> {
     self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> Name<S, Span, Lang> {
+  /// Returns the name's source spelling.
+  #[inline]
+  pub const fn source(&self) -> &S {
+    self.0.source_ref()
   }
 }
 
@@ -198,12 +206,19 @@ mod tests {
   fn carrier_preserves_an_arbitrary_unsized_language_marker() {
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(1), "field");
     assert_eq!(name.as_span(), &CustomSpan(1));
-    assert_eq!(name.source_ref(), &"field");
+    assert_eq!(name.source(), &"field");
 
     let ident: Ident<_, CustomSpan, dyn OtherLanguage> = name.into();
     assert_eq!(ident.as_span(), &CustomSpan(1));
 
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(2), "field");
     assert_eq!(name.into_components(), (CustomSpan(2), "field"));
+  }
+
+  #[test]
+  fn source_borrows_non_copy_source() {
+    let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(1), String::from("field"));
+    let source: &String = name.source();
+    assert_eq!(source, "field");
   }
 }

@@ -48,7 +48,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
@@ -64,7 +64,7 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for FloatValue<S, Span, Lang> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source_ref()
+    self.source()
   }
 }
 
@@ -79,24 +79,15 @@ impl<S, Span, Lang: ?Sized> FloatValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the floating-point literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the source of the float.
+  /// Returns the floating-point literal's source spelling.
   #[inline]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.value
-  }
-
-  /// Returns the source of the float.
-  #[inline]
-  pub const fn source_ref(&self) -> &S {
+  pub const fn source(&self) -> &S {
     &self.value
   }
 }
@@ -145,7 +136,7 @@ where
       "- FLOAT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source_ref().display(),
+      self.source().display(),
     )
   }
 }

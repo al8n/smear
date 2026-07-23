@@ -682,7 +682,7 @@ pub struct Errors<S, T, Char = char, Exp = Expectation, StateError = ()>(
 );
 
 impl<S, T, Char, Exp, StateError> Default for Errors<S, T, Char, Exp, StateError> {
-  #[inline(always)]
+  #[inline]
   fn default() -> Self {
     Self(DefaultErrorsContainer::default())
   }
@@ -691,7 +691,7 @@ impl<S, T, Char, Exp, StateError> Default for Errors<S, T, Char, Exp, StateError
 impl<S, T, Exp, Char, StateError> From<Error<S, T, Char, Exp, StateError>>
   for Errors<S, T, Char, Exp, StateError>
 {
-  #[inline(always)]
+  #[inline]
   fn from(error: Error<S, T, Char, Exp, StateError>) -> Self {
     Self(core::iter::once(error).collect())
   }
@@ -709,7 +709,7 @@ impl<S, T, Char, Exp, StateError> IntoIterator for Errors<S, T, Char, Exp, State
   type Item = Error<S, T, Char, Exp, StateError>;
   type IntoIter = <DefaultErrorsContainer<S, T, Char, Exp, StateError> as IntoIterator>::IntoIter;
 
-  #[inline(always)]
+  #[inline]
   fn into_iter(self) -> Self::IntoIter {
     self.0.into_iter()
   }
@@ -718,7 +718,7 @@ impl<S, T, Char, Exp, StateError> IntoIterator for Errors<S, T, Char, Exp, State
 impl<S, T, Char, Exp, StateError> Extend<Error<S, T, Char, Exp, StateError>>
   for Errors<S, T, Char, Exp, StateError>
 {
-  #[inline(always)]
+  #[inline]
   fn extend<I: IntoIterator<Item = Error<S, T, Char, Exp, StateError>>>(&mut self, iter: I) {
     self.0.extend(iter);
   }

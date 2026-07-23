@@ -225,13 +225,16 @@ impl<VariableDefinition, Span, Container> VariablesDefinition<VariableDefinition
     &self.span
   }
 
-  /// Returns the variable-definition container.
+  /// Returns the parsed variable definitions.
   #[inline]
-  pub const fn variable_definitions(&self) -> &Container {
-    &self.variable_definitions
+  pub fn variable_definitions(&self) -> &[VariableDefinition]
+  where
+    Container: AsRef<[VariableDefinition]>,
+  {
+    self.variable_definitions.as_ref()
   }
 
-  /// Consumes this collection and returns its contents.
+  /// Consumes this collection and returns its variable definitions.
   #[inline]
   pub fn into_variable_definitions(self) -> Container {
     self.variable_definitions
@@ -543,13 +546,16 @@ impl<Definition, Span, Container> Document<Definition, Span, Container> {
     &self.span
   }
 
-  /// Returns the definition container.
+  /// Returns the parsed definitions.
   #[inline]
-  pub const fn definitions(&self) -> &Container {
-    &self.definitions
+  pub fn definitions(&self) -> &[Definition]
+  where
+    Container: AsRef<[Definition]>,
+  {
+    self.definitions.as_ref()
   }
 
-  /// Consumes this document and returns its definitions.
+  /// Consumes this document and returns its parsed definitions.
   #[inline]
   pub fn into_definitions(self) -> Container {
     self.definitions
@@ -593,6 +599,14 @@ mod tests {
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);
+
+  struct ArrayBacked<T, const N: usize>([T; N]);
+
+  impl<T, const N: usize> AsRef<[T]> for ArrayBacked<T, N> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
 
   #[test]
   fn carriers_support_custom_spans() {
@@ -641,5 +655,19 @@ mod tests {
       document.into_components(),
       (CustomSpan(6), ["query { id }"])
     );
+  }
+
+  #[test]
+  fn collection_accessors_project_array_backed_containers_to_slices() {
+    let variables =
+      VariablesDefinition::<u8, CustomSpan, _>::new(CustomSpan(1), ArrayBacked([1_u8, 2]));
+    let projected: &[u8] = variables.variable_definitions();
+    assert_eq!(projected, &[1, 2]);
+    assert_eq!(variables.into_variable_definitions().0, [1, 2]);
+
+    let document = Document::<u8, CustomSpan, _>::new(CustomSpan(2), ArrayBacked([3_u8, 4]));
+    let projected: &[u8] = document.definitions();
+    assert_eq!(projected, &[3, 4]);
+    assert_eq!(document.into_definitions().0, [3, 4]);
   }
 }

@@ -25,7 +25,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
@@ -72,24 +72,15 @@ impl<S, Span, Lang: ?Sized> IntValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the integer literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the source of the int.
+  /// Returns the integer literal's source spelling.
   #[inline]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.value
-  }
-
-  /// Returns the source of the int.
-  #[inline]
-  pub const fn source_ref(&self) -> &S {
+  pub const fn source(&self) -> &S {
     &self.value
   }
 }
@@ -138,7 +129,7 @@ where
       "- INT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source_ref().display()
+      self.source().display()
     )
   }
 }

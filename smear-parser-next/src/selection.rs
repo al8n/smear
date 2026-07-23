@@ -316,13 +316,16 @@ impl<Selection, Span, Container> SelectionSet<Selection, Span, Container> {
     &self.span
   }
 
-  /// Returns the selection container.
+  /// Returns the contained selections.
   #[inline]
-  pub const fn selections(&self) -> &Container {
-    &self.selections
+  pub fn selections(&self) -> &[Selection]
+  where
+    Container: AsRef<[Selection]>,
+  {
+    self.selections.as_ref()
   }
 
-  /// Consumes this node and returns its selection container.
+  /// Consumes this node and returns its selections.
   #[inline]
   pub fn into_selections(self) -> Container {
     self.selections
@@ -478,6 +481,14 @@ mod tests {
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);
 
+  struct ArrayBacked<T, const N: usize>([T; N]);
+
+  impl<T, const N: usize> AsRef<[T]> for ArrayBacked<T, N> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
+
   #[test]
   fn carriers_support_custom_spans() {
     let alias = Alias::<_, CustomSpan>::new(CustomSpan(1), "alias");
@@ -511,5 +522,13 @@ mod tests {
     );
     assert_eq!(field.name(), &"field");
     assert_eq!(field.into_span(), CustomSpan(6));
+  }
+
+  #[test]
+  fn selections_project_array_backed_containers_to_slices() {
+    let selections = SelectionSet::<u8, CustomSpan, _>::new(CustomSpan(1), ArrayBacked([1_u8, 2]));
+    let projected: &[u8] = selections.selections();
+    assert_eq!(projected, &[1, 2]);
+    assert_eq!(selections.into_selections().0, [1, 2]);
   }
 }

@@ -113,7 +113,7 @@ macro_rules! reject_all {
 fn named_type_accepts() {
   fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let nt = t.unwrap_name();
-    assert!("Foo".equivalent(nt.name().source_ref()));
+    assert!("Foo".equivalent(nt.name().source()));
     assert!(!nt.required());
     assert_eq!(*nt.span(), SimpleSpan::new(0, 3));
   }
@@ -124,7 +124,7 @@ fn named_type_accepts() {
 fn named_type_non_null_accepts() {
   fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let nt = t.unwrap_name();
-    assert!("Foo".equivalent(nt.name().source_ref()));
+    assert!("Foo".equivalent(nt.name().source()));
     assert!(nt.required());
     assert_eq!(*nt.span(), SimpleSpan::new(0, 4));
   }
@@ -179,7 +179,7 @@ fn list_type_accepts() {
     assert!(!lt.required());
     assert_eq!(*lt.span(), SimpleSpan::new(0, 5));
     let inner = lt.ty().unwrap_name_ref();
-    assert!("Foo".equivalent(inner.name().source_ref()));
+    assert!("Foo".equivalent(inner.name().source()));
     assert!(!inner.required());
   }
   accept_all!(Type::graphql, "[Foo]", check);
@@ -224,7 +224,7 @@ fn doubly_nested_list_type() {
     let outer = t.unwrap_list();
     let middle = outer.ty().unwrap_list_ref();
     let inner = middle.ty().unwrap_name_ref();
-    assert!("Foo".equivalent(inner.name().source_ref()));
+    assert!("Foo".equivalent(inner.name().source()));
   }
   accept_all!(Type::graphql, "[[Foo]]", check);
 }

@@ -126,7 +126,7 @@ fn assert_str_expectation(
 fn field_accepts_bare_name() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
     assert!(f.alias().is_none());
-    assert!("name".equivalent(f.name().source_ref()));
+    assert!("name".equivalent(f.name().source()));
     assert!(f.arguments().is_none());
     assert!(f.directives().is_none());
     assert!(f.selection_set().is_none());
@@ -139,8 +139,8 @@ fn field_accepts_bare_name() {
 fn field_accepts_alias() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
     let alias = f.alias().expect("alias present");
-    assert!("user".equivalent(alias.name().source_ref()));
-    assert!("profile".equivalent(f.name().source_ref()));
+    assert!("user".equivalent(alias.name().source()));
+    assert!("profile".equivalent(f.name().source()));
   }
   accept_all!(field, "user: profile", check);
 }
@@ -148,7 +148,7 @@ fn field_accepts_alias() {
 #[test]
 fn field_accepts_arguments_and_directives() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
-    assert!("user".equivalent(f.name().source_ref()));
+    assert!("user".equivalent(f.name().source()));
     assert_eq!(f.arguments().expect("args").arguments().len(), 1);
     assert_eq!(f.directives().expect("dirs").directives().len(), 1);
   }
@@ -167,8 +167,8 @@ fn field_accepts_nested_selection_set() {
 #[test]
 fn field_accepts_alias_with_everything() {
   fn check<S: AsRef<[u8]>>(f: Field<S>) {
-    assert!("u".equivalent(f.alias().expect("alias").name().source_ref()));
-    assert!("user".equivalent(f.name().source_ref()));
+    assert!("u".equivalent(f.alias().expect("alias").name().source()));
+    assert!("user".equivalent(f.name().source()));
     assert!(f.arguments().is_some());
     assert!(f.directives().is_some());
     assert_eq!(f.selection_set().expect("ss").selections().len(), 1);
@@ -217,7 +217,7 @@ fn selection_dispatches_field() {
 fn selection_dispatches_fragment_spread() {
   fn check<S: AsRef<[u8]>>(s: Selection<S>) {
     let fs = s.unwrap_fragment_spread_ref();
-    assert!("UserFields".equivalent(fs.name().source_ref()));
+    assert!("UserFields".equivalent(fs.name().source()));
   }
   accept_all!(selection, "...UserFields", check);
 }
@@ -236,7 +236,7 @@ fn selection_dispatches_inline_fragment_with_type_condition() {
   fn check<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert!("User".equivalent(tc.name().source_ref()));
+    assert!("User".equivalent(tc.name().source()));
     assert_eq!(ifr.selection_set().selections().len(), 1);
   }
   accept_all!(selection, "... on User { id }", check);
@@ -320,12 +320,12 @@ fn fragment_spread_named_on_is_unrepresentable() {
   fn tc_x<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert!("X".equivalent(tc.name().source_ref()));
+    assert!("X".equivalent(tc.name().source()));
   }
   fn tc_on<S: AsRef<[u8]>>(s: Selection<S>) {
     let ifr = s.unwrap_inline_fragment_ref();
     let tc = ifr.type_condition().expect("type condition");
-    assert!("on".equivalent(tc.name().source_ref()));
+    assert!("on".equivalent(tc.name().source()));
   }
   accept_all!(selection, "... on X { f }", tc_x);
   accept_all!(selection, "... on on { f }", tc_on);

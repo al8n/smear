@@ -110,7 +110,7 @@ macro_rules! reject_all {
 #[test]
 fn directive_accepts_without_arguments() {
   fn check<S: AsRef<[u8]>>(d: AstDirective<S>) {
-    assert!("deprecated".equivalent(d.name().source_ref()));
+    assert!("deprecated".equivalent(d.name().source()));
     assert!(d.arguments().is_none());
     assert_eq!(d.span().start(), 0);
   }
@@ -120,10 +120,10 @@ fn directive_accepts_without_arguments() {
 #[test]
 fn directive_accepts_with_arguments() {
   fn check<S: AsRef<[u8]>>(d: AstDirective<S>) {
-    assert!("include".equivalent(d.name().source_ref()));
+    assert!("include".equivalent(d.name().source()));
     let args = d.arguments().expect("present");
     assert_eq!(args.arguments().len(), 1);
-    assert!("if".equivalent(args.arguments()[0].name().source_ref()));
+    assert!("if".equivalent(args.arguments()[0].name().source()));
   }
   accept_all!(Directive::<_>::graphql, "@include(if: true)", check);
 }
@@ -202,7 +202,7 @@ fn directive_rejects_malformed_arguments() {
 #[test]
 fn const_directive_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(d: AstConstDirective<S>) {
-    assert!("d".equivalent(d.name().source_ref()));
+    assert!("d".equivalent(d.name().source()));
   }
   accept_all!(ConstDirective::<_>::graphql, "@d(x: 1)", check);
   reject_all!(ConstDirective::<_>::graphql, "@d(x: $v)");
@@ -214,7 +214,7 @@ fn const_directive_accepts_and_rejects_variable() {
 fn directives_accepts_single() {
   fn check<S: AsRef<[u8]>>(ds: AstDirectives<S>) {
     assert_eq!(ds.directives().len(), 1);
-    assert!("deprecated".equivalent(ds.directives()[0].name().source_ref()));
+    assert!("deprecated".equivalent(ds.directives()[0].name().source()));
   }
   accept_all!(Directives::<_>::graphql, "@deprecated", check);
 }
@@ -223,8 +223,8 @@ fn directives_accepts_single() {
 fn directives_accepts_multiple() {
   fn check<S: AsRef<[u8]>>(ds: AstDirectives<S>) {
     assert_eq!(ds.directives().len(), 2);
-    assert!("a".equivalent(ds.directives()[0].name().source_ref()));
-    assert!("b".equivalent(ds.directives()[1].name().source_ref()));
+    assert!("a".equivalent(ds.directives()[0].name().source()));
+    assert!("b".equivalent(ds.directives()[1].name().source()));
   }
   accept_all!(Directives::<_>::graphql, "@a @b", check);
 }

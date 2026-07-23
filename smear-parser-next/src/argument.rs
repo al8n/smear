@@ -137,10 +137,19 @@ impl<Arg, Container, Span> ArgumentList<Arg, Container, Span> {
     &self.span
   }
 
-  /// Returns the container holding the arguments.
+  /// Returns the parsed arguments.
   #[inline]
-  pub const fn arguments(&self) -> &Container {
-    &self.arguments
+  pub fn arguments(&self) -> &[Arg]
+  where
+    Container: AsRef<[Arg]>,
+  {
+    self.arguments.as_ref()
+  }
+
+  /// Consumes this list and returns its arguments.
+  #[inline]
+  pub fn into_arguments(self) -> Container {
+    self.arguments
   }
 }
 
@@ -156,6 +165,14 @@ mod tests {
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   struct CustomSpan(u8);
+
+  struct ArrayBacked<T, const N: usize>([T; N]);
+
+  impl<T, const N: usize> AsRef<[T]> for ArrayBacked<T, N> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
 
   #[test]
   fn carriers_support_custom_spans() {
@@ -191,5 +208,18 @@ mod tests {
     assert_eq!(directive.span(), &CustomSpan(3));
     assert_eq!(directive.name(), &"name");
     assert_eq!(directive.arguments(), Some(&7));
+  }
+
+  #[test]
+  fn collection_accessors_project_array_backed_containers_to_slices() {
+    let arguments = ArgumentList::<u8, _, CustomSpan>::new(CustomSpan(1), ArrayBacked([1_u8, 2]));
+    let projected: &[u8] = arguments.arguments();
+    assert_eq!(projected, &[1, 2]);
+    assert_eq!(arguments.into_arguments().0, [1, 2]);
+
+    let directives = Directives::<u8, _, CustomSpan>::new(CustomSpan(2), ArrayBacked([3_u8, 4]));
+    let projected: &[u8] = directives.directives();
+    assert_eq!(projected, &[3, 4]);
+    assert_eq!(directives.into_directives().0, [3, 4]);
   }
 }

@@ -24,7 +24,7 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
@@ -56,7 +56,7 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for NullValue<S, Span, Lang> {
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source_ref()
+    self.source()
   }
 }
 
@@ -71,25 +71,16 @@ impl<S, Span, Lang: ?Sized> NullValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the null literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the source of the null value.
+  /// Returns the null literal's source spelling.
   #[inline]
-  pub const fn source_ref(&self) -> &S {
+  pub const fn source(&self) -> &S {
     &self.source
-  }
-
-  /// Returns the source of the null value.
-  #[inline]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.source
   }
 }
 
@@ -101,7 +92,7 @@ where
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.source_ref().fmt(f)
+    self.source().fmt(f)
   }
 }
 
@@ -113,6 +104,6 @@ where
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }

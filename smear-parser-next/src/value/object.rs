@@ -91,8 +91,17 @@ impl<Name, Value, Span, Container> Object<Name, Value, Span, Container> {
 
   /// Returns the parsed object fields.
   #[inline]
-  pub const fn fields(&self) -> &Container {
-    &self.fields
+  pub fn fields(&self) -> &[ObjectField<Name, Value, Span>]
+  where
+    Container: AsRef<[ObjectField<Name, Value, Span>]>,
+  {
+    self.fields.as_ref()
+  }
+
+  /// Consumes this object and returns its fields.
+  #[inline]
+  pub fn into_fields(self) -> Container {
+    self.fields
   }
 }
 
