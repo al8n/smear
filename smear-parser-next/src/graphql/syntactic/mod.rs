@@ -106,7 +106,7 @@ where
 /// This is deliberately a dialect production instead of a generic atom: the
 /// exclusion is a GraphQL grammar rule, and the rejection remains non-consuming
 /// so a surrounding production can retain the token for recovery or dispatch.
-pub(super) fn fragment_name<'inp, Src, Ctx>(
+pub fn fragment_name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<ast::FragmentName<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where

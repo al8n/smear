@@ -221,6 +221,26 @@ where
 }
 
 selection_parser!(
+  /// Parses a committed GraphQL type condition (`on NamedType`).
+  ///
+  /// The name phase accepts `on` itself, as `NamedType` has no fragment-name
+  /// exclusion.
+  ///
+  /// See the [GraphQL Type Condition specification](https://spec.graphql.org/draft/#TypeCondition).
+  pub type_condition,
+  inp,
+  TypeCondition<GraphqlSlice<'inp, Src>>,
+  {
+    let on = take_on(inp)?;
+    let name = take_name(inp)?;
+    Ok(TypeCondition::new(
+      SimpleSpan::new(on.span().start(), name.span().end()),
+      name,
+    ))
+  }
+);
+
+selection_parser!(
   /// Parses a GraphQL field (`Alias? Name Arguments? Directives? SelectionSet?`).
   ///
   /// The first name becomes an alias only after a committed `:`; the second name
@@ -289,9 +309,9 @@ selection_parser!(
     let offset = *inp.offset();
     (
       field.map(Selection::Field),
-      fragment_spread_selection,
-      typed_inline_fragment_selection,
-      untyped_inline_fragment_selection,
+      fragment_spread.map(Selection::FragmentSpread),
+      typed_inline_fragment.map(Selection::InlineFragment),
+      untyped_inline_fragment.map(Selection::InlineFragment),
     )
       .peek_then_choice::<_, U2>(|mut peeked, _| {
         let Some(head) = peeked.pop_front() else {
@@ -326,51 +346,37 @@ selection_parser!(
   }
 );
 
-/// Parses a named fragment spread after the selection dispatcher chose it.
-fn fragment_spread_selection<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<Selection<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-{
-  let cursor = *inp.cursor();
-  take_spread(inp)?;
-  let name = fragment_name(inp)?;
-  let directives = directives(inp)?;
-  let directives = if directives.directives().is_empty() {
-    None
-  } else {
-    Some(directives)
-  };
-  Ok(Selection::FragmentSpread(FragmentSpread::new(
-    inp.span_since(&cursor),
-    name,
-    directives,
-  )))
-}
+selection_parser!(
+  /// Parses a committed named GraphQL fragment spread (`... FragmentName Directives?`).
+  ///
+  /// Empty directives are represented by `None` on the AST node.
+  ///
+  /// See the [GraphQL Fragment Spread specification](https://spec.graphql.org/draft/#FragmentSpread).
+  pub fragment_spread,
+  inp,
+  FragmentSpread<GraphqlSlice<'inp, Src>>,
+  {
+    let cursor = *inp.cursor();
+    take_spread(inp)?;
+    let name = fragment_name(inp)?;
+    let directives = directives(inp)?;
+    let directives = if directives.directives().is_empty() {
+      None
+    } else {
+      Some(directives)
+    };
+    Ok(FragmentSpread::new(
+      inp.span_since(&cursor),
+      name,
+      directives,
+    ))
+  }
+);
 
-/// Parses a typed inline fragment after the selection dispatcher chose `... on`.
-fn typed_inline_fragment_selection<'inp, Src, Ctx>(
+/// Parses the typed inline-fragment core after a `... on` head.
+fn typed_inline_fragment<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<Selection<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -394,12 +400,7 @@ where
 {
   let cursor = *inp.cursor();
   take_spread(inp)?;
-  let on = take_on(inp)?;
-  let type_name = take_name(inp)?;
-  let type_condition = TypeCondition::new(
-    SimpleSpan::new(on.span().start(), type_name.span().end()),
-    type_name,
-  );
+  let type_condition = type_condition(inp)?;
   let directives = directives(inp)?;
   let directives = if directives.directives().is_empty() {
     None
@@ -408,18 +409,18 @@ where
   };
   guard_selection_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
   let selection_set = selection_set(inp)?;
-  Ok(Selection::InlineFragment(InlineFragment::new(
+  Ok(InlineFragment::new(
     inp.span_since(&cursor),
     Some(type_condition),
     directives,
     selection_set,
-  )))
+  ))
 }
 
-/// Parses an untyped inline fragment after the dispatcher chose `... @` or `... {`.
-fn untyped_inline_fragment_selection<'inp, Src, Ctx>(
+/// Parses the untyped inline-fragment core after a non-`on` tail.
+fn untyped_inline_fragment<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<Selection<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -451,13 +452,39 @@ where
   };
   guard_selection_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
   let selection_set = selection_set(inp)?;
-  Ok(Selection::InlineFragment(InlineFragment::new(
+  Ok(InlineFragment::new(
     inp.span_since(&cursor),
     None,
     directives,
     selection_set,
-  )))
+  ))
 }
+
+selection_parser!(
+  /// Parses a committed GraphQL inline fragment (`... TypeCondition? Directives? SelectionSet`).
+  ///
+  /// A fixed two-token dispatch chooses the typed form only for `... on`; every
+  /// other input enters the untyped core, which retains its local spread and
+  /// selection-set diagnostics without backtracking.
+  ///
+  /// See the [GraphQL Inline Fragment specification](https://spec.graphql.org/draft/#InlineFragment).
+  pub inline_fragment,
+  inp,
+  InlineFragment<GraphqlSlice<'inp, Src>>,
+  {
+    (typed_inline_fragment, untyped_inline_fragment)
+      .peek_then_choice::<_, U2>(|mut peeked, _| {
+        let typed = match peeked.pop_front() {
+          Some(head) if head.token().is_spread() => {
+            matches!(peeked.pop_front(), Some(next) if is_on::<Src>(next.token()))
+          }
+          _ => false,
+        };
+        Ok(if typed { Branch::B0 } else { Branch::B1 })
+      })
+      .parse_input(inp)
+  }
+);
 
 fn decide_selection_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
@@ -559,6 +586,33 @@ impl_selection_api!(
   S,
   Field<S>,
   field
+);
+
+impl_selection_api!(
+  /// Parses a committed GraphQL type condition (`on NamedType`).
+  ///
+  /// See the [GraphQL Type Condition specification](https://spec.graphql.org/draft/#TypeCondition).
+  S,
+  TypeCondition<S>,
+  type_condition
+);
+
+impl_selection_api!(
+  /// Parses a committed named GraphQL fragment spread.
+  ///
+  /// See the [GraphQL Fragment Spread specification](https://spec.graphql.org/draft/#FragmentSpread).
+  S,
+  FragmentSpread<S>,
+  fragment_spread
+);
+
+impl_selection_api!(
+  /// Parses a committed GraphQL inline fragment.
+  ///
+  /// See the [GraphQL Inline Fragment specification](https://spec.graphql.org/draft/#InlineFragment).
+  S,
+  InlineFragment<S>,
+  inline_fragment
 );
 
 impl_selection_api!(

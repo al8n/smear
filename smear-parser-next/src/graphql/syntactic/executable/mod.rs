@@ -7,7 +7,7 @@
 
 use std::vec::Vec;
 
-use smear_lexer::keywords::{Fragment, Mutation, On, Query, Subscription};
+use smear_lexer::keywords::{Fragment, Mutation, Query, Subscription};
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
@@ -22,7 +22,7 @@ use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken,
   directive::{const_directives, directives},
   fragment_name, peeks_where,
-  selection::selection_set,
+  selection::{selection_set, type_condition},
   ty::ty,
   value::default_value,
 };
@@ -33,7 +33,7 @@ use crate::{
     ast::{
       DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, FragmentDefinition,
       Name, NamedOperationDefinition, OperationDefinition, OperationType, StringValue,
-      TypeCondition, VariableDefinition, VariableValue, VariablesDefinition,
+      VariableDefinition, VariableValue, VariablesDefinition,
     },
     error::{Expectation, GraphqlError as DialectGraphqlError},
   },
@@ -174,16 +174,6 @@ where
   str: Equivalent<GraphqlSlice<'inp, Src>>,
 {
   matches!(token, GraphqlToken::<'inp, Src>::Identifier(value) if "fragment".equivalent(value))
-}
-
-#[inline]
-fn is_on<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Identifier(value) if "on".equivalent(value))
 }
 
 #[inline]
@@ -385,34 +375,6 @@ where
   guard_executable_phase(inp, Expectation::Keyword("fragment"), is_fragment::<Src>)?;
   match inp.next()? {
     Some(spanned) => Ok(Fragment::new(spanned.into_span())),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
-  }
-}
-
-fn take_on<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<On, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-{
-  guard_executable_phase(inp, Expectation::Keyword("on"), is_on::<Src>)?;
-  match inp.next()? {
-    Some(spanned) => Ok(On::new(spanned.into_span())),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }
 }
@@ -642,12 +604,7 @@ where
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let name = fragment_name(inp)?;
-  let on = take_on(inp)?;
-  let type_name = take_name(inp)?;
-  let type_condition = TypeCondition::new(
-    SimpleSpan::new(on.span().start(), type_name.span().end()),
-    type_name,
-  );
+  let type_condition = type_condition(inp)?;
   let directives = directives(inp)?;
   let directives = if directives.directives().is_empty() {
     None

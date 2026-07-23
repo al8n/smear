@@ -10,10 +10,10 @@
 
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
-use super::{field, selection, selection_set};
+use super::{field, fragment_spread, inline_fragment, selection, selection_set, type_condition};
 use crate::graphql::{
   GraphQL,
-  ast::{Field, Selection, SelectionSet},
+  ast::{Field, FragmentSpread, InlineFragment, Selection, SelectionSet, TypeCondition},
   error::{ErrorData, Expectation, GraphqlErrors},
   syntactic::{GraphqlInput, GraphqlLexer, GraphqlToken},
 };
@@ -199,6 +199,143 @@ fn field_reports_local_required_name_phases_without_consuming_them() {
     drive_str(|inp| field(inp).map(|_| ()), "user: }"),
     Expectation::Name,
     SimpleSpan::new(6, 7),
+  );
+}
+
+// ─── fragment productions ───────────────────────────────────────────────────
+
+#[test]
+fn type_condition_accepts_keyword_and_name() {
+  fn user<S: AsRef<[u8]>>(condition: TypeCondition<S>) {
+    assert!("User".equivalent(condition.name().source()));
+    assert_eq!(condition.span(), &SimpleSpan::new(0, 7));
+  }
+  fn on_name<S: AsRef<[u8]>>(condition: TypeCondition<S>) {
+    assert!("on".equivalent(condition.name().source()));
+  }
+  accept_all!(type_condition, "on User", user);
+  accept_all!(type_condition, "on on", on_name);
+}
+
+#[test]
+fn type_condition_reports_committed_keyword_and_name_phases() {
+  reject_all!(type_condition, "");
+  reject_all!(type_condition, "User");
+  reject_all!(type_condition, "on");
+  reject_all!(type_condition, "on @dir");
+
+  assert_str_expectation(
+    drive_str(|inp| type_condition(inp).map(|_| ()), "User"),
+    Expectation::Keyword("on"),
+    SimpleSpan::new(0, 4),
+  );
+  assert_str_expectation(
+    drive_str(|inp| type_condition(inp).map(|_| ()), ""),
+    Expectation::Keyword("on"),
+    SimpleSpan::new(0, 0),
+  );
+  assert_str_expectation(
+    drive_str(|inp| type_condition(inp).map(|_| ()), "on @dir"),
+    Expectation::Name,
+    SimpleSpan::new(3, 4),
+  );
+  assert_str_expectation(
+    drive_str(|inp| type_condition(inp).map(|_| ()), "on"),
+    Expectation::Name,
+    SimpleSpan::new(2, 2),
+  );
+}
+
+#[test]
+fn fragment_spread_accepts_plain_and_directive_forms() {
+  fn plain<S: AsRef<[u8]>>(spread: FragmentSpread<S>) {
+    assert!("UserFields".equivalent(spread.name().source()));
+    assert!(spread.directives().is_none());
+  }
+  fn with_directive<S: AsRef<[u8]>>(spread: FragmentSpread<S>) {
+    assert!("UserFields".equivalent(spread.name().source()));
+    assert_eq!(
+      spread.directives().expect("directives").directives().len(),
+      1
+    );
+  }
+  accept_all!(fragment_spread, "...UserFields", plain);
+  accept_all!(
+    fragment_spread,
+    "...UserFields @include(if: true)",
+    with_directive
+  );
+}
+
+#[test]
+fn fragment_spread_reports_committed_fragment_name_phase() {
+  reject_all!(fragment_spread, "...");
+  reject_all!(fragment_spread, "... 123");
+
+  assert_str_expectation(
+    drive_str(|inp| fragment_spread(inp).map(|_| ()), "..."),
+    Expectation::FragmentName,
+    SimpleSpan::new(3, 3),
+  );
+  assert_str_expectation(
+    drive_str(|inp| fragment_spread(inp).map(|_| ()), "... 123"),
+    Expectation::FragmentName,
+    SimpleSpan::new(4, 7),
+  );
+}
+
+#[test]
+fn inline_fragment_accepts_typed_untyped_and_directive_forms() {
+  fn typed<S: AsRef<[u8]>>(fragment: InlineFragment<S>) {
+    assert!(
+      "User".equivalent(
+        fragment
+          .type_condition()
+          .expect("type condition")
+          .name()
+          .source()
+      )
+    );
+    assert!(fragment.directives().is_none());
+  }
+  fn untyped<S: AsRef<[u8]>>(fragment: InlineFragment<S>) {
+    assert!(fragment.type_condition().is_none());
+    assert!(fragment.directives().is_none());
+  }
+  fn with_directive<S: AsRef<[u8]>>(fragment: InlineFragment<S>) {
+    assert!(fragment.type_condition().is_none());
+    assert_eq!(
+      fragment
+        .directives()
+        .expect("directives")
+        .directives()
+        .len(),
+      1
+    );
+  }
+  accept_all!(inline_fragment, "... on User { id }", typed);
+  accept_all!(inline_fragment, "... { id }", untyped);
+  accept_all!(
+    inline_fragment,
+    "... @skip(if: false) { id }",
+    with_directive
+  );
+}
+
+#[test]
+fn inline_fragment_reports_selection_set_and_spread_shaped_tail_phases() {
+  reject_all!(inline_fragment, "... on User");
+  reject_all!(inline_fragment, "... UserFields");
+
+  assert_str_expectation(
+    drive_str(|inp| inline_fragment(inp).map(|_| ()), "... on User"),
+    Expectation::LBrace,
+    SimpleSpan::new(11, 11),
+  );
+  assert_str_expectation(
+    drive_str(|inp| inline_fragment(inp).map(|_| ()), "... UserFields"),
+    Expectation::LBrace,
+    SimpleSpan::new(4, 14),
   );
 }
 
@@ -536,6 +673,21 @@ fn selection_set_matches_frozen_verdicts() {
 fn associated_selection_apis_infer_str_and_byte_slice_sources() {
   let _: Field<&str> = drive_str(Field::<&str>::graphql, "id").expect("str field");
   let _: Field<&[u8]> = drive_slice(Field::<&[u8]>::graphql, b"id").expect("slice field");
+
+  let _: TypeCondition<&str> =
+    drive_str(TypeCondition::<&str>::graphql, "on User").expect("str type condition");
+  let _: TypeCondition<&[u8]> =
+    drive_slice(TypeCondition::<&[u8]>::graphql, b"on User").expect("slice type condition");
+
+  let _: FragmentSpread<&str> =
+    drive_str(FragmentSpread::<&str>::graphql, "...Part").expect("str fragment spread");
+  let _: FragmentSpread<&[u8]> =
+    drive_slice(FragmentSpread::<&[u8]>::graphql, b"...Part").expect("slice fragment spread");
+
+  let _: InlineFragment<&str> =
+    drive_str(InlineFragment::<&str>::graphql, "... { id }").expect("str inline fragment");
+  let _: InlineFragment<&[u8]> =
+    drive_slice(InlineFragment::<&[u8]>::graphql, b"... { id }").expect("slice inline fragment");
 
   let _: Selection<&str> = drive_str(Selection::<&str>::graphql, "...Part").expect("str selection");
   let _: Selection<&[u8]> =
