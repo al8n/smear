@@ -1,8 +1,8 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use tokora::{
-  SimpleSpan as Span,
-  span::{AsSpan, IntoSpan},
+  SimpleSpan,
+  span::{AsSpan, IntoSpan, Span as SpanTrait},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -13,26 +13,27 @@ use tokora::{
 
 /// A floating-point value literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FloatValue<S> {
+pub struct FloatValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   value: S,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S> AsSpan<Span> for FloatValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for FloatValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for FloatValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FloatValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for FloatValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for FloatValue<S, Span, Lang> {
   type Components = (Span, S);
 
   #[inline]
@@ -41,7 +42,7 @@ impl<S> IntoComponents for FloatValue<S> {
   }
 }
 
-impl<S> Display for FloatValue<S>
+impl<S, Span, Lang: ?Sized> Display for FloatValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -51,14 +52,14 @@ where
   }
 }
 
-impl<S> AsRef<S> for FloatValue<S> {
+impl<S, Span, Lang: ?Sized> AsRef<S> for FloatValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S> core::ops::Deref for FloatValue<S> {
+impl<S, Span, Lang: ?Sized> core::ops::Deref for FloatValue<S, Span, Lang> {
   type Target = S;
 
   #[inline]
@@ -67,11 +68,15 @@ impl<S> core::ops::Deref for FloatValue<S> {
   }
 }
 
-impl<S> FloatValue<S> {
+impl<S, Span, Lang: ?Sized> FloatValue<S, Span, Lang> {
   /// Creates a new float value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self { span, value }
+    Self {
+      span,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the name.
@@ -96,7 +101,7 @@ impl<S> FloatValue<S> {
   }
 }
 
-impl<S> DisplayCompact for FloatValue<S>
+impl<S, Span, Lang: ?Sized> DisplayCompact for FloatValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -108,7 +113,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for FloatValue<S>
+impl<S, Span, Lang: ?Sized> DisplayPretty for FloatValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -120,9 +125,11 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for FloatValue<S>
+impl<S, Span, Lang: ?Sized> DisplaySyntaxTree for FloatValue<S, Span, Lang>
 where
   S: DisplayHuman,
+  Span: SpanTrait,
+  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(

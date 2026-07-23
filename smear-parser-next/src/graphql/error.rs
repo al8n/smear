@@ -10,7 +10,7 @@
 //!
 //! The atoms speak tokora's generic error families ([`UnexpectedToken`],
 //! [`SeparatedError`], the container/`TooFew` families, [`UnexpectedEot`], and the
-//! lexer errors). tokora 0.3.0's `ComposableEmitter` bundle and `From*` blankets
+//! lexer errors). tokora's `ComposableEmitter` bundle and `From*` blankets
 //! shrink the old twelve-impl set to the handful of `From` conversions the atoms'
 //! bounds actually demand; each lands here so [`Fatal`](tokora::emitter::Fatal)
 //! over [`GraphqlErrors`] is a complete [`ParseCtx`](crate::combinator::ParseCtx)
@@ -24,10 +24,6 @@ use smear_lexer::{
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
   tokora::error::UnexpectedEnd,
-};
-use smear_scaffold::hints::{
-  EnumTypeExtensionHint, InputObjectTypeExtensionHint, InterfaceTypeExtensionHint,
-  ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
 };
 use tokora::{
   SimpleSpan as Span,
@@ -51,6 +47,168 @@ pub enum VariableValueHint {
   /// A dollar `$` was expected.
   #[display("dollar")]
   Dollar,
+}
+
+/// A hint for what was expected in a object field value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum ObjectFieldValueHint {
+  /// A colon was expected.
+  #[display("colon")]
+  Colon,
+  /// A value was expected.
+  #[display("value")]
+  Value,
+  /// A name was expected.
+  #[display("name")]
+  Name,
+}
+
+/// Hints for the next component was expected while parsing a schema extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum SchemaExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Root operation types definition.
+  #[display("root operation types definition")]
+  RootOperationTypesDefinition,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Schema keyword.
+  #[display("schema keyword")]
+  Schema,
+  /// Directives or root operation types definition.
+  #[display("directives or root operation types definition")]
+  DirectivesOrRootOperationTypesDefinition,
+}
+
+/// Hints for the next component was expected while parsing a union type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum UnionTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Union member types.
+  #[display("union member types")]
+  UnionMemberTypes,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Union keyword.
+  #[display("union keyword")]
+  Union,
+  /// Directives or union member types.
+  #[display("directives or union member types")]
+  DirectivesOrUnionMemberTypes,
+}
+
+/// Hints for the next component was expected while parsing an input object type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum InputObjectTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Input fields definition.
+  #[display("input fields definition")]
+  InputFieldsDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Input keyword.
+  #[display("input keyword")]
+  Input,
+  /// Directives or input fields definition.
+  #[display("directives or input fields definition")]
+  DirectivesOrInputFieldsDefinition,
+}
+
+/// Hints for the next component was expected while parsing an object type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum ObjectTypeExtensionHint {
+  /// Implements interfaces.
+  #[display("implements")]
+  Implements,
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Fields definition.
+  #[display("fields definition")]
+  FieldsDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Type keyword.
+  #[display("type keyword")]
+  Type,
+  /// Implements, directives, or fields definition.
+  #[display("implements, directives, or fields definition")]
+  ImplementsOrDirectivesOrFieldsDefinition,
+}
+
+/// Hints for the next component was expected while parsing an interface type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum InterfaceTypeExtensionHint {
+  /// Implements interfaces.
+  #[display("implements")]
+  Implements,
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Fields definition.
+  #[display("fields definition")]
+  FieldsDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Interface keyword.
+  #[display("interface keyword")]
+  Interface,
+  /// Implements, directives, or fields definition.
+  #[display("implements, directives, or fields definition")]
+  ImplementsOrDirectivesOrFieldsDefinition,
+}
+
+/// Hints for the next component was expected while parsing an enum type extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
+#[non_exhaustive]
+pub enum EnumTypeExtensionHint {
+  /// Directives.
+  #[display("directives")]
+  Directives,
+  /// Enum values definition.
+  #[display("enum values definition")]
+  EnumValuesDefinition,
+  /// Name.
+  #[display("name")]
+  Name,
+  /// Extend keyword.
+  #[display("extend keyword")]
+  Extend,
+  /// Enum keyword.
+  #[display("enum keyword")]
+  Enum,
+  /// Directives or enum values definition.
+  #[display("directives or enum values definition")]
+  DirectivesOrEnumValuesDefinition,
 }
 
 /// Expectations for the GraphQL parser.
@@ -94,6 +252,8 @@ pub enum Expectation {
   ConstInputValue,
   /// Input value was expected.
   InputValue,
+  /// A type reference was expected.
+  Type,
   /// Fragment name was expected.
   FragmentName,
   /// A name was expected.
@@ -192,6 +352,8 @@ impl<S> UnexpectedKeyword<S> {
 /// Represents an unclosed delimiter in GraphQL source.
 #[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Unclosed {
+  /// Unclosed parentheses (missing `)`).
+  Parentheses,
   /// An unclosed list (missing `]`).
   List,
   /// An unclosed object (missing `}`).
@@ -223,7 +385,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// A fragment name is invalid.
   #[from(skip)]
   InvalidFragmentName(S),
-  /// A list or object was not closed.
+  /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// An unexpected token was found.
   UnexpectedToken(UnexpectedToken<T, Exp>),
@@ -415,6 +577,12 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unclosed_list(span: Span) -> Self {
     Self::new(span, ErrorData::Unclosed(Unclosed::List))
+  }
+
+  /// Creates an unclosed-parentheses error.
+  #[inline]
+  pub const fn unclosed_parentheses(span: Span) -> Self {
+    Self::new(span, ErrorData::Unclosed(Unclosed::Parentheses))
   }
 
   /// Creates an unclosed object error.
@@ -646,6 +814,13 @@ impl<S> From<TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>> for GraphqlE
   #[inline]
   fn from(err: TokoraUnclosed<tokora::punct::Bracket, Span, GraphQL>) -> Self {
     GraphqlError::unclosed_list(err.span()).into()
+  }
+}
+
+impl<S> From<TokoraUnclosed<tokora::punct::Paren, Span, GraphQL>> for GraphqlErrors<S> {
+  #[inline]
+  fn from(err: TokoraUnclosed<tokora::punct::Paren, Span, GraphQL>) -> Self {
+    GraphqlError::unclosed_parentheses(err.span()).into()
   }
 }
 

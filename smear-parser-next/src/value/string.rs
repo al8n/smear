@@ -1,8 +1,8 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use smear_lexer::{LitBlockStr, LitInlineStr, LitStr};
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -13,40 +13,41 @@ use tokora::{
 
 /// A string value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StringValue<S> {
+pub struct StringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   lit: LitStr<S>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S: AsRef<str>> AsRef<str> for StringValue<S> {
+impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for StringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S: AsRef<[u8]>> AsRef<[u8]> for StringValue<S> {
+impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for StringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S> AsSpan<Span> for StringValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for StringValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for StringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for StringValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for StringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for StringValue<S, Span, Lang> {
   type Components = (Span, LitStr<S>);
 
   #[inline]
@@ -55,11 +56,15 @@ impl<S> IntoComponents for StringValue<S> {
   }
 }
 
-impl<S> StringValue<S> {
+impl<S, Span, Lang: ?Sized> StringValue<S, Span, Lang> {
   /// Creates a new string value.
   #[inline(always)]
   pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
-    Self { span, lit }
+    Self {
+      span,
+      lit,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the name.
@@ -93,7 +98,7 @@ impl<S> StringValue<S> {
   }
 }
 
-impl<S> Display for StringValue<S>
+impl<S, Span, Lang: ?Sized> Display for StringValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -105,40 +110,41 @@ where
 
 /// A inline string value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct InlineStringValue<S> {
+pub struct InlineStringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   lit: LitInlineStr<S>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S: AsRef<str>> AsRef<str> for InlineStringValue<S> {
+impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S: AsRef<[u8]>> AsRef<[u8]> for InlineStringValue<S> {
+impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S> AsSpan<Span> for InlineStringValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for InlineStringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for InlineStringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for InlineStringValue<S, Span, Lang> {
   type Components = (Span, LitInlineStr<S>);
 
   #[inline]
@@ -147,7 +153,7 @@ impl<S> IntoComponents for InlineStringValue<S> {
   }
 }
 
-impl<S> Display for InlineStringValue<S>
+impl<S, Span, Lang: ?Sized> Display for InlineStringValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -157,11 +163,15 @@ where
   }
 }
 
-impl<S> InlineStringValue<S> {
+impl<S, Span, Lang: ?Sized> InlineStringValue<S, Span, Lang> {
   /// Creates a new inline string value.
   #[inline(always)]
   pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self {
-    Self { span, lit }
+    Self {
+      span,
+      lit,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the name.
@@ -195,7 +205,7 @@ impl<S> InlineStringValue<S> {
   }
 }
 
-impl<S> DisplayCompact for InlineStringValue<S>
+impl<S, Span, Lang: ?Sized> DisplayCompact for InlineStringValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -209,40 +219,41 @@ where
 
 /// A block string value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BlockStringValue<S> {
+pub struct BlockStringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   lit: LitBlockStr<S>,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S: AsRef<str>> AsRef<str> for BlockStringValue<S> {
+impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S: AsRef<[u8]>> AsRef<[u8]> for BlockStringValue<S> {
+impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
     self.lit.source_ref().as_ref()
   }
 }
 
-impl<S> AsSpan<Span> for BlockStringValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for BlockStringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for BlockStringValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for BlockStringValue<S, Span, Lang> {
   type Components = (Span, LitBlockStr<S>);
 
   #[inline]
@@ -251,7 +262,7 @@ impl<S> IntoComponents for BlockStringValue<S> {
   }
 }
 
-impl<S> Display for BlockStringValue<S>
+impl<S, Span, Lang: ?Sized> Display for BlockStringValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -261,11 +272,15 @@ where
   }
 }
 
-impl<S> BlockStringValue<S> {
+impl<S, Span, Lang: ?Sized> BlockStringValue<S, Span, Lang> {
   /// Creates a new block string value.
   #[inline(always)]
   pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self {
-    Self { span, lit }
+    Self {
+      span,
+      lit,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the name.
@@ -299,7 +314,7 @@ impl<S> BlockStringValue<S> {
   }
 }
 
-impl<S> DisplayPretty for BlockStringValue<S>
+impl<S, Span, Lang: ?Sized> DisplayPretty for BlockStringValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {

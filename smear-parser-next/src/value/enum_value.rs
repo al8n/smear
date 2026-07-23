@@ -1,7 +1,7 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -12,12 +12,13 @@ use tokora::{
 
 /// An enum value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumValue<S> {
+pub struct EnumValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   source: S,
   span: Span,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S> Display for EnumValue<S>
+impl<S, Span, Lang: ?Sized> Display for EnumValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -27,21 +28,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for EnumValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for EnumValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for EnumValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for EnumValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for EnumValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for EnumValue<S, Span, Lang> {
   type Components = (Span, S);
 
   #[inline]
@@ -50,7 +51,7 @@ impl<S> IntoComponents for EnumValue<S> {
   }
 }
 
-impl<S> core::ops::Deref for EnumValue<S> {
+impl<S, Span, Lang: ?Sized> core::ops::Deref for EnumValue<S, Span, Lang> {
   type Target = S;
 
   #[inline]
@@ -59,13 +60,14 @@ impl<S> core::ops::Deref for EnumValue<S> {
   }
 }
 
-impl<S> EnumValue<S> {
+impl<S, Span, Lang: ?Sized> EnumValue<S, Span, Lang> {
   /// Creates a new enum value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
     Self {
       source: value,
       span,
+      _lang: PhantomData,
     }
   }
 
@@ -91,7 +93,7 @@ impl<S> EnumValue<S> {
   }
 }
 
-impl<S> DisplayCompact for EnumValue<S>
+impl<S, Span, Lang: ?Sized> DisplayCompact for EnumValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -103,7 +105,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for EnumValue<S>
+impl<S, Span, Lang: ?Sized> DisplayPretty for EnumValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {

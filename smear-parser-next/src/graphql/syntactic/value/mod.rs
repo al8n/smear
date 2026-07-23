@@ -1,11 +1,10 @@
 //! GraphQL value productions over the concrete syntactic lexer.
 //!
-//! Public parsers live on the local AST nodes as `Type::graphql` and
-//! `Type::try_graphql`. They are fixed to [`GraphqlLexer`] and the
-//! [`GraphQL`] marker, while retaining the lexer's supported source matrix through
-//! the `Src` parameter. Results owned by `smear_scaffold` (lists, objects, object
-//! fields, and defaults) remain specialized free helpers; private helpers assemble
-//! their recursive productions with the same concrete input.
+//! Public associated parsers live directly on the GraphQL AST types, such as
+//! [`crate::graphql::ast::IntValue`], [`crate::graphql::ast::VariableValue`], and
+//! [`crate::graphql::ast::Object`]. Their slice generic is fixed by the AST result
+//! while the [`GraphqlLexer`] source is inferred from the parser input. Public
+//! free production functions remain available for direct parser composition.
 //!
 //! Every committed parser reports an unexpected token or end of input after it has
 //! committed. Where a `try_` counterpart is available, it declines without
@@ -15,13 +14,12 @@
 //! consuming a wrong token. Default values commit on `=` and validate the const-value
 //! tail without consuming a wrong token.
 
-use smear_scaffold::{ast as scaffold, hints::ObjectFieldValueHint};
 use std::vec::Vec;
 use tokora::{
   Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{UnexpectedEot, token::UnexpectedToken},
+  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket},
   span::Spanned,
@@ -32,16 +30,17 @@ use tokora::{
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 
-use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
+use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
 use crate::{
-  combinator::{Equivalent, ParseCtx, colon, dollar, equal, ident},
+  combinator::{Equivalent, ParseCtx, colon, dollar, equal},
   graphql::{
     GraphQL,
     ast::{
-      BooleanValue, ConstInputValue, ConstObjectField, DefaultInputValue, EnumValue, FloatValue,
-      InputValue, IntValue, Name, NullValue, ObjectField, StringValue, VariableValue,
+      BooleanValue, ConstInputValue, ConstList as AstConstList, ConstObject as AstConstObject,
+      ConstObjectField, DefaultInputValue, EnumValue, FloatValue, InputValue, IntValue,
+      List as AstList, NullValue, Object as AstObject, ObjectField, StringValue, VariableValue,
     },
-    error::{Expectation, GraphqlError as DialectGraphqlError},
+    error::{Expectation, GraphqlError as DialectGraphqlError, ObjectFieldValueHint},
   },
 };
 
@@ -83,8 +82,8 @@ macro_rules! value_parser {
       $output,
       [
         str: Equivalent<GraphqlSlice<'inp, Src>>,
-        GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+        GraphqlError<'inp, Src, Ctx>: From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
           + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
       ],
       $body
@@ -320,22 +319,28 @@ value_parser!(
   }
 );
 
-value_parser!(boolean_value, inp, BooleanValue, [equivalent], {
-  match inp.next()? {
-    Some(spanned) => {
-      let (span, token) = spanned.into_components();
+value_parser!(
+  boolean_value,
+  inp,
+  BooleanValue<GraphqlSlice<'inp, Src>>,
+  [equivalent],
+  {
+    match inp.next()? {
+      Some(spanned) => {
+        let (span, token) = spanned.into_components();
 
-      if token.is_true_literal() {
-        Ok(BooleanValue::new(span, true))
-      } else if token.is_false_literal() {
-        Ok(BooleanValue::new(span, false))
-      } else {
-        Err(UnexpectedToken::of(span).with_found(token).into())
+        if token.is_true_literal() {
+          Ok(BooleanValue::new(span, true))
+        } else if token.is_false_literal() {
+          Ok(BooleanValue::new(span, false))
+        } else {
+          Err(UnexpectedToken::of(span).with_found(token).into())
+        }
       }
+      None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
     }
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }
-});
+);
 
 value_parser!(
   null_value,
@@ -390,7 +395,7 @@ value_parser!(
   [],
   {
     dollar
-      .ignore_then(ident.peek_then::<_, U1>(
+      .ignore_then(name.peek_then::<_, U1>(
         |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
           match peeked.pop_front() {
             Some(token) if token.token().is_identifier() => Ok(()),
@@ -477,7 +482,7 @@ value_try_parser!(
 value_eot_parser!(
   try_boolean_value,
   inp,
-  ParseAttempt<BooleanValue>,
+  ParseAttempt<BooleanValue<GraphqlSlice<'inp, Src>>>,
   [equivalent],
   {
     inp
@@ -744,32 +749,32 @@ where
 value_parser!(
   pub list_value,
   inp,
-  scaffold::List<InputValue<GraphqlSlice<'inp, Src>>>,
+  AstList<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
     value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
-      .delimited::<Bracket>()
+      .delimited_by_brackets()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: values }| scaffold::List::new(span, values))
+      .map(|Spanned { span, data: values }| AstList::new(span, values))
   }
 );
 
 value_parser!(
   pub const_list_value,
   inp,
-  scaffold::List<ConstInputValue<GraphqlSlice<'inp, Src>>>,
+  AstConstList<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
     const_value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
-      .delimited::<Bracket>()
+      .delimited_by_brackets()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: values }| scaffold::List::new(span, values))
+      .map(|Spanned { span, data: values }| AstConstList::new(span, values))
   }
 );
 
@@ -786,7 +791,7 @@ value_parser!(
         ObjectFieldValueHint::Name,
         |token| token.is_identifier(),
       )?;
-      ident(inp)
+      name(inp)
     })
       .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
         guard_object_field_phase(
@@ -807,7 +812,7 @@ value_parser!(
         value(inp)
       })
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
+      .map(|Spanned { span, data: (name, value) }| ObjectField::new(span, name, value))
       .parse_input(inp)
   }
 );
@@ -825,7 +830,7 @@ value_parser!(
         ObjectFieldValueHint::Name,
         |token| token.is_identifier(),
       )?;
-      ident(inp)
+      name(inp)
     })
       .then_ignore(|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
         guard_object_field_phase(
@@ -846,7 +851,7 @@ value_parser!(
         const_value(inp)
       })
       .spanned()
-      .map(|Spanned { span, data: (name, value) }| scaffold::ObjectField::new(span, name, value))
+      .map(|Spanned { span, data: (name, value) }| ConstObjectField::new(span, name, value))
       .parse_input(inp)
   }
 );
@@ -854,37 +859,37 @@ value_parser!(
 value_parser!(
   pub object_value,
   inp,
-  scaffold::Object<Name<GraphqlSlice<'inp, Src>>, InputValue<GraphqlSlice<'inp, Src>>>,
+  AstObject<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
     object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
-      .delimited::<Brace>()
+      .delimited_by_braces()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields }| scaffold::Object::new(span, fields))
+      .map(|Spanned { span, data: fields }| AstObject::new(span, fields))
   }
 );
 
 value_parser!(
   pub const_object_value,
   inp,
-  scaffold::Object<Name<GraphqlSlice<'inp, Src>>, ConstInputValue<GraphqlSlice<'inp, Src>>>,
+  AstConstObject<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
   {
     const_object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
-      .delimited::<Brace>()
+      .delimited_by_braces()
       .collect_with(Vec::new())
       .spanned()
       .parse_input(inp)
-      .map(|Spanned { span, data: fields }| scaffold::Object::new(span, fields))
+      .map(|Spanned { span, data: fields }| AstConstObject::new(span, fields))
   }
 );
 
 value_parser!(
-  value,
+  pub(super) value,
   inp,
   InputValue<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
@@ -951,7 +956,7 @@ value_parser!(
 );
 
 value_parser!(
-  const_value,
+  pub(super) const_value,
   inp,
   ConstInputValue<GraphqlSlice<'inp, Src>>,
   [equivalent, delimited],
@@ -1101,41 +1106,92 @@ value_parser!(
 );
 
 macro_rules! graphql_slice_api {
-  ($slice:ident, $node:ty, $parse:ident, []) => {
-    graphql_slice_api!(@graphql $slice, $node, $parse, []);
+  ($slice:ident, $node:ty, $parse:ident, [], $spec:literal) => {
+    graphql_slice_api!(@graphql $slice, $node, $parse, [], $spec);
   };
-  ($slice:ident, $node:ty, $parse:ident, $try_parse:ident, []) => {
-    graphql_slice_api!(@graphql $slice, $node, $parse, []);
-    graphql_slice_api!(@try $slice, $node, $try_parse, []);
+  ($slice:ident, $node:ty, $parse:ident, $try_parse:ident, [], $spec:literal) => {
+    graphql_slice_api!(@graphql $slice, $node, $parse, [], $spec);
+    graphql_slice_api!(@try $slice, $node, $try_parse, [], $spec);
   };
-  ($slice:ident, $node:ty, $parse:ident, [equivalent]) => {
-    graphql_slice_api!(@graphql $slice, $node, $parse, [str: Equivalent<$slice>,]);
+  ($slice:ident, $node:ty, $parse:ident, $try_parse:ident, [eot], $spec:literal) => {
+    graphql_slice_api!(@graphql $slice, $node, $parse, [], $spec);
+    graphql_slice_api!(
+      @try $slice,
+      $node,
+      $try_parse,
+      [
+        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+          + From<
+            UnexpectedToken<
+              'inp,
+              GraphqlToken<'inp, Src>,
+              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+              SimpleSpan,
+              GraphQL,
+            >,
+          >,
+      ],
+      $spec
+    );
   };
-  ($slice:ident, $node:ty, $parse:ident, [equivalent, delimited]) => {
+  (
+    $slice:ident,
+    $node:ty,
+    $parse:ident,
+    $try_parse:ident,
+    [equivalent],
+    $spec:literal
+  ) => {
+    graphql_slice_api!(
+      @graphql $slice,
+      $node,
+      $parse,
+      [str: Equivalent<$slice>,],
+      $spec
+    );
+    graphql_slice_api!(
+      @try $slice,
+      $node,
+      $try_parse,
+      [
+        str: Equivalent<$slice>,
+        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
+      ],
+      $spec
+    );
+  };
+  (
+    $slice:ident,
+    $node:ty,
+    $parse:ident,
+    [equivalent, delimited],
+    $spec:literal
+  ) => {
     graphql_slice_api!(
       @graphql $slice,
       $node,
       $parse,
       [
         str: Equivalent<$slice>,
-        GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+        GraphqlError<'inp, Src, Ctx>: From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
           + From<DialectGraphqlError<$slice>>,
-      ]
+      ],
+      $spec
     );
-  };
-  ($slice:ident, $node:ty, $parse:ident, $try_parse:ident, [equivalent]) => {
-    graphql_slice_api!(@graphql $slice, $node, $parse, [str: Equivalent<$slice>,]);
-    graphql_slice_api!(@try $slice, $node, $try_parse, [str: Equivalent<$slice>,]);
   };
   (
     @graphql $slice:ident,
     $node:ty,
     $parse:ident,
-    [$($bounds:tt)*]
+    [$($bounds:tt)*],
+    $spec:literal
   ) => {
     impl<$slice> $node {
-      #[doc = "Parses this GraphQL value from the concrete syntactic lexer."]
+      /// Parses this committed GraphQL production.
+      ///
+      /// The lexer source is inferred from `inp`.
+      #[doc = $spec]
       pub fn graphql<'inp, Src, Ctx>(
         inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
@@ -1143,12 +1199,12 @@ macro_rules! graphql_slice_api {
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
         GraphqlLexer<'inp, Src>: Lexer<
-            'inp,
-            Source = Src,
-            Token = GraphqlToken<'inp, Src>,
-            Span = SimpleSpan,
-            Offset = usize,
-          >,
+          'inp,
+          Source = Src,
+          Token = GraphqlToken<'inp, Src>,
+          Span = SimpleSpan,
+          Offset = usize,
+        >,
         $($bounds)*
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
         GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
@@ -1166,15 +1222,18 @@ macro_rules! graphql_slice_api {
       }
     }
   };
-
   (
     @try $slice:ident,
     $node:ty,
     $try_parse:ident,
-    [$($bounds:tt)*]
+    [$($bounds:tt)*],
+    $spec:literal
   ) => {
     impl<$slice> $node {
-      #[doc = "Attempts this GraphQL value without consuming on a head mismatch."]
+      /// Attempts this GraphQL production without consuming on a head mismatch.
+      ///
+      /// The lexer source is inferred from `inp`.
+      #[doc = $spec]
       pub fn try_graphql<'inp, Src, Ctx>(
         inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
       ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
@@ -1182,24 +1241,14 @@ macro_rules! graphql_slice_api {
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
         GraphqlLexer<'inp, Src>: Lexer<
-            'inp,
-            Source = Src,
-            Token = GraphqlToken<'inp, Src>,
-            Span = SimpleSpan,
-            Offset = usize,
-          >,
+          'inp,
+          Source = Src,
+          Token = GraphqlToken<'inp, Src>,
+          Span = SimpleSpan,
+          Offset = usize,
+        >,
         $($bounds)*
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlToken<'inp, Src>,
-              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQL,
-            >,
-          >,
       {
         $try_parse(inp)
       }
@@ -1207,30 +1256,132 @@ macro_rules! graphql_slice_api {
   };
 }
 
-graphql_slice_api!(S, IntValue<S>, int_value, try_int_value, []);
-graphql_slice_api!(S, FloatValue<S>, float_value, try_float_value, []);
-graphql_slice_api!(S, StringValue<S>, string_value, try_string_value, []);
-graphql_slice_api!(S, NullValue<S>, null_value, try_null_value, [equivalent]);
-graphql_slice_api!(S, EnumValue<S>, enum_value, try_enum_value, [equivalent]);
 graphql_slice_api!(
   S,
-  crate::value::VariableValue<Name<S>>,
+  IntValue<S>,
+  int_value,
+  try_int_value,
+  [],
+  "See the [GraphQL Int Value specification](https://spec.graphql.org/draft/#sec-Int-Value)."
+);
+graphql_slice_api!(
+  S,
+  FloatValue<S>,
+  float_value,
+  try_float_value,
+  [],
+  "See the [GraphQL Float Value specification](https://spec.graphql.org/draft/#sec-Float-Value)."
+);
+graphql_slice_api!(
+  S,
+  StringValue<S>,
+  string_value,
+  try_string_value,
+  [],
+  "See the [GraphQL String Value specification](https://spec.graphql.org/draft/#sec-String-Value)."
+);
+graphql_slice_api!(
+  S,
+  BooleanValue<S>,
+  boolean_value,
+  try_boolean_value,
+  [equivalent],
+  "See the [GraphQL Boolean Value specification](https://spec.graphql.org/draft/#sec-Boolean-Value)."
+);
+graphql_slice_api!(
+  S,
+  NullValue<S>,
+  null_value,
+  try_null_value,
+  [equivalent],
+  "See the [GraphQL Null Value specification](https://spec.graphql.org/draft/#sec-Null-Value)."
+);
+graphql_slice_api!(
+  S,
+  EnumValue<S>,
+  enum_value,
+  try_enum_value,
+  [equivalent],
+  "See the [GraphQL Enum Value specification](https://spec.graphql.org/draft/#sec-Enum-Value)."
+);
+graphql_slice_api!(
+  S,
+  VariableValue<S>,
   variable_value,
   try_variable_value,
-  []
+  [eot],
+  "See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables)."
 );
-graphql_slice_api!(S, InputValue<S>, value, [equivalent, delimited]);
-graphql_slice_api!(S, ConstInputValue<S>, const_value, [equivalent, delimited]);
+graphql_slice_api!(
+  S,
+  AstList<S>,
+  list_value,
+  [equivalent, delimited],
+  "See the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value)."
+);
+graphql_slice_api!(
+  S,
+  AstConstList<S>,
+  const_list_value,
+  [equivalent, delimited],
+  "See the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value)."
+);
+graphql_slice_api!(
+  S,
+  ObjectField<S>,
+  object_field,
+  [equivalent, delimited],
+  "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
+);
+graphql_slice_api!(
+  S,
+  ConstObjectField<S>,
+  const_object_field,
+  [equivalent, delimited],
+  "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
+);
+graphql_slice_api!(
+  S,
+  AstObject<S>,
+  object_value,
+  [equivalent, delimited],
+  "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
+);
+graphql_slice_api!(
+  S,
+  AstConstObject<S>,
+  const_object_value,
+  [equivalent, delimited],
+  "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
+);
+graphql_slice_api!(
+  S,
+  InputValue<S>,
+  value,
+  [equivalent, delimited],
+  "See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values)."
+);
+graphql_slice_api!(
+  S,
+  ConstInputValue<S>,
+  const_value,
+  [equivalent, delimited],
+  "See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values)."
+);
 
-impl BooleanValue {
-  /// Parses a GraphQL boolean value from the concrete syntactic lexer.
+impl<S> DefaultInputValue<S> {
+  /// Parses an optional GraphQL default value.
+  ///
+  /// The lexer source is inferred from `inp`.
+  ///
+  /// See the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
   pub fn graphql<'inp, Src, Ctx>(
     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-  ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
+  ) -> Result<Option<Self>, GraphqlError<'inp, Src, Ctx>>
   where
-    Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<GraphqlSlice<'inp, Src>>,
+    Src: Source<usize, Slice<'inp> = S> + ?Sized,
+    S: Slice<'inp> + Clone + 'inp,
+    str: Equivalent<S>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -1243,25 +1394,42 @@ impl BooleanValue {
           SimpleSpan,
           GraphQL,
         >,
-      >,
+      > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+      + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+      + From<DialectGraphqlError<S>>,
   {
-    boolean_value(inp)
+    default_value(inp)
   }
 
-  /// Attempts a GraphQL boolean value without consuming on a head mismatch.
+  /// Attempts a GraphQL default value without consuming when `=` is absent.
+  ///
+  /// The lexer source is inferred from `inp`.
+  ///
+  /// See the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
   pub fn try_graphql<'inp, Src, Ctx>(
     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   ) -> Result<ParseAttempt<Self>, GraphqlError<'inp, Src, Ctx>>
   where
-    Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<GraphqlSlice<'inp, Src>>,
+    Src: Source<usize, Slice<'inp> = S> + ?Sized,
+    S: Slice<'inp> + Clone + 'inp,
+    str: Equivalent<S>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
+    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+      + From<
+        UnexpectedToken<
+          'inp,
+          GraphqlToken<'inp, Src>,
+          <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+          SimpleSpan,
+          GraphQL,
+        >,
+      > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+      + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+      + From<DialectGraphqlError<S>>,
   {
-    try_boolean_value(inp)
+    try_default_value(inp)
   }
 }
 

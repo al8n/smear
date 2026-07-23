@@ -1,44 +1,65 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_scaffold::ast as scaffold;
 use tokora::{
-  SimpleSpan as Span,
+  SimpleSpan,
   span::{AsSpan, IntoSpan},
 };
 
 use super::{DefaultVec, Name};
+use crate::graphql::GraphQL;
 
-pub use crate::value::{
-  BlockStringValue, BooleanValue, EnumValue, FloatValue, InlineStringValue, IntValue, NullValue,
-  StringValue,
-};
+/// A GraphQL boolean literal.
+pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQL>;
+
+/// A GraphQL enum literal.
+pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<S, Span, GraphQL>;
+
+/// A GraphQL floating-point literal.
+pub type FloatValue<S, Span = SimpleSpan> = crate::value::FloatValue<S, Span, GraphQL>;
+
+/// A GraphQL integer literal.
+pub type IntValue<S, Span = SimpleSpan> = crate::value::IntValue<S, Span, GraphQL>;
+
+/// The GraphQL `null` literal.
+pub type NullValue<S, Span = SimpleSpan> = crate::value::NullValue<S, Span, GraphQL>;
+
+/// A GraphQL string literal.
+pub type StringValue<S, Span = SimpleSpan> = crate::value::StringValue<S, Span, GraphQL>;
+
+/// A GraphQL inline string literal.
+pub type InlineStringValue<S, Span = SimpleSpan> =
+  crate::value::InlineStringValue<S, Span, GraphQL>;
+
+/// A GraphQL block string literal.
+pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue<S, Span, GraphQL>;
 
 /// A GraphQL variable value that can appear in queries and mutations.
-pub type VariableValue<S> = crate::value::VariableValue<Name<S>>;
+pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;
 
 /// List value in GraphQL (can contain variables).
-pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+pub type List<S, Container = DefaultVec<InputValue<S>>> =
+  crate::value::List<InputValue<S>, SimpleSpan, Container>;
 
 /// Object value in GraphQL (can contain variables).
-pub type Object<S, Container = DefaultVec<InputValue<S>>> =
-  scaffold::Object<Name<S>, InputValue<S>, Container>;
+pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
+  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
 
 /// Object field in GraphQL (can contain variables).
-pub type ObjectField<S> = scaffold::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
 
 /// Constant list value in GraphQL (no variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  scaffold::List<ConstInputValue<S>, Container>;
+  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object value in GraphQL (no variables).
-pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
-  scaffold::Object<Name<S>, ConstInputValue<S>, Container>;
+pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
+  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object field in GraphQL (no variables).
-pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
 
 /// Default value for input fields and arguments, using constant expressions
 /// (`= ConstValue`). Copied type-only from the frozen `graphql/ast/default.rs`.
-pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
 
 /// GraphQL input value (executable context).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
@@ -48,7 +69,7 @@ pub enum InputValue<S> {
   /// Variable reference (e.g., `$userId`).
   Variable(VariableValue<S>),
   /// Boolean value (`true` or `false`).
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
@@ -60,14 +81,14 @@ pub enum InputValue<S> {
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of values.
-  List(scaffold::List<InputValue<S>>),
+  List(List<S>),
   /// Object value with named fields.
-  Object(scaffold::Object<Name<S>, InputValue<S>>),
+  Object(Object<S>),
 }
 
-impl<S> AsSpan<Span> for InputValue<S> {
+impl<S> AsSpan<SimpleSpan> for InputValue<S> {
   #[inline]
-  fn as_span(&self) -> &Span {
+  fn as_span(&self) -> &SimpleSpan {
     match self {
       Self::Variable(v) => v.as_span(),
       Self::Boolean(v) => v.as_span(),
@@ -82,9 +103,9 @@ impl<S> AsSpan<Span> for InputValue<S> {
   }
 }
 
-impl<S> IntoSpan<Span> for InputValue<S> {
+impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
   #[inline]
-  fn into_span(self) -> Span {
+  fn into_span(self) -> SimpleSpan {
     match self {
       Self::Variable(v) => v.into_span(),
       Self::Boolean(v) => v.into_span(),
@@ -105,7 +126,7 @@ impl<S> IntoSpan<Span> for InputValue<S> {
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
   /// Boolean value (`true` or `false`).
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
@@ -117,14 +138,14 @@ pub enum ConstInputValue<S> {
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of constant values.
-  List(scaffold::List<ConstInputValue<S>>),
+  List(ConstList<S>),
   /// Object value with named fields (all values must be constant).
-  Object(scaffold::Object<Name<S>, ConstInputValue<S>>),
+  Object(ConstObject<S>),
 }
 
-impl<S> AsSpan<Span> for ConstInputValue<S> {
+impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
   #[inline]
-  fn as_span(&self) -> &Span {
+  fn as_span(&self) -> &SimpleSpan {
     match self {
       Self::Boolean(v) => v.as_span(),
       Self::String(v) => v.as_span(),
@@ -138,9 +159,9 @@ impl<S> AsSpan<Span> for ConstInputValue<S> {
   }
 }
 
-impl<S> IntoSpan<Span> for ConstInputValue<S> {
+impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
   #[inline]
-  fn into_span(self) -> Span {
+  fn into_span(self) -> SimpleSpan {
     match self {
       Self::Boolean(v) => v.into_span(),
       Self::String(v) => v.into_span(),

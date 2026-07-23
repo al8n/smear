@@ -10,8 +10,8 @@ description = "Atomic parser-combinators for GraphQL and GraphQL-like DSLs"
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
-std = ["smear-scaffold/std", "smear-lexer/std"]
+alloc = ["smear-lexer/alloc"]
+std = ["smear-lexer/std"]
 
 unstable = ["smear-lexer/unstable"]
 
@@ -26,7 +26,6 @@ smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 [dependencies]
 derive_more.workspace = true
 tokora.workspace = true
-smear-scaffold.workspace = true
 smear-lexer.workspace = true
 paste = "1"
 

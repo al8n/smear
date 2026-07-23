@@ -1,8 +1,8 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use tokora::{
-  SimpleSpan as Span,
-  span::{AsSpan, IntoSpan},
+  SimpleSpan,
+  span::{AsSpan, IntoSpan, Span as SpanTrait},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -13,12 +13,13 @@ use tokora::{
 
 /// An integer value literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IntValue<S> {
+pub struct IntValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
   value: S,
+  _lang: PhantomData<Lang>,
 }
 
-impl<S> Display for IntValue<S>
+impl<S, Span, Lang: ?Sized> Display for IntValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -28,21 +29,21 @@ where
   }
 }
 
-impl<S> AsSpan<Span> for IntValue<S> {
+impl<S, Span, Lang: ?Sized> AsSpan<Span> for IntValue<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<Span> for IntValue<S> {
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for IntValue<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for IntValue<S> {
+impl<S, Span, Lang: ?Sized> IntoComponents for IntValue<S, Span, Lang> {
   type Components = (Span, S);
 
   #[inline]
@@ -51,7 +52,7 @@ impl<S> IntoComponents for IntValue<S> {
   }
 }
 
-impl<S> core::ops::Deref for IntValue<S> {
+impl<S, Span, Lang: ?Sized> core::ops::Deref for IntValue<S, Span, Lang> {
   type Target = S;
 
   #[inline]
@@ -60,11 +61,15 @@ impl<S> core::ops::Deref for IntValue<S> {
   }
 }
 
-impl<S> IntValue<S> {
+impl<S, Span, Lang: ?Sized> IntValue<S, Span, Lang> {
   /// Creates a new int value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self { span, value }
+    Self {
+      span,
+      value,
+      _lang: PhantomData,
+    }
   }
 
   /// Returns the span of the name.
@@ -89,7 +94,7 @@ impl<S> IntValue<S> {
   }
 }
 
-impl<S> DisplayCompact for IntValue<S>
+impl<S, Span, Lang: ?Sized> DisplayCompact for IntValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -101,7 +106,7 @@ where
   }
 }
 
-impl<S> DisplayPretty for IntValue<S>
+impl<S, Span, Lang: ?Sized> DisplayPretty for IntValue<S, Span, Lang>
 where
   S: DisplayHuman,
 {
@@ -113,9 +118,11 @@ where
   }
 }
 
-impl<S> DisplaySyntaxTree for IntValue<S>
+impl<S, Span, Lang: ?Sized> DisplaySyntaxTree for IntValue<S, Span, Lang>
 where
   S: DisplayHuman,
+  Span: SpanTrait,
+  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(
