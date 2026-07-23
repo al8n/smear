@@ -15,7 +15,7 @@ use crate::graphql::{
   GraphQL,
   ast::{Field, Selection, SelectionSet},
   error::{ErrorData, Expectation, GraphqlErrors},
-  syntactic::{GraphqlInput, GraphqlLexer},
+  syntactic::{GraphqlInput, GraphqlLexer, GraphqlToken},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
@@ -304,9 +304,45 @@ fn selection_reports_local_dispatch_and_inline_fragment_phases() {
 }
 
 #[test]
+fn selection_dispatch_does_not_consume_an_invalid_head() {
+  let result = drive_str(
+    |inp| {
+      let result = selection(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("invalid selection head remains available");
+      assert_eq!(tail.span, SimpleSpan::new(0, 3));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::LitInt(_)));
+      Ok(result)
+    },
+    "123",
+  )
+  .expect("inspection parser should consume the retained head");
+
+  assert_str_expectation(result, Expectation::Selection, SimpleSpan::new(0, 3));
+}
+
+#[test]
+fn selection_dispatch_commits_a_spread_before_its_fragment_name_error() {
+  let result = drive_str(
+    |inp| {
+      let result = selection(inp).map(|_| ());
+      let tail = inp.next()?.expect("fragment-name tail remains available");
+      assert_eq!(tail.span, SimpleSpan::new(4, 7));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::LitInt(_)));
+      Ok(result)
+    },
+    "... 123",
+  )
+  .expect("inspection parser should consume the retained fragment-name tail");
+
+  assert_str_expectation(result, Expectation::FragmentName, SimpleSpan::new(4, 7));
+}
+
+#[test]
 fn fragment_spread_named_on_is_unrepresentable() {
-  // `FragmentName : Name but not on`, spread side. The `...`-fork rules `on` out
-  // FIRST (`try_on` commits the inline-fragment arm), so a fragment spread named
+  // `FragmentName : Name but not on`, spread side. The fixed two-token `...`
+  // dispatch rules `on` out before the fragment-spread branch, so a fragment spread named
   // `on` is structurally unrepresentable; the concrete GraphQL `FragmentName`
   // production remains defense in depth. Behavior per input shape, pinned:
   //
