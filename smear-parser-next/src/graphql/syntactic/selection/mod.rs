@@ -1,38 +1,39 @@
 //! GraphQL selection productions.
 //!
 //! These parsers are concrete over [`GraphqlLexer`] and
-//! construct slice-typed GraphQL AST nodes. A fixed two-token dispatcher keeps
-//! the `...` fork local: `... on` begins a typed inline fragment, `... @` and
-//! `... {` begin untyped inline fragments, and every other spread tail remains
-//! a branded `FragmentName` parse.
+//! construct slice-typed GraphQL AST nodes. Selection heads are consumed by
+//! declining atoms and passed into committed tails, so dispatch never
+//! classifies an accepted token and then asks another parser to classify it.
 
 use std::vec::Vec;
 
 use smear_lexer::keywords::On;
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
-  TryParseInput,
-  cache::{Peeked, PeekedTokenExt},
+  Lexer, SimpleSpan, Slice, Source, Token,
+  cache::PeekedTokenExt,
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
-  parser::Action,
+  parser::try_braces,
   punct::{Brace, Bracket, Paren},
-  span::Spanned,
   try_parse_input::ParseAttempt,
-  utils::typenum::{U1, U2},
+  utils::{IntoComponents, typenum::U1},
 };
 
 use super::{
-  GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, argument::arguments,
-  directive::directives, fragment_name, name, peeks_where,
+  GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken,
+  argument::arguments,
+  directive::{directives, directives_after_at},
+  fragment_name, try_name,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx},
+  combinator::{Equivalent, ParseCtx, try_at, try_colon, try_spread},
   graphql::{
     GraphQL,
     ast::{
-      Alias, Field, FragmentSpread, InlineFragment, Name, Selection, SelectionSet, TypeCondition,
+      Alias, Directives, Field, FragmentName, FragmentSpread, InlineFragment, Name, Selection,
+      SelectionSet, TypeCondition,
     },
     error::{Expectation, GraphqlError as DialectGraphqlError},
+    keyword::try_on,
   },
 };
 
@@ -72,14 +73,13 @@ macro_rules! selection_parser {
   };
 }
 
-/// Checks a committed selection-production phase without consuming a rejected
-/// token. Lookahead carries only the rejected token's span and kind into the
-/// diagnostic, never its source slice or the token itself.
-fn guard_selection_phase<'inp, Src, Ctx>(
+/// Emits a committed selection-production diagnostic without consuming the
+/// rejected token. This runs only after a declining atom established that the
+/// required head is absent.
+fn expected_selection_phase<'inp, Src, Ctx, T>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   expected: Expectation,
-  mut accepts: impl FnMut(&GraphqlToken<'inp, Src>) -> bool,
-) -> Result<(), GraphqlError<'inp, Src, Ctx>>
+) -> Result<T, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -91,11 +91,9 @@ where
   let offset = *inp.offset();
   let rejected = {
     let mut peeked = inp.peek::<U1>()?;
-    match peeked.pop_front() {
-      Some(token) if accepts(token.token()) => return Ok(()),
-      Some(token) => Some((*token.span(), token.token().kind())),
-      None => None,
-    }
+    peeked
+      .pop_front()
+      .map(|token| (*token.span(), token.token().kind()))
   };
 
   match rejected {
@@ -105,16 +103,6 @@ where
         .into(),
     ),
   }
-}
-
-#[inline]
-fn is_on<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Identifier(value) if "on".equivalent(value))
 }
 
 fn take_name<'inp, Src, Ctx>(
@@ -137,40 +125,15 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_selection_phase(inp, Expectation::Name, |token| token.is_identifier())?;
-  name(inp)
-}
-
-fn take_colon<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<(), GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-{
-  guard_selection_phase(inp, Expectation::Colon, |token| token.is_colon())?;
-  match inp.next()? {
-    Some(_) => Ok(()),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
+  match try_name(inp)? {
+    ParseAttempt::Accept(name) => Ok(name),
+    ParseAttempt::Decline => expected_selection_phase(inp, Expectation::Name),
   }
 }
 
 fn take_spread<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<(), GraphqlError<'inp, Src, Ctx>>
+) -> Result<SimpleSpan, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -188,10 +151,9 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_selection_phase(inp, Expectation::Spread, |token| token.is_spread())?;
-  match inp.next()? {
-    Some(_) => Ok(()),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
+  match try_spread(inp)? {
+    ParseAttempt::Accept(spread) => Ok(*spread.span()),
+    ParseAttempt::Decline => expected_selection_phase(inp, Expectation::Spread),
   }
 }
 
@@ -216,11 +178,39 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_selection_phase(inp, Expectation::Keyword("on"), is_on::<Src>)?;
-  match inp.next()? {
-    Some(spanned) => Ok(On::new(spanned.into_span())),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
+  match try_on(inp)? {
+    ParseAttempt::Accept(on) => Ok(on),
+    ParseAttempt::Decline => expected_selection_phase(inp, Expectation::Keyword("on")),
   }
+}
+
+/// Parses the committed name tail of a type condition after `on` is consumed.
+fn type_condition_after_on<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  on: On,
+) -> Result<TypeCondition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let name = take_name(inp)?;
+  Ok(TypeCondition::new(
+    SimpleSpan::new(on.span().start(), name.span().end()),
+    name,
+  ))
 }
 
 selection_parser!(
@@ -234,11 +224,8 @@ selection_parser!(
   inp,
   TypeCondition<GraphqlSlice<'inp, Src>>,
   {
-    take_on
-      .ignore_then(take_name)
-      .spanned()
-      .map(|Spanned { span, data: name }| TypeCondition::new(span, name))
-      .parse_input(inp)
+    let on = take_on(inp)?;
+    type_condition_after_on(inp, on)
   }
 );
 
@@ -253,18 +240,78 @@ selection_parser!(
   inp,
   ParseAttempt<TypeCondition<GraphqlSlice<'inp, Src>>>,
   {
-    (type_condition::<Src, Ctx>,)
-      .peek_then_try_choice::<_, U1>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
-          Ok(match peeked.pop_front() {
-            Some(token) if is_on::<Src>(token.token()) => Some(Branch::B0),
-            _ => None,
-          })
-        },
-      )
-      .try_parse_input(inp)
+    match try_on(inp)? {
+      ParseAttempt::Accept(on) => type_condition_after_on(inp, on).map(ParseAttempt::Accept),
+      ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    }
   }
 );
+
+/// Parses a field tail after its first name is already consumed.
+fn field_after_name<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  first_name: Name<GraphqlSlice<'inp, Src>>,
+) -> Result<Field<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let start = first_name.span().start();
+  let (alias, name) = match try_colon(inp)? {
+    ParseAttempt::Accept(colon) => {
+      let alias = Alias::new(SimpleSpan::new(start, colon.span().end()), first_name);
+      (Some(alias), take_name(inp)?)
+    }
+    ParseAttempt::Decline => (None, first_name),
+  };
+
+  let mut end = name.span().end();
+  let arguments = arguments(inp)?;
+  if arguments.span().start() != arguments.span().end() {
+    end = arguments.span().end();
+  }
+  let arguments = (!arguments.arguments().is_empty()).then_some(arguments);
+
+  let directives = directives(inp)?;
+  if directives.span().start() != directives.span().end() {
+    end = directives.span().end();
+  }
+  let directives = (!directives.directives().is_empty()).then_some(directives);
+
+  let selection_set = match try_selection_set(inp)? {
+    ParseAttempt::Accept(selection_set) => {
+      end = selection_set.span().end();
+      Some(selection_set)
+    }
+    ParseAttempt::Decline => None,
+  };
+
+  Ok(Field::new(
+    SimpleSpan::new(start, end),
+    alias,
+    name,
+    arguments,
+    directives,
+    selection_set,
+  ))
+}
 
 selection_parser!(
   /// Parses a GraphQL field (`Alias? Name Arguments? Directives? SelectionSet?`).
@@ -279,98 +326,104 @@ selection_parser!(
   inp,
   Field<GraphqlSlice<'inp, Src>>,
   {
-    let cursor = *inp.cursor();
     let first_name = take_name(inp)?;
-    let (alias, name) = if peeks_where(inp, |token| token.is_colon())? {
-      take_colon(inp)?;
-      let alias = Alias::new(inp.span_since(&cursor), first_name);
-      (Some(alias), take_name(inp)?)
-    } else {
-      (None, first_name)
-    };
-
-    let arguments = arguments(inp)?;
-    let arguments = if arguments.arguments().is_empty() {
-      None
-    } else {
-      Some(arguments)
-    };
-    let directives = directives(inp)?;
-    let directives = if directives.directives().is_empty() {
-      None
-    } else {
-      Some(directives)
-    };
-    let selection_set = if peeks_where(inp, |token| token.is_l_brace())? {
-      Some(selection_set(inp)?)
-    } else {
-      None
-    };
-
-    Ok(Field::new(
-      inp.span_since(&cursor),
-      alias,
-      name,
-      arguments,
-      directives,
-      selection_set,
-    ))
+    field_after_name(inp, first_name)
   }
 );
+
+fn try_selection<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<ParseAttempt<Selection<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  match try_name(inp)? {
+    ParseAttempt::Accept(name) => field_after_name(inp, name)
+      .map(Selection::Field)
+      .map(ParseAttempt::Accept),
+    ParseAttempt::Decline => match try_spread(inp)? {
+      ParseAttempt::Accept(spread) => {
+        selection_after_spread(inp, *spread.span()).map(ParseAttempt::Accept)
+      }
+      ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    },
+  }
+}
 
 selection_parser!(
   /// Parses a GraphQL selection — a field, fragment spread, or inline fragment.
   ///
-  /// A fixed two-token dispatch selects a field, fragment spread, typed inline
-  /// fragment, or untyped inline fragment. A rejected or absent first token is
-  /// non-consuming so a parent can recover at the same position; all other
-  /// spread tails commit to the fragment-spread branch and retain its local
-  /// `FragmentName` diagnostic.
+  /// The first accepted head is handed directly to its committed tail. A rejected
+  /// or absent head is left available for a parent recovery boundary.
   ///
   /// See the [GraphQL Selection specification](https://spec.graphql.org/draft/#Selection).
   pub selection,
   inp,
   Selection<GraphqlSlice<'inp, Src>>,
   {
-    let offset = *inp.offset();
-    (
-      field.map(Selection::Field),
-      fragment_spread.map(Selection::FragmentSpread),
-      typed_inline_fragment.map(Selection::InlineFragment),
-      untyped_inline_fragment.map(Selection::InlineFragment),
-    )
-      .peek_then_choice::<_, U2>(|mut peeked, _| {
-        let Some(head) = peeked.pop_front() else {
-          return Err(
-            DialectGraphqlError::maybe_unexpected_token(
-              None,
-              Expectation::Selection,
-              SimpleSpan::new(offset, offset),
-            )
-            .into(),
-          );
-        };
-
-        match head.token() {
-          token if token.is_identifier() => Ok(Branch::B0),
-          token if token.is_spread() => match peeked.pop_front() {
-            Some(next) if is_on::<Src>(next.token()) => Ok(Branch::B2),
-            Some(next) if next.token().is_at() || next.token().is_l_brace() => Ok(Branch::B3),
-            _ => Ok(Branch::B1),
-          },
-          token => Err(
-            DialectGraphqlError::unexpected_token(
-              token.kind(),
-              Expectation::Selection,
-              *head.span(),
-            )
-            .into(),
-          ),
-        }
-      })
-      .parse_input(inp)
+    match try_selection(inp)? {
+      ParseAttempt::Accept(selection) => Ok(selection),
+      ParseAttempt::Decline => expected_selection_phase(inp, Expectation::Selection),
+    }
   }
 );
+
+fn fragment_spread_after_name<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+  name: FragmentName<GraphqlSlice<'inp, Src>>,
+) -> Result<FragmentSpread<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let mut end = name.span().end();
+  let directives = directives(inp)?;
+  if directives.span().start() != directives.span().end() {
+    end = directives.span().end();
+  }
+  let directives = (!directives.directives().is_empty()).then_some(directives);
+  Ok(FragmentSpread::new(
+    SimpleSpan::new(start, end),
+    name,
+    directives,
+  ))
+}
 
 selection_parser!(
   /// Parses a committed named GraphQL fragment spread (`... FragmentName Directives?`).
@@ -382,26 +435,17 @@ selection_parser!(
   inp,
   FragmentSpread<GraphqlSlice<'inp, Src>>,
   {
-    let cursor = *inp.cursor();
-    take_spread(inp)?;
+    let spread = take_spread(inp)?;
     let name = fragment_name(inp)?;
-    let directives = directives(inp)?;
-    let directives = if directives.directives().is_empty() {
-      None
-    } else {
-      Some(directives)
-    };
-    Ok(FragmentSpread::new(
-      inp.span_since(&cursor),
-      name,
-      directives,
-    ))
+    fragment_spread_after_name(inp, spread.start(), name)
   }
 );
 
-/// Parses the typed inline-fragment core after a `... on` head.
-fn typed_inline_fragment<'inp, Src, Ctx>(
+fn inline_fragment_after_directives<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+  type_condition: Option<TypeCondition<GraphqlSlice<'inp, Src>>>,
+  directives: Directives<GraphqlSlice<'inp, Src>>,
 ) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -424,28 +468,20 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
-  take_spread(inp)?;
-  let type_condition = type_condition(inp)?;
-  let directives = directives(inp)?;
-  let directives = if directives.directives().is_empty() {
-    None
-  } else {
-    Some(directives)
-  };
-  guard_selection_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
+  let directives = (!directives.directives().is_empty()).then_some(directives);
   let selection_set = selection_set(inp)?;
   Ok(InlineFragment::new(
-    inp.span_since(&cursor),
-    Some(type_condition),
+    SimpleSpan::new(start, selection_set.span().end()),
+    type_condition,
     directives,
     selection_set,
   ))
 }
 
-/// Parses the untyped inline-fragment core after a non-`on` tail.
-fn untyped_inline_fragment<'inp, Src, Ctx>(
+fn typed_inline_fragment_after_type_condition<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+  type_condition: TypeCondition<GraphqlSlice<'inp, Src>>,
 ) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -468,66 +504,238 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
-  take_spread(inp)?;
   let directives = directives(inp)?;
-  let directives = if directives.directives().is_empty() {
-    None
-  } else {
-    Some(directives)
-  };
-  guard_selection_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
-  let selection_set = selection_set(inp)?;
-  Ok(InlineFragment::new(
-    inp.span_since(&cursor),
+  inline_fragment_after_directives(inp, start, Some(type_condition), directives)
+}
+
+fn untyped_inline_fragment_after_at<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+  at: tokora::punct::At<SimpleSpan, (), GraphQL>,
+) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let directives = directives_after_at(inp, at)?;
+  inline_fragment_after_directives(inp, start, None, directives)
+}
+
+fn untyped_inline_fragment_after_spread<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+) -> Result<InlineFragment<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let directives = directives(inp)?;
+  inline_fragment_after_directives(inp, start, None, directives)
+}
+
+fn untyped_inline_fragment_from_selection_set<S>(
+  start: usize,
+  selection_set: SelectionSet<S>,
+) -> InlineFragment<S> {
+  InlineFragment::new(
+    SimpleSpan::new(start, selection_set.span().end()),
     None,
-    directives,
+    None,
     selection_set,
-  ))
+  )
+}
+
+fn selection_after_spread<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  spread: SimpleSpan,
+) -> Result<Selection<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  match try_name(inp)? {
+    ParseAttempt::Accept(name) if "on".equivalent(name.source()) => {
+      let on = On::new(name.span());
+      let type_condition = type_condition_after_on(inp, on)?;
+      typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
+        .map(Selection::InlineFragment)
+    }
+    ParseAttempt::Accept(name) => {
+      let (span, source) = name.into_components();
+      let name = FragmentName::new(span, source);
+      fragment_spread_after_name(inp, spread.start(), name).map(Selection::FragmentSpread)
+    }
+    ParseAttempt::Decline => match try_at(inp)? {
+      ParseAttempt::Accept(at) => {
+        untyped_inline_fragment_after_at(inp, spread.start(), at).map(Selection::InlineFragment)
+      }
+      ParseAttempt::Decline => match try_selection_set(inp)? {
+        ParseAttempt::Accept(selection_set) => Ok(Selection::InlineFragment(
+          untyped_inline_fragment_from_selection_set(spread.start(), selection_set),
+        )),
+        ParseAttempt::Decline => expected_selection_phase(inp, Expectation::FragmentName),
+      },
+    },
+  }
 }
 
 selection_parser!(
   /// Parses a committed GraphQL inline fragment (`... TypeCondition? Directives? SelectionSet`).
   ///
-  /// A fixed two-token dispatch chooses the typed form only for `... on`; every
-  /// other input enters the untyped core, which retains its local spread and
-  /// selection-set diagnostics without backtracking.
+  /// `... on` is recognized by the declining keyword atom exactly once. Every
+  /// other tail uses the untyped fragment core.
   ///
   /// See the [GraphQL Inline Fragment specification](https://spec.graphql.org/draft/#InlineFragment).
   pub inline_fragment,
   inp,
   InlineFragment<GraphqlSlice<'inp, Src>>,
   {
-    (typed_inline_fragment, untyped_inline_fragment)
-      .peek_then_choice::<_, U2>(|mut peeked, _| {
-        let typed = match peeked.pop_front() {
-          Some(head) if head.token().is_spread() => {
-            matches!(peeked.pop_front(), Some(next) if is_on::<Src>(next.token()))
-          }
-          _ => false,
-        };
-        Ok(if typed { Branch::B0 } else { Branch::B1 })
-      })
-      .parse_input(inp)
+    let spread = take_spread(inp)?;
+    match try_on(inp)? {
+      ParseAttempt::Accept(on) => {
+        let type_condition = type_condition_after_on(inp, on)?;
+        typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
+      }
+      ParseAttempt::Decline => untyped_inline_fragment_after_spread(inp, spread.start()),
+    }
   }
 );
 
-fn decide_selection_head<'inp, Src, Ctx>(
-  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
-) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
+fn selection_set_contents<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<Vec<Selection<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  Ok(match peeked.pop_front() {
-    Some(token) if matches!(token.token(), GraphqlToken::<'inp, Src>::RBrace) => Action::Stop,
-    Some(_) => Action::Continue,
-    None => Action::Stop,
-  })
+  let first = selection(inp)?;
+  let mut selections = Vec::new();
+  selections.push(first);
+
+  loop {
+    match try_selection(inp)? {
+      ParseAttempt::Accept(selection) => selections.push(selection),
+      ParseAttempt::Decline => {
+        let stop = {
+          let mut peeked = inp.peek::<U1>()?;
+          match peeked.pop_front() {
+            Some(token) => token.token().is_r_brace(),
+            None => true,
+          }
+        };
+        if stop {
+          break;
+        }
+        return expected_selection_phase(inp, Expectation::Selection);
+      }
+    }
+  }
+
+  Ok(selections)
+}
+
+/// Attempts a nonempty GraphQL selection set. It declines without consuming
+/// when `{` is absent; once an opener is consumed, Tokora owns close and
+/// `Unclosed<Brace>` handling.
+fn try_selection_set<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<ParseAttempt<SelectionSet<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  match try_braces(selection_set_contents::<Src, Ctx>)(inp)? {
+    Some(delimited) => {
+      let (span, _open, _close, selections) = delimited.into_components();
+      Ok(ParseAttempt::Accept(SelectionSet::new(span, selections)))
+    }
+    None => Ok(ParseAttempt::Decline),
+  }
 }
 
 selection_parser!(
@@ -541,25 +749,10 @@ selection_parser!(
   inp,
   SelectionSet<GraphqlSlice<'inp, Src>>,
   {
-    guard_selection_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
-    (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| -> Result<
-      Vec<Selection<GraphqlSlice<'inp, Src>>>,
-      GraphqlError<'inp, Src, Ctx>,
-    > {
-      let first = selection(inp)?;
-      let mut rest: Vec<Selection<GraphqlSlice<'inp, Src>>> = selection
-        .repeated_while::<_, U1>(decide_selection_head::<Src, Ctx>)
-        .collect_with(Vec::new())
-        .parse_input(inp)?;
-      rest.insert(0, first);
-      Ok(rest)
-    })
-      .delimited_by_braces()
-      .parse_input(inp)
-      .map(|delimited| {
-        let (span, _open, _close, selections) = delimited.into_components();
-        SelectionSet::new(span, selections)
-      })
+    match try_selection_set(inp)? {
+      ParseAttempt::Accept(selection_set) => Ok(selection_set),
+      ParseAttempt::Decline => expected_selection_phase(inp, Expectation::LBrace),
+    }
   }
 );
 
