@@ -254,6 +254,14 @@ pub enum Expectation {
   InputValue,
   /// A type reference was expected.
   Type,
+  /// A selection was expected.
+  Selection,
+  /// A variable definition was expected.
+  VariableDefinition,
+  /// An operation type was expected.
+  OperationType,
+  /// An executable definition was expected.
+  ExecutableDefinition,
   /// Fragment name was expected.
   FragmentName,
   /// A name was expected.

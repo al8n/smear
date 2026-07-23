@@ -14,14 +14,19 @@
 use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 use tokora::{
   ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, Token,
+  cache::PeekedTokenExt,
   error::{UnexpectedEot, token::UnexpectedToken},
   try_parse_input::ParseAttempt,
+  utils::{IntoComponents, typenum::U1},
 };
 
 use super::GraphQL;
 use crate::{
-  combinator::{ParseCtx, ident, try_ident},
-  graphql::ast,
+  combinator::{Equivalent, ParseCtx, ident, try_ident},
+  graphql::{
+    ast,
+    error::{Expectation, GraphqlError as DialectGraphqlError},
+  },
 };
 
 /// The concrete lexer used by GraphQL syntactic productions over `Src`.
@@ -96,6 +101,65 @@ where
   try_ident(inp).map(|attempt| attempt.map(ast::Name::from))
 }
 
+/// Parses a GraphQL fragment name (`Name` but not `on`).
+///
+/// This is deliberately a dialect production instead of a generic atom: the
+/// exclusion is a GraphQL grammar rule, and the rejection remains non-consuming
+/// so a surrounding production can retain the token for recovery or dispatch.
+pub(super) fn fragment_name<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<ast::FragmentName<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let offset = *inp.offset();
+  {
+    let mut peeked = inp.peek::<U1>()?;
+    match peeked.pop_front() {
+      Some(token) => match token.token() {
+        GraphqlToken::<'inp, Src>::Identifier(source) if !"on".equivalent(source) => {}
+        _ => {
+          let span = *token.span();
+          let kind = token.token().kind();
+          return Err(
+            DialectGraphqlError::unexpected_token(kind, Expectation::FragmentName, span).into(),
+          );
+        }
+      },
+      None => {
+        return Err(
+          DialectGraphqlError::maybe_unexpected_token(
+            None,
+            Expectation::FragmentName,
+            SimpleSpan::new(offset, offset),
+          )
+          .into(),
+        );
+      }
+    }
+  }
+
+  name(inp).map(|name| {
+    let (span, source) = name.into_components();
+    ast::FragmentName::new(span, source)
+  })
+}
+
 impl<S> ast::Name<S> {
   /// Parses one committed GraphQL name.
   ///
@@ -142,6 +206,37 @@ impl<S> ast::Name<S> {
     GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
   {
     try_name(inp)
+  }
+}
+
+impl<S> ast::FragmentName<S> {
+  /// Parses a GraphQL fragment name (`Name` but not `on`).
+  ///
+  /// The lexer source is inferred from `inp`.
+  ///
+  /// See the [GraphQL Fragment Name specification](https://spec.graphql.org/draft/#FragmentName).
+  pub fn graphql<'inp, Src, Ctx>(
+    inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
+  where
+    Src: Source<usize, Slice<'inp> = S> + ?Sized,
+    S: Slice<'inp> + Clone + 'inp,
+    str: Equivalent<S>,
+    GraphqlLexer<'inp, Src>:
+      Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+      + From<
+        UnexpectedToken<
+          'inp,
+          GraphqlToken<'inp, Src>,
+          <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+          SimpleSpan,
+          GraphQL,
+        >,
+      > + From<DialectGraphqlError<S>>,
+  {
+    fragment_name(inp)
   }
 }
 

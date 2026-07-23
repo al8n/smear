@@ -20,7 +20,15 @@ use crate::graphql::GraphQL;
 /// ```
 ///
 /// Spec: [Name](https://spec.graphql.org/draft/#sec-Names)
-pub type Name<S, Span = SimpleSpan> = crate::name::Name<S, Span, GraphQL>;
+#[allow(type_alias_bounds)]
+pub type Name<S: ?Sized, Span = SimpleSpan> = crate::name::Name<S, Span, GraphQL>;
+
+/// A GraphQL fragment name (`Name` but not `on`).
+///
+/// The syntactic parser establishes the exclusion before constructing this
+/// branded node.
+#[allow(type_alias_bounds)]
+pub type FragmentName<S: ?Sized, Span = SimpleSpan> = crate::name::FragmentName<S, Span, GraphQL>;
 
 #[cfg(test)]
 mod tests {

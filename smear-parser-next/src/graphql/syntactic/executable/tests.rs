@@ -7,54 +7,75 @@
 //! noting the `operation`-name `on` row, where parser-next is spec-correct and frozen
 //! is not (see the module deviation note).
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{
   executable_definition, executable_document, fragment_definition, operation_definition,
   variable_definition, variables_definition,
 };
 use crate::graphql::{
+  GraphQL,
   ast::{
     DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, FragmentDefinition,
-    OperationDefinition, VariablesDefinition,
+    OperationDefinition, OperationType, VariableDefinition, VariablesDefinition,
   },
-  error::GraphqlErrors,
+  error::{ErrorData, Expectation, GraphqlErrors},
+  syntactic::{GraphqlInput, GraphqlLexer},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
-type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;
+type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 /// The fatal context a `[u8]`-sourced parse runs under.
-type SliceCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>>;
+type SliceCtx<'inp> =
+  FatalContext<'inp, GraphqlLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>, GraphQL>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlErrors<&str>>`.
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, str>, StrCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, str, StrCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser(f).parse_str(input)
+  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
+    f,
+  )
+  .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
 fn drive_slice<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_slice(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
 fn drive_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_bytes(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
@@ -87,6 +108,23 @@ macro_rules! reject_all {
   }};
 }
 
+fn assert_str_expectation(
+  result: Result<(), GraphqlErrors<&str>>,
+  expected: Expectation,
+  span: SimpleSpan,
+) {
+  let error = result
+    .expect_err("fixture should fail")
+    .into_iter()
+    .next()
+    .expect("fatal context emits one error");
+  assert_eq!(error.span(), span);
+  match error.data() {
+    ErrorData::UnexpectedToken(unexpected) => assert_eq!(unexpected.expected(), &expected),
+    other => panic!("expected unexpected-token diagnostic, got {other:?}"),
+  }
+}
+
 // ─── variable_definition ─────────────────────────────────────────────────────
 
 #[test]
@@ -98,6 +136,15 @@ fn variable_definition_accepts_minimal() {
     assert!(v.directives().is_none());
   }
   accept_all!(variable_definition, "$x: Int", check);
+}
+
+#[test]
+fn variable_definition_accepts_list_type() {
+  fn check<S: AsRef<[u8]>>(v: DescribedVariableDefinition<S>) {
+    assert!(v.ty().is_list());
+    assert!(v.ty().required());
+  }
+  accept_all!(variable_definition, "$x: [Int!]!", check);
 }
 
 #[test]
@@ -134,24 +181,67 @@ fn variable_definition_rejects_missing_dollar_or_type() {
   reject_all!(variable_definition, "$x");
 }
 
+#[test]
+fn variable_definition_reports_local_tail_phases_without_consuming_them() {
+  assert_str_expectation(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "x: Int"),
+    Expectation::Dollar,
+    SimpleSpan::new(0, 1),
+  );
+  assert_str_expectation(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "$x }"),
+    Expectation::Colon,
+    SimpleSpan::new(3, 4),
+  );
+  assert_str_expectation(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "$x: }"),
+    Expectation::Type,
+    SimpleSpan::new(4, 5),
+  );
+  assert_str_expectation(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "$x: Int = }"),
+    Expectation::ConstInputValue,
+    SimpleSpan::new(10, 11),
+  );
+  assert_str_expectation(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "$x: Int @"),
+    Expectation::Name,
+    SimpleSpan::new(9, 9),
+  );
+}
+
+#[test]
+fn variable_definition_directives_are_constant() {
+  reject_all!(variable_definition, "$x: Int @skip(if: $condition)");
+  assert!(
+    drive_str(variable_definition, "$x: Int @skip(if: false)").is_ok(),
+    "constant directive arguments should parse"
+  );
+}
+
 // ─── variables_definition ────────────────────────────────────────────────────
 
 #[test]
 fn variables_definition_accepts_single_and_multiple() {
-  fn one<S: AsRef<[u8]>>(v: Option<VariablesDefinition<S>>) {
-    assert_eq!(v.expect("present").variable_definitions().len(), 1);
+  fn one<S: AsRef<[u8]>>(v: VariablesDefinition<S>) {
+    assert_eq!(v.variable_definitions().len(), 1);
   }
-  fn two<S: AsRef<[u8]>>(v: Option<VariablesDefinition<S>>) {
-    assert_eq!(v.expect("present").variable_definitions().len(), 2);
+  fn two<S: AsRef<[u8]>>(v: VariablesDefinition<S>) {
+    assert_eq!(v.variable_definitions().len(), 2);
   }
   accept_all!(variables_definition, "($x: Int)", one);
   accept_all!(variables_definition, "($x: Int, $y: String!)", two);
 }
 
 #[test]
-fn variables_definition_declines_without_leading_paren() {
-  assert!(drive_str(variables_definition, "").unwrap().is_none());
-  assert!(drive_str(variables_definition, "{ x }").unwrap().is_none());
+fn variables_definition_is_empty_and_zero_width_without_leading_paren() {
+  let empty = drive_str(variables_definition, "").unwrap();
+  assert!(empty.variable_definitions().is_empty());
+  assert_eq!(empty.span(), &SimpleSpan::new(0, 0));
+
+  let absent = drive_str(variables_definition, "{ x }").unwrap();
+  assert!(absent.variable_definitions().is_empty());
+  assert_eq!(absent.span(), &SimpleSpan::new(0, 0));
 }
 
 #[test]
@@ -168,6 +258,15 @@ fn variables_definition_empty_parens_error_per_spec() {
     Ok(()) => false,
   };
   assert!(family);
+}
+
+#[test]
+fn variables_definition_empty_parens_reports_the_collection_phase() {
+  assert_str_expectation(
+    drive_str(|inp| variables_definition(inp).map(|_| ()), "()"),
+    Expectation::VariableDefinition,
+    SimpleSpan::new(1, 2),
+  );
 }
 
 #[test]
@@ -241,6 +340,20 @@ fn operation_definition_rejects_bad_type_or_missing_set() {
   reject_all!(operation_definition, "");
 }
 
+#[test]
+fn operation_definition_reports_operation_type_and_selection_set_phases() {
+  assert_str_expectation(
+    drive_str(|inp| operation_definition(inp).map(|_| ()), "queryy { id }"),
+    Expectation::OperationType,
+    SimpleSpan::new(0, 6),
+  );
+  assert_str_expectation(
+    drive_str(|inp| operation_definition(inp).map(|_| ()), "query Q"),
+    Expectation::LBrace,
+    SimpleSpan::new(7, 7),
+  );
+}
+
 // ─── fragment_definition ─────────────────────────────────────────────────────
 
 #[test]
@@ -274,15 +387,32 @@ fn fragment_definition_rejects_missing_parts() {
 }
 
 #[test]
+fn fragment_definition_reports_local_name_and_directive_tails() {
+  assert_str_expectation(
+    drive_str(|inp| fragment_definition(inp).map(|_| ()), "fragment F on"),
+    Expectation::Name,
+    SimpleSpan::new(13, 13),
+  );
+  assert_str_expectation(
+    drive_str(
+      |inp| fragment_definition(inp).map(|_| ()),
+      "fragment F on T @",
+    ),
+    Expectation::Name,
+    SimpleSpan::new(17, 17),
+  );
+}
+
+#[test]
 fn fragment_named_on_error_per_spec() {
   // `FragmentName : Name but not on` — the spec's second named exclusion, enforced
-  // through the `fragment_name` atom. A documented deviation from the frozen parser,
+  // through the concrete GraphQL `FragmentName` production. A documented deviation from the frozen parser,
   // which parsed `fragment on on X { … }`: its enforcing `parse_fragment_name`
   // helper had no callers — `parse_fragment_definition` used plain `parse_name`.
   reject_all!(fragment_definition, "fragment on on User { id }");
   // Through the executable-definition dispatch too (the `fragment` keyword commits).
   reject_all!(executable_definition, "fragment on on User { id }");
-  // The rejection is the exclusion atom's unexpected-token at the `on` name.
+  // The rejection is the concrete production's unexpected-token at the `on` name.
   let family = match drive_str(
     |inp| fragment_definition(inp).map(|_| ()),
     "fragment on on User { id }",
@@ -324,6 +454,15 @@ fn executable_definition_dispatches() {
   accept_all!(executable_definition, "{ id }", is_op);
   accept_all!(executable_definition, "query Q { id }", is_op);
   accept_all!(executable_definition, "fragment F on T { id }", is_frag);
+}
+
+#[test]
+fn executable_definition_rejects_an_invalid_head_locally() {
+  assert_str_expectation(
+    drive_str(|inp| executable_definition(inp).map(|_| ()), "nope"),
+    Expectation::ExecutableDefinition,
+    SimpleSpan::new(0, 4),
+  );
 }
 
 // ─── executable_document ─────────────────────────────────────────────────────
@@ -417,4 +556,58 @@ fn executable_document_matches_frozen_verdicts() {
       "slice executable_document({src:?})"
     );
   }
+}
+
+#[test]
+fn associated_executable_apis_infer_str_and_byte_slice_sources() {
+  let _: VariableDefinition<&str> =
+    drive_str(VariableDefinition::<&str>::graphql, "$x: Int").expect("str variable");
+  let _: VariableDefinition<&[u8]> =
+    drive_slice(VariableDefinition::<&[u8]>::graphql, b"$x: Int").expect("slice variable");
+
+  let _: DescribedVariableDefinition<&str> = drive_str(
+    DescribedVariableDefinition::<&str>::graphql,
+    "\"desc\" $x: Int",
+  )
+  .expect("str described variable");
+  let _: DescribedVariableDefinition<&[u8]> = drive_slice(
+    DescribedVariableDefinition::<&[u8]>::graphql,
+    b"\"desc\" $x: Int",
+  )
+  .expect("slice described variable");
+
+  let _: VariablesDefinition<&str> =
+    drive_str(VariablesDefinition::<&str>::graphql, "($x: Int)").expect("str variables");
+  let _: VariablesDefinition<&[u8]> =
+    drive_slice(VariablesDefinition::<&[u8]>::graphql, b"($x: Int)").expect("slice variables");
+
+  let _: OperationType = drive_str(OperationType::graphql, "query").expect("str operation type");
+  let _: OperationType =
+    drive_slice(OperationType::graphql, b"mutation").expect("slice operation type");
+
+  let _: OperationDefinition<&str> =
+    drive_str(OperationDefinition::<&str>::graphql, "query { id }").expect("str operation");
+  let _: OperationDefinition<&[u8]> =
+    drive_slice(OperationDefinition::<&[u8]>::graphql, b"query { id }").expect("slice operation");
+
+  let _: FragmentDefinition<&str> = drive_str(
+    FragmentDefinition::<&str>::graphql,
+    "fragment F on T { id }",
+  )
+  .expect("str fragment");
+  let _: FragmentDefinition<&[u8]> = drive_slice(
+    FragmentDefinition::<&[u8]>::graphql,
+    b"fragment F on T { id }",
+  )
+  .expect("slice fragment");
+
+  let _: ExecutableDefinition<&str> =
+    drive_str(ExecutableDefinition::<&str>::graphql, "{ id }").expect("str definition");
+  let _: ExecutableDefinition<&[u8]> =
+    drive_slice(ExecutableDefinition::<&[u8]>::graphql, b"{ id }").expect("slice definition");
+
+  let _: ExecutableDocument<&str> =
+    drive_str(ExecutableDocument::<&str>::graphql, "{ id }").expect("str document");
+  let _: ExecutableDocument<&[u8]> =
+    drive_slice(ExecutableDocument::<&[u8]>::graphql, b"{ id }").expect("slice document");
 }

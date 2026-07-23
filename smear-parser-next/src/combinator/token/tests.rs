@@ -17,7 +17,7 @@ use smear_lexer::tokora::{
 use super::{enum_value, ident, try_enum_value, try_ident};
 
 #[cfg(feature = "graphql")]
-use super::{at, colon, fragment_name, keyword_exact, lbrace, spread, try_at, try_keyword_exact};
+use super::{at, colon, keyword_exact, lbrace, spread, try_at, try_keyword_exact};
 #[cfg(feature = "graphql")]
 use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
 
@@ -614,59 +614,6 @@ fn enum_value_errors_on_empty_input() {
     "",
     |out: Result<(), TestError>| assert!(out.is_err())
   );
-}
-
-#[cfg(feature = "graphql")]
-#[test]
-fn fragment_name_commits_on_names_and_soft_keywords() {
-  // Only `on` is excluded from `FragmentName`; the `enum_value` exclusions
-  // (`true`/`false`/`null`) do NOT cross over, so `true` is a legal fragment name.
-  for word in ["hello", "enum", "true"] {
-    drive_all!(
-      Fatal::<TestError>::new(),
-      |inp| {
-        let id = fragment_name(inp)?;
-        assert_eq!(as_bytes(id.source_ref()), word.as_bytes());
-        assert_eq!(id.span(), SimpleSpan::new(0, word.len()));
-        Ok::<_, TestError>(())
-      },
-      word,
-      |out: Result<(), TestError>| assert!(out.is_ok(), "{word} should parse as a FragmentName")
-    );
-  }
-}
-
-#[cfg(feature = "graphql")]
-#[test]
-fn fragment_name_errors_on_on() {
-  // The spec's second named exclusion: `FragmentName : Name but not on`.
-  drive_all!(
-    Fatal::<TestError>::new(),
-    |inp| fragment_name(inp).map(|_| ()),
-    "on",
-    |out: Result<(), TestError>| assert!(out.is_err(), "`on` should be rejected")
-  );
-  drive_all!(
-    Verbose::<TestError>::new(),
-    |inp| fragment_name(inp).map(|_| ()),
-    "on",
-    |out: Result<(), TestError>| assert!(out.is_err(), "`on` should be rejected")
-  );
-}
-
-#[cfg(feature = "graphql")]
-#[test]
-fn fragment_name_errors_on_lbrace_and_empty_input() {
-  // The same committed discipline as `ident`/`enum_value`: a non-identifier
-  // token and end of input both error.
-  for src in ["{", ""] {
-    drive_all!(
-      Fatal::<TestError>::new(),
-      |inp| fragment_name(inp).map(|_| ()),
-      src,
-      |out: Result<(), TestError>| assert!(out.is_err(), "{src:?} should be rejected")
-    );
-  }
 }
 
 /// A test error that keeps an [`UnexpectedToken`]'s span, unlike [`TestError`]

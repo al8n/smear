@@ -8,48 +8,69 @@
 //! `parse_selection_set` verdicts — excluding the empty-`{}` row, which parser-next
 //! rejects per the spec-cardinality rule (plan Amendment 2).
 
-use smear_lexer::graphql::syntactic::SyntacticLexer;
-use tokora::{FatalContext, InputRef, Parse, Parser, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{field, selection, selection_set};
 use crate::graphql::{
+  GraphQL,
   ast::{Field, Selection, SelectionSet},
-  error::GraphqlErrors,
+  error::{ErrorData, Expectation, GraphqlErrors},
+  syntactic::{GraphqlInput, GraphqlLexer},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
-type StrCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, str>, GraphqlErrors<&'inp str>>;
+type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 /// The fatal context a `[u8]`-sourced parse runs under.
-type SliceCtx<'inp> = FatalContext<'inp, SyntacticLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>>;
+type SliceCtx<'inp> =
+  FatalContext<'inp, GraphqlLexer<'inp, [u8]>, GraphqlErrors<&'inp [u8]>, GraphQL>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlErrors<&str>>`.
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, str>, StrCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, str, StrCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser(f).parse_str(input)
+  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
+    f,
+  )
+  .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
 fn drive_slice<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_slice(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
 fn drive_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut InputRef<'inp, 'c, SyntacticLexer<'inp, [u8]>, SliceCtx<'inp>>,
+    &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser(f).parse_bytes(input)
+  Parser::with_parser_of::<
+    'inp,
+    GraphqlLexer<'inp, [u8]>,
+    O,
+    GraphqlErrors<&'inp [u8]>,
+    _,
+    GraphQL,
+  >(f)
+  .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
@@ -80,6 +101,23 @@ macro_rules! reject_all {
       $src
     );
   }};
+}
+
+fn assert_str_expectation(
+  result: Result<(), GraphqlErrors<&str>>,
+  expected: Expectation,
+  span: SimpleSpan,
+) {
+  let error = result
+    .expect_err("fixture should fail")
+    .into_iter()
+    .next()
+    .expect("fatal context emits one error");
+  assert_eq!(error.span(), span);
+  match error.data() {
+    ErrorData::UnexpectedToken(unexpected) => assert_eq!(unexpected.expected(), &expected),
+    other => panic!("expected unexpected-token diagnostic, got {other:?}"),
+  }
 }
 
 // ─── field ─────────────────────────────────────────────────────────────────────
@@ -148,6 +186,20 @@ fn field_rejects_missing_name() {
 fn field_rejects_alias_without_second_name() {
   reject_all!(field, "user:");
   reject_all!(field, "user: { id }");
+}
+
+#[test]
+fn field_reports_local_required_name_phases_without_consuming_them() {
+  assert_str_expectation(
+    drive_str(|inp| field(inp).map(|_| ()), "{ id }"),
+    Expectation::Name,
+    SimpleSpan::new(0, 1),
+  );
+  assert_str_expectation(
+    drive_str(|inp| field(inp).map(|_| ()), "user: }"),
+    Expectation::Name,
+    SimpleSpan::new(6, 7),
+  );
 }
 
 // ─── selection ───────────────────────────────────────────────────────────────
@@ -233,11 +285,30 @@ fn selection_rejects_bare_spread() {
 }
 
 #[test]
+fn selection_reports_local_dispatch_and_inline_fragment_phases() {
+  assert_str_expectation(
+    drive_str(|inp| selection(inp).map(|_| ()), "123"),
+    Expectation::Selection,
+    SimpleSpan::new(0, 3),
+  );
+  assert_str_expectation(
+    drive_str(|inp| selection(inp).map(|_| ()), "... on"),
+    Expectation::Name,
+    SimpleSpan::new(6, 6),
+  );
+  assert_str_expectation(
+    drive_str(|inp| selection(inp).map(|_| ()), "... @d"),
+    Expectation::LBrace,
+    SimpleSpan::new(6, 6),
+  );
+}
+
+#[test]
 fn fragment_spread_named_on_is_unrepresentable() {
   // `FragmentName : Name but not on`, spread side. The `...`-fork rules `on` out
   // FIRST (`try_on` commits the inline-fragment arm), so a fragment spread named
-  // `on` is structurally unrepresentable; the spread arm's `fragment_name` atom is
-  // defense in depth. Behavior per input shape, pinned:
+  // `on` is structurally unrepresentable; the concrete GraphQL `FragmentName`
+  // production remains defense in depth. Behavior per input shape, pinned:
   //
   //   `... on X { f }`   -> inline fragment, type condition `X`
   //   `... on on { f }`  -> inline fragment, type condition `on` (the FIRST `on` is
@@ -319,6 +390,15 @@ fn selection_set_empty_braces_error_per_spec() {
     Ok(()) => false,
   };
   assert!(family);
+}
+
+#[test]
+fn selection_set_reports_the_collection_phase() {
+  assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "{}"),
+    Expectation::Selection,
+    SimpleSpan::new(1, 2),
+  );
 }
 
 #[test]
@@ -414,4 +494,19 @@ fn selection_set_matches_frozen_verdicts() {
       "slice selection_set({src:?})"
     );
   }
+}
+
+#[test]
+fn associated_selection_apis_infer_str_and_byte_slice_sources() {
+  let _: Field<&str> = drive_str(Field::<&str>::graphql, "id").expect("str field");
+  let _: Field<&[u8]> = drive_slice(Field::<&[u8]>::graphql, b"id").expect("slice field");
+
+  let _: Selection<&str> = drive_str(Selection::<&str>::graphql, "...Part").expect("str selection");
+  let _: Selection<&[u8]> =
+    drive_slice(Selection::<&[u8]>::graphql, b"...Part").expect("slice selection");
+
+  let _: SelectionSet<&str> =
+    drive_str(SelectionSet::<&str>::graphql, "{ id }").expect("str selection set");
+  let _: SelectionSet<&[u8]> =
+    drive_slice(SelectionSet::<&[u8]>::graphql, b"{ id }").expect("slice selection set");
 }

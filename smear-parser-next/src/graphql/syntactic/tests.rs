@@ -44,6 +44,8 @@ fn direct_ast_parsers_infer_sources_and_return_source_slices() {
   let _: ast::Name<&[u8]> = drive_slice(ast::Name::<&[u8]>::graphql, b"name");
   let _: ParseAttempt<ast::Name<&str>> = drive_str(ast::Name::<&str>::try_graphql, "name");
   let _: ParseAttempt<ast::Name<&[u8]>> = drive_slice(ast::Name::<&[u8]>::try_graphql, b"name");
+  let _: ast::FragmentName<&str> = drive_str(ast::FragmentName::<&str>::graphql, "part");
+  let _: ast::FragmentName<&[u8]> = drive_slice(ast::FragmentName::<&[u8]>::graphql, b"part");
 
   let _: ast::BooleanValue<&str> = drive_str(ast::BooleanValue::<&str>::graphql, "true");
   let _: ast::BooleanValue<&[u8]> = drive_slice(ast::BooleanValue::<&[u8]>::graphql, b"false");

@@ -1,58 +1,215 @@
 //! GraphQL executable-definition AST node types.
 //!
-//! Copied type-only from the frozen `smear-parser` crate (`graphql/ast/default.rs`):
-//! variable definitions, operation definitions (named + shorthand), fragment
-//! definitions, and the executable document, keyed by the source slice `S`. Variable
-//! definitions carry an optional [`Described`] wrapper exactly as the frozen crate
-//! does, so `VariablesDefinition` threads [`DescribedVariableDefinition`].
+//! Shared executable carriers live at crate level. This module binds them to
+//! GraphQL's names, values, directives, selections, and operation keywords.
 
-use smear_scaffold::ast as scaffold;
+use core::borrow::Borrow;
 
-use super::{
-  DefaultInputValue, Directives, FragmentName, Name, SelectionSet, StringValue, Type,
-  TypeCondition, VariableValue,
+use derive_more::{Display, From, IsVariant, TryUnwrap, Unwrap};
+use smear_lexer::keywords::{Mutation, Query, Subscription};
+use tokora::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
 };
 
-pub use scaffold::OperationType;
+use super::{
+  ConstDirectives, DefaultInputValue, Directives, FragmentName, Name, SelectionSet, StringValue,
+  Type, TypeCondition, VariableValue,
+};
 
-/// A node paired with an optional description (a leading string literal).
-pub type Described<T, S> = scaffold::Described<T, StringValue<S>>;
+/// A node with an optional leading GraphQL string description.
+pub type Described<T, S> = crate::executable::Described<T, StringValue<S>>;
 
-/// Variable definition in an operation
-/// (`Description? Variable ':' Type DefaultValue? Directives?`).
-pub type VariableDefinition<S, Ty = Type<Name<S>>> =
-  scaffold::VariableDefinition<VariableValue<S>, Ty, DefaultInputValue<S>, Directives<S>>;
+/// A variable definition in an executable operation.
+///
+/// Directives in this grammar position use constant arguments.
+pub type VariableDefinition<S, Ty = Type<Name<S>>> = crate::executable::VariableDefinition<
+  VariableValue<S>,
+  Ty,
+  DefaultInputValue<S>,
+  ConstDirectives<S>,
+>;
 
-/// Variable definition with an optional leading description.
+/// A variable definition with an optional leading description.
 pub type DescribedVariableDefinition<S, Ty = Type<Name<S>>> =
   Described<VariableDefinition<S, Ty>, S>;
 
-/// List of variable definitions for an operation (`( VariableDefinition+ )`).
+/// A variable-definition collection.
+///
+/// An absent opening parenthesis yields an empty, zero-width collection; a
+/// present parenthesized collection contains one or more definitions.
 pub type VariablesDefinition<S, Ty = Type<Name<S>>> =
-  scaffold::VariablesDefinition<DescribedVariableDefinition<S, Ty>>;
+  crate::executable::VariablesDefinition<DescribedVariableDefinition<S, Ty>>;
 
-/// Fragment definition in an executable document
-/// (`fragment FragmentName TypeCondition Directives? SelectionSet`).
-pub type FragmentDefinition<S> =
-  scaffold::FragmentDefinition<FragmentName<S>, TypeCondition<S>, Directives<S>, SelectionSet<S>>;
-
-/// Named operation definition (query, mutation, or subscription with metadata).
-pub type NamedOperationDefinition<S, Ty = Type<Name<S>>> = scaffold::NamedOperationDefinition<
-  Name<S>,
-  OperationType,
-  VariablesDefinition<S, Ty>,
+/// A named fragment definition.
+pub type FragmentDefinition<S> = crate::executable::FragmentDefinition<
+  FragmentName<S>,
+  TypeCondition<S>,
   Directives<S>,
   SelectionSet<S>,
 >;
 
-/// Operation definition (named, or the query-shorthand selection set).
-pub type OperationDefinition<S, Ty = Type<Name<S>>> =
-  scaffold::OperationDefinition<NamedOperationDefinition<S, Ty>, SelectionSet<S>>;
+/// The GraphQL operation keyword (`query`, `mutation`, or `subscription`).
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum OperationType {
+  /// A read operation.
+  #[display("query")]
+  Query(Query),
+  /// A write operation.
+  #[display("mutation")]
+  Mutation(Mutation),
+  /// A streaming operation.
+  #[display("subscription")]
+  Subscription(Subscription),
+}
 
-/// Executable definition (operation or fragment).
-pub type ExecutableDefinition<S, Ty = Type<Name<S>>> =
-  scaffold::ExecutableDefinition<OperationDefinition<S, Ty>, FragmentDefinition<S>>;
+impl OperationType {
+  /// Returns the span covering the operation keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Query(keyword) => keyword.span(),
+      Self::Mutation(keyword) => keyword.span(),
+      Self::Subscription(keyword) => keyword.span(),
+    }
+  }
 
-/// Executable document (operations and fragments).
+  /// Returns the operation keyword spelling.
+  #[inline]
+  pub const fn as_str(&self) -> &'static str {
+    match self {
+      Self::Query(_) => "query",
+      Self::Mutation(_) => "mutation",
+      Self::Subscription(_) => "subscription",
+    }
+  }
+}
+
+impl AsSpan<Span> for OperationType {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl IntoSpan<Span> for OperationType {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Query(keyword) => keyword.into_span(),
+      Self::Mutation(keyword) => keyword.into_span(),
+      Self::Subscription(keyword) => keyword.into_span(),
+    }
+  }
+}
+
+impl AsRef<str> for OperationType {
+  #[inline]
+  fn as_ref(&self) -> &str {
+    self.as_str()
+  }
+}
+
+impl Borrow<str> for OperationType {
+  #[inline]
+  fn borrow(&self) -> &str {
+    self.as_str()
+  }
+}
+
+/// A named operation definition.
+pub type NamedOperationDefinition<S, Ty = Type<Name<S>>> =
+  crate::executable::NamedOperationDefinition<
+    Name<S>,
+    OperationType,
+    VariablesDefinition<S, Ty>,
+    Directives<S>,
+    SelectionSet<S>,
+  >;
+
+/// An operation definition, either named or query shorthand.
+#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum OperationDefinition<S, Ty = Type<Name<S>>> {
+  /// A named `query`, `mutation`, or `subscription` operation.
+  Named(NamedOperationDefinition<S, Ty>),
+  /// A query-shorthand selection set.
+  Shorthand(SelectionSet<S>),
+}
+
+impl<S, Ty> OperationDefinition<S, Ty> {
+  /// Returns the span covering the operation definition.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Named(operation) => operation.span(),
+      Self::Shorthand(selection_set) => selection_set.span(),
+    }
+  }
+}
+
+impl<S, Ty> AsSpan<Span> for OperationDefinition<S, Ty> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S, Ty> IntoSpan<Span> for OperationDefinition<S, Ty> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Named(operation) => operation.into_span(),
+      Self::Shorthand(selection_set) => selection_set.into_span(),
+    }
+  }
+}
+
+/// An executable definition, either an operation or a fragment.
+#[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum ExecutableDefinition<S, Ty = Type<Name<S>>> {
+  /// An operation definition.
+  Operation(OperationDefinition<S, Ty>),
+  /// A fragment definition.
+  Fragment(FragmentDefinition<S>),
+}
+
+impl<S, Ty> ExecutableDefinition<S, Ty> {
+  /// Returns the span covering the executable definition.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    match self {
+      Self::Operation(operation) => operation.span(),
+      Self::Fragment(fragment) => fragment.span(),
+    }
+  }
+}
+
+impl<S, Ty> AsSpan<Span> for ExecutableDefinition<S, Ty> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.span()
+  }
+}
+
+impl<S, Ty> IntoSpan<Span> for ExecutableDefinition<S, Ty> {
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Operation(operation) => operation.into_span(),
+      Self::Fragment(fragment) => fragment.into_span(),
+    }
+  }
+}
+
+/// A nonempty GraphQL executable document.
 pub type ExecutableDocument<S, Ty = Type<Name<S>>> =
-  scaffold::Document<ExecutableDefinition<S, Ty>>;
+  crate::executable::Document<ExecutableDefinition<S, Ty>>;

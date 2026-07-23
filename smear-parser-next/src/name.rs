@@ -22,6 +22,78 @@ use tokora::{
 #[repr(transparent)]
 pub struct Name<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Ident<S, Span, Lang>);
 
+/// A dialect-branded fragment name.
+///
+/// GraphQL-family dialects use this nominal wrapper for the `Name but not on`
+/// grammar position. Its constructor is kept within this crate so syntactic
+/// productions are the single place that establish that exclusion.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct FragmentName<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Name<S, Span, Lang>);
+
+impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
+  #[inline]
+  pub(crate) const fn new(span: Span, source: S) -> Self {
+    Self(Name::new(span, source))
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
+  type Target = Name<S, Span, Lang>;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> AsRef<Name<S, Span, Lang>> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn as_ref(&self) -> &Name<S, Span, Lang> {
+    &self.0
+  }
+}
+
+impl<S, Span, Lang: ?Sized> PartialEq<S> for FragmentName<S, Span, Lang>
+where
+  S: PartialEq,
+{
+  #[inline]
+  fn eq(&self, other: &S) -> bool {
+    self.source_ref().eq(other)
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
+  }
+}
+
 impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
   /// Creates a valid dialect name.
   #[inline]
