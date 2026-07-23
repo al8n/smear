@@ -15,6 +15,7 @@ use tokora::{
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket, Paren},
+  span::Spanned,
   utils::typenum::{U1, U2},
 };
 
@@ -231,12 +232,11 @@ selection_parser!(
   inp,
   TypeCondition<GraphqlSlice<'inp, Src>>,
   {
-    let on = take_on(inp)?;
-    let name = take_name(inp)?;
-    Ok(TypeCondition::new(
-      SimpleSpan::new(on.span().start(), name.span().end()),
-      name,
-    ))
+    take_on
+      .ignore_then(take_name)
+      .spanned()
+      .map(|Spanned { span, data: name }| TypeCondition::new(span, name))
+      .parse_input(inp)
   }
 );
 
