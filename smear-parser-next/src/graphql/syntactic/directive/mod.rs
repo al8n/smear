@@ -3,13 +3,15 @@
 //! Singular directives diagnose their committed `@` and name phases locally.
 //! Absent directive runs produce an empty, zero-width collection without consuming;
 //! after an `@` they greedily parse every following directive head.
+//! Associated entry points are exposed directly on the GraphQL AST directive
+//! types, with the lexer source inferred from the parser input.
 
 use std::vec::Vec;
 
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{UnexpectedEot, token::UnexpectedToken},
+  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket, Paren},
   span::Spanned,
@@ -20,9 +22,10 @@ use tokora::{
 use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken,
   argument::{arguments, const_arguments},
+  name,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx, at, ident},
+  combinator::{Equivalent, ParseCtx, at},
   graphql::{
     GraphQL,
     ast::{ConstDirective, ConstDirectives, Directive, Directives},
@@ -58,9 +61,9 @@ macro_rules! directive_parser {
             GraphQL,
           >,
         >
-        + From<tokora::error::Unclosed<Paren, SimpleSpan, GraphQL>>
-        + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-        + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
+        + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+        + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+        + From<Unclosed<Brace, SimpleSpan, GraphQL>>
         + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
     $body
   };
@@ -120,7 +123,7 @@ directive_parser!(
         guard_directive_phase(inp, Expectation::Name, |token| {
           matches!(token, GraphqlToken::<'inp, Src>::Identifier(_))
         })?;
-        ident(inp)
+        name(inp)
       })
       .then(arguments)
       .spanned()
@@ -158,7 +161,7 @@ directive_parser!(
         guard_directive_phase(inp, Expectation::Name, |token| {
           matches!(token, GraphqlToken::<'inp, Src>::Identifier(_))
         })?;
-        ident(inp)
+        name(inp)
       })
       .then(const_arguments)
       .spanned()
@@ -202,7 +205,7 @@ directive_parser!(
     > {
       directive
         .repeated_while::<_, U1>(decide_directive_head::<Src, Ctx>)
-        .collect_with(Vec::<Directive<GraphqlSlice<'inp, Src>>>::new())
+        .collect_with(Vec::new())
         .parse_input(inp)
     })
       .spanned()
@@ -222,7 +225,7 @@ directive_parser!(
     > {
       const_directive
         .repeated_while::<_, U1>(decide_directive_head::<Src, Ctx>)
-        .collect_with(Vec::<ConstDirective<GraphqlSlice<'inp, Src>>>::new())
+        .collect_with(Vec::new())
         .parse_input(inp)
     })
       .spanned()
@@ -277,21 +280,24 @@ directive_parser!(
   }
 );
 
-macro_rules! impl_directive_graphql {
+macro_rules! impl_directive_api {
   (
     $(#[$meta:meta])*
+    $slice:ident,
     $node:ty,
     $parser:ident
   ) => {
-    impl<S> $node {
+    impl<$slice> $node {
       $(#[$meta])*
+      ///
+      /// The lexer source is inferred from `inp`.
       pub fn graphql<'inp, Src, Ctx>(
         inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
       where
-        Src: Source<usize, Slice<'inp> = S> + ?Sized,
-        S: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<S>,
+        Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
+        $slice: Slice<'inp> + Clone + 'inp,
+        str: Equivalent<$slice>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -310,10 +316,10 @@ macro_rules! impl_directive_graphql {
               GraphQL,
             >,
           >
-          + From<tokora::error::Unclosed<Paren, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<tokora::error::Unclosed<Brace, SimpleSpan, GraphQL>>
-          + From<DialectGraphqlError<S>>,
+          + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+          + From<DialectGraphqlError<$slice>>,
       {
         $parser(inp)
       }
@@ -321,36 +327,40 @@ macro_rules! impl_directive_graphql {
   };
 }
 
-impl_directive_graphql!(
+impl_directive_api!(
   /// Parses one committed executable GraphQL directive.
   ///
   /// See [`directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
   Directive<S>,
   directive
 );
 
-impl_directive_graphql!(
+impl_directive_api!(
   /// Parses one committed constant GraphQL directive.
   ///
   /// See [`const_directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
   ConstDirective<S>,
   const_directive
 );
 
-impl_directive_graphql!(
+impl_directive_api!(
   /// Parses executable GraphQL directives, returning an empty zero-width collection
   /// without consuming when `@` is absent.
   ///
   /// See [`directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
   Directives<S>,
   directives
 );
 
-impl_directive_graphql!(
+impl_directive_api!(
   /// Parses constant GraphQL directives, returning an empty zero-width collection
   /// without consuming when `@` is absent.
   ///
   /// See [`const_directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
   ConstDirectives<S>,
   const_directives
 );

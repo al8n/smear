@@ -1,30 +1,29 @@
 //! GraphQL type-reference productions over the concrete syntactic lexer.
 //!
-//! Consumers can parse through the free [`ty`] parser or [`Type::graphql`]. A
-//! committed one-token choice selects a named or list type, and a trailing `!` is
-//! folded into the selected node's `required` flag.
+//! Consumers can parse through the free [`ty`] parser or
+//! [`Type::graphql`]. A committed one-token choice selects a named or list type,
+//! and a trailing `!` is folded into the selected node's `required` flag.
 //!
 //! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
 use std::boxed::Box;
 
-use smear_scaffold::ast as scaffold;
 use tokora::{
   Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
-  error::{UnexpectedEot, token::UnexpectedToken},
+  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   punct::Bracket,
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::typenum::U1,
 };
 
-use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
+use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
 use crate::{
-  combinator::{ParseCtx, ident, try_bang},
+  combinator::{ParseCtx, try_bang},
   graphql::{
     GraphQL,
-    ast::{Name, Type},
+    ast::{ListType, Name, NamedType, Type},
     error::{Expectation, GraphqlError as DialectGraphqlError},
   },
 };
@@ -54,7 +53,7 @@ where
       >,
     >,
 {
-  ident(inp).map(TypeCore::Name)
+  name(inp).map(TypeCore::Name)
 }
 
 fn list_type_core<'inp, Src, Ctx>(
@@ -75,7 +74,7 @@ where
         SimpleSpan,
         GraphQL,
       >,
-    > + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+    > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   ty.delimited_by_brackets()
@@ -108,7 +107,7 @@ where
         SimpleSpan,
         GraphQL,
       >,
-    > + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+    > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
@@ -143,10 +142,8 @@ where
        }| {
         let required = matches!(bang, ParseAttempt::Accept(_));
         match core {
-          TypeCore::Name(name) => Type::Name(scaffold::NamedType::new(span, name, required)),
-          TypeCore::List(inner) => {
-            Type::List(Box::new(scaffold::ListType::new(span, inner, required)))
-          }
+          TypeCore::Name(name) => Type::Name(NamedType::new(span, name, required)),
+          TypeCore::List(inner) => Type::List(Box::new(ListType::new(span, inner, required))),
         }
       },
     )
@@ -156,8 +153,9 @@ where
 impl<S> Type<Name<S>> {
   /// Parses a committed GraphQL type reference.
   ///
-  /// This is the inherent form of [`ty`]. It accepts named and recursively nested
-  /// list types and folds a trailing `!` into the selected node's required flag.
+  /// The lexer source is inferred from `inp`. This parser accepts named and
+  /// recursively nested list types and folds a trailing `!` into the selected
+  /// node's required flag.
   ///
   /// See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
   pub fn graphql<'inp, Src, Ctx>(
@@ -178,7 +176,7 @@ impl<S> Type<Name<S>> {
           SimpleSpan,
           GraphQL,
         >,
-      > + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+      > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
       + From<DialectGraphqlError<S>>,
   {
     ty(inp)

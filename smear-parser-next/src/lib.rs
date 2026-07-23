@@ -14,10 +14,15 @@ extern crate std;
 /// Re-exported lexer crate.
 pub use smear_lexer as lexer;
 
-/// Re-exported scaffold crate.
-pub use smear_scaffold as scaffold;
-
 pub mod combinator;
+
+/// Name-node carrier shared by the GraphQL-family dialect ASTs.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod name;
+
+/// Type-reference carriers shared by the GraphQL-family dialect ASTs.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod ty;
 
 /// Argument-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.

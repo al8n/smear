@@ -11,7 +11,11 @@ use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use crate::graphql::{
   GraphQL,
-  ast::{ConstDirective, ConstDirectives, Directive, Directives},
+  ast::{
+    ConstDirective, ConstDirective as AstConstDirective, ConstDirectives,
+    ConstDirectives as AstConstDirectives, Directive, Directive as AstDirective, Directives,
+    Directives as AstDirectives,
+  },
   error::{ErrorData, Expectation, GraphqlErrors},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
@@ -105,7 +109,7 @@ macro_rules! reject_all {
 
 #[test]
 fn directive_accepts_without_arguments() {
-  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+  fn check<S: AsRef<[u8]>>(d: AstDirective<S>) {
     assert!("deprecated".equivalent(d.name().source_ref()));
     assert!(d.arguments().is_none());
     assert_eq!(d.span().start(), 0);
@@ -115,7 +119,7 @@ fn directive_accepts_without_arguments() {
 
 #[test]
 fn directive_accepts_with_arguments() {
-  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+  fn check<S: AsRef<[u8]>>(d: AstDirective<S>) {
     assert!("include".equivalent(d.name().source_ref()));
     let args = d.arguments().expect("present");
     assert_eq!(args.arguments().len(), 1);
@@ -126,7 +130,7 @@ fn directive_accepts_with_arguments() {
 
 #[test]
 fn directive_accepts_empty_arguments_as_none() {
-  fn check<S: AsRef<[u8]>>(d: Directive<S>) {
+  fn check<S: AsRef<[u8]>>(d: AstDirective<S>) {
     assert!(d.arguments().is_none());
   }
   accept_all!(Directive::<_>::graphql, "@d()", check);
@@ -197,7 +201,7 @@ fn directive_rejects_malformed_arguments() {
 
 #[test]
 fn const_directive_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(d: ConstDirective<S>) {
+  fn check<S: AsRef<[u8]>>(d: AstConstDirective<S>) {
     assert!("d".equivalent(d.name().source_ref()));
   }
   accept_all!(ConstDirective::<_>::graphql, "@d(x: 1)", check);
@@ -208,7 +212,7 @@ fn const_directive_accepts_and_rejects_variable() {
 
 #[test]
 fn directives_accepts_single() {
-  fn check<S: AsRef<[u8]>>(ds: Directives<S>) {
+  fn check<S: AsRef<[u8]>>(ds: AstDirectives<S>) {
     assert_eq!(ds.directives().len(), 1);
     assert!("deprecated".equivalent(ds.directives()[0].name().source_ref()));
   }
@@ -217,7 +221,7 @@ fn directives_accepts_single() {
 
 #[test]
 fn directives_accepts_multiple() {
-  fn check<S: AsRef<[u8]>>(ds: Directives<S>) {
+  fn check<S: AsRef<[u8]>>(ds: AstDirectives<S>) {
     assert_eq!(ds.directives().len(), 2);
     assert!("a".equivalent(ds.directives()[0].name().source_ref()));
     assert!("b".equivalent(ds.directives()[1].name().source_ref()));
@@ -276,7 +280,7 @@ fn directives_rejects_malformed_directive_mid_run() {
 
 #[test]
 fn const_directives_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(ds: ConstDirectives<S>) {
+  fn check<S: AsRef<[u8]>>(ds: AstConstDirectives<S>) {
     assert_eq!(ds.directives().len(), 1);
   }
   accept_all!(ConstDirectives::<_>::graphql, "@d(x: 1)", check);

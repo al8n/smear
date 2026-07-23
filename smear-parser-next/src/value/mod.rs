@@ -1,33 +1,39 @@
 //! Value-node carriers shared by the dialect ASTs.
 //!
 //! Copied type-only from the frozen `smear-parser` crate (`src/value/`): the
-//! boolean / enum / int / float / string / null / variable value nodes the
-//! dialect input-value enums are built from. Each is generic over the source slice
-//! `S` where applicable and over `Span`, which defaults to
+//! boolean / enum / int / float / string / null / variable value nodes and the
+//! minimal collection carriers the dialect input-value enums are built from.
+//! Each is generic over the source slice `S` where applicable and over `Span`, which defaults to
 //! [`SimpleSpan`](tokora::SimpleSpan). Literal carriers also have a `Lang` marker
 //! for dialect type safety; variables instead inherit their dialect from the name
-//! node they contain. The carriers expose only span and source accessors — the
-//! assemblies construct them, and the productions and tests read them.
+//! node they contain. The carriers expose constructors plus span and source
+//! accessors; parsers and external AST builders can construct them without
+//! allocating beyond their selected collection container.
 
-// The `pub(crate)` `new` constructors are the substrate the Wave 1+ value
-// productions build these nodes with; until those productions land they have no
-// in-crate caller. Kept crate-private (per the frozen crate) so only the parser
-// mints nodes — external users read them out of parse results.
+// Some scalar constructors remain crate-private to preserve their existing
+// parser-minted invariant. The copied collection carriers intentionally keep
+// their public constructors, matching the scaffold types they replace.
 #![allow(dead_code)]
 
 pub use boolean_value::*;
+pub use default_input_value::*;
 pub use enum_value::*;
 pub use float::*;
 pub use int::*;
+pub use list::*;
 pub use null_value::*;
+pub use object::*;
 pub use string::*;
 pub use variable::*;
 
 mod boolean_value;
+mod default_input_value;
 mod enum_value;
 mod float;
 mod int;
+mod list;
 mod null_value;
+mod object;
 mod string;
 mod variable;
 
@@ -40,8 +46,8 @@ mod tests {
   };
 
   use super::{
-    BlockStringValue, BooleanValue, EnumValue, FloatValue, InlineStringValue, IntValue, NullValue,
-    StringValue, VariableValue,
+    BlockStringValue, BooleanValue, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
+    IntValue, List, NullValue, Object, ObjectField, StringValue, VariableValue,
   };
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,10 +57,10 @@ mod tests {
 
   #[test]
   fn carriers_support_custom_spans_and_language_markers() {
-    let boolean = BooleanValue::<CustomSpan, dyn CustomLang>::new(CustomSpan(1), true);
+    let boolean = BooleanValue::<str, CustomSpan, dyn CustomLang>::new(CustomSpan(1), true);
     assert_eq!(boolean.as_span(), &CustomSpan(1));
     assert_eq!(
-      BooleanValue::<CustomSpan, dyn CustomLang>::new(CustomSpan(1), true).into_span(),
+      BooleanValue::<str, CustomSpan, dyn CustomLang>::new(CustomSpan(1), true).into_span(),
       CustomSpan(1)
     );
     assert_eq!(boolean.into_components(), (CustomSpan(1), true));
@@ -140,11 +146,35 @@ mod tests {
     );
     assert_eq!(variable.into_components(), (CustomSpan(9), "value"));
 
+    let list = List::<i32, CustomSpan>::new(CustomSpan(10), vec![1, 2]);
+    assert_eq!(list.as_span(), &CustomSpan(10));
+    assert_eq!(list.values(), &[1, 2]);
+    assert_eq!(list.into_components(), (CustomSpan(10), vec![1, 2]));
+
+    let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(11), "answer", 42);
+    assert_eq!(field.as_span(), &CustomSpan(11));
+    assert_eq!(field.name(), &"answer");
+    assert_eq!(field.value(), &42);
+    assert_eq!(field.into_components(), (CustomSpan(11), "answer", 42));
+
+    let object_field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
+    let object = Object::<&str, i32, CustomSpan>::new(CustomSpan(13), vec![object_field]);
+    assert_eq!(object.as_span(), &CustomSpan(13));
+    assert_eq!(object.fields().len(), 1);
+    let (span, fields) = object.into_components();
+    assert_eq!(span, CustomSpan(13));
+    assert_eq!(fields[0].name(), &"answer");
+
+    let default = DefaultInputValue::<_, CustomSpan>::new(CustomSpan(14), 42);
+    assert_eq!(default.as_span(), &CustomSpan(14));
+    assert_eq!(default.value(), &42);
+    assert_eq!(default.into_components(), (CustomSpan(14), 42));
+
     #[cfg(feature = "graphql")]
     {
-      let branded: crate::graphql::ast::BooleanValue<CustomSpan> =
-        BooleanValue::<CustomSpan, crate::graphql::GraphQL>::new(CustomSpan(10), false);
-      let _: crate::value::BooleanValue<CustomSpan, crate::graphql::GraphQL> = branded;
+      let branded: crate::graphql::ast::BooleanValue<str, CustomSpan> =
+        BooleanValue::<str, CustomSpan, crate::graphql::GraphQL>::new(CustomSpan(15), false);
+      let _: crate::value::BooleanValue<str, CustomSpan, crate::graphql::GraphQL> = branded;
     }
   }
 }

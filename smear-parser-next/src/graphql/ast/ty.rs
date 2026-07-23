@@ -1,11 +1,12 @@
 use std::{boxed::Box, rc::Rc, sync::Arc};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_scaffold::ast::{ListType, NamedType};
 use tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
 };
+
+pub use crate::ty::{ListType, NamedType};
 
 macro_rules! ty {
   ($(
@@ -27,14 +28,14 @@ macro_rules! ty {
         }
 
         impl<Name> From<ListType<Self>> for $name<Name> {
-          #[inline]
+          #[inline(always)]
           fn from(ty: ListType<Self>) -> Self {
             Self::List(<$ty<ListType<Self>>>::new(ty))
           }
         }
 
         impl<Name> AsSpan<Span> for $name<Name> {
-          #[inline]
+          #[inline(always)]
           fn as_span(&self) -> &Span {
             match self {
               Self::Name(ty) => ty.span(),
@@ -44,11 +45,22 @@ macro_rules! ty {
         }
 
         impl<Name> IntoSpan<Span> for $name<Name> {
-          #[inline]
+          #[inline(always)]
           fn into_span(self) -> Span {
             match self {
               Self::Name(ty) => ty.into_span(),
               Self::List(ty) => *ty.span(),
+            }
+          }
+        }
+
+        impl<Name> $name<Name> {
+          /// Returns the span covering the complete type reference.
+          #[inline(always)]
+          pub fn required(&self) -> bool {
+            match self {
+              Self::Name(ty) => ty.required(),
+              Self::List(ty) => ty.required(),
             }
           }
         }

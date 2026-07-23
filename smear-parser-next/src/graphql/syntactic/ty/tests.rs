@@ -17,7 +17,7 @@ use tokora::{
 
 use crate::graphql::{
   GraphQL,
-  ast::{Name, Type},
+  ast::{Name, Type, Type as AstType},
   error::{ErrorData, Expectation, GraphqlError as DialectGraphqlError, GraphqlErrors, Unclosed},
   syntactic::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlToken},
 };
@@ -111,7 +111,7 @@ macro_rules! reject_all {
 
 #[test]
 fn named_type_accepts() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let nt = t.unwrap_name();
     assert!("Foo".equivalent(nt.name().source_ref()));
     assert!(!nt.required());
@@ -122,7 +122,7 @@ fn named_type_accepts() {
 
 #[test]
 fn named_type_non_null_accepts() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let nt = t.unwrap_name();
     assert!("Foo".equivalent(nt.name().source_ref()));
     assert!(nt.required());
@@ -134,7 +134,7 @@ fn named_type_non_null_accepts() {
 #[test]
 fn named_type_accepts_soft_keyword_spellings() {
   // Type names are pure-lexical `Name`s; no keyword exclusion applies (Ruling 1).
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     assert!(t.is_name());
   }
   accept_all!(Type::graphql, "type", check);
@@ -147,7 +147,7 @@ fn type_graphql_does_not_require_equivalent() {
   #[allow(dead_code)]
   fn parse_type_slice<'inp, Src, TypeSlice, Ctx>(
     inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-  ) -> Result<Type<Name<TypeSlice>>, GraphqlError<'inp, Src, Ctx>>
+  ) -> Result<AstType<Name<TypeSlice>>, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = TypeSlice> + ?Sized,
     TypeSlice: tokora::Slice<'inp> + Clone + 'inp,
@@ -174,7 +174,7 @@ fn type_graphql_does_not_require_equivalent() {
 
 #[test]
 fn list_type_accepts() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let lt = t.unwrap_list();
     assert!(!lt.required());
     assert_eq!(*lt.span(), SimpleSpan::new(0, 5));
@@ -187,7 +187,7 @@ fn list_type_accepts() {
 
 #[test]
 fn list_type_non_null_accepts() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let lt = t.unwrap_list();
     assert!(lt.required());
     assert_eq!(*lt.span(), SimpleSpan::new(0, 6));
@@ -197,7 +197,7 @@ fn list_type_non_null_accepts() {
 
 #[test]
 fn list_type_of_non_null_named_type() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let lt = t.unwrap_list();
     assert!(!lt.required());
     let inner = lt.ty().unwrap_name_ref();
@@ -209,7 +209,7 @@ fn list_type_of_non_null_named_type() {
 #[test]
 fn list_type_of_non_null_named_type_non_null_list() {
   // `[Foo!]!` — outer list is non-null, inner element is also non-null.
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let lt = t.unwrap_list();
     assert!(lt.required());
     let inner = lt.ty().unwrap_name_ref();
@@ -220,7 +220,7 @@ fn list_type_of_non_null_named_type_non_null_list() {
 
 #[test]
 fn doubly_nested_list_type() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     let outer = t.unwrap_list();
     let middle = outer.ty().unwrap_list_ref();
     let inner = middle.ty().unwrap_name_ref();
@@ -231,7 +231,7 @@ fn doubly_nested_list_type() {
 
 #[test]
 fn doubly_nested_list_type_with_inner_non_nulls() {
-  fn check<S: AsRef<[u8]>>(t: Type<Name<S>>) {
+  fn check<S: AsRef<[u8]>>(t: AstType<Name<S>>) {
     // `[[Foo!]!]!`
     let outer = t.unwrap_list();
     assert!(outer.required());

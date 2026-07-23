@@ -11,7 +11,10 @@ use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use crate::graphql::{
   GraphQL,
-  ast::{Argument, Arguments, ConstArgument, ConstArguments},
+  ast::{
+    Argument, Argument as AstArgument, Arguments, Arguments as AstArguments, ConstArgument,
+    ConstArgument as AstConstArgument, ConstArguments, ConstArguments as AstConstArguments,
+  },
   error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
@@ -105,7 +108,7 @@ macro_rules! reject_all {
 
 #[test]
 fn argument_accepts() {
-  fn check<S: AsRef<[u8]>>(a: Argument<S>) {
+  fn check<S: AsRef<[u8]>>(a: AstArgument<S>) {
     assert!("x".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
     assert_eq!(a.span().start(), 0);
@@ -115,7 +118,7 @@ fn argument_accepts() {
 
 #[test]
 fn argument_accepts_variable_value() {
-  fn check<S: AsRef<[u8]>>(a: Argument<S>) {
+  fn check<S: AsRef<[u8]>>(a: AstArgument<S>) {
     assert!(a.value().is_variable());
   }
   accept_all!(Argument::<_>::graphql, "x: $v", check);
@@ -123,7 +126,7 @@ fn argument_accepts_variable_value() {
 
 #[test]
 fn argument_accepts_composite_value() {
-  fn check<S: AsRef<[u8]>>(a: Argument<S>) {
+  fn check<S: AsRef<[u8]>>(a: AstArgument<S>) {
     let list = a.value().unwrap_list_ref();
     assert_eq!(list.values().len(), 2);
   }
@@ -176,7 +179,7 @@ fn argument_phase_diagnostics_are_typed() {
 
 #[test]
 fn const_argument_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(a: ConstArgument<S>) {
+  fn check<S: AsRef<[u8]>>(a: AstConstArgument<S>) {
     assert!("k".equivalent(a.name().source_ref()));
     assert!(a.value().is_int());
   }
@@ -188,7 +191,7 @@ fn const_argument_accepts_and_rejects_variable() {
 
 #[test]
 fn arguments_accepts_single() {
-  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: AstArguments<S>) {
     assert_eq!(args.arguments().len(), 1);
     assert!("x".equivalent(args.arguments()[0].name().source_ref()));
   }
@@ -197,7 +200,7 @@ fn arguments_accepts_single() {
 
 #[test]
 fn arguments_accepts_multiple() {
-  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: AstArguments<S>) {
     assert_eq!(args.arguments().len(), 2);
     assert!("a".equivalent(args.arguments()[0].name().source_ref()));
     assert!("b".equivalent(args.arguments()[1].name().source_ref()));
@@ -211,7 +214,7 @@ fn arguments_accepts_empty_parens() {
   // entry for this site): `Arguments : ( Argument+ )` demands one-or-more, but
   // parser-next stays lenient and accepts an empty `()` here, matching the frozen
   // parser's unenforced `+`.
-  fn check<S: AsRef<[u8]>>(args: Arguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: AstArguments<S>) {
     assert!(args.arguments().is_empty());
     assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }
@@ -279,7 +282,7 @@ fn arguments_commit_non_closing_heads_to_argument_phases() {
 
 #[test]
 fn const_arguments_accepts_and_rejects_variable() {
-  fn check<S: AsRef<[u8]>>(args: ConstArguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: AstConstArguments<S>) {
     assert_eq!(args.arguments().len(), 1);
   }
   accept_all!(ConstArguments::<_>::graphql, "(k: 1)", check);
@@ -297,7 +300,7 @@ fn const_arguments_absent_is_empty_and_zero_width() {
 fn const_arguments_accepts_empty_parens() {
   // Const twin of `arguments_accepts_empty_parens` (plan Amendment 5): empty `()`
   // is accepted, matching frozen parity.
-  fn check<S: AsRef<[u8]>>(args: ConstArguments<S>) {
+  fn check<S: AsRef<[u8]>>(args: AstConstArguments<S>) {
     assert!(args.arguments().is_empty());
     assert_eq!(*args.span(), SimpleSpan::new(0, 2));
   }

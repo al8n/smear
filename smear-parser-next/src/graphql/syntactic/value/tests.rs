@@ -11,7 +11,6 @@
 //! marker, so the drivers use `Parser::with_parser_of` with that marker explicitly.
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
-use smear_scaffold::hints::ObjectFieldValueHint;
 use tokora::{
   FatalContext, Lexer, Parse, Parser, SimpleSpan, Source,
   error::{UnexpectedEot, token::UnexpectedToken},
@@ -22,10 +21,13 @@ use super::{const_object_field, default_value, object_field, try_default_value};
 use crate::graphql::{
   GraphQL,
   ast::{
-    BooleanValue, ConstInputValue, DefaultInputValue, EnumValue, FloatValue, InputValue, IntValue,
-    NullValue, StringValue, VariableValue,
+    BooleanValue, BooleanValue as BooleanValueParser, ConstInputValue,
+    ConstInputValue as ConstInputValueParser, DefaultInputValue, EnumValue as EnumValueParser,
+    FloatValue as FloatValueParser, InputValue, InputValue as InputValueParser, IntValue,
+    IntValue as IntValueParser, NullValue as NullValueParser, StringValue as StringValueParser,
+    VariableValue as VariableValueParser,
   },
-  error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
+  error::{ErrorData, Expectation, GraphqlErrors, ObjectFieldValueHint, Unclosed},
   syntactic::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlToken},
 };
 use tokora::try_parse_input::ParseAttempt;
@@ -147,13 +149,13 @@ fn int_value_accepts() {
     assert!("42".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 2));
   }
-  accept_all!(IntValue::graphql, "42", check);
+  accept_all!(IntValueParser::graphql, "42", check);
 }
 
 #[test]
 fn int_value_rejects_non_int() {
-  reject_all!(IntValue::graphql, "\"s\"");
-  reject_all!(IntValue::graphql, "");
+  reject_all!(IntValueParser::graphql, "\"s\"");
+  reject_all!(IntValueParser::graphql, "");
 }
 
 #[test]
@@ -182,7 +184,7 @@ fn int_value_graphql_does_not_require_equivalent() {
         >,
       >,
   {
-    IntValue::graphql(inp)
+    IntValueParser::graphql(inp)
   }
 }
 
@@ -192,12 +194,12 @@ fn float_value_accepts() {
     assert!("3.14".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
-  accept_all!(FloatValue::graphql, "3.14", check);
+  accept_all!(FloatValueParser::graphql, "3.14", check);
 }
 
 #[test]
 fn float_value_rejects_int() {
-  reject_all!(FloatValue::graphql, "42");
+  reject_all!(FloatValueParser::graphql, "42");
 }
 
 #[test]
@@ -206,7 +208,7 @@ fn string_value_accepts_inline() {
     assert!("\"hi\"".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
-  accept_all!(StringValue::graphql, "\"hi\"", check);
+  accept_all!(StringValueParser::graphql, "\"hi\"", check);
 }
 
 #[test]
@@ -215,12 +217,12 @@ fn string_value_accepts_block() {
     assert!("\"\"\"hi\"\"\"".equivalent(v.source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 8));
   }
-  accept_all!(StringValue::graphql, "\"\"\"hi\"\"\"", check);
+  accept_all!(StringValueParser::graphql, "\"\"\"hi\"\"\"", check);
 }
 
 #[test]
 fn string_value_rejects_int() {
-  reject_all!(StringValue::graphql, "42");
+  reject_all!(StringValueParser::graphql, "42");
 }
 
 // ─── Variable ────────────────────────────────────────────────────────────────
@@ -231,30 +233,30 @@ fn variable_value_accepts() {
     assert!("userId".equivalent(v.name().source_ref()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 7));
   }
-  accept_all!(VariableValue::graphql, "$userId", check);
+  accept_all!(VariableValueParser::graphql, "$userId", check);
 }
 
 #[test]
 fn variable_value_rejects_missing_name() {
-  reject_all!(VariableValue::graphql, "$");
+  reject_all!(VariableValueParser::graphql, "$");
 }
 
 #[test]
 fn variable_value_rejects_without_dollar() {
-  reject_all!(VariableValue::graphql, "userId");
+  reject_all!(VariableValueParser::graphql, "userId");
 }
 
 #[test]
 fn try_variable_value_accepts_and_declines() {
   // Accept on `$name`.
-  let accepted = drive_str(VariableValue::try_graphql, "$x").unwrap();
+  let accepted = drive_str(VariableValueParser::try_graphql, "$x").unwrap();
   assert!(matches!(accepted, ParseAttempt::Accept(_)));
   // Decline (nothing consumed) on a non-`$` token.
   let declined = drive_str(
     |inp| {
-      let attempt = VariableValue::try_graphql(inp)?;
+      let attempt = VariableValueParser::try_graphql(inp)?;
       // The declined identifier is untouched, so a plain value pulls it back.
-      let leftover = InputValue::graphql(inp)?;
+      let leftover = InputValueParser::graphql(inp)?;
       Ok::<_, GraphqlErrors<&str>>((attempt.is_decline(), leftover.is_enum()))
     },
     "x",
@@ -272,7 +274,7 @@ fn value_int_arm() {
     assert!("42".equivalent(i.source_ref()));
     assert_eq!(*i.span(), SimpleSpan::new(0, 2));
   }
-  accept_all!(InputValue::graphql, "42", check);
+  accept_all!(InputValueParser::graphql, "42", check);
 }
 
 #[test]
@@ -280,7 +282,7 @@ fn value_float_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!("1.5e3".equivalent(v.unwrap_float().source_ref()));
   }
-  accept_all!(InputValue::graphql, "1.5e3", check);
+  accept_all!(InputValueParser::graphql, "1.5e3", check);
 }
 
 #[test]
@@ -288,7 +290,7 @@ fn value_string_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!("\"hi\"".equivalent(v.unwrap_string().source_ref()));
   }
-  accept_all!(InputValue::graphql, "\"hi\"", check);
+  accept_all!(InputValueParser::graphql, "\"hi\"", check);
 }
 
 #[test]
@@ -296,7 +298,7 @@ fn value_block_string_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!(v.is_string());
   }
-  accept_all!(InputValue::graphql, "\"\"\"block\"\"\"", check);
+  accept_all!(InputValueParser::graphql, "\"\"\"block\"\"\"", check);
 }
 
 #[test]
@@ -306,7 +308,7 @@ fn value_true_arm() {
     assert!(b.value());
     assert_eq!(*b.span(), SimpleSpan::new(0, 4));
   }
-  accept_all!(InputValue::graphql, "true", check);
+  accept_all!(InputValueParser::graphql, "true", check);
 }
 
 #[test]
@@ -314,7 +316,7 @@ fn value_false_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!(!v.unwrap_boolean().value());
   }
-  accept_all!(InputValue::graphql, "false", check);
+  accept_all!(InputValueParser::graphql, "false", check);
 }
 
 #[test]
@@ -324,7 +326,7 @@ fn value_null_arm() {
     assert!("null".equivalent(n.source_ref()));
     assert_eq!(*n.span(), SimpleSpan::new(0, 4));
   }
-  accept_all!(InputValue::graphql, "null", check);
+  accept_all!(InputValueParser::graphql, "null", check);
 }
 
 #[test]
@@ -334,7 +336,7 @@ fn value_enum_arm() {
     assert!("ACTIVE".equivalent(e.source_ref()));
     assert_eq!(*e.span(), SimpleSpan::new(0, 6));
   }
-  accept_all!(InputValue::graphql, "ACTIVE", check);
+  accept_all!(InputValueParser::graphql, "ACTIVE", check);
 }
 
 #[test]
@@ -343,8 +345,8 @@ fn value_enum_arm_accepts_soft_keywords() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!(v.is_enum());
   }
-  accept_all!(InputValue::graphql, "enum", check);
-  accept_all!(InputValue::graphql, "type", check);
+  accept_all!(InputValueParser::graphql, "enum", check);
+  accept_all!(InputValueParser::graphql, "type", check);
 }
 
 #[test]
@@ -352,7 +354,7 @@ fn value_variable_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!("x".equivalent(v.unwrap_variable().name().source_ref()));
   }
-  accept_all!(InputValue::graphql, "$x", check);
+  accept_all!(InputValueParser::graphql, "$x", check);
 }
 
 #[test]
@@ -364,7 +366,7 @@ fn value_list_arm() {
     assert!(list.values()[0].is_int());
     assert!(list.values()[1].is_int());
   }
-  accept_all!(InputValue::graphql, "[1, 2]", check);
+  accept_all!(InputValueParser::graphql, "[1, 2]", check);
 }
 
 #[test]
@@ -372,7 +374,7 @@ fn value_empty_list_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!(v.unwrap_list().values().is_empty());
   }
-  accept_all!(InputValue::graphql, "[]", check);
+  accept_all!(InputValueParser::graphql, "[]", check);
 }
 
 #[test]
@@ -384,7 +386,7 @@ fn value_object_arm() {
     assert!("a".equivalent(field.name().source_ref()));
     assert!(field.value().is_int());
   }
-  accept_all!(InputValue::graphql, "{ a: 1 }", check);
+  accept_all!(InputValueParser::graphql, "{ a: 1 }", check);
 }
 
 #[test]
@@ -392,7 +394,7 @@ fn value_empty_object_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     assert!(v.unwrap_object().fields().is_empty());
   }
-  accept_all!(InputValue::graphql, "{}", check);
+  accept_all!(InputValueParser::graphql, "{}", check);
 }
 
 #[test]
@@ -405,7 +407,7 @@ fn value_nested_list_and_object() {
     let obj = outer.values()[1].unwrap_object_ref();
     assert!(obj.fields()[0].value().is_variable());
   }
-  accept_all!(InputValue::graphql, "[[1], { k: $v }]", check);
+  accept_all!(InputValueParser::graphql, "[[1], { k: $v }]", check);
 }
 
 // ─── value: enum exclusion ordering (Ruling 2) ───────────────────────────────
@@ -413,17 +415,29 @@ fn value_nested_list_and_object() {
 #[test]
 fn value_resolves_true_false_null_before_enum() {
   // The three reserved spellings never fall through to the enum arm.
-  assert!(drive_str(InputValue::graphql, "true").unwrap().is_boolean());
   assert!(
-    drive_str(InputValue::graphql, "false")
+    drive_str(InputValueParser::graphql, "true")
       .unwrap()
       .is_boolean()
   );
-  assert!(drive_str(InputValue::graphql, "null").unwrap().is_null());
-  // Anything else on the identifier arm is an enum.
-  assert!(drive_str(InputValue::graphql, "trueish").unwrap().is_enum());
   assert!(
-    drive_str(InputValue::graphql, "NULLABLE")
+    drive_str(InputValueParser::graphql, "false")
+      .unwrap()
+      .is_boolean()
+  );
+  assert!(
+    drive_str(InputValueParser::graphql, "null")
+      .unwrap()
+      .is_null()
+  );
+  // Anything else on the identifier arm is an enum.
+  assert!(
+    drive_str(InputValueParser::graphql, "trueish")
+      .unwrap()
+      .is_enum()
+  );
+  assert!(
+    drive_str(InputValueParser::graphql, "NULLABLE")
       .unwrap()
       .is_enum()
   );
@@ -433,12 +447,12 @@ fn value_resolves_true_false_null_before_enum() {
 
 #[test]
 fn value_rejects_non_value_heads() {
-  reject_all!(InputValue::graphql, "}");
-  reject_all!(InputValue::graphql, ")");
-  reject_all!(InputValue::graphql, "]");
-  reject_all!(InputValue::graphql, ":");
-  reject_all!(InputValue::graphql, "@");
-  reject_all!(InputValue::graphql, "=");
+  reject_all!(InputValueParser::graphql, "}");
+  reject_all!(InputValueParser::graphql, ")");
+  reject_all!(InputValueParser::graphql, "]");
+  reject_all!(InputValueParser::graphql, ":");
+  reject_all!(InputValueParser::graphql, "@");
+  reject_all!(InputValueParser::graphql, "=");
 }
 
 #[test]
@@ -447,7 +461,7 @@ fn value_invalid_head_expects_input_value() {
     ("}", SyntacticTokenKind::RBrace),
     ("@", SyntacticTokenKind::At),
   ] {
-    let error = drive_str(|inp| InputValue::graphql(inp).map(|_| ()), src)
+    let error = drive_str(|inp| InputValueParser::graphql(inp).map(|_| ()), src)
       .expect_err("a non-value head should fail")
       .into_iter()
       .next()
@@ -463,7 +477,7 @@ fn value_invalid_head_expects_input_value() {
 
 #[test]
 fn value_end_of_input_error_family() {
-  let is_eot = match drive_str(|inp| InputValue::graphql(inp).map(|_| ()), "") {
+  let is_eot = match drive_str(|inp| InputValueParser::graphql(inp).map(|_| ()), "") {
     Err(errs) => errs
       .into_iter()
       .next()
@@ -476,11 +490,11 @@ fn value_end_of_input_error_family() {
 #[test]
 fn value_unterminated_list_is_unclosed_list() {
   assert_unclosed_list(drive_str(
-    |inp| InputValue::graphql(inp).map(|_| ()),
+    |inp| InputValueParser::graphql(inp).map(|_| ()),
     "[1, 2",
   ));
   assert_unclosed_list(drive_slice(
-    |inp| InputValue::graphql(inp).map(|_| ()),
+    |inp| InputValueParser::graphql(inp).map(|_| ()),
     b"[1, 2",
   ));
 }
@@ -488,18 +502,18 @@ fn value_unterminated_list_is_unclosed_list() {
 #[test]
 fn value_unterminated_object_is_unclosed_object() {
   assert_unclosed_object(drive_str(
-    |inp| InputValue::graphql(inp).map(|_| ()),
+    |inp| InputValueParser::graphql(inp).map(|_| ()),
     "{ a: 1",
   ));
   assert_unclosed_object(drive_slice(
-    |inp| InputValue::graphql(inp).map(|_| ()),
+    |inp| InputValueParser::graphql(inp).map(|_| ()),
     b"{ a: 1",
   ));
 }
 
 #[test]
 fn value_object_field_missing_colon_is_error() {
-  reject_all!(InputValue::graphql, "{ a 1 }");
+  reject_all!(InputValueParser::graphql, "{ a 1 }");
 }
 
 // ─── const_value ─────────────────────────────────────────────────────────────
@@ -509,7 +523,7 @@ fn const_value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
     assert!("7".equivalent(v.unwrap_int().source_ref()));
   }
-  accept_all!(ConstInputValue::graphql, "7", check);
+  accept_all!(ConstInputValueParser::graphql, "7", check);
 }
 
 #[test]
@@ -517,15 +531,15 @@ fn const_value_enum_and_scalars() {
   fn check_enum<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
     assert!(v.is_enum());
   }
-  accept_all!(ConstInputValue::graphql, "ACTIVE", check_enum);
+  accept_all!(ConstInputValueParser::graphql, "ACTIVE", check_enum);
   fn check_bool<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
     assert!(v.unwrap_boolean().value());
   }
-  accept_all!(ConstInputValue::graphql, "true", check_bool);
+  accept_all!(ConstInputValueParser::graphql, "true", check_bool);
   fn check_null<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
     assert!(v.is_null());
   }
-  accept_all!(ConstInputValue::graphql, "null", check_null);
+  accept_all!(ConstInputValueParser::graphql, "null", check_null);
 }
 
 #[test]
@@ -535,13 +549,13 @@ fn const_value_list_and_object() {
     assert_eq!(obj.fields().len(), 1);
     assert!(obj.fields()[0].value().is_list());
   }
-  accept_all!(ConstInputValue::graphql, "{ xs: [1, 2] }", check);
+  accept_all!(ConstInputValueParser::graphql, "{ xs: [1, 2] }", check);
 }
 
 #[test]
 fn const_value_rejects_variable() {
-  reject_all!(ConstInputValue::graphql, "$x");
-  let error = drive_str(|inp| ConstInputValue::graphql(inp).map(|_| ()), "$x")
+  reject_all!(ConstInputValueParser::graphql, "$x");
+  let error = drive_str(|inp| ConstInputValueParser::graphql(inp).map(|_| ()), "$x")
     .expect_err("variables are not const input values")
     .into_iter()
     .next()
@@ -556,18 +570,18 @@ fn const_value_rejects_variable() {
 
 #[test]
 fn const_value_rejects_nested_variable() {
-  reject_all!(ConstInputValue::graphql, "[$x]");
-  reject_all!(ConstInputValue::graphql, "{ a: $x }");
+  reject_all!(ConstInputValueParser::graphql, "[$x]");
+  reject_all!(ConstInputValueParser::graphql, "{ a: $x }");
 }
 
 #[test]
 fn const_value_unterminated_list_is_unclosed_list() {
   assert_unclosed_list(drive_str(
-    |inp| ConstInputValue::graphql(inp).map(|_| ()),
+    |inp| ConstInputValueParser::graphql(inp).map(|_| ()),
     "[1, 2",
   ));
   assert_unclosed_list(drive_slice(
-    |inp| ConstInputValue::graphql(inp).map(|_| ()),
+    |inp| ConstInputValueParser::graphql(inp).map(|_| ()),
     b"[1, 2",
   ));
 }
@@ -575,11 +589,11 @@ fn const_value_unterminated_list_is_unclosed_list() {
 #[test]
 fn const_value_unterminated_object_is_unclosed_object() {
   assert_unclosed_object(drive_str(
-    |inp| ConstInputValue::graphql(inp).map(|_| ()),
+    |inp| ConstInputValueParser::graphql(inp).map(|_| ()),
     "{ a: 1",
   ));
   assert_unclosed_object(drive_slice(
-    |inp| ConstInputValue::graphql(inp).map(|_| ()),
+    |inp| ConstInputValueParser::graphql(inp).map(|_| ()),
     b"{ a: 1",
   ));
 }
@@ -817,7 +831,7 @@ fn object_fields_wrong_value_leave_closing_brace() {
 
 #[test]
 fn object_non_terminator_commits_and_expects_name() {
-  let error = drive_str(|inp| InputValue::graphql(inp).map(|_| ()), "{ : 1 }")
+  let error = drive_str(|inp| InputValueParser::graphql(inp).map(|_| ()), "{ : 1 }")
     .expect_err("a non-terminator commits the object-field parser")
     .into_iter()
     .next()
@@ -854,7 +868,7 @@ fn default_value_absent_without_equal() {
   let (absent, leftover_is_int) = drive_str(
     |inp| {
       let default = default_value(inp)?;
-      let leftover = InputValue::graphql(inp)?;
+      let leftover = InputValueParser::graphql(inp)?;
       Ok::<_, GraphqlErrors<&str>>((default.is_none(), leftover.is_int()))
     },
     "42",
@@ -921,7 +935,7 @@ macro_rules! try_declines_leaving {
     let (declined, recovered) = drive_str(
       |inp| {
         let attempt = $try_fn(inp)?;
-        let recovered = InputValue::graphql(inp).is_ok();
+        let recovered = InputValueParser::graphql(inp).is_ok();
         Ok::<_, GraphqlErrors<&str>>((attempt.is_decline(), recovered))
       },
       $src,
@@ -940,72 +954,85 @@ macro_rules! try_declines_leaving {
 
 #[test]
 fn try_leaf_twins_decline_and_leave() {
-  try_declines_leaving!(IntValue::try_graphql, "true");
-  try_declines_leaving!(FloatValue::try_graphql, "42");
-  try_declines_leaving!(StringValue::try_graphql, "42");
-  try_declines_leaving!(BooleanValue::try_graphql, "ACTIVE");
-  try_declines_leaving!(NullValue::try_graphql, "ACTIVE");
-  try_declines_leaving!(EnumValue::try_graphql, "true"); // reserved spelling → not an enum
+  try_declines_leaving!(IntValueParser::try_graphql, "true");
+  try_declines_leaving!(FloatValueParser::try_graphql, "42");
+  try_declines_leaving!(StringValueParser::try_graphql, "42");
+  try_declines_leaving!(BooleanValueParser::<&str>::try_graphql, "ACTIVE");
+  try_declines_leaving!(NullValueParser::try_graphql, "ACTIVE");
+  try_declines_leaving!(EnumValueParser::try_graphql, "true"); // reserved spelling → not an enum
 }
 
 #[test]
 fn try_leaf_twins_accept() {
   assert!(matches!(
-    drive_str(IntValue::try_graphql, "42").unwrap(),
+    drive_str(IntValueParser::try_graphql, "42").unwrap(),
     ParseAttempt::Accept(_)
   ));
   assert!(matches!(
-    drive_str(FloatValue::try_graphql, "3.14").unwrap(),
+    drive_str(FloatValueParser::try_graphql, "3.14").unwrap(),
     ParseAttempt::Accept(_)
   ));
   assert!(matches!(
-    drive_str(StringValue::try_graphql, "\"hi\"").unwrap(),
+    drive_str(StringValueParser::try_graphql, "\"hi\"").unwrap(),
     ParseAttempt::Accept(_)
   ));
   assert!(matches!(
-    drive_str(BooleanValue::try_graphql, "true").unwrap(),
+    drive_str(BooleanValueParser::<&str>::try_graphql, "true").unwrap(),
     ParseAttempt::Accept(_)
   ));
   assert!(matches!(
-    drive_str(NullValue::try_graphql, "null").unwrap(),
+    drive_str(NullValueParser::try_graphql, "null").unwrap(),
     ParseAttempt::Accept(_)
   ));
   assert!(matches!(
-    drive_str(EnumValue::try_graphql, "ACTIVE").unwrap(),
+    drive_str(EnumValueParser::try_graphql, "ACTIVE").unwrap(),
     ParseAttempt::Accept(_)
   ));
 }
 
 #[test]
 fn boolean_value_committed_accepts_and_rejects() {
-  assert!(drive_str(BooleanValue::graphql, "true").unwrap().value());
-  assert!(!drive_str(BooleanValue::graphql, "false").unwrap().value());
-  reject_all!(BooleanValue::graphql, "null");
-  reject_all!(BooleanValue::graphql, "ACTIVE");
-  reject_all!(BooleanValue::graphql, "42");
+  let true_value: BooleanValue<&str> =
+    drive_str(BooleanValueParser::<&str>::graphql, "true").unwrap();
+  assert!(true_value.value());
+
+  let false_value: BooleanValue<&[u8]> =
+    drive_slice(BooleanValueParser::<&[u8]>::graphql, b"false").unwrap();
+  assert!(!false_value.value());
+
+  for rejected in ["null", "ACTIVE", "42"] {
+    assert!(drive_str(BooleanValueParser::<&str>::graphql, rejected).is_err());
+    assert!(drive_slice(BooleanValueParser::<&[u8]>::graphql, rejected.as_bytes()).is_err());
+  }
 }
 
 #[test]
 fn null_value_committed_accepts_and_rejects() {
-  assert!("null".equivalent(drive_str(NullValue::graphql, "null").unwrap().source_ref()));
-  reject_all!(NullValue::graphql, "true");
-  reject_all!(NullValue::graphql, "ACTIVE");
+  assert!(
+    "null".equivalent(
+      drive_str(NullValueParser::graphql, "null")
+        .unwrap()
+        .source_ref()
+    )
+  );
+  reject_all!(NullValueParser::graphql, "true");
+  reject_all!(NullValueParser::graphql, "ACTIVE");
 }
 
 #[test]
 fn enum_value_committed_excludes_reserved() {
   assert!(
     "ACTIVE".equivalent(
-      drive_str(EnumValue::graphql, "ACTIVE")
+      drive_str(EnumValueParser::graphql, "ACTIVE")
         .unwrap()
         .source_ref()
     )
   );
   // Soft keywords are enums; the three reserved spellings are excluded.
-  assert!(drive_str(EnumValue::graphql, "type").is_ok());
-  reject_all!(EnumValue::graphql, "true");
-  reject_all!(EnumValue::graphql, "false");
-  reject_all!(EnumValue::graphql, "null");
+  assert!(drive_str(EnumValueParser::graphql, "type").is_ok());
+  reject_all!(EnumValueParser::graphql, "true");
+  reject_all!(EnumValueParser::graphql, "false");
+  reject_all!(EnumValueParser::graphql, "null");
 }
 
 // ─── variable commitment regressions ─────────────────────────────────────────
@@ -1016,7 +1043,7 @@ fn variable_dollar_commits_and_reports_missing_name() {
   // committed variable error rather than a decline.
   let (is_eot, at_eot) = drive_str(
     |inp| {
-      let is_eot = match VariableValue::try_graphql(inp) {
+      let is_eot = match VariableValueParser::try_graphql(inp) {
         Err(errs) => errs
           .into_iter()
           .next()
@@ -1037,7 +1064,7 @@ fn variable_dollar_commits_and_reports_missing_name() {
 fn variable_wrong_name_token_is_left_for_its_parent() {
   let (errored, colon_remains) = drive_str(
     |inp| {
-      let errored = VariableValue::try_graphql(inp).is_err();
+      let errored = VariableValueParser::try_graphql(inp).is_err();
       let colon_remains = matches!(
         inp
           .next()?
@@ -1091,12 +1118,16 @@ const VALUE_ORACLE: &[(&str, bool)] = &[
 fn value_matches_frozen_verdicts() {
   for (src, accept) in VALUE_ORACLE {
     assert_eq!(
-      drive_str(|inp| InputValue::graphql(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| InputValueParser::graphql(inp).map(|_| ()), src).is_ok(),
       *accept,
       "str value({src:?})"
     );
     assert_eq!(
-      drive_slice(|inp| InputValue::graphql(inp).map(|_| ()), src.as_bytes()).is_ok(),
+      drive_slice(
+        |inp| InputValueParser::graphql(inp).map(|_| ()),
+        src.as_bytes(),
+      )
+      .is_ok(),
       *accept,
       "slice value({src:?})"
     );
@@ -1126,13 +1157,13 @@ const CONST_VALUE_ORACLE: &[(&str, bool)] = &[
 fn const_value_matches_frozen_verdicts() {
   for (src, accept) in CONST_VALUE_ORACLE {
     assert_eq!(
-      drive_str(|inp| ConstInputValue::graphql(inp).map(|_| ()), src).is_ok(),
+      drive_str(|inp| ConstInputValueParser::graphql(inp).map(|_| ()), src,).is_ok(),
       *accept,
       "str const_value({src:?})"
     );
     assert_eq!(
       drive_slice(
-        |inp| ConstInputValue::graphql(inp).map(|_| ()),
+        |inp| ConstInputValueParser::graphql(inp).map(|_| ()),
         src.as_bytes()
       )
       .is_ok(),

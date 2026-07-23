@@ -1,5 +1,4 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use smear_scaffold::ast as scaffold;
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
@@ -9,7 +8,7 @@ use super::{DefaultVec, Name};
 use crate::graphql::GraphQL;
 
 /// A GraphQL boolean literal.
-pub type BooleanValue<Span = SimpleSpan> = crate::value::BooleanValue<Span, GraphQL>;
+pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQL>;
 
 /// A GraphQL enum literal.
 pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<S, Span, GraphQL>;
@@ -37,29 +36,30 @@ pub type BlockStringValue<S, Span = SimpleSpan> = crate::value::BlockStringValue
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S>, Span>;
 
 /// List value in GraphQL (can contain variables).
-pub type List<S, Container = DefaultVec<InputValue<S>>> = scaffold::List<InputValue<S>, Container>;
+pub type List<S, Container = DefaultVec<InputValue<S>>> =
+  crate::value::List<InputValue<S>, SimpleSpan, Container>;
 
 /// Object value in GraphQL (can contain variables).
-pub type Object<S, Container = DefaultVec<InputValue<S>>> =
-  scaffold::Object<Name<S>, InputValue<S>, Container>;
+pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
+  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
 
 /// Object field in GraphQL (can contain variables).
-pub type ObjectField<S> = scaffold::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
 
 /// Constant list value in GraphQL (no variables).
 pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  scaffold::List<ConstInputValue<S>, Container>;
+  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object value in GraphQL (no variables).
-pub type ConstObject<S, Container = DefaultVec<ConstInputValue<S>>> =
-  scaffold::Object<Name<S>, ConstInputValue<S>, Container>;
+pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
+  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
 
 /// Constant object field in GraphQL (no variables).
-pub type ConstObjectField<S> = scaffold::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
 
 /// Default value for input fields and arguments, using constant expressions
 /// (`= ConstValue`). Copied type-only from the frozen `graphql/ast/default.rs`.
-pub type DefaultInputValue<S> = scaffold::DefaultInputValue<ConstInputValue<S>>;
+pub type DefaultInputValue<S> = crate::value::DefaultInputValue<ConstInputValue<S>>;
 
 /// GraphQL input value (executable context).
 #[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]
@@ -69,7 +69,7 @@ pub enum InputValue<S> {
   /// Variable reference (e.g., `$userId`).
   Variable(VariableValue<S>),
   /// Boolean value (`true` or `false`).
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
@@ -81,9 +81,9 @@ pub enum InputValue<S> {
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of values.
-  List(scaffold::List<InputValue<S>>),
+  List(List<S>),
   /// Object value with named fields.
-  Object(scaffold::Object<Name<S>, InputValue<S>>),
+  Object(Object<S>),
 }
 
 impl<S> AsSpan<SimpleSpan> for InputValue<S> {
@@ -126,7 +126,7 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 #[try_unwrap(ref, ref_mut)]
 pub enum ConstInputValue<S> {
   /// Boolean value (`true` or `false`).
-  Boolean(BooleanValue),
+  Boolean(BooleanValue<S>),
   /// String value (inline or block string).
   String(StringValue<S>),
   /// Floating-point number.
@@ -138,9 +138,9 @@ pub enum ConstInputValue<S> {
   /// The `null` literal.
   Null(NullValue<S>),
   /// List of constant values.
-  List(scaffold::List<ConstInputValue<S>>),
+  List(ConstList<S>),
   /// Object value with named fields (all values must be constant).
-  Object(scaffold::Object<Name<S>, ConstInputValue<S>>),
+  Object(ConstObject<S>),
 }
 
 impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
