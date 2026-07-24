@@ -163,21 +163,19 @@ where
     Some(token) => {
       let span = *token.span();
       let kind = token.token().kind();
-      let head = match token.token() {
-        GraphqlToken::<'inp, Src>::LBrace => Some(ExecutableHead::Shorthand),
-        GraphqlToken::<'inp, Src>::Identifier(value) if "query".equivalent(value) => {
-          Some(ExecutableHead::Operation(OperationHead::Query))
-        }
-        GraphqlToken::<'inp, Src>::Identifier(value) if "mutation".equivalent(value) => {
-          Some(ExecutableHead::Operation(OperationHead::Mutation))
-        }
-        GraphqlToken::<'inp, Src>::Identifier(value) if "subscription".equivalent(value) => {
-          Some(ExecutableHead::Operation(OperationHead::Subscription))
-        }
-        GraphqlToken::<'inp, Src>::Identifier(value) if "fragment".equivalent(value) => {
-          Some(ExecutableHead::Fragment)
-        }
-        _ => None,
+      let token = token.token();
+      let head = if token.is_l_brace() {
+        Some(ExecutableHead::Shorthand)
+      } else if token.is_query() {
+        Some(ExecutableHead::Operation(OperationHead::Query))
+      } else if token.is_mutation() {
+        Some(ExecutableHead::Operation(OperationHead::Mutation))
+      } else if token.is_subscription() {
+        Some(ExecutableHead::Operation(OperationHead::Subscription))
+      } else if token.is_fragment() {
+        Some(ExecutableHead::Fragment)
+      } else {
+        None
       };
       match head {
         Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
@@ -229,73 +227,6 @@ where
   }
 }
 
-#[inline]
-fn is_name<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Identifier(_))
-}
-
-#[inline]
-fn is_type_head<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(
-    token,
-    GraphqlToken::<'inp, Src>::Identifier(_) | GraphqlToken::<'inp, Src>::LBracket
-  )
-}
-
-#[inline]
-fn is_dollar<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Dollar)
-}
-
-#[inline]
-fn is_colon<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Colon)
-}
-
-#[inline]
-fn is_lparen<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::LParen)
-}
-
-#[inline]
-fn is_lbrace<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::LBrace)
-}
-
-#[inline]
-fn is_fragment<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Identifier(value) if "fragment".equivalent(value))
-}
-
 fn take_name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<Name<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
@@ -316,7 +247,7 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_executable_phase(inp, Expectation::Name, is_name::<Src>)?;
+  guard_executable_phase(inp, Expectation::Name, |token| token.is_identifier())?;
   match inp.next()? {
     Some(spanned) => {
       let (span, token) = spanned.into_components();
@@ -435,7 +366,7 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_executable_phase(inp, Expectation::Dollar, is_dollar::<Src>)?;
+  guard_executable_phase(inp, Expectation::Dollar, |token| token.is_dollar())?;
   match inp.next()? {
     Some(spanned) => Ok(spanned.into_span()),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -462,7 +393,7 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_executable_phase(inp, Expectation::Colon, is_colon::<Src>)?;
+  guard_executable_phase(inp, Expectation::Colon, |token| token.is_colon())?;
   match inp.next()? {
     Some(_) => Ok(()),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -490,7 +421,9 @@ where
       >,
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  guard_executable_phase(inp, Expectation::Keyword("fragment"), is_fragment::<Src>)?;
+  guard_executable_phase(inp, Expectation::Keyword("fragment"), |token| {
+    token.is_fragment()
+  })?;
   match inp.next()? {
     Some(spanned) => Ok(Fragment::new(spanned.into_span())),
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -526,7 +459,9 @@ where
   let name = take_name(inp)?;
   let variable = VariableValue::new(inp.span_since(&cursor), name);
   take_colon(inp)?;
-  guard_executable_phase(inp, Expectation::Type, is_type_head::<Src>)?;
+  guard_executable_phase(inp, Expectation::Type, |token| {
+    token.is_identifier() || token.is_l_bracket()
+  })?;
   let ty = ty(inp)?;
   let default_value = default_value(inp)?;
   let directives = const_directives(inp)?;
@@ -614,7 +549,7 @@ executable_parser!(
   VariablesDefinition<GraphqlSlice<'inp, Src>>,
   {
     let start = *inp.offset();
-    if !peeks_where(inp, is_lparen::<Src>)? {
+    if !peeks_where(inp, |token| token.is_l_paren())? {
       return Ok(VariablesDefinition::new(
         SimpleSpan::new(start, start),
         Vec::new(),
@@ -675,7 +610,7 @@ where
   let variables = (!variables.variable_definitions().is_empty()).then_some(variables);
   let directives = directives(inp)?;
   let directives = (!directives.directives().is_empty()).then_some(directives);
-  guard_executable_phase(inp, Expectation::LBrace, is_lbrace::<Src>)?;
+  guard_executable_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
   let selection_set = selection_set(inp)?;
   Ok(OperationDefinition::Named(NamedOperationDefinition::new(
     SimpleSpan::new(start, selection_set.span().end()),
@@ -810,7 +745,7 @@ where
   } else {
     Some(directives)
   };
-  guard_executable_phase(inp, Expectation::LBrace, is_lbrace::<Src>)?;
+  guard_executable_phase(inp, Expectation::LBrace, |token| token.is_l_brace())?;
   let selection_set = selection_set(inp)?;
   Ok(FragmentDefinition::new(
     SimpleSpan::new(keyword.span().start(), selection_set.span().end()),

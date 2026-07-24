@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokora::state::tracker::LimitExceeded;
+use tokora::{state::tracker::LimitExceeded, utils::cmp::Equivalent};
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
@@ -144,6 +144,42 @@ pub enum LosslessToken<S> {
 }
 
 impl<S> LosslessToken<S> {
+  /// Returns `true` if this token is the `query` keyword.
+  #[inline]
+  pub fn is_query(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "query".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `mutation` keyword.
+  #[inline]
+  pub fn is_mutation(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "mutation".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `subscription` keyword.
+  #[inline]
+  pub fn is_subscription(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "subscription".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `fragment` keyword.
+  #[inline]
+  pub fn is_fragment(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "fragment".equivalent(value))
+  }
+
   /// Returns `true` if this token is trivia (whitespace, comments, commas, BOM).
   #[inline]
   pub const fn is_trivia(&self) -> bool {
@@ -316,6 +352,36 @@ mod tests {
   use super::*;
   use tokora::token::IdentifierToken;
 
+  fn assert_keyword_predicates<S>(query: S, mutation: S, subscription: S, fragment: S, other: S)
+  where
+    str: tokora::utils::cmp::Equivalent<S>,
+  {
+    let query = LosslessToken::Identifier(query);
+    assert!(query.is_query());
+
+    let mutation = LosslessToken::Identifier(mutation);
+    assert!(mutation.is_mutation());
+
+    let subscription = LosslessToken::Identifier(subscription);
+    assert!(subscription.is_subscription());
+
+    let fragment = LosslessToken::Identifier(fragment);
+    assert!(fragment.is_fragment());
+
+    let other = LosslessToken::Identifier(other);
+    assert!(
+      !other.is_query() && !other.is_mutation() && !other.is_subscription() && !other.is_fragment()
+    );
+
+    let punctuator: LosslessToken<S> = LosslessToken::LBrace;
+    assert!(
+      !punctuator.is_query()
+        && !punctuator.is_mutation()
+        && !punctuator.is_subscription()
+        && !punctuator.is_fragment()
+    );
+  }
+
   #[test]
   fn identifier_capability_classifies_tokens() {
     // UFCS on `IdentifierToken`: the `IsVariant` derive also generates an inherent
@@ -326,5 +392,17 @@ mod tests {
     assert!(!IdentifierToken::is_identifier(
       &LosslessToken::<&str>::LitInt("1")
     ));
+  }
+
+  #[test]
+  fn keyword_predicates_support_str_and_byte_slice_sources() {
+    assert_keyword_predicates("query", "mutation", "subscription", "fragment", "field");
+    assert_keyword_predicates::<&[u8]>(
+      b"query",
+      b"mutation",
+      b"subscription",
+      b"fragment",
+      b"field",
+    );
   }
 }

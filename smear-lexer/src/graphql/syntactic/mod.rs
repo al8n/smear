@@ -186,6 +186,42 @@ pub enum SyntacticToken<S> {
 }
 
 impl<S> SyntacticToken<S> {
+  /// Returns `true` if this token is the `query` keyword.
+  #[inline]
+  pub fn is_query(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "query".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `mutation` keyword.
+  #[inline]
+  pub fn is_mutation(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "mutation".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `subscription` keyword.
+  #[inline]
+  pub fn is_subscription(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "subscription".equivalent(value))
+  }
+
+  /// Returns `true` if this token is the `fragment` keyword.
+  #[inline]
+  pub fn is_fragment(&self) -> bool
+  where
+    str: Equivalent<S>,
+  {
+    matches!(self, Self::Identifier(value) if "fragment".equivalent(value))
+  }
+
   /// Returns the kind of the token.
   #[inline]
   pub const fn kind(&self) -> SyntacticTokenKind {
