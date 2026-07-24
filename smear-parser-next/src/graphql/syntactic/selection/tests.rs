@@ -125,6 +125,19 @@ fn assert_str_expectation(
   }
 }
 
+fn assert_str_unclosed_object(result: Result<(), GraphqlErrors<&str>>, span: SimpleSpan) {
+  let error = result
+    .expect_err("fixture should fail")
+    .into_iter()
+    .next()
+    .expect("fatal context emits one error");
+  assert_eq!(error.span(), span);
+  assert!(matches!(
+    error.data(),
+    ErrorData::Unclosed(Unclosed::Object)
+  ));
+}
+
 // ─── field ─────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -606,28 +619,25 @@ fn selection_set_empty_braces_error_per_spec() {
   // parser, whose `while` loop accepted it.
   reject_all!(selection_set, "{}");
   reject_all!(selection_set, "{ }");
-  // The rejection is the committed selection's unexpected-token at the `}`.
-  let family = match drive_str(|inp| selection_set(inp).map(|_| ()), "{}") {
-    Err(errs) => errs
-      .into_iter()
-      .next()
-      .is_some_and(|e| e.data().is_unexpected_token()),
-    Ok(()) => false,
-  };
-  assert!(family);
+  // The native `at_least(1)` delimiter pipeline maps Tokora's `TooFew` to the
+  // dialect's generic repetition diagnostic.
+  let error = drive_str(|inp| selection_set(inp).map(|_| ()), "{}")
+    .expect_err("empty selection set should fail")
+    .into_iter()
+    .next()
+    .expect("fatal context emits one error");
+  assert_eq!(error.span(), SimpleSpan::new(0, 2));
+  assert!(matches!(
+    error.data(),
+    ErrorData::Other(message) if message == "too few elements"
+  ));
 }
 
 #[test]
-fn selection_set_reports_the_collection_phase() {
-  assert_str_expectation(
-    drive_str(|inp| selection_set(inp).map(|_| ()), "{}"),
-    Expectation::Selection,
-    SimpleSpan::new(1, 2),
-  );
-  assert_str_expectation(
+fn selection_set_reports_native_cardinality_and_item_diagnostics() {
+  assert_str_unclosed_object(
     drive_str(|inp| selection_set(inp).map(|_| ()), "{"),
-    Expectation::Selection,
-    SimpleSpan::new(1, 1),
+    SimpleSpan::new(0, 1),
   );
   assert_str_expectation(
     drive_str(|inp| selection_set(inp).map(|_| ()), "{ 123 }"),
@@ -645,15 +655,10 @@ fn selection_set_reports_the_collection_phase() {
 fn selection_set_unterminated_is_unclosed_object() {
   reject_all!(selection_set, "{ id");
 
-  let error = drive_str(|inp| selection_set(inp).map(|_| ()), "{ id")
-    .expect_err("unterminated selection set should fail")
-    .into_iter()
-    .next()
-    .expect("unterminated selection set should emit an error");
-  assert!(matches!(
-    error.into_data(),
-    ErrorData::Unclosed(Unclosed::Object)
-  ));
+  assert_str_unclosed_object(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "{ id"),
+    SimpleSpan::new(0, 1),
+  );
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
