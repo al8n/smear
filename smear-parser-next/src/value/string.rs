@@ -22,14 +22,14 @@ pub struct StringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
 impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for StringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
 impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for StringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
@@ -58,7 +58,7 @@ impl<S, Span, Lang: ?Sized> IntoComponents for StringValue<S, Span, Lang> {
 
 impl<S, Span, Lang: ?Sized> StringValue<S, Span, Lang> {
   /// Creates a new string value.
-  #[inline(always)]
+  #[inline]
   pub(crate) const fn new(span: Span, lit: LitStr<S>) -> Self {
     Self {
       span,
@@ -67,24 +67,15 @@ impl<S, Span, Lang: ?Sized> StringValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the string literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the underlying source.
-  #[inline(always)]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.lit.source()
-  }
-
-  /// Returns the reference to the underlying source.
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
+  /// Returns the string literal's source spelling.
+  #[inline]
+  pub const fn source(&self) -> &S {
     self.lit.source_ref()
   }
 
@@ -94,7 +85,7 @@ impl<S, Span, Lang: ?Sized> StringValue<S, Span, Lang> {
   where
     S: AsRef<str>,
   {
-    self.lit.source_ref().as_ref().trim_matches('"')
+    self.source().as_ref().trim_matches('"')
   }
 }
 
@@ -104,11 +95,11 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
-/// A inline string value.
+/// An inline string value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InlineStringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
   span: Span,
@@ -119,14 +110,14 @@ pub struct InlineStringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
 impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
 impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for InlineStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
@@ -159,13 +150,13 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
 impl<S, Span, Lang: ?Sized> InlineStringValue<S, Span, Lang> {
   /// Creates a new inline string value.
-  #[inline(always)]
+  #[inline]
   pub(crate) const fn new(span: Span, lit: LitInlineStr<S>) -> Self {
     Self {
       span,
@@ -174,24 +165,15 @@ impl<S, Span, Lang: ?Sized> InlineStringValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the inline string literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the underlying source.
-  #[inline(always)]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.lit.source()
-  }
-
-  /// Returns the reference to the underlying source.
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
+  /// Returns the inline string literal's source spelling.
+  #[inline]
+  pub const fn source(&self) -> &S {
     self.lit.source_ref()
   }
 
@@ -201,7 +183,7 @@ impl<S, Span, Lang: ?Sized> InlineStringValue<S, Span, Lang> {
   where
     S: AsRef<str>,
   {
-    self.lit.source_ref().as_ref().trim_matches('"')
+    self.source().as_ref().trim_matches('"')
   }
 }
 
@@ -228,14 +210,14 @@ pub struct BlockStringValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
 impl<S: AsRef<str>, Span, Lang: ?Sized> AsRef<str> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &str {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
 impl<S: AsRef<[u8]>, Span, Lang: ?Sized> AsRef<[u8]> for BlockStringValue<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &[u8] {
-    self.lit.source_ref().as_ref()
+    self.source().as_ref()
   }
 }
 
@@ -268,13 +250,13 @@ where
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }
 
 impl<S, Span, Lang: ?Sized> BlockStringValue<S, Span, Lang> {
   /// Creates a new block string value.
-  #[inline(always)]
+  #[inline]
   pub(crate) const fn new(span: Span, lit: LitBlockStr<S>) -> Self {
     Self {
       span,
@@ -283,24 +265,15 @@ impl<S, Span, Lang: ?Sized> BlockStringValue<S, Span, Lang> {
     }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the block string literal.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the underlying source.
-  #[inline(always)]
-  pub const fn source(&self) -> S
-  where
-    S: Copy,
-  {
-    self.lit.source()
-  }
-
-  /// Returns the reference to the underlying source.
-  #[inline(always)]
-  pub const fn source_ref(&self) -> &S {
+  /// Returns the block string literal's source spelling.
+  #[inline]
+  pub const fn source(&self) -> &S {
     self.lit.source_ref()
   }
 
@@ -310,7 +283,7 @@ impl<S, Span, Lang: ?Sized> BlockStringValue<S, Span, Lang> {
   where
     S: AsRef<str>,
   {
-    self.lit.source_ref().as_ref().trim_matches('"')
+    self.source().as_ref().trim_matches('"')
   }
 }
 
@@ -322,6 +295,6 @@ where
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source_ref(), f)
+    DisplayHuman::fmt(self.source(), f)
   }
 }

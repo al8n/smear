@@ -16,15 +16,17 @@ use tokora::{
   punct::{Brace, Bracket, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  utils::{DowncastRef, typenum::U1},
 };
+
+use smear_lexer::graphql::ContextualKeyword;
 
 use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name,
   value::{HeadKind, const_value, value, value_head_kind},
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx, colon},
+  combinator::{ParseCtx, colon},
   graphql::{
     GraphQL,
     ast::{Argument, ArgumentList, Arguments, ConstArgument, ConstArguments},
@@ -55,7 +57,6 @@ macro_rules! argument_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-      str: Equivalent<GraphqlSlice<'inp, Src>>,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -63,6 +64,7 @@ macro_rules! argument_parser {
         Span = SimpleSpan,
         Offset = usize,
       >,
+      GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       $($bounds)*
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
       GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
@@ -320,7 +322,6 @@ macro_rules! impl_argument_api {
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<$slice>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -328,6 +329,7 @@ macro_rules! impl_argument_api {
           Span = SimpleSpan,
           Offset = usize,
         >,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         $($bounds)*
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
         GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>

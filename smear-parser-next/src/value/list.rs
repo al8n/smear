@@ -34,8 +34,17 @@ impl<Value, Span, Container> List<Value, Span, Container> {
 
   /// Returns the parsed list elements.
   #[inline]
-  pub const fn values(&self) -> &Container {
-    &self.values
+  pub fn values(&self) -> &[Value]
+  where
+    Container: AsRef<[Value]>,
+  {
+    self.values.as_ref()
+  }
+
+  /// Consumes this list and returns its values.
+  #[inline]
+  pub fn into_values(self) -> Container {
+    self.values
   }
 }
 

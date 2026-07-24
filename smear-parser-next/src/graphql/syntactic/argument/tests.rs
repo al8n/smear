@@ -109,7 +109,7 @@ macro_rules! reject_all {
 #[test]
 fn argument_accepts() {
   fn check<S: AsRef<[u8]>>(a: AstArgument<S>) {
-    assert!("x".equivalent(a.name().source_ref()));
+    assert!("x".equivalent(a.name().source()));
     assert!(a.value().is_int());
     assert_eq!(a.span().start(), 0);
   }
@@ -180,7 +180,7 @@ fn argument_phase_diagnostics_are_typed() {
 #[test]
 fn const_argument_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(a: AstConstArgument<S>) {
-    assert!("k".equivalent(a.name().source_ref()));
+    assert!("k".equivalent(a.name().source()));
     assert!(a.value().is_int());
   }
   accept_all!(ConstArgument::<_>::graphql, "k: 1", check);
@@ -193,7 +193,7 @@ fn const_argument_accepts_and_rejects_variable() {
 fn arguments_accepts_single() {
   fn check<S: AsRef<[u8]>>(args: AstArguments<S>) {
     assert_eq!(args.arguments().len(), 1);
-    assert!("x".equivalent(args.arguments()[0].name().source_ref()));
+    assert!("x".equivalent(args.arguments()[0].name().source()));
   }
   accept_all!(Arguments::<_>::graphql, "(x: 1)", check);
 }
@@ -202,8 +202,8 @@ fn arguments_accepts_single() {
 fn arguments_accepts_multiple() {
   fn check<S: AsRef<[u8]>>(args: AstArguments<S>) {
     assert_eq!(args.arguments().len(), 2);
-    assert!("a".equivalent(args.arguments()[0].name().source_ref()));
-    assert!("b".equivalent(args.arguments()[1].name().source_ref()));
+    assert!("a".equivalent(args.arguments()[0].name().source()));
+    assert!("b".equivalent(args.arguments()[1].name().source()));
   }
   accept_all!(Arguments::<_>::graphql, "(a: 1, b: 2)", check);
 }

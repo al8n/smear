@@ -20,6 +20,14 @@ pub mod combinator;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod name;
 
+/// Selection-node carriers shared by the GraphQL-family dialect ASTs.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod selection;
+
+/// Executable-document carriers shared by the GraphQL-family dialect ASTs.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod executable;
+
 /// Type-reference carriers shared by the GraphQL-family dialect ASTs.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod ty;

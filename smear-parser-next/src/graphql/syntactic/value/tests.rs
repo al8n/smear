@@ -146,7 +146,7 @@ fn assert_unclosed_object<S>(result: Result<(), GraphqlErrors<S>>) {
 #[test]
 fn int_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::IntValue<S>) {
-    assert!("42".equivalent(v.source_ref()));
+    assert!("42".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(IntValueParser::graphql, "42", check);
@@ -191,7 +191,7 @@ fn int_value_graphql_does_not_require_equivalent() {
 #[test]
 fn float_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::FloatValue<S>) {
-    assert!("3.14".equivalent(v.source_ref()));
+    assert!("3.14".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(FloatValueParser::graphql, "3.14", check);
@@ -205,7 +205,7 @@ fn float_value_rejects_int() {
 #[test]
 fn string_value_accepts_inline() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
-    assert!("\"hi\"".equivalent(v.source_ref()));
+    assert!("\"hi\"".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(StringValueParser::graphql, "\"hi\"", check);
@@ -214,7 +214,7 @@ fn string_value_accepts_inline() {
 #[test]
 fn string_value_accepts_block() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::StringValue<S>) {
-    assert!("\"\"\"hi\"\"\"".equivalent(v.source_ref()));
+    assert!("\"\"\"hi\"\"\"".equivalent(v.source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 8));
   }
   accept_all!(StringValueParser::graphql, "\"\"\"hi\"\"\"", check);
@@ -230,7 +230,7 @@ fn string_value_rejects_int() {
 #[test]
 fn variable_value_accepts() {
   fn check<S: AsRef<[u8]>>(v: crate::graphql::ast::VariableValue<S>) {
-    assert!("userId".equivalent(v.name().source_ref()));
+    assert!("userId".equivalent(v.name().source()));
     assert_eq!(*v.span(), SimpleSpan::new(0, 7));
   }
   accept_all!(VariableValueParser::graphql, "$userId", check);
@@ -271,7 +271,7 @@ fn try_variable_value_accepts_and_declines() {
 fn value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let i = v.unwrap_int();
-    assert!("42".equivalent(i.source_ref()));
+    assert!("42".equivalent(i.source()));
     assert_eq!(*i.span(), SimpleSpan::new(0, 2));
   }
   accept_all!(InputValueParser::graphql, "42", check);
@@ -280,7 +280,7 @@ fn value_int_arm() {
 #[test]
 fn value_float_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("1.5e3".equivalent(v.unwrap_float().source_ref()));
+    assert!("1.5e3".equivalent(v.unwrap_float().source()));
   }
   accept_all!(InputValueParser::graphql, "1.5e3", check);
 }
@@ -288,7 +288,7 @@ fn value_float_arm() {
 #[test]
 fn value_string_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("\"hi\"".equivalent(v.unwrap_string().source_ref()));
+    assert!("\"hi\"".equivalent(v.unwrap_string().source()));
   }
   accept_all!(InputValueParser::graphql, "\"hi\"", check);
 }
@@ -323,7 +323,7 @@ fn value_false_arm() {
 fn value_null_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let n = v.unwrap_null();
-    assert!("null".equivalent(n.source_ref()));
+    assert!("null".equivalent(n.source()));
     assert_eq!(*n.span(), SimpleSpan::new(0, 4));
   }
   accept_all!(InputValueParser::graphql, "null", check);
@@ -333,7 +333,7 @@ fn value_null_arm() {
 fn value_enum_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
     let e = v.unwrap_enum();
-    assert!("ACTIVE".equivalent(e.source_ref()));
+    assert!("ACTIVE".equivalent(e.source()));
     assert_eq!(*e.span(), SimpleSpan::new(0, 6));
   }
   accept_all!(InputValueParser::graphql, "ACTIVE", check);
@@ -352,7 +352,7 @@ fn value_enum_arm_accepts_soft_keywords() {
 #[test]
 fn value_variable_arm() {
   fn check<S: AsRef<[u8]>>(v: InputValue<S>) {
-    assert!("x".equivalent(v.unwrap_variable().name().source_ref()));
+    assert!("x".equivalent(v.unwrap_variable().name().source()));
   }
   accept_all!(InputValueParser::graphql, "$x", check);
 }
@@ -383,7 +383,7 @@ fn value_object_arm() {
     let obj = v.unwrap_object();
     assert_eq!(obj.fields().len(), 1);
     let field = &obj.fields()[0];
-    assert!("a".equivalent(field.name().source_ref()));
+    assert!("a".equivalent(field.name().source()));
     assert!(field.value().is_int());
   }
   accept_all!(InputValueParser::graphql, "{ a: 1 }", check);
@@ -521,7 +521,7 @@ fn value_object_field_missing_colon_is_error() {
 #[test]
 fn const_value_int_arm() {
   fn check<S: AsRef<[u8]>>(v: ConstInputValue<S>) {
-    assert!("7".equivalent(v.unwrap_int().source_ref()));
+    assert!("7".equivalent(v.unwrap_int().source()));
   }
   accept_all!(ConstInputValueParser::graphql, "7", check);
 }
@@ -603,7 +603,7 @@ fn const_value_unterminated_object_is_unclosed_object() {
 #[test]
 fn object_field_accepts() {
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
-    assert!("name".equivalent(f.name().source_ref()));
+    assert!("name".equivalent(f.name().source()));
     assert!(f.value().is_string());
     assert_eq!(f.span().start(), 0);
   }
@@ -615,7 +615,7 @@ fn object_field_name_may_be_reserved_word() {
   // Object field names are `Name`s; `true` is a legal field name (only the enum
   // *value* position excludes it).
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ObjectField<S>) {
-    assert!("true".equivalent(f.name().source_ref()));
+    assert!("true".equivalent(f.name().source()));
     assert!(f.value().is_int());
   }
   accept_all!(object_field, "true: 1", check);
@@ -624,7 +624,7 @@ fn object_field_name_may_be_reserved_word() {
 #[test]
 fn const_object_field_accepts_and_rejects_variable() {
   fn check<S: AsRef<[u8]>>(f: crate::graphql::ast::ConstObjectField<S>) {
-    assert!("k".equivalent(f.name().source_ref()));
+    assert!("k".equivalent(f.name().source()));
     assert!(f.value().is_int());
   }
   accept_all!(const_object_field, "k: 1", check);
@@ -1012,7 +1012,7 @@ fn null_value_committed_accepts_and_rejects() {
     "null".equivalent(
       drive_str(NullValueParser::graphql, "null")
         .unwrap()
-        .source_ref()
+        .source()
     )
   );
   reject_all!(NullValueParser::graphql, "true");
@@ -1025,7 +1025,7 @@ fn enum_value_committed_excludes_reserved() {
     "ACTIVE".equivalent(
       drive_str(EnumValueParser::graphql, "ACTIVE")
         .unwrap()
-        .source_ref()
+        .source()
     )
   );
   // Soft keywords are enums; the three reserved spellings are excluded.

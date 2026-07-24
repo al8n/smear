@@ -6,7 +6,7 @@ use tokora::{
   punct::*,
   state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
   token::*,
-  utils::{CharLen, cmp::Equivalent},
+  utils::{CharLen, DowncastRef},
 };
 
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  error,
+  ContextualKeyword, error,
 };
 
 use self::number::NumberLexerToken;
@@ -37,42 +37,13 @@ pub(crate) mod number;
 #[cfg(test)]
 mod tests;
 
-/// All GraphQL reserved keywords.
-const GRAPHQL_KEYWORDS: &[&str] = &[
-  "type",
-  "interface",
-  "union",
-  "enum",
-  "input",
-  "scalar",
-  "extend",
-  "schema",
-  "directive",
-  "fragment",
-  "query",
-  "mutation",
-  "subscription",
-  "implements",
-  "repeatable",
-  "on",
-  "true",
-  "false",
-  "null",
-];
-
 /// Check if a `SyntacticToken` is a GraphQL keyword, returning the keyword string if so.
 #[inline]
 pub fn graphql_keyword<S>(tok: &SyntacticToken<S>) -> Option<&'static str>
 where
-  str: tokora::utils::cmp::Equivalent<S>,
+  SyntacticToken<S>: DowncastRef<ContextualKeyword>,
 {
-  match tok {
-    SyntacticToken::Identifier(s) => GRAPHQL_KEYWORDS
-      .iter()
-      .copied()
-      .find(|kw| (*kw).equivalent(s)),
-    _ => None,
-  }
+  tok.downcast_ref().map(ContextualKeyword::as_str)
 }
 
 /// The error data type for lexing based on syntactic token with `char` source.
@@ -248,10 +219,10 @@ where
 impl<'a, S> KeywordToken<'a> for SyntacticToken<S>
 where
   S: Slice<'a> + Clone + 'a,
-  str: Equivalent<S>,
+  SyntacticToken<S>: DowncastRef<ContextualKeyword>,
 {
   fn keyword(&self) -> Option<&'static str> {
-    graphql_keyword(self)
+    self.downcast_ref().map(ContextualKeyword::as_str)
   }
 }
 
@@ -268,7 +239,7 @@ where
 impl<'a, S> LitToken<'a> for SyntacticToken<S>
 where
   S: Slice<'a> + Clone + 'a,
-  str: Equivalent<S>,
+  SyntacticToken<S>: DowncastRef<ContextualKeyword>,
 {
   #[inline(always)]
   fn is_decimal_literal(&self) -> bool {
@@ -297,17 +268,17 @@ where
 
   #[inline(always)]
   fn is_true_literal(&self) -> bool {
-    matches!(self, Self::Identifier(s) if "true".equivalent(s))
+    self.downcast_ref() == Some(ContextualKeyword::True)
   }
 
   #[inline(always)]
   fn is_false_literal(&self) -> bool {
-    matches!(self, Self::Identifier(s) if "false".equivalent(s))
+    self.downcast_ref() == Some(ContextualKeyword::False)
   }
 
   #[inline(always)]
   fn is_null_literal(&self) -> bool {
-    matches!(self, Self::Identifier(s) if "null".equivalent(s))
+    self.downcast_ref() == Some(ContextualKeyword::Null)
   }
 }
 
@@ -390,14 +361,13 @@ impl<S> SyntacticToken<S> {
   /// Returns `true` if the token is a GraphQL enum value, which is defined as an identifier that is not a reserved keyword.
   pub fn is_enum_value_literal(&self) -> bool
   where
-    str: Equivalent<S>,
+    SyntacticToken<S>: DowncastRef<ContextualKeyword>,
   {
-    match self {
-      Self::Identifier(s) => {
-        !("true".equivalent(s) || "false".equivalent(s) || "null".equivalent(s))
-      }
-      _ => false,
-    }
+    matches!(self, Self::Identifier(_))
+      && !matches!(
+        self.downcast_ref(),
+        Some(ContextualKeyword::True | ContextualKeyword::False | ContextualKeyword::Null)
+      )
   }
 }
 

@@ -22,6 +22,78 @@ use tokora::{
 #[repr(transparent)]
 pub struct Name<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Ident<S, Span, Lang>);
 
+/// A dialect-branded fragment name.
+///
+/// GraphQL-family dialects use this nominal wrapper for the `Name but not on`
+/// grammar position. Its constructor is kept within this crate so syntactic
+/// productions are the single place that establish that exclusion.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct FragmentName<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Name<S, Span, Lang>);
+
+impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
+  #[inline]
+  pub(crate) const fn new(span: Span, source: S) -> Self {
+    Self(Name::new(span, source))
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
+  type Target = Name<S, Span, Lang>;
+
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> AsRef<Name<S, Span, Lang>> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn as_ref(&self) -> &Name<S, Span, Lang> {
+    &self.0
+  }
+}
+
+impl<S, Span, Lang: ?Sized> PartialEq<S> for FragmentName<S, Span, Lang>
+where
+  S: PartialEq,
+{
+  #[inline]
+  fn eq(&self, other: &S) -> bool {
+    self.source().eq(other)
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn as_span(&self) -> &Span {
+    self.0.as_span()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
+  #[inline]
+  fn into_span(self) -> Span {
+    self.0.into_span()
+  }
+}
+
+impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
+  type Components = (Span, S);
+
+  #[inline]
+  fn into_components(self) -> Self::Components {
+    self.0.into_components()
+  }
+}
+
 impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
   /// Creates a valid dialect name.
   #[inline]
@@ -33,6 +105,14 @@ impl<S, Span, Lang: ?Sized> Name<S, Span, Lang> {
   #[inline]
   pub fn into_ident(self) -> Ident<S, Span, Lang> {
     self.0
+  }
+}
+
+impl<S: ?Sized, Span, Lang: ?Sized> Name<S, Span, Lang> {
+  /// Returns the name's source spelling.
+  #[inline]
+  pub const fn source(&self) -> &S {
+    self.0.source_ref()
   }
 }
 
@@ -126,12 +206,19 @@ mod tests {
   fn carrier_preserves_an_arbitrary_unsized_language_marker() {
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(1), "field");
     assert_eq!(name.as_span(), &CustomSpan(1));
-    assert_eq!(name.source_ref(), &"field");
+    assert_eq!(name.source(), &"field");
 
     let ident: Ident<_, CustomSpan, dyn OtherLanguage> = name.into();
     assert_eq!(ident.as_span(), &CustomSpan(1));
 
     let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(2), "field");
     assert_eq!(name.into_components(), (CustomSpan(2), "field"));
+  }
+
+  #[test]
+  fn source_borrows_non_copy_source() {
+    let name = Name::<_, CustomSpan, dyn OtherLanguage>::new(CustomSpan(1), String::from("field"));
+    let source: &String = name.source();
+    assert_eq!(source, "field");
   }
 }

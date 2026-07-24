@@ -61,18 +61,18 @@ where
 
 impl<Name, Span> VariableValue<Name, Span> {
   /// Creates a new variable from the given span and name.
-  #[inline(always)]
+  #[inline]
   pub(crate) const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
 
-  /// Returns the span of the name.
+  /// Returns the span covering the variable.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the name as a string slice.
+  /// Returns the variable name.
   #[inline]
   pub const fn name(&self) -> &Name {
     &self.name

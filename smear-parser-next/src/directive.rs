@@ -122,7 +122,7 @@ impl<Directive, Container, Span> IntoComponents for Directives<Directive, Contai
 }
 
 impl<Directive, Container, Span> Directives<Directive, Container, Span> {
-  /// Creates a directives collection from its span and container.
+  /// Creates a directives collection from its span and parsed directives.
   #[inline]
   pub const fn new(span: Span, directives: Container) -> Self {
     Self {
@@ -138,13 +138,16 @@ impl<Directive, Container, Span> Directives<Directive, Container, Span> {
     &self.span
   }
 
-  /// Returns the directive container.
+  /// Returns the parsed directives.
   #[inline]
-  pub const fn directives(&self) -> &Container {
-    &self.directives
+  pub fn directives(&self) -> &[Directive]
+  where
+    Container: AsRef<[Directive]>,
+  {
+    self.directives.as_ref()
   }
 
-  /// Consumes the collection and returns its directive container.
+  /// Consumes this collection and returns its directives.
   #[inline]
   pub fn into_directives(self) -> Container {
     self.directives

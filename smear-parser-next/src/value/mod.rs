@@ -53,6 +53,14 @@ mod tests {
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
   struct CustomSpan(u8);
 
+  struct ArrayBacked<T, const N: usize>([T; N]);
+
+  impl<T, const N: usize> AsRef<[T]> for ArrayBacked<T, N> {
+    fn as_ref(&self) -> &[T] {
+      &self.0
+    }
+  }
+
   trait CustomLang {}
 
   #[test]
@@ -176,5 +184,64 @@ mod tests {
         BooleanValue::<str, CustomSpan, crate::graphql::GraphQL>::new(CustomSpan(15), false);
       let _: crate::value::BooleanValue<str, CustomSpan, crate::graphql::GraphQL> = branded;
     }
+  }
+
+  #[test]
+  fn collection_accessors_project_array_backed_containers_to_slices() {
+    let list = List::<u8, CustomSpan, _>::new(CustomSpan(1), ArrayBacked([1_u8, 2]));
+    let projected: &[u8] = list.values();
+    assert_eq!(projected, &[1, 2]);
+    assert_eq!(list.into_values().0, [1, 2]);
+
+    let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(2), "answer", 42_u8);
+    let object = Object::<_, _, CustomSpan, _>::new(CustomSpan(3), ArrayBacked([field]));
+    let projected: &[ObjectField<&str, u8, CustomSpan>] = object.fields();
+    assert_eq!(projected.len(), 1);
+    assert_eq!(projected[0].name(), &"answer");
+    assert_eq!(object.into_fields().0[0].value(), &42);
+  }
+
+  #[test]
+  fn literal_sources_borrow_non_copy_carriers() {
+    let int = IntValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(1), String::from("1"));
+    let source: &String = int.source();
+    assert_eq!(source, "1");
+
+    let float =
+      FloatValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(2), String::from("1.5"));
+    let source: &String = float.source();
+    assert_eq!(source, "1.5");
+
+    let enumeration =
+      EnumValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(3), String::from("ACTIVE"));
+    let source: &String = enumeration.source();
+    assert_eq!(source, "ACTIVE");
+
+    let null = NullValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(4), String::from("null"));
+    let source: &String = null.source();
+    assert_eq!(source, "null");
+
+    let inline_lit = match LitStr::try_from("\"inline\"").unwrap() {
+      LitStr::Inline(lit) => lit.map(String::from),
+      LitStr::Block(_) => panic!("inline spelling produced a block literal"),
+    };
+    let string = StringValue::<_, CustomSpan, dyn CustomLang>::new(
+      CustomSpan(5),
+      LitStr::Inline(inline_lit.clone()),
+    );
+    let source: &String = string.source();
+    assert_eq!(source, "\"inline\"");
+
+    let inline = InlineStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(6), inline_lit);
+    let source: &String = inline.source();
+    assert_eq!(source, "\"inline\"");
+
+    let block_lit = match LitStr::try_from("\"\"\"block\"\"\"").unwrap() {
+      LitStr::Block(lit) => lit.map(String::from),
+      LitStr::Inline(_) => panic!("block spelling produced an inline literal"),
+    };
+    let block = BlockStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(7), block_lit);
+    let source: &String = block.source();
+    assert_eq!(source, "\"\"\"block\"\"\"");
   }
 }

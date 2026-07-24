@@ -122,10 +122,10 @@ where
 }
 
 /// Commits to an `EnumValue`: a `Name` that is not `true`, `false`, or `null`.
-/// The spec carves out exactly this one exclusion from `Name`, which is
-/// otherwise unreserved, so soft keywords such as `enum`/`type` parse here
-/// exactly as [`ident`] accepts them. The same exclusion governs the `Name`
-/// that `EnumValueDefinition` introduces, so this atom backs both positions.
+/// This is an `EnumValue`-specific exclusion from an otherwise unreserved name, so soft
+/// keywords such as `enum`/`type` parse here exactly as [`ident`] accepts
+/// them. The same exclusion governs the `Name` that `EnumValueDefinition`
+/// introduces, so this atom backs both positions.
 ///
 /// Errors on a non-identifier token, end of input, or an identifier spelled
 /// `true`, `false`, or `null` — consuming whatever token is next either way,

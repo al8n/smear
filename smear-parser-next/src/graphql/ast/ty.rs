@@ -28,14 +28,14 @@ macro_rules! ty {
         }
 
         impl<Name> From<ListType<Self>> for $name<Name> {
-          #[inline(always)]
+          #[inline]
           fn from(ty: ListType<Self>) -> Self {
             Self::List(<$ty<ListType<Self>>>::new(ty))
           }
         }
 
         impl<Name> AsSpan<Span> for $name<Name> {
-          #[inline(always)]
+          #[inline]
           fn as_span(&self) -> &Span {
             match self {
               Self::Name(ty) => ty.span(),
@@ -45,7 +45,7 @@ macro_rules! ty {
         }
 
         impl<Name> IntoSpan<Span> for $name<Name> {
-          #[inline(always)]
+          #[inline]
           fn into_span(self) -> Span {
             match self {
               Self::Name(ty) => ty.into_span(),
@@ -55,8 +55,8 @@ macro_rules! ty {
         }
 
         impl<Name> $name<Name> {
-          /// Returns the span covering the complete type reference.
-          #[inline(always)]
+          /// Returns whether this type reference is non-null.
+          #[inline]
           pub fn required(&self) -> bool {
             match self {
               Self::Name(ty) => ty.required(),

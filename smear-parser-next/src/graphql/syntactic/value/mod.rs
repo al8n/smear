@@ -8,31 +8,32 @@
 //!
 //! Every committed parser reports an unexpected token or end of input after it has
 //! committed. Where a `try_` counterpart is available, it declines without
-//! consuming when its head does not match. The variable parser commits on `$` and
-//! validates its name with a single-token lookahead. Object field lists stop only at
-//! `}` or end of input; each field validates its name, colon, and value without
+//! consuming when its head does not match. Scalar input-value heads are fused so
+//! their token is lexed and classified once; list and object heads retain their
+//! delimiter for the existing delimited parsers. The variable parser commits on `$`
+//! and validates its name with a single-token lookahead. Object field lists stop only
+//! at `}` or end of input; each field validates its name, colon, and value without
 //! consuming a wrong token. Default values commit on `=` and validate the const-value
 //! tail without consuming a wrong token.
 
 use std::vec::Vec;
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
   punct::{Brace, Bracket},
   span::Spanned,
-  token::LitToken,
   try_parse_input::ParseAttempt,
-  utils::typenum::{U1, U2},
+  utils::{DowncastRef, typenum::U1},
 };
 
-use smear_lexer::graphql::syntactic::SyntacticTokenKind;
+use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
 use crate::{
-  combinator::{Equivalent, ParseCtx, colon, dollar, equal},
+  combinator::{ParseCtx, colon, dollar, equal},
   graphql::{
     GraphQL,
     ast::{
@@ -58,14 +59,14 @@ macro_rules! value_parser {
     $visibility:vis $name:ident,
     $input:ident,
     $output:ty,
-    [equivalent],
+    [contextual],
     $body:block
   ) => {
     value_parser!(
       @impl $visibility $name,
       $input,
       $output,
-      [str: Equivalent<GraphqlSlice<'inp, Src>>,],
+      [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
       $body
     );
   };
@@ -73,7 +74,7 @@ macro_rules! value_parser {
     $visibility:vis $name:ident,
     $input:ident,
     $output:ty,
-    [equivalent, delimited],
+    [contextual, delimited],
     $body:block
   ) => {
     value_parser!(
@@ -81,7 +82,7 @@ macro_rules! value_parser {
       $input,
       $output,
       [
-        str: Equivalent<GraphqlSlice<'inp, Src>>,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlError<'inp, Src, Ctx>: From<Unclosed<Bracket, SimpleSpan, GraphQL>>
           + From<Unclosed<Brace, SimpleSpan, GraphQL>>
           + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
@@ -140,14 +141,14 @@ macro_rules! value_try_parser {
     $visibility:vis $name:ident,
     $input:ident,
     $output:ty,
-    [equivalent],
+    [contextual],
     $body:block
   ) => {
     value_try_parser!(
       @impl $visibility $name,
       $input,
       $output,
-      [str: Equivalent<GraphqlSlice<'inp, Src>>,],
+      [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
       $body
     );
   };
@@ -192,14 +193,14 @@ macro_rules! value_eot_parser {
     $visibility:vis $name:ident,
     $input:ident,
     $output:ty,
-    [equivalent],
+    [contextual],
     $body:block
   ) => {
     value_eot_parser!(
       @impl $visibility $name,
       $input,
       $output,
-      [str: Equivalent<GraphqlSlice<'inp, Src>>,],
+      [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
       $body
     );
   };
@@ -280,61 +281,18 @@ value_parser!(
 );
 
 value_parser!(
-  inline_string_value,
-  inp,
-  StringValue<GraphqlSlice<'inp, Src>>,
-  [],
-  {
-    match inp.next()? {
-      Some(spanned) => {
-        let (span, token) = spanned.into_components();
-        match token {
-          GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
-            Ok(StringValue::new(span, value.into()))
-          }
-          other => Err(UnexpectedToken::of(span).with_found(other).into()),
-        }
-      }
-      None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
-    }
-  }
-);
-
-value_parser!(
-  block_string_value,
-  inp,
-  StringValue<GraphqlSlice<'inp, Src>>,
-  [],
-  {
-    match inp.next()? {
-      Some(spanned) => {
-        let (span, token) = spanned.into_components();
-        match token {
-          GraphqlToken::<'inp, Src>::LitBlockStr(value) => Ok(StringValue::new(span, value.into())),
-          other => Err(UnexpectedToken::of(span).with_found(other).into()),
-        }
-      }
-      None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
-    }
-  }
-);
-
-value_parser!(
   boolean_value,
   inp,
   BooleanValue<GraphqlSlice<'inp, Src>>,
-  [equivalent],
+  [contextual],
   {
     match inp.next()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
-
-        if token.is_true_literal() {
-          Ok(BooleanValue::new(span, true))
-        } else if token.is_false_literal() {
-          Ok(BooleanValue::new(span, false))
-        } else {
-          Err(UnexpectedToken::of(span).with_found(token).into())
+        match token.downcast_ref() {
+          Some(ContextualKeyword::True) => Ok(BooleanValue::new(span, true)),
+          Some(ContextualKeyword::False) => Ok(BooleanValue::new(span, false)),
+          _ => Err(UnexpectedToken::of(span).with_found(token).into()),
         }
       }
       None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -346,16 +304,17 @@ value_parser!(
   null_value,
   inp,
   NullValue<GraphqlSlice<'inp, Src>>,
-  [equivalent],
+  [contextual],
   {
     match inp.next()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
-        match token {
-          GraphqlToken::<'inp, Src>::Identifier(value) if "null".equivalent(&value) => {
-            Ok(NullValue::new(span, value))
-          }
-          other => Err(UnexpectedToken::of(span).with_found(other).into()),
+        match token.downcast_ref() {
+          Some(ContextualKeyword::Null) => match token {
+            GraphqlToken::<'inp, Src>::Identifier(value) => Ok(NullValue::new(span, value)),
+            other => unreachable!("contextual null token was not an identifier: {:?}", other),
+          },
+          _ => Err(UnexpectedToken::of(span).with_found(token).into()),
         }
       }
       None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -367,20 +326,19 @@ value_parser!(
   enum_value,
   inp,
   EnumValue<GraphqlSlice<'inp, Src>>,
-  [equivalent],
+  [contextual],
   {
     match inp.next()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
-        match token {
-          GraphqlToken::<'inp, Src>::Identifier(value)
-            if !("true".equivalent(&value)
-              || "false".equivalent(&value)
-              || "null".equivalent(&value)) =>
-          {
-            Ok(EnumValue::new(span, value))
+        match token.downcast_ref() {
+          Some(ContextualKeyword::True | ContextualKeyword::False | ContextualKeyword::Null) => {
+            Err(UnexpectedToken::of(span).with_found(token).into())
           }
-          other => Err(UnexpectedToken::of(span).with_found(other).into()),
+          _ => match token {
+            GraphqlToken::<'inp, Src>::Identifier(value) => Ok(EnumValue::new(span, value)),
+            other => Err(UnexpectedToken::of(span).with_found(other).into()),
+          },
         }
       }
       None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
@@ -394,26 +352,8 @@ value_parser!(
   VariableValue<GraphqlSlice<'inp, Src>>,
   [],
   {
-    dollar
-      .ignore_then(name.peek_then::<_, U1>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
-          match peeked.pop_front() {
-            Some(token) if token.token().is_identifier() => Ok(()),
-            Some(token) => Err(
-              UnexpectedToken::expected_one_with_found(
-                *token.span(),
-                token.token().clone(),
-                SyntacticTokenKind::Identifier,
-              )
-              .into(),
-            ),
-            None => Ok(()),
-          }
-        },
-      ))
-      .spanned()
-      .map(|Spanned { span, data: ident }| VariableValue::new(span, ident))
-      .parse_input(inp)
+    let start = dollar(inp)?.span().start();
+    variable_after_dollar(start, inp)
   }
 );
 
@@ -483,17 +423,15 @@ value_eot_parser!(
   try_boolean_value,
   inp,
   ParseAttempt<BooleanValue<GraphqlSlice<'inp, Src>>>,
-  [equivalent],
+  [contextual],
   {
     inp
       .try_expect_map(|t| {
         let token = t.into_data();
-        if token.is_true_literal() {
-          Some(true)
-        } else if token.is_false_literal() {
-          Some(false)
-        } else {
-          None
+        match token.downcast_ref() {
+          Some(ContextualKeyword::True) => Some(true),
+          Some(ContextualKeyword::False) => Some(false),
+          _ => None,
         }
       })
       .map(|opt| {
@@ -508,10 +446,10 @@ value_eot_parser!(
   try_null_value,
   inp,
   ParseAttempt<NullValue<GraphqlSlice<'inp, Src>>>,
-  [equivalent],
+  [contextual],
   {
     inp
-      .try_expect(|t| t.into_data().is_null_literal())
+      .try_expect(|t| t.into_data().downcast_ref() == Some(ContextualKeyword::Null))
       .map(|opt| {
         opt
           .map(|Spanned { span, data: token }| match token {
@@ -527,10 +465,16 @@ value_eot_parser!(
   try_enum_value,
   inp,
   ParseAttempt<EnumValue<GraphqlSlice<'inp, Src>>>,
-  [equivalent],
+  [contextual],
   {
     inp
-      .try_expect(|t| t.into_data().is_enum_value_literal())
+      .try_expect(|t| {
+        let token = t.into_data();
+        !matches!(
+          token.downcast_ref(),
+          Some(ContextualKeyword::True | ContextualKeyword::False | ContextualKeyword::Null)
+        ) && token.is_identifier()
+      })
       .map(|opt| {
         opt
           .map(|Spanned { span, data: token }| match token {
@@ -548,21 +492,62 @@ value_parser!(
   ParseAttempt<VariableValue<GraphqlSlice<'inp, Src>>>,
   [],
   {
-    (variable_value::<Src, Ctx>,)
-      .peek_then_try_choice::<_, U1>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| {
-          let Some(dollar) = peeked.pop_front() else {
-            return Ok(None);
-          };
-          if !dollar.token().is_dollar() {
-            return Ok(None);
-          }
-          Ok(Some(Branch::B0))
-        },
-      )
+    (
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::Dollar => variable_after_dollar(span.start(), inp),
+        _ => unreachable!("fused variable arm received a non-dollar token"),
+      },
+    )
+      .fused_dispatch_on_kind(&[SyntacticTokenKind::Dollar])
       .try_parse_input(inp)
   }
 );
+
+/// Parses a variable name after its `$` head has already committed. A bad name
+/// remains available to its parent, matching the committed variable parser.
+fn variable_after_dollar<'inp, Src, Ctx>(
+  start: usize,
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<VariableValue<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    >,
+{
+  let name = name
+    .peek_then::<_, U1>(
+      |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _| match peeked.pop_front() {
+        Some(token) if token.token().is_identifier() => Ok(()),
+        Some(token) => Err(
+          UnexpectedToken::expected_one_with_found(
+            *token.span(),
+            token.token().clone(),
+            SyntacticTokenKind::Identifier,
+          )
+          .into(),
+        ),
+        None => Ok(()),
+      },
+    )
+    .parse_input(inp)?;
+  Ok(VariableValue::new(
+    SimpleSpan::new(start, name.span().end()),
+    name,
+  ))
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum HeadKind {
@@ -587,28 +572,23 @@ pub(crate) fn value_head_kind<'inp, Src>(t: &GraphqlToken<'inp, Src>) -> Option<
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
 {
-  Some(match t {
-    GraphqlToken::<'inp, Src>::LitInt(_) => HeadKind::Int,
-    GraphqlToken::<'inp, Src>::LitFloat(_) => HeadKind::Float,
-    GraphqlToken::<'inp, Src>::LitInlineStr(_) => HeadKind::InlineStr,
-    GraphqlToken::<'inp, Src>::LitBlockStr(_) => HeadKind::BlockStr,
-    GraphqlToken::<'inp, Src>::Identifier(s) => {
-      if "true".equivalent(s) {
-        HeadKind::True
-      } else if "false".equivalent(s) {
-        HeadKind::False
-      } else if "null".equivalent(s) {
-        HeadKind::Null
-      } else {
-        HeadKind::Enum
-      }
-    }
-    GraphqlToken::<'inp, Src>::Dollar => HeadKind::Dollar,
-    GraphqlToken::<'inp, Src>::LBracket => HeadKind::List,
-    GraphqlToken::<'inp, Src>::LBrace => HeadKind::Object,
-    _ => return None,
+  Some(match t.downcast_ref() {
+    Some(ContextualKeyword::True) => HeadKind::True,
+    Some(ContextualKeyword::False) => HeadKind::False,
+    Some(ContextualKeyword::Null) => HeadKind::Null,
+    _ => match t {
+      GraphqlToken::<'inp, Src>::LitInt(_) => HeadKind::Int,
+      GraphqlToken::<'inp, Src>::LitFloat(_) => HeadKind::Float,
+      GraphqlToken::<'inp, Src>::LitInlineStr(_) => HeadKind::InlineStr,
+      GraphqlToken::<'inp, Src>::LitBlockStr(_) => HeadKind::BlockStr,
+      GraphqlToken::<'inp, Src>::Identifier(_) => HeadKind::Enum,
+      GraphqlToken::<'inp, Src>::Dollar => HeadKind::Dollar,
+      GraphqlToken::<'inp, Src>::LBracket => HeadKind::List,
+      GraphqlToken::<'inp, Src>::LBrace => HeadKind::Object,
+      _ => return None,
+    },
   })
 }
 
@@ -617,7 +597,7 @@ fn is_const_value_head<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
 {
   !matches!(value_head_kind::<Src>(token), Some(HeadKind::Dollar) | None)
 }
@@ -631,8 +611,8 @@ where
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
 {
   Ok(match peeked.pop_front() {
     Some(token) if value_head_kind::<Src>(token.token()).is_some() => Action::Continue,
@@ -656,58 +636,6 @@ where
     Some(_) => Action::Continue,
     None => Action::Stop,
   })
-}
-
-/// Consumes the scalar token selected by [`value_head_kind`]. The dispatcher has
-/// already established the token's meaning, so this helper only handles token
-/// availability and preserves the payload for the selected branch to move.
-#[inline]
-fn consume_dispatched_token<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<Spanned<GraphqlToken<'inp, Src>, SimpleSpan>, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
-{
-  match inp.next()? {
-    Some(spanned) => Ok(spanned),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
-  }
-}
-
-/// Moves the identifier payload from a scalar branch that was already selected
-/// by [`value_head_kind`], preserving a typed parser error if that invariant is
-/// ever violated.
-#[inline]
-fn consume_dispatched_identifier<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<(SimpleSpan, GraphqlSlice<'inp, Src>), GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    >,
-{
-  let (span, token) = consume_dispatched_token(inp)?.into_components();
-  match token {
-    GraphqlToken::<'inp, Src>::Identifier(value) => Ok((span, value)),
-    other => Err(UnexpectedToken::of(span).with_found(other).into()),
-  }
 }
 
 fn guard_object_field_phase<'inp, Src, Ctx>(
@@ -750,7 +678,7 @@ value_parser!(
   pub list_value,
   inp,
   AstList<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
@@ -766,7 +694,7 @@ value_parser!(
   pub const_list_value,
   inp,
   AstConstList<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     const_value
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
@@ -782,7 +710,7 @@ value_parser!(
   pub object_field,
   inp,
   ObjectField<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       guard_object_field_phase(
@@ -821,7 +749,7 @@ value_parser!(
   pub const_object_field,
   inp,
   ConstObjectField<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       guard_object_field_phase(
@@ -860,7 +788,7 @@ value_parser!(
   pub object_value,
   inp,
   AstObject<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
@@ -876,7 +804,7 @@ value_parser!(
   pub const_object_value,
   inp,
   AstConstObject<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     const_object_field
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
@@ -892,66 +820,114 @@ value_parser!(
   pub(super) value,
   inp,
   InputValue<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
-    let off = *inp.offset();
-    (
-      int_value.map(InputValue::Int),
-      float_value.map(InputValue::Float),
-      inline_string_value.map(InputValue::String),
-      block_string_value.map(InputValue::String),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let span = consume_dispatched_token(inp)?.into_span();
-        Ok(InputValue::Boolean(BooleanValue::new(span, true)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let span = consume_dispatched_token(inp)?.into_span();
-        Ok(InputValue::Boolean(BooleanValue::new(span, false)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let (span, value) = consume_dispatched_identifier(inp)?;
-        Ok(InputValue::Null(NullValue::new(span, value)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let (span, value) = consume_dispatched_identifier(inp)?;
-        Ok(InputValue::Enum(EnumValue::new(span, value)))
-      }),
-      variable_value.map(InputValue::Variable),
-      list_value.map(InputValue::List),
-      object_value.map(InputValue::Object),
+    let int_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitInt(value) => {
+          Ok(InputValue::Int(IntValue::new(span, value)))
+        }
+        _ => unreachable!("fused input-value arm received a non-int token"),
+      };
+    let float_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitFloat(value) => {
+          Ok(InputValue::Float(FloatValue::new(span, value)))
+        }
+        _ => unreachable!("fused input-value arm received a non-float token"),
+      };
+    let inline_string_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
+          Ok(InputValue::String(StringValue::new(span, value.into())))
+        }
+        _ => unreachable!("fused input-value arm received a non-inline-string token"),
+      };
+    let block_string_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
+          Ok(InputValue::String(StringValue::new(span, value.into())))
+        }
+        _ => unreachable!("fused input-value arm received a non-block-string token"),
+      };
+    let identifier_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let keyword = token.downcast_ref();
+        match token {
+          GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
+            Some(ContextualKeyword::True) => {
+              InputValue::Boolean(BooleanValue::new(span, true))
+            }
+            Some(ContextualKeyword::False) => {
+              InputValue::Boolean(BooleanValue::new(span, false))
+            }
+            Some(ContextualKeyword::Null) => InputValue::Null(NullValue::new(span, value)),
+            _ => InputValue::Enum(EnumValue::new(span, value)),
+          }),
+          _ => unreachable!("fused input-value arm received a non-identifier token"),
+        }
+      };
+    let dollar_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::Dollar => {
+          variable_after_dollar(span.start(), inp).map(InputValue::Variable)
+        }
+        _ => unreachable!("fused input-value arm received a non-dollar token"),
+      };
+
+    match (
+      int_head_arm,
+      float_head_arm,
+      inline_string_head_arm,
+      block_string_head_arm,
+      identifier_head_arm,
+      dollar_head_arm,
     )
-      .peek_then_choice::<_, U2>(|peeked, _| {
-        let Some(head) = peeked.front() else {
-          return Err(UnexpectedEot::eot_of(off).into());
+      .fused_dispatch_on_kind(&[
+        SyntacticTokenKind::Int,
+        SyntacticTokenKind::Float,
+        SyntacticTokenKind::InlineString,
+        SyntacticTokenKind::BlockString,
+        SyntacticTokenKind::Identifier,
+        SyntacticTokenKind::Dollar,
+      ])
+      .try_parse_input(inp)?
+    {
+      ParseAttempt::Accept(value) => Ok(value),
+      ParseAttempt::Decline => {
+        let off = *inp.offset();
+        let list = {
+          let mut peeked = inp.peek::<U1>()?;
+          match peeked.pop_front() {
+            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
+            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
+            Some(head) => {
+              return Err(
+                DialectGraphqlError::unexpected_token(
+                  head.token().kind(),
+                  Expectation::InputValue,
+                  *head.span(),
+                )
+                .into(),
+              );
+            }
+            None => return Err(UnexpectedEot::eot_of(off).into()),
+          }
         };
 
-        Ok(match value_head_kind::<Src>(head.token()) {
-          Some(knd) => match knd {
-            HeadKind::Int => Branch::B0,
-            HeadKind::Float => Branch::B1,
-            HeadKind::InlineStr => Branch::B2,
-            HeadKind::BlockStr => Branch::B3,
-            HeadKind::True => Branch::B4,
-            HeadKind::False => Branch::B5,
-            HeadKind::Null => Branch::B6,
-            HeadKind::Enum => Branch::B7,
-            HeadKind::Dollar => Branch::B8,
-            HeadKind::List => Branch::B9,
-            HeadKind::Object => Branch::B10,
-          },
-          _ => {
-            return Err(
-              DialectGraphqlError::unexpected_token(
-                head.token().kind(),
-                Expectation::InputValue,
-                *head.span(),
-              )
-              .into(),
-            );
-          }
-        })
-      })
-      .parse_input(inp)
+        if list {
+          list_value(inp).map(InputValue::List)
+        } else {
+          object_value(inp).map(InputValue::Object)
+        }
+      }
+    }
   }
 );
 
@@ -959,51 +935,84 @@ value_parser!(
   pub(super) const_value,
   inp,
   ConstInputValue<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
-    let off = *inp.offset();
-    (
-      int_value.map(ConstInputValue::Int),
-      float_value.map(ConstInputValue::Float),
-      inline_string_value.map(ConstInputValue::String),
-      block_string_value.map(ConstInputValue::String),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let span = consume_dispatched_token(inp)?.into_span();
-        Ok(ConstInputValue::Boolean(BooleanValue::new(span, true)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let span = consume_dispatched_token(inp)?.into_span();
-        Ok(ConstInputValue::Boolean(BooleanValue::new(span, false)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let (span, value) = consume_dispatched_identifier(inp)?;
-        Ok(ConstInputValue::Null(NullValue::new(span, value)))
-      }),
-      (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        let (span, value) = consume_dispatched_identifier(inp)?;
-        Ok(ConstInputValue::Enum(EnumValue::new(span, value)))
-      }),
-      const_list_value.map(ConstInputValue::List),
-      const_object_value.map(ConstInputValue::Object),
-    )
-      .peek_then_choice::<_, U2>(|peeked, _| {
-        let Some(head) = peeked.front() else {
-          return Err(UnexpectedEot::eot_of(off).into());
-        };
+    let int_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitInt(value) => {
+          Ok(ConstInputValue::Int(IntValue::new(span, value)))
+        }
+        _ => unreachable!("fused const-input-value arm received a non-int token"),
+      };
+    let float_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitFloat(value) => {
+          Ok(ConstInputValue::Float(FloatValue::new(span, value)))
+        }
+        _ => unreachable!("fused const-input-value arm received a non-float token"),
+      };
+    let inline_string_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
+          Ok(ConstInputValue::String(StringValue::new(span, value.into())))
+        }
+        _ => unreachable!("fused const-input-value arm received a non-inline-string token"),
+      };
+    let block_string_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
+        GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
+          Ok(ConstInputValue::String(StringValue::new(span, value.into())))
+        }
+        _ => unreachable!("fused const-input-value arm received a non-block-string token"),
+      };
+    let identifier_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       _: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let keyword = token.downcast_ref();
+        match token {
+          GraphqlToken::<'inp, Src>::Identifier(value) => Ok(match keyword {
+            Some(ContextualKeyword::True) => {
+              ConstInputValue::Boolean(BooleanValue::new(span, true))
+            }
+            Some(ContextualKeyword::False) => {
+              ConstInputValue::Boolean(BooleanValue::new(span, false))
+            }
+            Some(ContextualKeyword::Null) => ConstInputValue::Null(NullValue::new(span, value)),
+            _ => ConstInputValue::Enum(EnumValue::new(span, value)),
+          }),
+          _ => unreachable!("fused const-input-value arm received a non-identifier token"),
+        }
+      };
 
-        Ok(match value_head_kind::<Src>(head.token()) {
-          Some(knd) => match knd {
-            HeadKind::Int => Branch::B0,
-            HeadKind::Float => Branch::B1,
-            HeadKind::InlineStr => Branch::B2,
-            HeadKind::BlockStr => Branch::B3,
-            HeadKind::True => Branch::B4,
-            HeadKind::False => Branch::B5,
-            HeadKind::Null => Branch::B6,
-            HeadKind::Enum => Branch::B7,
-            HeadKind::List => Branch::B8,
-            HeadKind::Object => Branch::B9,
-            HeadKind::Dollar => {
+    match (
+      int_head_arm,
+      float_head_arm,
+      inline_string_head_arm,
+      block_string_head_arm,
+      identifier_head_arm,
+    )
+      .fused_dispatch_on_kind(&[
+        SyntacticTokenKind::Int,
+        SyntacticTokenKind::Float,
+        SyntacticTokenKind::InlineString,
+        SyntacticTokenKind::BlockString,
+        SyntacticTokenKind::Identifier,
+      ])
+      .try_parse_input(inp)?
+    {
+      ParseAttempt::Accept(value) => Ok(value),
+      ParseAttempt::Decline => {
+        let off = *inp.offset();
+        let list = {
+          let mut peeked = inp.peek::<U1>()?;
+          match peeked.pop_front() {
+            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBracket) => true,
+            Some(head) if matches!(head.token(), GraphqlToken::<'inp, Src>::LBrace) => false,
+            Some(head) => {
               return Err(
                 DialectGraphqlError::unexpected_token(
                   head.token().kind(),
@@ -1013,20 +1022,17 @@ value_parser!(
                 .into(),
               );
             }
-          },
-          _ => {
-            return Err(
-              DialectGraphqlError::unexpected_token(
-                head.token().kind(),
-                Expectation::ConstInputValue,
-                *head.span(),
-              )
-              .into(),
-            );
+            None => return Err(UnexpectedEot::eot_of(off).into()),
           }
-        })
-      })
-      .parse_input(inp)
+        };
+
+        if list {
+          const_list_value(inp).map(ConstInputValue::List)
+        } else {
+          const_object_value(inp).map(ConstInputValue::Object)
+        }
+      }
+    }
   }
 );
 
@@ -1034,7 +1040,7 @@ value_parser!(
   committed_default_value,
   inp,
   DefaultInputValue<GraphqlSlice<'inp, Src>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     let validated_const_tail = |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       let off = *inp.offset();
@@ -1077,7 +1083,7 @@ value_parser!(
   pub try_default_value,
   inp,
   ParseAttempt<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     committed_default_value
       .peek_then_try::<_, U1>(
@@ -1099,7 +1105,7 @@ value_parser!(
   pub default_value,
   inp,
   Option<DefaultInputValue<GraphqlSlice<'inp, Src>>>,
-  [equivalent, delimited],
+  [contextual, delimited],
   {
     try_default_value(inp).map(Into::into)
   }
@@ -1139,14 +1145,14 @@ macro_rules! graphql_slice_api {
     $node:ty,
     $parse:ident,
     $try_parse:ident,
-    [equivalent],
+    [contextual],
     $spec:literal
   ) => {
     graphql_slice_api!(
       @graphql $slice,
       $node,
       $parse,
-      [str: Equivalent<$slice>,],
+      [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
       $spec
     );
     graphql_slice_api!(
@@ -1154,7 +1160,7 @@ macro_rules! graphql_slice_api {
       $node,
       $try_parse,
       [
-        str: Equivalent<$slice>,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
       ],
       $spec
@@ -1164,7 +1170,7 @@ macro_rules! graphql_slice_api {
     $slice:ident,
     $node:ty,
     $parse:ident,
-    [equivalent, delimited],
+    [contextual, delimited],
     $spec:literal
   ) => {
     graphql_slice_api!(
@@ -1172,7 +1178,7 @@ macro_rules! graphql_slice_api {
       $node,
       $parse,
       [
-        str: Equivalent<$slice>,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlError<'inp, Src, Ctx>: From<Unclosed<Bracket, SimpleSpan, GraphQL>>
           + From<Unclosed<Brace, SimpleSpan, GraphQL>>
           + From<DialectGraphqlError<$slice>>,
@@ -1285,7 +1291,7 @@ graphql_slice_api!(
   BooleanValue<S>,
   boolean_value,
   try_boolean_value,
-  [equivalent],
+  [contextual],
   "See the [GraphQL Boolean Value specification](https://spec.graphql.org/draft/#sec-Boolean-Value)."
 );
 graphql_slice_api!(
@@ -1293,7 +1299,7 @@ graphql_slice_api!(
   NullValue<S>,
   null_value,
   try_null_value,
-  [equivalent],
+  [contextual],
   "See the [GraphQL Null Value specification](https://spec.graphql.org/draft/#sec-Null-Value)."
 );
 graphql_slice_api!(
@@ -1301,7 +1307,7 @@ graphql_slice_api!(
   EnumValue<S>,
   enum_value,
   try_enum_value,
-  [equivalent],
+  [contextual],
   "See the [GraphQL Enum Value specification](https://spec.graphql.org/draft/#sec-Enum-Value)."
 );
 graphql_slice_api!(
@@ -1316,56 +1322,56 @@ graphql_slice_api!(
   S,
   AstList<S>,
   list_value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value)."
 );
 graphql_slice_api!(
   S,
   AstConstList<S>,
   const_list_value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL List Value specification](https://spec.graphql.org/draft/#sec-List-Value)."
 );
 graphql_slice_api!(
   S,
   ObjectField<S>,
   object_field,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
 );
 graphql_slice_api!(
   S,
   ConstObjectField<S>,
   const_object_field,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
 );
 graphql_slice_api!(
   S,
   AstObject<S>,
   object_value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
 );
 graphql_slice_api!(
   S,
   AstConstObject<S>,
   const_object_value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Object Values specification](https://spec.graphql.org/draft/#sec-Input-Object-Values)."
 );
 graphql_slice_api!(
   S,
   InputValue<S>,
   value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values)."
 );
 graphql_slice_api!(
   S,
   ConstInputValue<S>,
   const_value,
-  [equivalent, delimited],
+  [contextual, delimited],
   "See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values)."
 );
 
@@ -1381,7 +1387,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<S>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -1412,7 +1418,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<S>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
