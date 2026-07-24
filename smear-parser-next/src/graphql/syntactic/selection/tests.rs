@@ -406,9 +406,10 @@ fn inline_fragment_propagates_native_selection_set_tail_errors() {
     drive_str(|inp| inline_fragment(inp).map(|_| ()), "... on User"),
     SimpleSpan::new(11, 11),
   );
-  assert_str_end_of_input(
+  assert_str_expectation(
     drive_str(|inp| inline_fragment(inp).map(|_| ()), "... UserFields"),
-    SimpleSpan::new(4, 4),
+    Expectation::LBrace,
+    SimpleSpan::new(4, 14),
   );
 }
 
@@ -622,6 +623,7 @@ fn selection_set_accepts_nested() {
 #[test]
 fn selection_set_uses_native_missing_opener_diagnostics() {
   reject_all!(selection_set, "");
+  reject_all!(selection_set, "id");
   reject_all!(selection_set, "id }");
 
   assert_str_end_of_input(
@@ -629,8 +631,13 @@ fn selection_set_uses_native_missing_opener_diagnostics() {
     SimpleSpan::new(0, 0),
   );
   assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "id"),
+    Expectation::LBrace,
+    SimpleSpan::new(0, 2),
+  );
+  assert_str_expectation(
     drive_str(|inp| selection_set(inp).map(|_| ()), "id }"),
-    Expectation::Name,
+    Expectation::LBrace,
     SimpleSpan::new(0, 2),
   );
 }

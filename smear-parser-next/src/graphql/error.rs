@@ -32,7 +32,7 @@ use tokora::{
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
   },
-  utils::CowStr,
+  utils::{CowStr, Expected},
 };
 
 use super::GraphQL;
@@ -735,31 +735,72 @@ pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 // ---- `From` glue -----------------------------------------------------------
 //
 // The atoms bound `ErrorOf: From<…>` over tokora's generic error families; each
-// conversion below lands the dialect side. Kinds and the `Lang` marker stay
-// generic so the bound is satisfied for `Lang = GraphQL` (and any other marker a
-// production pins); found tokens are reduced to the dialect's concrete token kind.
+// conversion below lands the dialect side. The `Lang` marker stays generic so the
+// bound is satisfied for `Lang = GraphQL` (and any other marker a production
+// pins); Tokora token errors use the concrete `SyntacticTokenKind`, and found
+// tokens are reduced to that dialect token kind.
+// A single concrete Tokora expected kind is mapped into the corresponding
+// GraphQL expectation, while absent or multi-kind expectations retain the historic
+// `Name` fallback because [`ErrorData::UnexpectedToken`] has one expectation slot.
 // Diagnostics-carrying families (missing separator/element, full container, too
 // few, lexer errors) map to `Other` exactly as the frozen glue did — these are
 // emitter paths a `Vec` container and a fail-fast context rarely reach.
 
-impl<'a, S, Kind: Clone, Lang: ?Sized>
-  From<TokUnexpectedToken<'a, SyntacticToken<S>, Kind, Span, Lang>> for GraphqlErrors<S>
+#[inline]
+fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
+  match kind {
+    SyntacticTokenKind::Identifier => Expectation::Name,
+    SyntacticTokenKind::Int => Expectation::IntValue,
+    SyntacticTokenKind::Float => Expectation::FloatValue,
+    SyntacticTokenKind::InlineString => Expectation::InlineString,
+    SyntacticTokenKind::BlockString => Expectation::BlockString,
+    SyntacticTokenKind::Dollar => Expectation::Dollar,
+    SyntacticTokenKind::LParen => Expectation::LParen,
+    SyntacticTokenKind::RParen => Expectation::RParen,
+    SyntacticTokenKind::Spread => Expectation::Spread,
+    SyntacticTokenKind::Colon => Expectation::Colon,
+    SyntacticTokenKind::Equal => Expectation::Equal,
+    SyntacticTokenKind::At => Expectation::At,
+    SyntacticTokenKind::LBracket => Expectation::LBracket,
+    SyntacticTokenKind::RBracket => Expectation::RBracket,
+    SyntacticTokenKind::LBrace => Expectation::LBrace,
+    SyntacticTokenKind::RBrace => Expectation::RBrace,
+    SyntacticTokenKind::Pipe => Expectation::Pipe,
+    SyntacticTokenKind::Bang => Expectation::Bang,
+    SyntacticTokenKind::Ampersand => Expectation::Ampersand,
+    _ => Expectation::Name,
+  }
+}
+
+#[inline]
+fn expectation_from_tokora(expected: Option<Expected<'_, SyntacticTokenKind>>) -> Expectation {
+  match expected {
+    Some(Expected::One(kind)) => expectation_from_token_kind(kind),
+    _ => Expectation::Name,
+  }
+}
+
+impl<'a, S, Lang: ?Sized>
+  From<TokUnexpectedToken<'a, SyntacticToken<S>, SyntacticTokenKind, Span, Lang>>
+  for GraphqlErrors<S>
 {
   #[inline]
-  fn from(err: TokUnexpectedToken<'a, SyntacticToken<S>, Kind, Span, Lang>) -> Self {
-    let (span, found, _expected) = err.into_components();
+  fn from(err: TokUnexpectedToken<'a, SyntacticToken<S>, SyntacticTokenKind, Span, Lang>) -> Self {
+    let (span, found, expected) = err.into_components();
     match found {
-      Some(token) => GraphqlError::unexpected_token(token.kind(), Expectation::Name, span).into(),
+      Some(token) => {
+        GraphqlError::unexpected_token(token.kind(), expectation_from_tokora(expected), span).into()
+      }
       None => GraphqlError::unexpected_end_of_input(span).into(),
     }
   }
 }
 
-impl<'a, S, Kind: Clone, Lang: ?Sized> From<SeparatedError<'a, SyntacticToken<S>, Kind, Span, Lang>>
-  for GraphqlErrors<S>
+impl<'a, S, Lang: ?Sized>
+  From<SeparatedError<'a, SyntacticToken<S>, SyntacticTokenKind, Span, Lang>> for GraphqlErrors<S>
 {
   #[inline]
-  fn from(err: SeparatedError<'a, SyntacticToken<S>, Kind, Span, Lang>) -> Self {
+  fn from(err: SeparatedError<'a, SyntacticToken<S>, SyntacticTokenKind, Span, Lang>) -> Self {
     Self::from(err.into_inner())
   }
 }
@@ -852,10 +893,10 @@ impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlErrors<
 
 #[cfg(test)]
 mod tests {
-  use smear_lexer::graphql::syntactic::SyntacticLexer;
-  use tokora::{FatalContext, Lexer, ParseCtx};
+  use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken, SyntacticTokenKind};
+  use tokora::{FatalContext, Lexer, ParseCtx, SimpleSpan};
 
-  use super::{GraphQL, GraphqlErrors};
+  use super::{ErrorData, Expectation, GraphQL, GraphqlErrors, SeparatedError, TokUnexpectedToken};
 
   fn assert_parse_ctx<'inp, L, Ctx>()
   where
@@ -876,5 +917,86 @@ mod tests {
       SyntacticLexer<'_, [u8]>,
       FatalContext<'_, SyntacticLexer<'_, [u8]>, GraphqlErrors<&[u8]>, GraphQL>,
     >();
+  }
+
+  type TokoraTokenError = TokUnexpectedToken<
+    'static,
+    SyntacticToken<&'static str>,
+    SyntacticTokenKind,
+    SimpleSpan,
+    GraphQL,
+  >;
+
+  fn unexpected_with(expected: SyntacticTokenKind) -> TokoraTokenError {
+    TokUnexpectedToken::expected_one_with_found(
+      SimpleSpan::new(4, 9),
+      SyntacticToken::Identifier("found"),
+      expected,
+    )
+  }
+
+  fn assert_expected(errors: GraphqlErrors<&'static str>, expected: Expectation) {
+    let error = errors
+      .into_iter()
+      .next()
+      .expect("Tokora conversion emits one error");
+    assert_eq!(error.span(), SimpleSpan::new(4, 9));
+    let ErrorData::UnexpectedToken(unexpected) = error.data() else {
+      panic!(
+        "expected unexpected-token diagnostic, got {:?}",
+        error.data()
+      );
+    };
+    assert_eq!(unexpected.found(), Some(&SyntacticTokenKind::Identifier));
+    assert_eq!(unexpected.expected(), &expected);
+  }
+
+  #[test]
+  fn tokora_unexpected_token_maps_single_expected_kinds() {
+    for (kind, expected) in [
+      (SyntacticTokenKind::Identifier, Expectation::Name),
+      (SyntacticTokenKind::Int, Expectation::IntValue),
+      (SyntacticTokenKind::Float, Expectation::FloatValue),
+      (SyntacticTokenKind::InlineString, Expectation::InlineString),
+      (SyntacticTokenKind::BlockString, Expectation::BlockString),
+      (SyntacticTokenKind::Dollar, Expectation::Dollar),
+      (SyntacticTokenKind::LParen, Expectation::LParen),
+      (SyntacticTokenKind::RParen, Expectation::RParen),
+      (SyntacticTokenKind::Spread, Expectation::Spread),
+      (SyntacticTokenKind::Colon, Expectation::Colon),
+      (SyntacticTokenKind::Equal, Expectation::Equal),
+      (SyntacticTokenKind::At, Expectation::At),
+      (SyntacticTokenKind::LBracket, Expectation::LBracket),
+      (SyntacticTokenKind::RBracket, Expectation::RBracket),
+      (SyntacticTokenKind::LBrace, Expectation::LBrace),
+      (SyntacticTokenKind::RBrace, Expectation::RBrace),
+      (SyntacticTokenKind::Pipe, Expectation::Pipe),
+      (SyntacticTokenKind::Bang, Expectation::Bang),
+      (SyntacticTokenKind::Ampersand, Expectation::Ampersand),
+    ] {
+      assert_expected(unexpected_with(kind).into(), expected);
+    }
+  }
+
+  #[test]
+  fn tokora_unrepresentable_expected_sets_keep_the_name_fallback() {
+    static ONE_OF: [SyntacticTokenKind; 2] =
+      [SyntacticTokenKind::LBrace, SyntacticTokenKind::LBracket];
+
+    let without_expected =
+      TokoraTokenError::of(SimpleSpan::new(4, 9)).with_found(SyntacticToken::Identifier("found"));
+    assert_expected(without_expected.into(), Expectation::Name);
+
+    let one_of = TokoraTokenError::expected_one_of_with_found(
+      SimpleSpan::new(4, 9),
+      SyntacticToken::Identifier("found"),
+      &ONE_OF,
+    );
+    assert_expected(one_of.into(), Expectation::Name);
+
+    assert_expected(
+      SeparatedError::leading(unexpected_with(SyntacticTokenKind::LBrace)).into(),
+      Expectation::LBrace,
+    );
   }
 }
