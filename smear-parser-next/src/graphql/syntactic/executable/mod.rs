@@ -20,6 +20,7 @@ use tokora::{
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::{Action, parens},
   punct::{Brace, Bracket, Paren},
+  span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
@@ -37,9 +38,9 @@ use crate::{
   graphql::{
     GraphQL,
     ast::{
-      DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, FragmentDefinition,
-      Name, NamedOperationDefinition, OperationDefinition, OperationType, StringValue,
-      VariableDefinition, VariableValue, VariablesDefinition,
+      DescribedExecutableDefinition, DescribedVariableDefinition, ExecutableDefinition,
+      ExecutableDocument, FragmentDefinition, Name, NamedOperationDefinition, OperationDefinition,
+      OperationType, StringValue, VariableDefinition, VariableValue, VariablesDefinition,
     },
     error::{Expectation, GraphqlError as DialectGraphqlError},
   },
@@ -776,24 +777,33 @@ executable_parser!(
 executable_parser!(
   /// Parses one GraphQL executable definition.
   ///
-  /// One-token dispatch chooses shorthand, a named operation, or a fragment.
-  /// Each branch consumes its classified head directly before entering the
-  /// corresponding committed tail; rejected heads stay unconsumed for recovery.
+  /// An optional leading string description is frozen-parser/dialect
+  /// compatibility, not part of the standard GraphQL executable-definition
+  /// grammar. After an accepted description, the following definition head is
+  /// committed. One-token dispatch then chooses shorthand, a named operation,
+  /// or a fragment. Each branch consumes its classified head directly before
+  /// entering the corresponding committed tail; rejected non-description heads
+  /// stay unconsumed for recovery.
   ///
-  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
+  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
+  /// for the wrapped inner definition.
   pub executable_definition,
   inp,
-  ExecutableDefinition<GraphqlSlice<'inp, Src>>,
+  DescribedExecutableDefinition<GraphqlSlice<'inp, Src>>,
   [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
-    let start = *inp.offset();
+    let cursor = *inp.cursor();
+    let description = match StringValue::try_graphql(inp)? {
+      ParseAttempt::Accept(value) => Some(value),
+      ParseAttempt::Decline => None,
+    };
     let classified = classify_executable_head(inp)?;
     let found = classified.found();
     let mut named_head = None;
     let branch: Branch<2> = match classified {
       ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), ..) => {
-        named_head = Some(head);
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), span, ..) => {
+        named_head = Some((head, span.start()));
         Branch::B1
       }
       ClassifiedExecutableHead::Accepted(ExecutableHead::Fragment, ..) => Branch::B2,
@@ -814,7 +824,7 @@ executable_parser!(
       },
       |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
         let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
-        let head = named_head.expect("named operation branch has an operation head");
+        let (head, start) = named_head.expect("named operation branch has an operation head");
         let operation_type = operation_type_from_classified(head, span);
         named_operation_after_classified_head(inp, start, operation_type)
         .map(ExecutableDefinition::Operation)
@@ -825,7 +835,12 @@ executable_parser!(
         fragment_definition_body(inp, Fragment::new(span)).map(ExecutableDefinition::Fragment)
       },
     );
-    tails.parse_choice(inp, &branch)
+    let definition = tails.parse_choice(inp, &branch)?;
+    Ok(DescribedExecutableDefinition::new(
+      inp.span_since(&cursor),
+      description,
+      definition,
+    ))
   }
 );
 
@@ -849,23 +864,28 @@ where
 executable_parser!(
   /// Parses a nonempty GraphQL executable document.
   ///
-  /// A document has no enclosing delimiter, so it commits to its first
-  /// executable definition and then parses every remaining definition.
+  /// A document has no enclosing delimiter. Its optional leading definition
+  /// descriptions are frozen-parser/dialect compatibility, not standard
+  /// GraphQL syntax.
   ///
-  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
+  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
+  /// for each wrapped inner definition.
   pub executable_document,
   inp,
   ExecutableDocument<GraphqlSlice<'inp, Src>>,
   [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
-    let cursor = *inp.cursor();
-    let first = executable_definition(inp)?;
-    let mut definitions: Vec<ExecutableDefinition<GraphqlSlice<'inp, Src>>> = executable_definition
+    let Spanned { span, data: definitions }: Spanned<
+      Vec<DescribedExecutableDefinition<GraphqlSlice<'inp, Src>>>,
+      SimpleSpan,
+    > = executable_definition
       .repeated_while::<_, U1>(decide_executable_definition_head::<Src, Ctx>)
+      .at_least(1)
       .collect_with(Vec::new())
+      .map(|definitions: Vec<DescribedExecutableDefinition<GraphqlSlice<'inp, Src>>>| definitions)
+      .spanned()
       .parse_input(inp)?;
-    definitions.insert(0, first);
-    Ok(ExecutableDocument::new(inp.span_since(&cursor), definitions))
+    Ok(ExecutableDocument::new(span, definitions))
   }
 );
 
@@ -962,19 +982,25 @@ impl_executable_api!(
 );
 
 impl_executable_api!(
-  /// Parses an executable definition.
+  /// Parses an executable definition with optional frozen-parser/dialect
+  /// compatibility description. Standard GraphQL executable definitions are
+  /// not described.
   ///
-  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
+  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
+  /// for the wrapped inner definition.
   S,
-  ExecutableDefinition<S>,
+  DescribedExecutableDefinition<S>,
   executable_definition,
   [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
-  /// Parses a nonempty executable document.
+  /// Parses a nonempty executable document whose optional definition
+  /// descriptions are frozen-parser/dialect compatibility, not standard
+  /// GraphQL syntax.
   ///
-  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
+  /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition)
+  /// for each wrapped inner definition.
   S,
   ExecutableDocument<S>,
   executable_document,

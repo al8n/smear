@@ -210,6 +210,16 @@ impl<S, Ty> IntoSpan<Span> for ExecutableDefinition<S, Ty> {
   }
 }
 
+/// A top-level executable definition with an optional leading description.
+///
+/// Leading descriptions are frozen-parser/dialect compatibility. They are not
+/// part of the standard GraphQL executable-definition grammar.
+pub type DescribedExecutableDefinition<S, Ty = Type<Name<S>>> =
+  Described<ExecutableDefinition<S, Ty>, S>;
+
 /// A nonempty GraphQL executable document.
+///
+/// Its definitions may carry leading descriptions for frozen-parser/dialect
+/// compatibility; standard GraphQL executable definitions are not described.
 pub type ExecutableDocument<S, Ty = Type<Name<S>>> =
-  crate::executable::Document<ExecutableDefinition<S, Ty>>;
+  crate::executable::Document<DescribedExecutableDefinition<S, Ty>>;

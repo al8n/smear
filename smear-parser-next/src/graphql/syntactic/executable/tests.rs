@@ -16,8 +16,9 @@ use super::{
 use crate::graphql::{
   GraphQL,
   ast::{
-    DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, FragmentDefinition,
-    OperationDefinition, OperationType, VariableDefinition, VariablesDefinition,
+    DescribedExecutableDefinition, DescribedVariableDefinition, ExecutableDocument,
+    FragmentDefinition, OperationDefinition, OperationType, VariableDefinition,
+    VariablesDefinition,
   },
   error::{ErrorData, Expectation, GraphqlErrors},
   syntactic::{GraphqlInput, GraphqlLexer, GraphqlToken},
@@ -525,28 +526,34 @@ fn fragment_named_on_error_per_spec() {
 // ─── executable_definition ───────────────────────────────────────────────────
 
 #[test]
-fn executable_definition_dispatches() {
-  fn is_op<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
-    assert!(d.is_operation());
+fn executable_definition_dispatches_without_description() {
+  fn is_op<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_none());
+    assert!(d.node().is_operation());
   }
-  fn is_mutation<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
+  fn is_mutation<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_none());
     assert!(
-      d.unwrap_operation_ref()
+      d.node()
+        .unwrap_operation_ref()
         .unwrap_named_ref()
         .operation_type()
         .is_mutation()
     );
   }
-  fn is_subscription<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
+  fn is_subscription<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_none());
     assert!(
-      d.unwrap_operation_ref()
+      d.node()
+        .unwrap_operation_ref()
         .unwrap_named_ref()
         .operation_type()
         .is_subscription()
     );
   }
-  fn is_frag<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
-    assert!(d.is_fragment());
+  fn is_frag<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_none());
+    assert!(d.node().is_fragment());
   }
   accept_all!(executable_definition, "{ id }", is_op);
   accept_all!(executable_definition, "query Q { id }", is_op);
@@ -561,6 +568,71 @@ fn executable_definition_dispatches() {
     is_subscription
   );
   accept_all!(executable_definition, "fragment F on T { id }", is_frag);
+}
+
+#[test]
+fn executable_definition_accepts_compatibility_descriptions() {
+  fn operation<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_some());
+    assert!(d.node().is_operation());
+    assert!(d.node().unwrap_operation_ref().is_named());
+  }
+  fn shorthand<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_some());
+    assert!(d.node().unwrap_operation_ref().is_shorthand());
+  }
+  fn fragment<S: AsRef<[u8]>>(d: DescribedExecutableDefinition<S>) {
+    assert!(d.description().is_some());
+    assert!(d.node().is_fragment());
+  }
+
+  accept_all!(
+    executable_definition,
+    "\"description\" query Q { id }",
+    operation
+  );
+  accept_all!(
+    executable_definition,
+    "\"\"\"description\"\"\" query Q { id }",
+    operation
+  );
+  accept_all!(executable_definition, "\"description\" { id }", shorthand);
+  accept_all!(
+    executable_definition,
+    "\"\"\"description\"\"\" { id }",
+    shorthand
+  );
+  accept_all!(
+    executable_definition,
+    "\"description\" fragment F on T { id }",
+    fragment
+  );
+  accept_all!(
+    executable_definition,
+    "\"\"\"description\"\"\" fragment F on T { id }",
+    fragment
+  );
+}
+
+#[test]
+fn described_executable_definition_span_includes_description() {
+  for source in [
+    "\"desc\" query { id }",
+    "\"desc\"  # compatibility description\n  query { id }",
+  ] {
+    let definition = drive_str(executable_definition, source).expect("described definition");
+    let keyword_start = source.find("query").expect("operation keyword");
+
+    assert_eq!(definition.span(), &SimpleSpan::new(0, source.len()));
+    assert_eq!(
+      definition.description().expect("description").span(),
+      &SimpleSpan::new(0, 6)
+    );
+    assert_eq!(
+      definition.node().span(),
+      &SimpleSpan::new(keyword_start, source.len())
+    );
+  }
 }
 
 #[test]
@@ -586,21 +658,77 @@ fn executable_definition_rejects_an_invalid_head_locally() {
   );
 }
 
+#[test]
+fn executable_definition_commits_after_description() {
+  let result = drive_str(
+    |inp| {
+      let result = executable_definition(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("invalid head after description remains available");
+      assert_eq!(tail.span, SimpleSpan::new(7, 11));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::Identifier(_)));
+      Ok(result)
+    },
+    "\"desc\" nope",
+  )
+  .expect("inspection parser should consume the retained invalid head");
+
+  assert_str_expectation(
+    result,
+    Expectation::ExecutableDefinition,
+    SimpleSpan::new(7, 11),
+  );
+  assert_str_expectation(
+    drive_str(|inp| executable_definition(inp).map(|_| ()), "\"desc\""),
+    Expectation::ExecutableDefinition,
+    SimpleSpan::new(6, 6),
+  );
+}
+
 // ─── executable_document ─────────────────────────────────────────────────────
 
 #[test]
 fn executable_document_accepts_single_and_multiple() {
   fn one<S: AsRef<[u8]>>(d: ExecutableDocument<S>) {
     assert_eq!(d.definitions().len(), 1);
+    assert!(d.definitions()[0].description().is_none());
   }
   fn many<S: AsRef<[u8]>>(d: ExecutableDocument<S>) {
     assert_eq!(d.definitions().len(), 3);
+    assert!(
+      d.definitions()
+        .iter()
+        .all(|definition| definition.description().is_none())
+    );
   }
   accept_all!(executable_document, "{ id }", one);
   accept_all!(
     executable_document,
     "query A { a } mutation B { b } fragment F on T { c }",
     many
+  );
+}
+
+#[test]
+fn executable_document_keeps_independent_compatibility_descriptions() {
+  fn check<S: AsRef<[u8]>>(d: ExecutableDocument<S>) {
+    let definitions = d.definitions();
+    assert_eq!(definitions.len(), 3);
+    assert!(
+      definitions
+        .iter()
+        .all(|definition| definition.description().is_some())
+    );
+    assert!(definitions[0].node().is_operation());
+    assert!(definitions[1].node().unwrap_operation_ref().is_shorthand());
+    assert!(definitions[2].node().is_fragment());
+  }
+
+  accept_all!(
+    executable_document,
+    "\"operation\" query A { a } \"\"\"shorthand\"\"\" { b } \"fragment\" fragment F on T { c }",
+    check
   );
 }
 
@@ -722,10 +850,16 @@ fn associated_executable_apis_infer_str_and_byte_slice_sources() {
   )
   .expect("slice fragment");
 
-  let _: ExecutableDefinition<&str> =
-    drive_str(ExecutableDefinition::<&str>::graphql, "{ id }").expect("str definition");
-  let _: ExecutableDefinition<&[u8]> =
-    drive_slice(ExecutableDefinition::<&[u8]>::graphql, b"{ id }").expect("slice definition");
+  let _: DescribedExecutableDefinition<&str> = drive_str(
+    DescribedExecutableDefinition::<&str>::graphql,
+    "\"desc\" { id }",
+  )
+  .expect("str described definition");
+  let _: DescribedExecutableDefinition<&[u8]> = drive_slice(
+    DescribedExecutableDefinition::<&[u8]>::graphql,
+    b"\"desc\" { id }",
+  )
+  .expect("slice described definition");
 
   let _: ExecutableDocument<&str> =
     drive_str(ExecutableDocument::<&str>::graphql, "{ id }").expect("str document");
