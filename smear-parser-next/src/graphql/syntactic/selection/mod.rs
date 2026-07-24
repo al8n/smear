@@ -10,13 +10,18 @@ use std::vec::Vec;
 
 use smear_lexer::keywords::On;
 use tokora::{
-  Branch, Lexer, ParseChoice, SimpleSpan, Slice, Source, Token,
-  cache::PeekedTokenExt,
+  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  TryParseInput,
+  cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
-  parser::try_braces,
+  parser::Action,
   punct::{Brace, Bracket, Paren},
+  span::Spanned,
   try_parse_input::ParseAttempt,
-  utils::{IntoComponents, typenum::U1},
+  utils::{
+    IntoComponents,
+    typenum::{U1, U2},
+  },
 };
 
 use super::{
@@ -26,7 +31,7 @@ use super::{
   fragment_name, try_name,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx, try_at, try_colon, try_spread},
+  combinator::{Equivalent, ParseCtx, lbrace, try_at, try_colon, try_spread},
   graphql::{
     GraphQL,
     ast::{
@@ -743,59 +748,108 @@ selection_parser!(
   }
 );
 
-fn selection_set_contents<'inp, Src, Ctx>(
+enum SelectionSetHead {
+  MissingOpen,
+  MissingFirstSelection,
+  Ready,
+}
+
+/// Classifies the required selection-set opener and the two heads that the
+/// delimited repetition consumes before it can invoke its item decision: an
+/// immediate `}` and end of input.
+///
+/// The committed error path consumes the known `{` and delegates to
+/// [`expected_selection_phase`] so `{ Selection+ }` retains the same first-item
+/// diagnostic as the former explicit first-selection parse.
+fn selection_set_head<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<Vec<Selection<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
+) -> Result<SelectionSetHead, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let first = selection(inp)?;
-  let mut selections = Vec::new();
-  selections.push(first);
-
-  loop {
-    match try_selection(inp)? {
-      ParseAttempt::Accept(selection) => selections.push(selection),
-      ParseAttempt::Decline => {
-        let stop = {
-          let mut peeked = inp.peek::<U1>()?;
-          match peeked.pop_front() {
-            Some(token) => token.token().is_r_brace(),
-            None => true,
-          }
-        };
-        if stop {
-          break;
-        }
-        return expected_selection_phase(inp, Expectation::Selection);
-      }
-    }
+  let mut peeked = inp.peek::<U2>()?;
+  let Some(open) = peeked.pop_front() else {
+    return Ok(SelectionSetHead::MissingOpen);
+  };
+  if !open.token().is_l_brace() {
+    return Ok(SelectionSetHead::MissingOpen);
   }
 
-  Ok(selections)
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_r_brace() => SelectionSetHead::MissingFirstSelection,
+    None => SelectionSetHead::MissingFirstSelection,
+    Some(_) => SelectionSetHead::Ready,
+  })
 }
 
+/// Continues through every non-closer token so the committed [`selection`]
+/// parser emits its local diagnostic for an invalid collection item. The
+/// delimited repetition probes `}` before consulting this decision.
+fn decide_selection_set_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+{
+  Ok(match peeked.pop_front() {
+    Some(_) => Action::Continue,
+    None => Action::Stop,
+  })
+}
+
+/// Continues an optional selection-set attempt only when its `{` opener is
+/// present, leaving every other token for the caller.
+fn decide_selection_set_opener<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_l_brace() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+selection_parser!(
+  committed_selection_set,
+  inp,
+  SelectionSet<GraphqlSlice<'inp, Src>>,
+  {
+    match selection_set_head(inp)? {
+      SelectionSetHead::MissingOpen => expected_selection_phase(inp, Expectation::LBrace),
+      SelectionSetHead::MissingFirstSelection => {
+        lbrace(inp)?;
+        expected_selection_phase(inp, Expectation::Selection)
+      }
+      SelectionSetHead::Ready => selection
+        .repeated_while::<_, U1>(decide_selection_set_tail::<Src, Ctx>)
+        .delimited_by_braces()
+        .collect_with(Vec::new())
+        .spanned()
+        .parse_input(inp)
+        .map(|Spanned { span, data }| SelectionSet::new(span, data)),
+    }
+  }
+);
+
 /// Attempts a nonempty GraphQL selection set. It declines without consuming
-/// when `{` is absent; once an opener is consumed, Tokora owns close and
-/// `Unclosed<Brace>` handling.
+/// when `{` is absent; once an opener is consumed, the delimited repetition
+/// owns close and `Unclosed<Brace>` handling.
 fn try_selection_set<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<ParseAttempt<SelectionSet<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
@@ -820,30 +874,24 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  match try_braces(selection_set_contents::<Src, Ctx>)(inp)? {
-    Some(delimited) => {
-      let (span, _open, _close, selections) = delimited.into_components();
-      Ok(ParseAttempt::Accept(SelectionSet::new(span, selections)))
-    }
-    None => Ok(ParseAttempt::Decline),
-  }
+  committed_selection_set
+    .peek_then_try::<_, U1>(decide_selection_set_opener::<Src, Ctx>)
+    .try_parse_input(inp)
 }
 
 selection_parser!(
   /// Parses a nonempty GraphQL selection set (`{ Selection+ }`).
   ///
-  /// The first selection commits the `+` cardinality. The delimiter combinator
-  /// emits `Unclosed<Brace>` when a real opener has no closer.
+  /// A first-item guard preserves the `+` cardinality before the delimited
+  /// collection runs. The delimiter combinator emits `Unclosed<Brace>` when a
+  /// real opener has no closer.
   ///
   /// See the [GraphQL Selection Sets specification](https://spec.graphql.org/draft/#SelectionSet).
   pub selection_set,
   inp,
   SelectionSet<GraphqlSlice<'inp, Src>>,
   {
-    match try_selection_set(inp)? {
-      ParseAttempt::Accept(selection_set) => Ok(selection_set),
-      ParseAttempt::Decline => expected_selection_phase(inp, Expectation::LBrace),
-    }
+    committed_selection_set(inp)
   }
 );
 

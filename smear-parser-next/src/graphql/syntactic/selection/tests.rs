@@ -19,7 +19,7 @@ use super::{
 use crate::graphql::{
   GraphQL,
   ast::{Field, FragmentSpread, InlineFragment, Selection, SelectionSet, TypeCondition},
-  error::{ErrorData, Expectation, GraphqlErrors},
+  error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlInput, GraphqlLexer, GraphqlToken},
 };
 
@@ -624,11 +624,36 @@ fn selection_set_reports_the_collection_phase() {
     Expectation::Selection,
     SimpleSpan::new(1, 2),
   );
+  assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "{"),
+    Expectation::Selection,
+    SimpleSpan::new(1, 1),
+  );
+  assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "{ 123 }"),
+    Expectation::Selection,
+    SimpleSpan::new(2, 5),
+  );
+  assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "{ id 123 }"),
+    Expectation::Selection,
+    SimpleSpan::new(5, 8),
+  );
 }
 
 #[test]
-fn selection_set_rejects_unterminated() {
+fn selection_set_unterminated_is_unclosed_object() {
   reject_all!(selection_set, "{ id");
+
+  let error = drive_str(|inp| selection_set(inp).map(|_| ()), "{ id")
+    .expect_err("unterminated selection set should fail")
+    .into_iter()
+    .next()
+    .expect("unterminated selection set should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::Unclosed(Unclosed::Object)
+  ));
 }
 
 // ─── frozen-parity oracle (table-driven) ─────────────────────────────────────
