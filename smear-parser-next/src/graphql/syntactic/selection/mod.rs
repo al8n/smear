@@ -2,14 +2,15 @@
 //!
 //! These parsers are concrete over [`GraphqlLexer`] and
 //! construct slice-typed GraphQL AST nodes. Selection heads are consumed by
-//! declining atoms and passed into committed tails, so dispatch never
-//! classifies an accepted token and then asks another parser to classify it.
+//! declining atoms and passed through deterministic [`ParseChoice`] branches
+//! into committed tails, so dispatch never classifies an accepted token and
+//! then asks another parser to classify it.
 
 use std::vec::Vec;
 
 use smear_lexer::keywords::On;
 use tokora::{
-  Lexer, SimpleSpan, Slice, Source, Token,
+  Branch, Lexer, ParseChoice, SimpleSpan, Slice, Source, Token,
   cache::PeekedTokenExt,
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::try_braces,
@@ -355,24 +356,50 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  match try_name(inp)? {
-    ParseAttempt::Accept(name) => field_after_name(inp, name)
-      .map(Selection::Field)
-      .map(ParseAttempt::Accept),
+  let mut name = None;
+  let mut spread = None;
+  let branch: Branch<1> = match try_name(inp)? {
+    ParseAttempt::Accept(accepted) => {
+      name = Some(accepted);
+      Branch::B0
+    }
     ParseAttempt::Decline => match try_spread(inp)? {
-      ParseAttempt::Accept(spread) => {
-        selection_after_spread(inp, *spread.span()).map(ParseAttempt::Accept)
+      ParseAttempt::Accept(accepted) => {
+        spread = Some(*accepted.span());
+        Branch::B1
       }
-      ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+      ParseAttempt::Decline => return Ok(ParseAttempt::Decline),
     },
-  }
+  };
+
+  let mut tails = (
+    |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      field_after_name(
+        inp,
+        name
+          .take()
+          .expect("selected field branch stores its consumed name"),
+      )
+      .map(Selection::Field)
+    },
+    |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      selection_after_spread(
+        inp,
+        spread
+          .take()
+          .expect("selected spread branch stores its consumed span"),
+      )
+    },
+  );
+  tails.parse_choice(inp, &branch).map(ParseAttempt::Accept)
 }
 
 selection_parser!(
   /// Parses a GraphQL selection — a field, fragment spread, or inline fragment.
   ///
-  /// The first accepted head is handed directly to its committed tail. A rejected
-  /// or absent head is left available for a parent recovery boundary.
+  /// A deterministic choice routes the first accepted, already-consumed head
+  /// directly to its committed tail. A rejected or absent head is left available
+  /// for a parent recovery boundary.
   ///
   /// See the [GraphQL Selection specification](https://spec.graphql.org/draft/#Selection).
   pub selection,
@@ -604,37 +631,85 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  match try_name(inp)? {
-    ParseAttempt::Accept(name) if "on".equivalent(name.source()) => {
-      let on = On::new(name.span());
-      let type_condition = type_condition_after_on(inp, on)?;
-      typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
-        .map(Selection::InlineFragment)
+  let mut on = None;
+  let mut name = None;
+  let mut at = None;
+  let mut selection_set = None;
+  let branch: Branch<3> = match try_name(inp)? {
+    ParseAttempt::Accept(accepted) if "on".equivalent(accepted.source()) => {
+      on = Some(On::new(accepted.span()));
+      Branch::B0
     }
-    ParseAttempt::Accept(name) => {
-      let (span, source) = name.into_components();
-      let name = FragmentName::new(span, source);
-      fragment_spread_after_name(inp, spread.start(), name).map(Selection::FragmentSpread)
+    ParseAttempt::Accept(accepted) => {
+      let (span, source) = accepted.into_components();
+      name = Some(FragmentName::new(span, source));
+      Branch::B1
     }
     ParseAttempt::Decline => match try_at(inp)? {
-      ParseAttempt::Accept(at) => {
-        untyped_inline_fragment_after_at(inp, spread.start(), at).map(Selection::InlineFragment)
+      ParseAttempt::Accept(accepted) => {
+        at = Some(accepted);
+        Branch::B2
       }
       ParseAttempt::Decline => match try_selection_set(inp)? {
-        ParseAttempt::Accept(selection_set) => Ok(Selection::InlineFragment(
-          untyped_inline_fragment_from_selection_set(spread.start(), selection_set),
-        )),
-        ParseAttempt::Decline => expected_selection_phase(inp, Expectation::FragmentName),
+        ParseAttempt::Accept(accepted) => {
+          selection_set = Some(accepted);
+          Branch::B3
+        }
+        ParseAttempt::Decline => {
+          return expected_selection_phase(inp, Expectation::FragmentName);
+        }
       },
     },
-  }
+  };
+
+  let mut tails = (
+    |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      let type_condition = type_condition_after_on(
+        inp,
+        on.take()
+          .expect("selected type-condition branch stores its consumed `on`"),
+      )?;
+      typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
+        .map(Selection::InlineFragment)
+    },
+    |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      fragment_spread_after_name(
+        inp,
+        spread.start(),
+        name
+          .take()
+          .expect("selected fragment-spread branch stores its consumed name"),
+      )
+      .map(Selection::FragmentSpread)
+    },
+    |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      untyped_inline_fragment_after_at(
+        inp,
+        spread.start(),
+        at.take()
+          .expect("selected inline-fragment branch stores its consumed `@`"),
+      )
+      .map(Selection::InlineFragment)
+    },
+    |_inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+      Ok(Selection::InlineFragment(
+        untyped_inline_fragment_from_selection_set(
+          spread.start(),
+          selection_set
+            .take()
+            .expect("selected inline-fragment branch stores its selection set"),
+        ),
+      ))
+    },
+  );
+  tails.parse_choice(inp, &branch)
 }
 
 selection_parser!(
   /// Parses a committed GraphQL inline fragment (`... TypeCondition? Directives? SelectionSet`).
   ///
-  /// `... on` is recognized by the declining keyword atom exactly once. Every
-  /// other tail uses the untyped fragment core.
+  /// A deterministic choice routes the `on` atom, when accepted, into the
+  /// typed tail exactly once. Every other tail uses the untyped fragment core.
   ///
   /// See the [GraphQL Inline Fragment specification](https://spec.graphql.org/draft/#InlineFragment).
   pub inline_fragment,
@@ -642,13 +717,29 @@ selection_parser!(
   InlineFragment<GraphqlSlice<'inp, Src>>,
   {
     let spread = take_spread(inp)?;
-    match try_on(inp)? {
-      ParseAttempt::Accept(on) => {
-        let type_condition = type_condition_after_on(inp, on)?;
-        typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
+    let mut on = None;
+    let branch: Branch<1> = match try_on(inp)? {
+      ParseAttempt::Accept(accepted) => {
+        on = Some(accepted);
+        Branch::B0
       }
-      ParseAttempt::Decline => untyped_inline_fragment_after_spread(inp, spread.start()),
-    }
+      ParseAttempt::Decline => Branch::B1,
+    };
+
+    let mut tails = (
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let type_condition = type_condition_after_on(
+          inp,
+          on.take()
+            .expect("selected inline-fragment branch stores its consumed `on`"),
+        )?;
+        typed_inline_fragment_after_type_condition(inp, spread.start(), type_condition)
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        untyped_inline_fragment_after_spread(inp, spread.start())
+      },
+    );
+    tails.parse_choice(inp, &branch)
   }
 );
 
