@@ -11,7 +11,7 @@ use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::{
   executable_definition, executable_document, fragment_definition, operation_definition,
-  variable_definition, variables_definition,
+  operation_type, variable_definition, variables_definition,
 };
 use crate::graphql::{
   GraphQL,
@@ -20,7 +20,7 @@ use crate::graphql::{
     OperationDefinition, OperationType, VariableDefinition, VariablesDefinition,
   },
   error::{ErrorData, Expectation, GraphqlErrors},
-  syntactic::{GraphqlInput, GraphqlLexer},
+  syntactic::{GraphqlInput, GraphqlLexer, GraphqlToken},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
@@ -274,6 +274,68 @@ fn variables_definition_rejects_unterminated() {
   reject_all!(variables_definition, "($x: Int");
 }
 
+// ─── operation_type ──────────────────────────────────────────────────────────
+
+#[test]
+fn operation_type_dispatches_each_keyword() {
+  fn query(operation: OperationType) {
+    assert!(operation.is_query());
+  }
+  fn mutation(operation: OperationType) {
+    assert!(operation.is_mutation());
+  }
+  fn subscription(operation: OperationType) {
+    assert!(operation.is_subscription());
+  }
+
+  accept_all!(operation_type, "query", query);
+  accept_all!(operation_type, "mutation", mutation);
+  accept_all!(operation_type, "subscription", subscription);
+}
+
+#[test]
+fn operation_type_reports_and_retains_an_invalid_head() {
+  let result = drive_str(
+    |inp| {
+      let result = operation_type(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("invalid operation-type head remains available");
+      assert_eq!(tail.span, SimpleSpan::new(0, 4));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::Identifier(_)));
+      Ok(result)
+    },
+    "nope",
+  )
+  .expect("inspection parser should consume the retained operation-type head");
+
+  assert_str_expectation(result, Expectation::OperationType, SimpleSpan::new(0, 4));
+  assert_str_expectation(
+    drive_str(|inp| operation_type(inp).map(|_| ()), ""),
+    Expectation::OperationType,
+    SimpleSpan::new(0, 0),
+  );
+}
+
+#[test]
+fn operation_type_rejects_and_retains_a_shorthand_head() {
+  let result = drive_str(
+    |inp| {
+      let result = operation_type(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("shorthand head remains available to the caller");
+      assert_eq!(tail.span, SimpleSpan::new(0, 1));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::LBrace));
+      Ok(result)
+    },
+    "{ id }",
+  )
+  .expect("inspection parser should consume the retained shorthand head");
+
+  assert_str_expectation(result, Expectation::OperationType, SimpleSpan::new(0, 1));
+}
+
 // ─── operation_definition ────────────────────────────────────────────────────
 
 #[test]
@@ -352,6 +414,25 @@ fn operation_definition_reports_operation_type_and_selection_set_phases() {
     Expectation::LBrace,
     SimpleSpan::new(7, 7),
   );
+}
+
+#[test]
+fn operation_definition_rejects_and_retains_a_fragment_head() {
+  let result = drive_str(
+    |inp| {
+      let result = operation_definition(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("fragment head remains available to the caller");
+      assert_eq!(tail.span, SimpleSpan::new(0, 8));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::Identifier(_)));
+      Ok(result)
+    },
+    "fragment F on T { id }",
+  )
+  .expect("inspection parser should consume the retained fragment head");
+
+  assert_str_expectation(result, Expectation::OperationType, SimpleSpan::new(0, 8));
 }
 
 // ─── fragment_definition ─────────────────────────────────────────────────────
@@ -448,18 +529,58 @@ fn executable_definition_dispatches() {
   fn is_op<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
     assert!(d.is_operation());
   }
+  fn is_mutation<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
+    assert!(
+      d.unwrap_operation_ref()
+        .unwrap_named_ref()
+        .operation_type()
+        .is_mutation()
+    );
+  }
+  fn is_subscription<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
+    assert!(
+      d.unwrap_operation_ref()
+        .unwrap_named_ref()
+        .operation_type()
+        .is_subscription()
+    );
+  }
   fn is_frag<S: AsRef<[u8]>>(d: ExecutableDefinition<S>) {
     assert!(d.is_fragment());
   }
   accept_all!(executable_definition, "{ id }", is_op);
   accept_all!(executable_definition, "query Q { id }", is_op);
+  accept_all!(
+    executable_definition,
+    "mutation M { setThing }",
+    is_mutation
+  );
+  accept_all!(
+    executable_definition,
+    "subscription S { onThing }",
+    is_subscription
+  );
   accept_all!(executable_definition, "fragment F on T { id }", is_frag);
 }
 
 #[test]
 fn executable_definition_rejects_an_invalid_head_locally() {
+  let result = drive_str(
+    |inp| {
+      let result = executable_definition(inp).map(|_| ());
+      let tail = inp
+        .next()?
+        .expect("invalid executable-definition head remains available");
+      assert_eq!(tail.span, SimpleSpan::new(0, 4));
+      assert!(matches!(tail.data, GraphqlToken::<'_, str>::Identifier(_)));
+      Ok(result)
+    },
+    "nope",
+  )
+  .expect("inspection parser should consume the retained executable-definition head");
+
   assert_str_expectation(
-    drive_str(|inp| executable_definition(inp).map(|_| ()), "nope"),
+    result,
     Expectation::ExecutableDefinition,
     SimpleSpan::new(0, 4),
   );

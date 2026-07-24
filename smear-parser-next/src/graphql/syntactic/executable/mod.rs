@@ -3,13 +3,19 @@
 //! These parsers are concrete over [`GraphqlLexer`] and
 //! construct slice-typed GraphQL AST nodes. Optional collections remain concrete
 //! empty collections at their own layer; their parents turn an empty collection
-//! into `None` where the AST grammar makes that distinction meaningful.
+//! into `None` where the AST grammar makes that distinction meaningful. Real
+//! executable alternatives use one-token lookahead and deterministic
+//! [`ParseChoice`] branches that consume their classified heads directly before
+//! entering committed tails.
 
 use std::vec::Vec;
 
-use smear_lexer::keywords::{Fragment, Mutation, Query, Subscription};
+use smear_lexer::{
+  graphql::syntactic::SyntacticTokenKind,
+  keywords::{Fragment, Mutation, Query, Subscription},
+};
 use tokora::{
-  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
+  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::{Action, parens},
@@ -109,6 +115,120 @@ where
   }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum OperationHead {
+  Query,
+  Mutation,
+  Subscription,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ExecutableHead {
+  Shorthand,
+  Operation(OperationHead),
+  Fragment,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ClassifiedExecutableHead {
+  Accepted(ExecutableHead, SimpleSpan, SyntacticTokenKind),
+  Rejected(Option<(SimpleSpan, SyntacticTokenKind)>),
+}
+
+impl ClassifiedExecutableHead {
+  #[inline]
+  const fn found(self) -> Option<(SimpleSpan, SyntacticTokenKind)> {
+    match self {
+      Self::Accepted(_, span, kind) => Some((span, kind)),
+      Self::Rejected(found) => found,
+    }
+  }
+}
+
+/// Classifies the first executable-definition token without consuming it.
+#[inline]
+fn classify_executable_head<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+) -> Result<ClassifiedExecutableHead, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+{
+  let mut peeked = inp.peek::<U1>()?;
+  Ok(match peeked.pop_front() {
+    Some(token) => {
+      let span = *token.span();
+      let kind = token.token().kind();
+      let head = match token.token() {
+        GraphqlToken::<'inp, Src>::LBrace => Some(ExecutableHead::Shorthand),
+        GraphqlToken::<'inp, Src>::Identifier(value) if "query".equivalent(value) => {
+          Some(ExecutableHead::Operation(OperationHead::Query))
+        }
+        GraphqlToken::<'inp, Src>::Identifier(value) if "mutation".equivalent(value) => {
+          Some(ExecutableHead::Operation(OperationHead::Mutation))
+        }
+        GraphqlToken::<'inp, Src>::Identifier(value) if "subscription".equivalent(value) => {
+          Some(ExecutableHead::Operation(OperationHead::Subscription))
+        }
+        GraphqlToken::<'inp, Src>::Identifier(value) if "fragment".equivalent(value) => {
+          Some(ExecutableHead::Fragment)
+        }
+        _ => None,
+      };
+      match head {
+        Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
+        None => ClassifiedExecutableHead::Rejected(Some((span, kind))),
+      }
+    }
+    None => ClassifiedExecutableHead::Rejected(None),
+  })
+}
+
+/// Builds an operation type from a head already classified by executable
+/// dispatch, without inspecting source text again.
+#[inline]
+fn operation_type_from_classified(head: OperationHead, span: SimpleSpan) -> OperationType {
+  match head {
+    OperationHead::Query => OperationType::Query(Query::new(span)),
+    OperationHead::Mutation => OperationType::Mutation(Mutation::new(span)),
+    OperationHead::Subscription => OperationType::Subscription(Subscription::new(span)),
+  }
+}
+
+/// Emits the caller's local expectation from one classified executable head.
+fn expected_classified_executable_head<'inp, Src, Ctx, T>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+  found: Option<(SimpleSpan, SyntacticTokenKind)>,
+) -> Result<T, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  match found {
+    Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, expected, span).into()),
+    None => {
+      let offset = *inp.offset();
+      Err(
+        DialectGraphqlError::maybe_unexpected_token(
+          None,
+          expected,
+          SimpleSpan::new(offset, offset),
+        )
+        .into(),
+      )
+    }
+  }
+}
+
 #[inline]
 fn is_name<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
 where
@@ -176,19 +296,6 @@ where
   matches!(token, GraphqlToken::<'inp, Src>::Identifier(value) if "fragment".equivalent(value))
 }
 
-#[inline]
-fn is_operation_type<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-{
-  matches!(token, GraphqlToken::<'inp, Src>::Identifier(value)
-    if "query".equivalent(value)
-      || "mutation".equivalent(value)
-      || "subscription".equivalent(value))
-}
-
 fn take_name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<Name<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
@@ -222,7 +329,58 @@ where
   }
 }
 
-fn try_take_name<'inp, Src, Ctx>(
+/// Consumes an identifier already classified by an executable dispatch.
+///
+/// This deliberately skips a declining atom: the classifier has already
+/// established the token's structural role. Any impossible cache/input mismatch
+/// remains a typed diagnostic instead of a panic.
+#[inline]
+fn take_classified_identifier<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+) -> Result<(SimpleSpan, GraphqlSlice<'inp, Src>), GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  match inp.next()? {
+    Some(spanned) => {
+      let (span, token) = spanned.into_components();
+      match token {
+        GraphqlToken::<'inp, Src>::Identifier(source) => Ok((span, source)),
+        token => Err(DialectGraphqlError::unexpected_token(token.kind(), expected, span).into()),
+      }
+    }
+    None => {
+      let offset = *inp.offset();
+      Err(
+        DialectGraphqlError::maybe_unexpected_token(
+          None,
+          expected,
+          SimpleSpan::new(offset, offset),
+        )
+        .into(),
+      )
+    }
+  }
+}
+
+/// Optionally consumes an operation name after peeking its identifier once.
+#[inline]
+fn try_take_classified_name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
 ) -> Result<Option<Name<GraphqlSlice<'inp, Src>>>, GraphqlError<'inp, Src, Ctx>>
 where
@@ -244,12 +402,14 @@ where
 {
   let has_name = {
     let mut peeked = inp.peek::<U1>()?;
-    peeked
-      .pop_front()
-      .is_some_and(|token| is_name::<Src>(token.token()))
+    matches!(
+      peeked.pop_front(),
+      Some(token) if matches!(token.token(), GraphqlToken::<'inp, Src>::Identifier(_))
+    )
   };
   if has_name {
-    take_name(inp).map(Some)
+    let (span, source) = take_classified_identifier(inp, Expectation::Name)?;
+    Ok(Some(Name::new(span, source)))
   } else {
     Ok(None)
   }
@@ -305,48 +465,6 @@ where
   guard_executable_phase(inp, Expectation::Colon, is_colon::<Src>)?;
   match inp.next()? {
     Some(_) => Ok(()),
-    None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
-  }
-}
-
-fn take_operation_type<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<OperationType, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-{
-  guard_executable_phase(inp, Expectation::OperationType, is_operation_type::<Src>)?;
-  match inp.next()? {
-    Some(spanned) => {
-      let (span, token) = spanned.into_components();
-      match token {
-        GraphqlToken::<'inp, Src>::Identifier(value) if "query".equivalent(&value) => {
-          Ok(OperationType::Query(Query::new(span)))
-        }
-        GraphqlToken::<'inp, Src>::Identifier(value) if "mutation".equivalent(&value) => {
-          Ok(OperationType::Mutation(Mutation::new(span)))
-        }
-        GraphqlToken::<'inp, Src>::Identifier(value) if "subscription".equivalent(&value) => {
-          Ok(OperationType::Subscription(Subscription::new(span)))
-        }
-        other => Err(UnexpectedToken::of(span).with_found(other).into()),
-      }
-    }
     None => Err(UnexpectedEot::eot_of(*inp.offset()).into()),
   }
 }
@@ -524,21 +642,104 @@ executable_parser!(
   }
 );
 
+/// Parses the committed tail of a named operation after its keyword is consumed.
+#[inline]
+fn named_operation_after_classified_head<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+  operation_type: OperationType,
+) -> Result<OperationDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let name = try_take_classified_name(inp)?;
+  let variables = variables_definition(inp)?;
+  let variables = (!variables.variable_definitions().is_empty()).then_some(variables);
+  let directives = directives(inp)?;
+  let directives = (!directives.directives().is_empty()).then_some(directives);
+  guard_executable_phase(inp, Expectation::LBrace, is_lbrace::<Src>)?;
+  let selection_set = selection_set(inp)?;
+  Ok(OperationDefinition::Named(NamedOperationDefinition::new(
+    SimpleSpan::new(start, selection_set.span().end()),
+    operation_type,
+    name,
+    variables,
+    directives,
+    selection_set,
+  )))
+}
+
 executable_parser!(
   /// Parses a GraphQL operation type.
+  ///
+  /// One-token dispatch selects the matching operation keyword branch, which
+  /// consumes the classified identifier directly.
   ///
   /// See the [GraphQL Operation Type specification](https://spec.graphql.org/draft/#OperationType).
   pub operation_type,
   inp,
   OperationType,
-  { take_operation_type(inp) }
+  {
+    let classified = classify_executable_head(inp)?;
+    let found = classified.found();
+    let branch: Branch<2> = match classified {
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(OperationHead::Query), ..) => {
+        Branch::B0
+      }
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(OperationHead::Mutation), ..) => {
+        Branch::B1
+      }
+      ClassifiedExecutableHead::Accepted(
+        ExecutableHead::Operation(OperationHead::Subscription),
+        ..,
+      ) => Branch::B2,
+      _ => {
+        return expected_classified_executable_head(inp, Expectation::OperationType, found);
+      }
+    };
+
+    let mut tails = (
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
+        Ok(OperationType::Query(Query::new(span)))
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
+        Ok(OperationType::Mutation(Mutation::new(span)))
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
+        Ok(OperationType::Subscription(Subscription::new(span)))
+      },
+    );
+    tails.parse_choice(inp, &branch)
+  }
 );
 
 executable_parser!(
   /// Parses a GraphQL operation definition.
   ///
-  /// A leading selection set is query shorthand. Otherwise the operation keyword
-  /// commits the named form; absent variable and directive collections are stored
+  /// One-token dispatch selects shorthand or a named operation keyword. Each
+  /// branch consumes its classified head directly before entering the committed
+  /// named-operation tail; absent variable and directive collections are stored
   /// as `None` on that parent node.
   ///
   /// See the [GraphQL Operation Definition specification](https://spec.graphql.org/draft/#OperationDefinition).
@@ -546,35 +747,33 @@ executable_parser!(
   inp,
   OperationDefinition<GraphqlSlice<'inp, Src>>,
   {
-    if peeks_where(inp, is_lbrace::<Src>)? {
-      return selection_set(inp).map(OperationDefinition::Shorthand);
-    }
+    let start = *inp.offset();
+    let classified = classify_executable_head(inp)?;
+    let found = classified.found();
+    let mut named_head = None;
+    let branch: Branch<1> = match classified {
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), ..) => {
+        named_head = Some(head);
+        Branch::B1
+      }
+      _ => {
+        return expected_classified_executable_head(inp, Expectation::OperationType, found);
+      }
+    };
 
-    let cursor = *inp.cursor();
-    let operation_type = take_operation_type(inp)?;
-    let name = try_take_name(inp)?;
-    let variables = variables_definition(inp)?;
-    let variables = if variables.variable_definitions().is_empty() {
-      None
-    } else {
-      Some(variables)
-    };
-    let directives = directives(inp)?;
-    let directives = if directives.directives().is_empty() {
-      None
-    } else {
-      Some(directives)
-    };
-    guard_executable_phase(inp, Expectation::LBrace, is_lbrace::<Src>)?;
-    let selection_set = selection_set(inp)?;
-    Ok(OperationDefinition::Named(NamedOperationDefinition::new(
-      inp.span_since(&cursor),
-      operation_type,
-      name,
-      variables,
-      directives,
-      selection_set,
-    )))
+    let mut tails = (
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        selection_set(inp).map(OperationDefinition::Shorthand)
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
+        let head = named_head.expect("named operation branch has an operation head");
+        let operation_type = operation_type_from_classified(head, span);
+        named_operation_after_classified_head(inp, start, operation_type)
+      },
+    );
+    tails.parse_choice(inp, &branch)
   }
 );
 
@@ -635,37 +834,58 @@ executable_parser!(
   }
 );
 
-#[inline]
-fn is_executable_definition_head<'inp, Src>(token: &GraphqlToken<'inp, Src>) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
-{
-  is_lbrace::<Src>(token) || is_fragment::<Src>(token) || is_operation_type::<Src>(token)
-}
-
 executable_parser!(
   /// Parses one GraphQL executable definition.
   ///
-  /// The first token chooses between a fragment definition and an operation;
-  /// rejected heads stay unconsumed for recovery.
+  /// One-token dispatch chooses shorthand, a named operation, or a fragment.
+  /// Each branch consumes its classified head directly before entering the
+  /// corresponding committed tail; rejected heads stay unconsumed for recovery.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   pub executable_definition,
   inp,
   ExecutableDefinition<GraphqlSlice<'inp, Src>>,
   {
-    guard_executable_phase(
-      inp,
-      Expectation::ExecutableDefinition,
-      is_executable_definition_head::<Src>,
-    )?;
-    if peeks_where(inp, is_fragment::<Src>)? {
-      fragment_definition(inp).map(ExecutableDefinition::Fragment)
-    } else {
-      operation_definition(inp).map(ExecutableDefinition::Operation)
-    }
+    let start = *inp.offset();
+    let classified = classify_executable_head(inp)?;
+    let found = classified.found();
+    let mut named_head = None;
+    let branch: Branch<2> = match classified {
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), ..) => {
+        named_head = Some(head);
+        Branch::B1
+      }
+      ClassifiedExecutableHead::Accepted(ExecutableHead::Fragment, ..) => Branch::B2,
+      ClassifiedExecutableHead::Rejected(_) => {
+        return expected_classified_executable_head(
+          inp,
+          Expectation::ExecutableDefinition,
+          found,
+        );
+      }
+    };
+
+    let mut tails = (
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        selection_set(inp)
+          .map(OperationDefinition::Shorthand)
+          .map(ExecutableDefinition::Operation)
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) = take_classified_identifier(inp, Expectation::OperationType)?;
+        let head = named_head.expect("named operation branch has an operation head");
+        let operation_type = operation_type_from_classified(head, span);
+        named_operation_after_classified_head(inp, start, operation_type)
+        .map(ExecutableDefinition::Operation)
+      },
+      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let (span, _) =
+          take_classified_identifier(inp, Expectation::Keyword("fragment"))?;
+        fragment_definition_body(inp, Fragment::new(span)).map(ExecutableDefinition::Fragment)
+      },
+    );
+    tails.parse_choice(inp, &branch)
   }
 );
 
@@ -698,11 +918,6 @@ executable_parser!(
   ExecutableDocument<GraphqlSlice<'inp, Src>>,
   {
     let cursor = *inp.cursor();
-    guard_executable_phase(
-      inp,
-      Expectation::ExecutableDefinition,
-      is_executable_definition_head::<Src>,
-    )?;
     let first = executable_definition(inp)?;
     let mut definitions: Vec<ExecutableDefinition<GraphqlSlice<'inp, Src>>> = executable_definition
       .repeated_while::<_, U1>(decide_executable_definition_head::<Src, Ctx>)
