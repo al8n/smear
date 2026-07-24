@@ -61,6 +61,7 @@ where
 = InputRef<'inp, 'input, GraphqlLexer<'inp, Src>, Ctx, GraphQL>;
 
 pub mod argument;
+pub mod definition;
 pub mod directive;
 pub mod executable;
 pub mod selection;
