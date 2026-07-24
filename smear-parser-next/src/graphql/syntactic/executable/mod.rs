@@ -11,7 +11,7 @@
 use std::vec::Vec;
 
 use smear_lexer::{
-  graphql::syntactic::SyntacticTokenKind,
+  graphql::{ContextualKeyword, syntactic::SyntacticTokenKind},
   keywords::{Fragment, Mutation, Query, Subscription},
 };
 use tokora::{
@@ -21,7 +21,7 @@ use tokora::{
   parser::{Action, parens},
   punct::{Brace, Bracket, Paren},
   try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  utils::{DowncastRef, typenum::U1},
 };
 
 use super::{
@@ -33,7 +33,7 @@ use super::{
   value::default_value,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx},
+  combinator::ParseCtx,
   graphql::{
     GraphQL,
     ast::{
@@ -46,7 +46,7 @@ use crate::{
 };
 
 macro_rules! executable_parser {
-  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [$($bounds:tt)*], $body:block) => {
     $(#[$meta])*
     $visibility fn $name<'inp, Src, Ctx>(
       $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -54,7 +54,6 @@ macro_rules! executable_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-      str: Equivalent<GraphqlSlice<'inp, Src>>,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -63,6 +62,7 @@ macro_rules! executable_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+      $($bounds)*
       GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
         + From<
           UnexpectedToken<
@@ -153,9 +153,9 @@ fn classify_executable_head<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
   let mut peeked = inp.peek::<U1>()?;
@@ -164,18 +164,17 @@ where
       let span = *token.span();
       let kind = token.token().kind();
       let token = token.token();
-      let head = if token.is_l_brace() {
-        Some(ExecutableHead::Shorthand)
-      } else if token.is_query() {
-        Some(ExecutableHead::Operation(OperationHead::Query))
-      } else if token.is_mutation() {
-        Some(ExecutableHead::Operation(OperationHead::Mutation))
-      } else if token.is_subscription() {
-        Some(ExecutableHead::Operation(OperationHead::Subscription))
-      } else if token.is_fragment() {
-        Some(ExecutableHead::Fragment)
-      } else {
-        None
+      let head = match token.downcast_ref() {
+        Some(ContextualKeyword::Query) => Some(ExecutableHead::Operation(OperationHead::Query)),
+        Some(ContextualKeyword::Mutation) => {
+          Some(ExecutableHead::Operation(OperationHead::Mutation))
+        }
+        Some(ContextualKeyword::Subscription) => {
+          Some(ExecutableHead::Operation(OperationHead::Subscription))
+        }
+        Some(ContextualKeyword::Fragment) => Some(ExecutableHead::Fragment),
+        _ if matches!(token, GraphqlToken::<'inp, Src>::LBrace) => Some(ExecutableHead::Shorthand),
+        _ => None,
       };
       match head {
         Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
@@ -406,9 +405,9 @@ fn take_fragment<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -422,7 +421,7 @@ where
     > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   guard_executable_phase(inp, Expectation::Keyword("fragment"), |token| {
-    token.is_fragment()
+    token.downcast_ref() == Some(ContextualKeyword::Fragment)
   })?;
   match inp.next()? {
     Some(spanned) => Ok(Fragment::new(spanned.into_span())),
@@ -436,9 +435,9 @@ fn variable_definition_core<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -490,6 +489,7 @@ executable_parser!(
   pub variable_definition,
   inp,
   DescribedVariableDefinition<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let cursor = *inp.cursor();
     let description = match StringValue::try_graphql(inp)? {
@@ -547,6 +547,7 @@ executable_parser!(
   pub variables_definition,
   inp,
   VariablesDefinition<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let start = *inp.offset();
     if !peeks_where(inp, |token| token.is_l_paren())? {
@@ -587,9 +588,9 @@ fn named_operation_after_classified_head<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -632,6 +633,7 @@ executable_parser!(
   pub operation_type,
   inp,
   OperationType,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let classified = classify_executable_head(inp)?;
     let found = classified.found();
@@ -681,6 +683,7 @@ executable_parser!(
   pub operation_definition,
   inp,
   OperationDefinition<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let start = *inp.offset();
     let classified = classify_executable_head(inp)?;
@@ -719,9 +722,9 @@ fn fragment_definition_body<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -763,6 +766,7 @@ executable_parser!(
   pub fragment_definition,
   inp,
   FragmentDefinition<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let keyword = take_fragment(inp)?;
     fragment_definition_body(inp, keyword)
@@ -780,6 +784,7 @@ executable_parser!(
   pub executable_definition,
   inp,
   ExecutableDefinition<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let start = *inp.offset();
     let classified = classify_executable_head(inp)?;
@@ -851,6 +856,7 @@ executable_parser!(
   pub executable_document,
   inp,
   ExecutableDocument<GraphqlSlice<'inp, Src>>,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let cursor = *inp.cursor();
     let first = executable_definition(inp)?;
@@ -864,7 +870,7 @@ executable_parser!(
 );
 
 macro_rules! impl_executable_api {
-  ($(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident) => {
+  ($(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident, [$($bounds:tt)*]) => {
     impl<$slice> $node {
       $(#[$meta])*
       ///
@@ -875,7 +881,6 @@ macro_rules! impl_executable_api {
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<$slice>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -884,6 +889,7 @@ macro_rules! impl_executable_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+        $($bounds)*
         GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
           + From<
             UnexpectedToken<
@@ -911,7 +917,8 @@ impl_executable_api!(
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
   VariableDefinition<S>,
-  variable_definition_core
+  variable_definition_core,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -920,7 +927,8 @@ impl_executable_api!(
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
   DescribedVariableDefinition<S>,
-  variable_definition
+  variable_definition,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -929,7 +937,8 @@ impl_executable_api!(
   /// See the [GraphQL Variables specification](https://spec.graphql.org/draft/#sec-Language.Variables).
   S,
   VariablesDefinition<S>,
-  variables_definition
+  variables_definition,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -938,7 +947,8 @@ impl_executable_api!(
   /// See the [GraphQL Operation Definition specification](https://spec.graphql.org/draft/#OperationDefinition).
   S,
   OperationDefinition<S>,
-  operation_definition
+  operation_definition,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -947,7 +957,8 @@ impl_executable_api!(
   /// See the [GraphQL Fragment Definition specification](https://spec.graphql.org/draft/#FragmentDefinition).
   S,
   FragmentDefinition<S>,
-  fragment_definition
+  fragment_definition,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -956,7 +967,8 @@ impl_executable_api!(
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   S,
   ExecutableDefinition<S>,
-  executable_definition
+  executable_definition,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl_executable_api!(
@@ -965,7 +977,8 @@ impl_executable_api!(
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   S,
   ExecutableDocument<S>,
-  executable_document
+  executable_document,
+  [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 
 impl OperationType {
@@ -980,9 +993,9 @@ impl OperationType {
   where
     Src: Source<usize> + ?Sized,
     GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<GraphqlSlice<'inp, Src>>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
     GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
       + From<

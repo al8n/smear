@@ -14,8 +14,10 @@ use tokora::{
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   punct::{Brace, Bracket, Paren},
   try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  utils::{DowncastRef, typenum::U1},
 };
+
+use smear_lexer::graphql::ContextualKeyword;
 
 use super::{
   GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken,
@@ -23,7 +25,7 @@ use super::{
   try_name,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx, try_at},
+  combinator::{ParseCtx, try_at},
   graphql::{
     GraphQL,
     ast::{ConstDirective, ConstDirectives, Directive, Directives, Name},
@@ -40,7 +42,6 @@ macro_rules! directive_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-      str: Equivalent<GraphqlSlice<'inp, Src>>,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -48,6 +49,7 @@ macro_rules! directive_parser {
         Span = SimpleSpan,
         Offset = usize,
       >,
+      GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
       GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
         + From<
@@ -156,9 +158,9 @@ pub(super) fn directive_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -194,9 +196,9 @@ pub(super) fn directives_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -234,9 +236,9 @@ fn const_directive_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -274,9 +276,9 @@ fn const_directives_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -404,7 +406,6 @@ macro_rules! impl_directive_api {
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<$slice>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -412,6 +413,7 @@ macro_rules! impl_directive_api {
           Span = SimpleSpan,
           Offset = usize,
         >,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
         GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
           + From<

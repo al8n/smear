@@ -11,18 +11,21 @@
 //! productions with; the productions themselves are purely syntactic — lossless/CST
 //! structure is a separate `lossless` module's concern (a later wave).
 
-use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+use smear_lexer::graphql::{
+  ContextualKeyword,
+  syntactic::{SyntacticLexer, SyntacticToken},
+};
 use tokora::{
   ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, Token,
   cache::PeekedTokenExt,
   error::{UnexpectedEot, token::UnexpectedToken},
   try_parse_input::ParseAttempt,
-  utils::{IntoComponents, typenum::U1},
+  utils::{DowncastRef, IntoComponents, typenum::U1},
 };
 
 use super::GraphQL;
 use crate::{
-  combinator::{Equivalent, ParseCtx, ident, try_ident},
+  combinator::{ParseCtx, ident, try_ident},
   graphql::{
     ast,
     error::{Expectation, GraphqlError as DialectGraphqlError},
@@ -112,7 +115,7 @@ pub fn fragment_name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -131,16 +134,18 @@ where
   {
     let mut peeked = inp.peek::<U1>()?;
     match peeked.pop_front() {
-      Some(token) => match token.token() {
-        GraphqlToken::<'inp, Src>::Identifier(source) if !"on".equivalent(source) => {}
-        _ => {
+      Some(token) => {
+        let token_ref = token.token();
+        if matches!(token_ref.downcast_ref(), Some(ContextualKeyword::On))
+          || !matches!(token_ref, GraphqlToken::<'inp, Src>::Identifier(_))
+        {
           let span = *token.span();
-          let kind = token.token().kind();
+          let kind = token_ref.kind();
           return Err(
             DialectGraphqlError::unexpected_token(kind, Expectation::FragmentName, span).into(),
           );
         }
-      },
+      }
       None => {
         return Err(
           DialectGraphqlError::maybe_unexpected_token(
@@ -221,7 +226,7 @@ impl<S> ast::FragmentName<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    str: Equivalent<S>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,

@@ -34,6 +34,11 @@ pub mod syntactic;
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
 
+/// GraphQL contextual keywords recognized from identifier spellings.
+pub mod keyword;
+
+pub use keyword::ContextualKeyword;
+
 pub(crate) mod handlers;
 
 #[cfg(test)]

@@ -8,7 +8,10 @@
 
 use std::vec::Vec;
 
-use smear_lexer::{graphql::syntactic::SyntacticTokenKind, keywords::On};
+use smear_lexer::{
+  graphql::{ContextualKeyword, syntactic::SyntacticTokenKind},
+  keywords::On,
+};
 use tokora::{
   Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
   TryParseInput,
@@ -19,7 +22,7 @@ use tokora::{
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{
-    IntoComponents,
+    DowncastRef, IntoComponents,
     typenum::{U1, U2},
   },
 };
@@ -29,7 +32,7 @@ use super::{
   directive::directives, fragment_name, try_name,
 };
 use crate::{
-  combinator::{Equivalent, ParseCtx, try_colon, try_spread},
+  combinator::{ParseCtx, try_colon, try_spread},
   graphql::{
     GraphQL,
     ast::{
@@ -50,7 +53,7 @@ macro_rules! selection_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-      str: Equivalent<GraphqlSlice<'inp, Src>>,
+      GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       GraphqlLexer<'inp, Src>: Lexer<
         'inp,
         Source = Src,
@@ -267,7 +270,7 @@ fn take_on<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -359,7 +362,7 @@ fn field_after_name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -442,7 +445,7 @@ fn try_selection<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -477,16 +480,19 @@ where
     match first.token() {
       GraphqlToken::<'inp, Src>::Identifier(_) => SelectionDispatch::Field,
       GraphqlToken::<'inp, Src>::Spread => match peeked.pop_front() {
-        Some(second) => match second.token() {
-          GraphqlToken::<'inp, Src>::Identifier(source) if "on".equivalent(source) => {
-            SelectionDispatch::TypedInlineFragment
+        Some(second) => {
+          let token = second.token();
+          match token.downcast_ref() {
+            Some(ContextualKeyword::On) => SelectionDispatch::TypedInlineFragment,
+            _ => match token {
+              GraphqlToken::<'inp, Src>::Identifier(_) => SelectionDispatch::FragmentSpread,
+              GraphqlToken::<'inp, Src>::At | GraphqlToken::<'inp, Src>::LBrace => {
+                SelectionDispatch::UntypedInlineFragment
+              }
+              token => SelectionDispatch::InvalidSpreadTail(Some((*second.span(), token.kind()))),
+            },
           }
-          GraphqlToken::<'inp, Src>::Identifier(_) => SelectionDispatch::FragmentSpread,
-          GraphqlToken::<'inp, Src>::At | GraphqlToken::<'inp, Src>::LBrace => {
-            SelectionDispatch::UntypedInlineFragment
-          }
-          token => SelectionDispatch::InvalidSpreadTail(Some((*second.span(), token.kind()))),
-        },
+        }
         None => SelectionDispatch::InvalidSpreadTail(None),
       },
       _ => return Ok(ParseAttempt::Decline),
@@ -573,7 +579,7 @@ fn fragment_spread_after_name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -629,7 +635,7 @@ fn inline_fragment_after_directives<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -665,7 +671,7 @@ fn typed_inline_fragment_after_type_condition<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -694,7 +700,7 @@ fn untyped_inline_fragment_after_spread<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -818,7 +824,7 @@ fn try_selection_set<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  str: Equivalent<GraphqlSlice<'inp, Src>>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
@@ -869,7 +875,7 @@ macro_rules! impl_selection_api {
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<$slice>,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
@@ -911,7 +917,7 @@ macro_rules! impl_selection_try_api {
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp,
-        str: Equivalent<$slice>,
+        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
         GraphqlLexer<'inp, Src>: Lexer<
           'inp,
           Source = Src,
