@@ -765,27 +765,10 @@ where
   })
 }
 
-/// Reports whether the next token is a selection-set opener without consuming
-/// it. Both the committed and optional selection-set parsers share this
-/// classifier so only the committed path turns a missing opener into the
-/// GraphQL-specific diagnostic.
-#[inline]
-fn has_selection_set_opener<'inp, Src>(
-  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-) -> bool
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-{
-  matches!(peeked.pop_front(), Some(token) if token.token().is_l_brace())
-}
-
 /// Continues an optional selection-set attempt only when its `{` opener is
 /// present, leaving every other token for the caller.
 fn decide_selection_set_opener<'inp, Src, Ctx>(
-  peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
@@ -795,10 +778,9 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
-  Ok(if has_selection_set_opener(peeked) {
-    Action::Continue
-  } else {
-    Action::Stop
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_l_brace() => Action::Continue,
+    _ => Action::Stop,
   })
 }
 
@@ -807,14 +789,6 @@ selection_parser!(
   inp,
   SelectionSet<GraphqlSlice<'inp, Src>>,
   {
-    let has_opener = {
-      let peeked = inp.peek::<U1>()?;
-      has_selection_set_opener(peeked)
-    };
-    if !has_opener {
-      return expected_selection_phase(inp, Expectation::LBrace);
-    }
-
     selection
       .repeated_while::<_, U1>(decide_selection_set_tail::<Src, Ctx>)
       .at_least(1)

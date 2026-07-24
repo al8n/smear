@@ -125,6 +125,16 @@ fn assert_str_expectation(
   }
 }
 
+fn assert_str_end_of_input(result: Result<(), GraphqlErrors<&str>>, span: SimpleSpan) {
+  let error = result
+    .expect_err("fixture should fail")
+    .into_iter()
+    .next()
+    .expect("fatal context emits one error");
+  assert_eq!(error.span(), span);
+  assert!(matches!(error.data(), ErrorData::EndOfInput));
+}
+
 fn assert_str_unclosed_object(result: Result<(), GraphqlErrors<&str>>, span: SimpleSpan) {
   let error = result
     .expect_err("fixture should fail")
@@ -388,19 +398,17 @@ fn inline_fragment_accepts_typed_untyped_and_directive_forms() {
 }
 
 #[test]
-fn inline_fragment_reports_selection_set_and_spread_shaped_tail_phases() {
+fn inline_fragment_propagates_native_selection_set_tail_errors() {
   reject_all!(inline_fragment, "... on User");
   reject_all!(inline_fragment, "... UserFields");
 
-  assert_str_expectation(
+  assert_str_end_of_input(
     drive_str(|inp| inline_fragment(inp).map(|_| ()), "... on User"),
-    Expectation::LBrace,
     SimpleSpan::new(11, 11),
   );
-  assert_str_expectation(
+  assert_str_end_of_input(
     drive_str(|inp| inline_fragment(inp).map(|_| ()), "... UserFields"),
-    Expectation::LBrace,
-    SimpleSpan::new(4, 14),
+    SimpleSpan::new(4, 4),
   );
 }
 
@@ -487,7 +495,7 @@ fn selection_rejects_bare_spread() {
 }
 
 #[test]
-fn selection_reports_local_dispatch_and_inline_fragment_phases() {
+fn selection_reports_local_dispatch_and_native_inline_fragment_tail_errors() {
   assert_str_expectation(
     drive_str(|inp| selection(inp).map(|_| ()), "123"),
     Expectation::Selection,
@@ -498,9 +506,8 @@ fn selection_reports_local_dispatch_and_inline_fragment_phases() {
     Expectation::Name,
     SimpleSpan::new(6, 6),
   );
-  assert_str_expectation(
+  assert_str_end_of_input(
     drive_str(|inp| selection(inp).map(|_| ()), "... @d"),
-    Expectation::LBrace,
     SimpleSpan::new(6, 6),
   );
 }
@@ -610,6 +617,22 @@ fn selection_set_accepts_nested() {
     assert_eq!(f.selection_set().expect("nested").selections().len(), 2);
   }
   accept_all!(selection_set, "{ user { id name } }", check);
+}
+
+#[test]
+fn selection_set_uses_native_missing_opener_diagnostics() {
+  reject_all!(selection_set, "");
+  reject_all!(selection_set, "id }");
+
+  assert_str_end_of_input(
+    drive_str(|inp| selection_set(inp).map(|_| ()), ""),
+    SimpleSpan::new(0, 0),
+  );
+  assert_str_expectation(
+    drive_str(|inp| selection_set(inp).map(|_| ()), "id }"),
+    Expectation::Name,
+    SimpleSpan::new(0, 2),
+  );
 }
 
 #[test]
