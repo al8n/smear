@@ -534,6 +534,12 @@ fn selection_dispatch_does_not_consume_an_invalid_head() {
 
 #[test]
 fn selection_dispatch_commits_a_spread_before_its_fragment_name_error() {
+  assert_str_expectation(
+    drive_str(|inp| selection(inp).map(|_| ()), "..."),
+    Expectation::FragmentName,
+    SimpleSpan::new(3, 3),
+  );
+
   let result = drive_str(
     |inp| {
       let result = selection(inp).map(|_| ());
