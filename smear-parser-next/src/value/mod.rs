@@ -21,8 +21,10 @@ pub use enum_value::*;
 pub use float::*;
 pub use int::*;
 pub use list::*;
+pub use map::*;
 pub use null_value::*;
 pub use object::*;
+pub use set::*;
 pub use string::*;
 pub use variable::*;
 
@@ -32,8 +34,10 @@ mod enum_value;
 mod float;
 mod int;
 mod list;
+mod map;
 mod null_value;
 mod object;
+mod set;
 mod string;
 mod variable;
 
@@ -47,7 +51,7 @@ mod tests {
 
   use super::{
     BlockStringValue, BooleanValue, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
-    IntValue, List, NullValue, Object, ObjectField, StringValue, VariableValue,
+    IntValue, List, Map, MapEntry, NullValue, Object, ObjectField, Set, StringValue, VariableValue,
   };
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -159,11 +163,35 @@ mod tests {
     assert_eq!(list.values(), &[1, 2]);
     assert_eq!(list.into_components(), (CustomSpan(10), vec![1, 2]));
 
-    let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(11), "answer", 42);
-    assert_eq!(field.as_span(), &CustomSpan(11));
+    let set = Set::<i32, CustomSpan>::new(CustomSpan(11), vec![1, 2]);
+    assert_eq!(set.as_span(), &CustomSpan(11));
+    assert_eq!(set.values(), &[1, 2]);
+    assert_eq!(set.into_components(), (CustomSpan(11), vec![1, 2]));
+
+    let entry = MapEntry::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
+    assert_eq!(entry.as_span(), &CustomSpan(12));
+    assert_eq!(entry.key(), &"answer");
+    assert_eq!(entry.value(), &42);
+    assert_eq!(entry.into_components(), (CustomSpan(12), "answer", 42));
+
+    let map = Map::<_, _, CustomSpan>::new(
+      CustomSpan(13),
+      vec![MapEntry::<_, _, CustomSpan>::new(
+        CustomSpan(14),
+        "answer",
+        42,
+      )],
+    );
+    assert_eq!(map.as_span(), &CustomSpan(13));
+    assert_eq!(map.entries().len(), 1);
+    assert_eq!(map.entries()[0].key(), &"answer");
+    assert_eq!(map.into_entries()[0].value(), &42);
+
+    let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(15), "answer", 42);
+    assert_eq!(field.as_span(), &CustomSpan(15));
     assert_eq!(field.name(), &"answer");
     assert_eq!(field.value(), &42);
-    assert_eq!(field.into_components(), (CustomSpan(11), "answer", 42));
+    assert_eq!(field.into_components(), (CustomSpan(15), "answer", 42));
 
     let object_field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
     let object = Object::<&str, i32, CustomSpan>::new(CustomSpan(13), vec![object_field]);

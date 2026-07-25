@@ -5,4 +5,4 @@ OK  9..10  Identifier("f")
 OK  10..11  Colon
 OK  12..18  Identifier("String")
 OK  19..20  Equal
-ERR LexerErrors([LexerError { span: SimpleSpan { start: 21, end: 30 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: TripleQuote, _lang: PhantomData<()> })])) }])
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 21, end: 30 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: TripleQuote, expected: None, _lang: PhantomData<()> })])) }])

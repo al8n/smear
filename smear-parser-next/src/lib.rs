@@ -20,6 +20,10 @@ pub mod combinator;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod name;
 
+/// Namespaced-path carrier shared by GraphQL-family dialect ASTs.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod path;
+
 /// Selection-node carriers shared by the GraphQL-family dialect ASTs.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod selection;
@@ -55,3 +59,8 @@ mod value;
 /// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
 #[cfg(feature = "graphql")]
 pub mod graphql;
+
+/// The GraphQLX dialect: namespaced paths, collection values, generic type
+/// references, and imports over the concrete GraphQLX lexer.
+#[cfg(feature = "graphqlx")]
+pub mod graphqlx;

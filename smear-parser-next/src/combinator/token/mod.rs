@@ -60,10 +60,13 @@ macro_rules! punct_atoms {
 
 punct_atoms!(
   at / try_at => At,
+  asterisk / try_asterisk => Asterisk,
   colon / try_colon => Colon,
   dollar / try_dollar => Dollar,
   equal / try_equal => Equal,
   bang / try_bang => Exclamation,
+  plus / try_plus => Plus,
+  minus / try_minus => Hyphen,
   pipe / try_pipe => Pipe,
   ampersand / try_ampersand => Ampersand,
   lbrace / try_lbrace => OpenBrace,
@@ -72,6 +75,10 @@ punct_atoms!(
   rbracket / try_rbracket => CloseBracket,
   lparen / try_lparen => OpenParen,
   rparen / try_rparen => CloseParen,
+  langle / try_langle => OpenAngle,
+  rangle / try_rangle => CloseAngle,
+  fat_arrow / try_fat_arrow => FatArrow,
+  double_colon / try_double_colon => DoubleColon,
   spread / try_spread => Spread,
 );
 

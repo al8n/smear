@@ -4,6 +4,9 @@ use tokora::utils::human_display::DisplayHuman;
 /// Errors for GraphQLx lexers
 pub mod error;
 
+/// GraphQLx contextual keywords recognized from identifier spellings.
+pub mod keyword;
+
 /// Syntactic tokens for GraphQLx - fast lexing that skips trivia.
 ///
 /// This module provides [`SyntacticToken`](syntactic::SyntacticToken), which is optimized for
@@ -38,6 +41,8 @@ pub mod syntactic;
 ///
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;
+
+pub use keyword::ContextualKeyword;
 
 mod handlers;
 
