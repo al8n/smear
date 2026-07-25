@@ -14,6 +14,7 @@ pub use executable::*;
 pub use field::*;
 pub use name::*;
 pub use ty::*;
+pub use type_system::*;
 pub use value::*;
 
 mod argument;
@@ -22,6 +23,7 @@ mod executable;
 mod field;
 mod name;
 mod ty;
+mod type_system;
 mod value;
 
 /// The default container type used for AST collections (lists, objects).

@@ -581,7 +581,7 @@ executable_parser!(
 
 /// Parses the committed tail of a named operation after its keyword is consumed.
 #[inline]
-fn named_operation_after_classified_head<'inp, Src, Ctx>(
+pub(super) fn named_operation_after_classified_head<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   start: usize,
   operation_type: OperationType,
@@ -716,7 +716,7 @@ executable_parser!(
   }
 );
 
-fn fragment_definition_body<'inp, Src, Ctx>(
+pub(super) fn fragment_definition_body<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   keyword: Fragment,
 ) -> Result<FragmentDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>

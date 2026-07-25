@@ -42,6 +42,10 @@ mod argument;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod directive;
 
+/// Type-system AST carriers shared by the GraphQL-family dialects.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod type_system;
+
 /// Value-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
