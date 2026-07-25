@@ -1,4 +1,4 @@
-//! End-to-end GraphQLX production tests.
+//! End-to-end GraphQLx production tests.
 //!
 //! The parser API is deliberately source-generic.  Each successful case below
 //! is exercised through the concrete lexer over `str`, `[u8]`, and `Bytes`
@@ -12,21 +12,21 @@ use tokora::{
 };
 
 use super::{
-  GraphQLX, ast,
+  GraphQLx, ast,
   error::{ErrorData, Expectation, GraphqlxErrors, Unclosed},
   syntactic::{self, GraphqlxInput, GraphqlxLexer},
 };
 
 /// The fatal context a `str`-sourced parse runs under.
 type StrCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, str>, GraphqlxErrors<&'inp str>, GraphQLX>;
+  FatalContext<'inp, GraphqlxLexer<'inp, str>, GraphqlxErrors<&'inp str>, GraphQLx>;
 /// The fatal context a `[u8]`-sourced parse runs under.
 type SliceCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLX>;
+  FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 /// The fatal context for an owned, refcount-sliced [`bytes::Bytes`] source.
 #[cfg(feature = "bytes")]
 type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLX>;
+  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlxErrors<&str>>`.
 fn drive_str<'inp, O>(
@@ -35,7 +35,7 @@ fn drive_str<'inp, O>(
   ) -> Result<O, GraphqlxErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlxErrors<&'inp str>> {
-  Parser::with_parser_of::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLX>(
+  Parser::with_parser_of::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
     f,
   )
   .parse_str(input)
@@ -54,7 +54,7 @@ fn drive_slice<'inp, O>(
     O,
     GraphqlxErrors<&'inp [u8]>,
     _,
-    GraphQLX,
+    GraphQLx,
   >(f)
   .parse_slice(input)
 }
@@ -72,7 +72,7 @@ fn drive_bytes_as_slice<'inp, O>(
     O,
     GraphqlxErrors<&'inp [u8]>,
     _,
-    GraphQLX,
+    GraphQLx,
   >(f)
   .parse_bytes(input)
 }
@@ -92,7 +92,7 @@ fn drive_owned_bytes<'inp, O>(
     O,
     GraphqlxErrors<::bytes::Bytes>,
     _,
-    GraphQLX,
+    GraphQLx,
   >(f)
   .parse(input)
 }
@@ -593,7 +593,7 @@ fn imports_cover_named_wildcard_aliases_and_module_strings() {
 #[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
-    .expect_err("an integer cannot begin a GraphQLX type")
+    .expect_err("an integer cannot begin a GraphQLx type")
     .into_iter()
     .next()
     .expect("invalid type should emit an error");

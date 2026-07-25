@@ -1,4 +1,4 @@
-//! GraphQLX import productions.
+//! GraphQLx import productions.
 
 use std::vec::Vec;
 use tokora::{
@@ -22,7 +22,7 @@ use super::{
 use crate::{
   combinator::{ParseCtx, asterisk},
   graphqlx::{
-    GraphQLX,
+    GraphQLx,
     ast::{
       ImportClause, ImportDefinition, ImportList, ImportMember, NamedSpecifier, WildcardSpecifier,
     },
@@ -32,7 +32,7 @@ use crate::{
 
 macro_rules! import_parser {
   (@impl [$($unclosed:ty),*] $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
-    #[doc = "Parses this committed GraphQLX import production."]
+    #[doc = "Parses this committed GraphQLx import production."]
     $visibility fn $name<'inp, Src, Ctx>(
       $input: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
     ) -> Result<$output, GraphqlxError<'inp, Src, Ctx>>
@@ -49,15 +49,15 @@ macro_rules! import_parser {
         Span = SimpleSpan,
         Offset = usize,
       >,
-      Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+      Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
         + From<
           UnexpectedToken<
             'inp,
             GraphqlxToken<'inp, Src>,
             <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
             SimpleSpan,
-            GraphQLX,
+            GraphQLx,
           >,
         > $(+ From<$unclosed>)*
         + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
@@ -68,7 +68,7 @@ macro_rules! import_parser {
   };
   (brace $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
     import_parser!(
-      @impl [Unclosed<Brace, SimpleSpan, GraphQLX>]
+      @impl [Unclosed<Brace, SimpleSpan, GraphQLx>]
       $visibility $name, $input, $output, $body
     );
   };
@@ -85,15 +85,15 @@ where
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
     > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -120,15 +120,15 @@ where
     + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
     > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -152,15 +152,15 @@ where
     + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
     > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -188,15 +188,15 @@ where
     + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
     > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -228,7 +228,7 @@ import_parser!(plain pub import_member, inp, ImportMember<GraphqlxSlice<'inp, Sr
         named_specifier_after_name(super::ast::Name::new(span, source), inp)
           .map(ImportMember::Named)
       }
-      _ => unreachable!("fused GraphQLX import-member dispatch received a non-identifier token"),
+      _ => unreachable!("fused GraphQLx import-member dispatch received a non-identifier token"),
     };
   let wildcard_head =
     |Spanned { span, data: token }: Spanned<GraphqlxToken<'inp, Src>, SimpleSpan>,
@@ -236,7 +236,7 @@ import_parser!(plain pub import_member, inp, ImportMember<GraphqlxSlice<'inp, Sr
       GraphqlxToken::<'inp, Src>::Asterisk => {
         wildcard_specifier_after_asterisk(span, inp).map(ImportMember::Wildcard)
       }
-      _ => unreachable!("fused GraphQLX import-member dispatch received a non-asterisk token"),
+      _ => unreachable!("fused GraphQLx import-member dispatch received a non-asterisk token"),
     };
 
   match (named_head, wildcard_head)
@@ -260,7 +260,7 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(match peeked.pop_front() {
     Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RBrace) => Action::Stop,
@@ -287,7 +287,7 @@ import_parser!(brace pub import_clause, inp, ImportClause<GraphqlxSlice<'inp, Sr
       GraphqlxToken::<'inp, Src>::Asterisk => {
         wildcard_specifier_after_asterisk(span, inp).map(ImportClause::Wildcard)
       }
-      _ => unreachable!("fused GraphQLX import-clause dispatch received a non-asterisk token"),
+      _ => unreachable!("fused GraphQLx import-clause dispatch received a non-asterisk token"),
     };
 
   match (wildcard_head,)
@@ -317,17 +317,17 @@ where
     + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Brace, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let cursor = *inp.cursor();
@@ -341,7 +341,7 @@ where
 macro_rules! graphqlx_import_api {
   (@impl [$($unclosed:ty),*] $node:ty, $parse:ident) => {
     impl<S> $node {
-      /// Parses this committed GraphQLX import production.
+      /// Parses this committed GraphQLx import production.
       pub fn graphqlx<'inp, Src, Ctx>(
         inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
@@ -358,15 +358,15 @@ macro_rules! graphqlx_import_api {
             Span = SimpleSpan,
             Offset = usize,
           >,
-        Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+        Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
           + From<
             UnexpectedToken<
               'inp,
               GraphqlxToken<'inp, Src>,
               <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
               SimpleSpan,
-              GraphQLX,
+              GraphQLx,
             >,
           > $(+ From<$unclosed>)*
           + From<DialectGraphqlxError<S>>,
@@ -379,7 +379,7 @@ macro_rules! graphqlx_import_api {
     graphqlx_import_api!(@impl [] $node, $parse);
   };
   (brace $node:ty, $parse:ident) => {
-    graphqlx_import_api!(@impl [Unclosed<Brace, SimpleSpan, GraphQLX>] $node, $parse);
+    graphqlx_import_api!(@impl [Unclosed<Brace, SimpleSpan, GraphQLx>] $node, $parse);
   };
 }
 

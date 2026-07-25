@@ -1,4 +1,4 @@
-//! GraphQLX import AST nodes.
+//! GraphQLx import AST nodes.
 
 use core::marker::PhantomData;
 use std::vec::Vec;
@@ -10,7 +10,7 @@ use tokora::{
 
 use super::{InlineStringValue, Name, Path};
 
-/// A named GraphQLX import specifier, optionally renamed with `as Path`.
+/// A named GraphQLx import specifier, optionally renamed with `as Path`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NamedSpecifier<S, Span = SimpleSpan, PathContainer = Vec<Name<S, Span>>> {
   span: Span,
@@ -71,7 +71,7 @@ impl<S, Span, PathContainer> IntoComponents for NamedSpecifier<S, Span, PathCont
   }
 }
 
-/// A wildcard GraphQLX import specifier, optionally renamed with `as Path`.
+/// A wildcard GraphQLx import specifier, optionally renamed with `as Path`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WildcardSpecifier<S, Span = SimpleSpan, PathContainer = Vec<Name<S, Span>>> {
   span: Span,
@@ -121,7 +121,7 @@ impl<S, Span, PathContainer> IntoComponents for WildcardSpecifier<S, Span, PathC
   }
 }
 
-/// A member of a braced GraphQLX import list.
+/// A member of a braced GraphQLx import list.
 #[derive(
   Debug,
   Clone,
@@ -162,7 +162,7 @@ impl<S> IntoSpan<SimpleSpan> for ImportMember<S> {
   }
 }
 
-/// A braced list of GraphQLX import members.
+/// A braced list of GraphQLx import members.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImportList<S, Container = Vec<ImportMember<S>>> {
   span: SimpleSpan,

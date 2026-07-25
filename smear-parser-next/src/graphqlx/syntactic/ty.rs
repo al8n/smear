@@ -1,6 +1,6 @@
-//! GraphQLX recursive type-reference productions.
+//! GraphQLx recursive type-reference productions.
 //!
-//! GraphQLX extends GraphQL's named/list references with paths, generic type
+//! GraphQLx extends GraphQL's named/list references with paths, generic type
 //! arguments, set types (`<T>`), and map types (`<K => V>`). A trailing `!`
 //! is folded into the node it immediately follows.
 
@@ -26,7 +26,7 @@ use super::{
 use crate::{
   combinator::{ParseCtx, try_bang, try_fat_arrow},
   graphqlx::{
-    GraphQLX,
+    GraphQLx,
     ast::{DefinitionTypePath, Type, TypeGenerics},
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
@@ -58,7 +58,7 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(match peeked.pop_front() {
     Some(token) if type_head_kind(token.token().kind()) => Action::Continue,
@@ -76,18 +76,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| ty(inp))
@@ -110,18 +110,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   if next_is(inp, |token| {
@@ -144,18 +144,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let generics = try_type_generics(inp)?;
@@ -172,18 +172,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| ty(inp))
@@ -202,18 +202,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
@@ -228,7 +228,7 @@ where
   .map(|delimited| delimited.into_data())
 }
 
-/// Parses a committed recursive GraphQLX type reference.
+/// Parses a committed recursive GraphQLx type reference.
 pub fn ty<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<Type<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -239,18 +239,18 @@ where
     Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
     + From<
       UnexpectedToken<
         'inp,
         GraphqlxToken<'inp, Src>,
         <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
         SimpleSpan,
-        GraphQLX,
+        GraphQLx,
       >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let cursor = *inp.cursor();
@@ -262,7 +262,7 @@ where
         let path = path_after_first(span.start(), first, false, inp)?;
         path_type_after_path(path, inp)
       }
-      _ => unreachable!("fused GraphQLX type dispatch received a non-identifier token"),
+      _ => unreachable!("fused GraphQLx type dispatch received a non-identifier token"),
     };
   let path_separator_head =
     |Spanned { span, data: token }: Spanned<GraphqlxToken<'inp, Src>, SimpleSpan>,
@@ -272,7 +272,7 @@ where
         let path = path_after_first(span.start(), first, true, inp)?;
         path_type_after_path(path, inp)
       }
-      _ => unreachable!("fused GraphQLX type dispatch received a non-path-separator token"),
+      _ => unreachable!("fused GraphQLx type dispatch received a non-path-separator token"),
     };
   let core = match (identifier_head, path_separator_head)
     .fused_dispatch_on_kind(&[
@@ -308,7 +308,7 @@ where
 }
 
 impl<S> Type<S> {
-  /// Parses one committed GraphQLX type reference.
+  /// Parses one committed GraphQLx type reference.
   pub fn graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
@@ -318,18 +318,18 @@ impl<S> Type<S> {
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-    Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLX>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLX>>
+    Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
       + From<
         UnexpectedToken<
           'inp,
           GraphqlxToken<'inp, Src>,
           <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
           SimpleSpan,
-          GraphQLX,
+          GraphQLx,
         >,
-      > + From<Unclosed<Angle, SimpleSpan, GraphQLX>>
-      + From<Unclosed<Bracket, SimpleSpan, GraphQLX>>
+      > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
+      + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
       + From<DialectGraphqlxError<S>>,
   {
     ty(inp)

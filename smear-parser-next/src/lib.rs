@@ -60,7 +60,7 @@ mod value;
 #[cfg(feature = "graphql")]
 pub mod graphql;
 
-/// The GraphQLX dialect: namespaced paths, collection values, generic type
-/// references, and imports over the concrete GraphQLX lexer.
+/// The GraphQLx dialect: namespaced paths, collection values, generic type
+/// references, and imports over the concrete GraphQLx lexer.
 #[cfg(feature = "graphqlx")]
 pub mod graphqlx;

@@ -1,6 +1,6 @@
-//! GraphQLX parser errors and Tokora conversion glue.
+//! GraphQLx parser errors and Tokora conversion glue.
 //!
-//! The GraphQLX parser owns its error family so it remains usable with the
+//! The GraphQLx parser owns its error family so it remains usable with the
 //! `graphqlx` feature alone; it deliberately does not depend on the separately
 //! feature-gated GraphQL dialect module.
 
@@ -23,9 +23,9 @@ use tokora::{
   utils::Expected,
 };
 
-use super::GraphQLX;
+use super::GraphQLx;
 
-/// Typed expectations reported by GraphQLX productions.
+/// Typed expectations reported by GraphQLx productions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Expectation {
@@ -93,13 +93,13 @@ pub enum Expectation {
   EnumValue,
   /// A variable reference (`$name`).
   VariableValue,
-  /// A GraphQLX type reference.
+  /// A GraphQLx type reference.
   Type,
-  /// A GraphQLX input value.
+  /// A GraphQLx input value.
   InputValue,
-  /// A constant GraphQLX input value.
+  /// A constant GraphQLx input value.
   ConstInputValue,
-  /// A GraphQLX import clause.
+  /// A GraphQLx import clause.
   ImportClause,
   /// An import member.
   ImportMember,
@@ -152,7 +152,7 @@ impl<T, TK> UnexpectedToken<T, TK> {
   }
 }
 
-/// The delimiter kind left unclosed by a GraphQLX production.
+/// The delimiter kind left unclosed by a GraphQLx production.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, IsVariant)]
 pub enum Unclosed {
   /// Parentheses, missing `)`.
@@ -165,7 +165,7 @@ pub enum Unclosed {
   Angle,
 }
 
-/// The data carried by a GraphQLX parser error.
+/// The data carried by a GraphQLx parser error.
 #[derive(Debug, Clone, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -186,7 +186,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   Source(core::marker::PhantomData<S>),
 }
 
-/// A single GraphQLX parser error.
+/// A single GraphQLx parser error.
 #[derive(Debug, Clone)]
 pub struct Error<S, T, Char = char, Exp = Expectation, StateError = ()> {
   span: Span,
@@ -225,7 +225,7 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
       span,
       ErrorData::UnexpectedEnd(UnexpectedEnd::with_name(
         0,
-        tokora::utils::CowStr::from_static("GraphQLX production"),
+        tokora::utils::CowStr::from_static("GraphQLx production"),
         expected,
       )),
     )
@@ -277,7 +277,7 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
 type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
   std::vec::Vec<Error<S, T, Char, Exp, StateError>>;
 
-/// A collection of GraphQLX parser errors.
+/// A collection of GraphQLx parser errors.
 #[derive(Debug, Clone, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct Errors<S, T, Char = char, Exp = Expectation, StateError = ()>(
   DefaultErrorsContainer<S, T, Char, Exp, StateError>,
@@ -326,11 +326,11 @@ impl<S, T, Char, Exp, StateError> Extend<Error<S, T, Char, Exp, StateError>>
   }
 }
 
-/// The GraphQLX dialect error keyed to a source slice and concrete syntactic
+/// The GraphQLx dialect error keyed to a source slice and concrete syntactic
 /// token kind.
 pub type GraphqlxError<S> = Error<S, SyntacticTokenKind, char, Expectation>;
 
-/// The GraphQLX dialect error container used by parser contexts.
+/// The GraphQLx dialect error container used by parser contexts.
 pub type GraphqlxErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 
 #[inline]
@@ -458,30 +458,30 @@ impl<S, Lang: ?Sized> From<UnexpectedEot<usize, Lang>> for GraphqlxErrors<S> {
   }
 }
 
-impl<S> From<TokoraUnclosed<Bracket, Span, GraphQLX>> for GraphqlxErrors<S> {
+impl<S> From<TokoraUnclosed<Bracket, Span, GraphQLx>> for GraphqlxErrors<S> {
   #[inline]
-  fn from(err: TokoraUnclosed<Bracket, Span, GraphQLX>) -> Self {
+  fn from(err: TokoraUnclosed<Bracket, Span, GraphQLx>) -> Self {
     GraphqlxError::unclosed_list(err.span()).into()
   }
 }
 
-impl<S> From<TokoraUnclosed<Paren, Span, GraphQLX>> for GraphqlxErrors<S> {
+impl<S> From<TokoraUnclosed<Paren, Span, GraphQLx>> for GraphqlxErrors<S> {
   #[inline]
-  fn from(err: TokoraUnclosed<Paren, Span, GraphQLX>) -> Self {
+  fn from(err: TokoraUnclosed<Paren, Span, GraphQLx>) -> Self {
     GraphqlxError::unclosed_parentheses(err.span()).into()
   }
 }
 
-impl<S> From<TokoraUnclosed<Brace, Span, GraphQLX>> for GraphqlxErrors<S> {
+impl<S> From<TokoraUnclosed<Brace, Span, GraphQLx>> for GraphqlxErrors<S> {
   #[inline]
-  fn from(err: TokoraUnclosed<Brace, Span, GraphQLX>) -> Self {
+  fn from(err: TokoraUnclosed<Brace, Span, GraphQLx>) -> Self {
     GraphqlxError::unclosed_object(err.span()).into()
   }
 }
 
-impl<S> From<TokoraUnclosed<Angle, Span, GraphQLX>> for GraphqlxErrors<S> {
+impl<S> From<TokoraUnclosed<Angle, Span, GraphQLx>> for GraphqlxErrors<S> {
   #[inline]
-  fn from(err: TokoraUnclosed<Angle, Span, GraphQLX>) -> Self {
+  fn from(err: TokoraUnclosed<Angle, Span, GraphQLx>) -> Self {
     GraphqlxError::unclosed_angle(err.span()).into()
   }
 }

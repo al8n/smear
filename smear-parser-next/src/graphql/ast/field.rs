@@ -1,6 +1,6 @@
 //! GraphQL selection AST node types.
 //!
-//! Shared selection carriers live at crate level so GraphQLX can bind the same
+//! Shared selection carriers live at crate level so GraphQLx can bind the same
 //! structures later. This module specializes them to GraphQL names, executable
 //! arguments, and executable directives.
 
