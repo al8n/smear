@@ -1,111 +1,20 @@
-//! SDL type-definition dispatch.
+//! SDL named type-definition dispatch.
 
 use super::*;
 
-#[derive(Debug, Copy, Clone)]
-enum TypeDefinitionHead {
-  Scalar,
-  Object,
-  Interface,
-  Union,
-  Enum,
-  InputObject,
-}
-
-#[derive(Debug, Copy, Clone)]
-enum ClassifiedTypeDefinitionHead {
-  Accepted(TypeDefinitionHead, SimpleSpan, SyntacticTokenKind),
-  Rejected(Option<(SimpleSpan, SyntacticTokenKind)>),
-}
-
-impl ClassifiedTypeDefinitionHead {
-  #[inline]
-  const fn found(self) -> Option<(SimpleSpan, SyntacticTokenKind)> {
-    match self {
-      Self::Accepted(_, span, kind) => Some((span, kind)),
-      Self::Rejected(found) => found,
-    }
-  }
-}
-
-/// Classifies the leading type-definition keyword exactly once without consuming it.
-#[inline]
-fn classify_type_definition_head<'inp, Src, Ctx>(
+/// Enters a named type-definition tail after its contextual keyword was already
+/// consumed and classified by a fused dispatcher.
+pub(super) fn type_definition_after_keyword<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<ClassifiedTypeDefinitionHead, GraphqlError<'inp, Src, Ctx>>
+  keyword: ContextualKeyword,
+  start: usize,
+) -> Result<TypeDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-{
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(match peeked.pop_front() {
-    Some(token) => {
-      let span = *token.span();
-      let kind = token.token().kind();
-      let head = match token.token().downcast_ref() {
-        Some(ContextualKeyword::Scalar) => Some(TypeDefinitionHead::Scalar),
-        Some(ContextualKeyword::Type) => Some(TypeDefinitionHead::Object),
-        Some(ContextualKeyword::Interface) => Some(TypeDefinitionHead::Interface),
-        Some(ContextualKeyword::Union) => Some(TypeDefinitionHead::Union),
-        Some(ContextualKeyword::Enum) => Some(TypeDefinitionHead::Enum),
-        Some(ContextualKeyword::Input) => Some(TypeDefinitionHead::InputObject),
-        _ => None,
-      };
-      match head {
-        Some(head) => ClassifiedTypeDefinitionHead::Accepted(head, span, kind),
-        None => ClassifiedTypeDefinitionHead::Rejected(Some((span, kind))),
-      }
-    }
-    None => ClassifiedTypeDefinitionHead::Rejected(None),
-  })
-}
-
-fn expected_classified_type_definition_head<'inp, Src, Ctx, T>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-  found: Option<(SimpleSpan, SyntacticTokenKind)>,
-) -> Result<T, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
-{
-  const EXPECTED: Expectation = Expectation::Keyword("type definition");
-  match found {
-    Some((span, kind)) => Err(DialectGraphqlError::unexpected_token(kind, EXPECTED, span).into()),
-    None => {
-      let offset = *inp.offset();
-      Err(
-        DialectGraphqlError::maybe_unexpected_token(
-          None,
-          EXPECTED,
-          SimpleSpan::new(offset, offset),
-        )
-        .into(),
-      )
-    }
-  }
-}
-
-/// Consumes an identifier head already accepted by the type-definition classifier.
-///
-/// This intentionally validates only the token shape: the contextual-keyword
-/// spelling was already classified, and rechecking it here would make dispatch
-/// do the same work twice.
-fn take_classified_type_definition_keyword<'inp, Src, Ctx>(
-  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
-) -> Result<SimpleSpan, GraphqlError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -116,31 +25,40 @@ where
         SimpleSpan,
         GraphQL,
       >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  match inp.next()? {
-    Some(spanned) => {
-      let (span, token) = spanned.into_components();
-      match token {
-        GraphqlToken::<'inp, Src>::Identifier(_) => Ok(span),
-        token => Err(
-          DialectGraphqlError::unexpected_token(
-            token.kind(),
-            Expectation::Keyword("type definition"),
-            span,
-          )
-          .into(),
-        ),
-      }
+  match keyword {
+    ContextualKeyword::Scalar => {
+      super::scalar::scalar_after_keyword(inp, start).map(TypeDefinition::Scalar)
     }
-    None => expected_classified_type_definition_head(inp, None),
+    ContextualKeyword::Type => {
+      super::object::object_after_keyword(inp, start).map(TypeDefinition::Object)
+    }
+    ContextualKeyword::Interface => {
+      super::interface::interface_after_keyword(inp, start).map(TypeDefinition::Interface)
+    }
+    ContextualKeyword::Union => {
+      super::union::union_after_keyword(inp, start).map(TypeDefinition::Union)
+    }
+    ContextualKeyword::Enum => {
+      super::enum_type::enum_after_keyword(inp, start).map(TypeDefinition::Enum)
+    }
+    ContextualKeyword::Input => {
+      super::input_object::input_object_after_keyword(inp, start).map(TypeDefinition::InputObject)
+    }
+    _ => expected_definition_phase(inp, Expectation::Keyword("type definition")),
   }
 }
 
 definition_parser!(
-  /// Parses a GraphQL named type definition by deterministic contextual-keyword
-  /// dispatch. The selected branch consumes the already classified identifier and
-  /// then enters its committed tail.
+  /// Parses a GraphQL named type definition by fused contextual-keyword dispatch.
+  ///
+  /// The dispatcher consumes the identifier once, downcasts it once to a
+  /// contextual keyword, and enters the selected committed tail without asking a
+  /// subparser to inspect the same head again.
   ///
   /// See the [GraphQL Type Definition specification](https://spec.graphql.org/draft/#TypeDefinition).
   pub type_definition,
@@ -148,49 +66,41 @@ definition_parser!(
   TypeDefinition<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    let classified = classify_type_definition_head(inp)?;
-    let found = classified.found();
-    let (head, start) = match classified {
-      ClassifiedTypeDefinitionHead::Accepted(head, span, _) => (head, span.start()),
-      ClassifiedTypeDefinitionHead::Rejected(_) => {
-        return expected_classified_type_definition_head(inp, found);
-      }
-    };
-    let branch: Branch<5> = match head {
-      TypeDefinitionHead::Scalar => Branch::B0,
-      TypeDefinitionHead::Object => Branch::B1,
-      TypeDefinitionHead::Interface => Branch::B2,
-      TypeDefinitionHead::Union => Branch::B3,
-      TypeDefinitionHead::Enum => Branch::B4,
-      TypeDefinitionHead::InputObject => Branch::B5,
-    };
-    let mut tails = (
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::scalar::scalar_after_keyword(inp, start).map(TypeDefinition::Scalar)
-      },
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::object::object_after_keyword(inp, start).map(TypeDefinition::Object)
-      },
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::interface::interface_after_keyword(inp, start).map(TypeDefinition::Interface)
-      },
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::union::union_after_keyword(inp, start).map(TypeDefinition::Union)
-      },
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::enum_type::enum_after_keyword(inp, start).map(TypeDefinition::Enum)
-      },
-      |inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
-        take_classified_type_definition_keyword(inp)?;
-        super::input_object::input_object_after_keyword(inp, start).map(TypeDefinition::InputObject)
-      },
-    );
-    tails.parse_choice(inp, &branch)
+    let identifier_head_arm =
+      |Spanned { span, data: token }: Spanned<GraphqlToken<'inp, Src>, SimpleSpan>,
+       inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
+        let kind = token.kind();
+        let keyword = token.downcast_ref();
+        match token {
+          GraphqlToken::<'inp, Src>::Identifier(_) => match keyword {
+            Some(
+              keyword @ (ContextualKeyword::Scalar
+              | ContextualKeyword::Type
+              | ContextualKeyword::Interface
+              | ContextualKeyword::Union
+              | ContextualKeyword::Enum
+              | ContextualKeyword::Input),
+            ) => type_definition_after_keyword(inp, keyword, span.start()),
+            _ => Err(
+              DialectGraphqlError::unexpected_token(
+                kind,
+                Expectation::Keyword("type definition"),
+                span,
+              )
+              .into(),
+            ),
+          },
+          _ => unreachable!("fused type-definition arm received a non-identifier token"),
+        }
+      };
+
+    match (identifier_head_arm,)
+      .fused_dispatch_on_kind(&[SyntacticTokenKind::Identifier])
+      .try_parse_input(inp)?
+    {
+      ParseAttempt::Accept(definition) => Ok(definition),
+      ParseAttempt::Decline => expected_definition_phase(inp, Expectation::Keyword("type definition")),
+    }
   }
 );
 

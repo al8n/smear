@@ -115,6 +115,42 @@ pub type InputObjectTypeDefinition<S, Ty = Type<Name<S>>> =
 pub type DescribedInputObjectTypeDefinition<S, Ty = Type<Name<S>>> =
   Described<InputObjectTypeDefinition<S, Ty>, S>;
 
+/// Scalar type extension (`extend scalar Name Directives`).
+pub type ScalarTypeExtension<S> =
+  crate::type_system::ScalarTypeExtension<Name<S>, ConstDirectives<S>>;
+
+/// Object type extension (`extend type Name` plus a nonempty extension payload).
+pub type ObjectTypeExtension<S, Ty = Type<Name<S>>> = crate::type_system::ObjectTypeExtension<
+  Name<S>,
+  ImplementInterfaces<Name<S>>,
+  ConstDirectives<S>,
+  FieldsDefinition<S, Ty>,
+>;
+
+/// Interface type extension (`extend interface Name` plus a nonempty extension payload).
+pub type InterfaceTypeExtension<S, Ty = Type<Name<S>>> = crate::type_system::InterfaceTypeExtension<
+  Name<S>,
+  ImplementInterfaces<Name<S>>,
+  ConstDirectives<S>,
+  FieldsDefinition<S, Ty>,
+>;
+
+/// Union type extension (`extend union Name` plus directives or member types).
+pub type UnionTypeExtension<S> =
+  crate::type_system::UnionTypeExtension<Name<S>, ConstDirectives<S>, UnionMemberTypes<Name<S>>>;
+
+/// Enum type extension (`extend enum Name` plus directives or values).
+pub type EnumTypeExtension<S> =
+  crate::type_system::EnumTypeExtension<Name<S>, ConstDirectives<S>, EnumValuesDefinition<S>>;
+
+/// Input object type extension (`extend input Name` plus directives or fields).
+pub type InputObjectTypeExtension<S, Ty = Type<Name<S>>> =
+  crate::type_system::InputObjectTypeExtension<
+    Name<S>,
+    ConstDirectives<S>,
+    InputFieldsDefinition<S, Ty>,
+  >;
+
 /// Directive definition
 /// (`directive '@' Name ArgumentsDefinition? repeatable? 'on' DirectiveLocations`).
 pub type DirectiveDefinition<S, Ty = Type<Name<S>>> = crate::type_system::DirectiveDefinition<
@@ -193,3 +229,43 @@ impl<S, Ty> TypeDefinition<S, Ty> {
     }
   }
 }
+
+/// A GraphQL type extension — one of the six named type-system extension shapes.
+pub type TypeExtension<S, Ty = Type<Name<S>>> = crate::type_system::TypeExtension<
+  ScalarTypeExtension<S>,
+  ObjectTypeExtension<S, Ty>,
+  InterfaceTypeExtension<S, Ty>,
+  UnionTypeExtension<S>,
+  EnumTypeExtension<S>,
+  InputObjectTypeExtension<S, Ty>,
+>;
+
+/// Schema extension (`extend schema` plus directives or root operation types).
+pub type SchemaExtension<S> =
+  crate::type_system::SchemaExtension<ConstDirectives<S>, RootOperationTypesDefinition<S>>;
+
+/// Type-system definition: a named type, directive, or schema definition.
+pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = crate::type_system::TypeSystemDefinition<
+  TypeDefinition<S, Ty>,
+  DirectiveDefinition<S, Ty>,
+  SchemaDefinition<S>,
+>;
+
+/// Type-system definition with one optional leading description.
+pub type DescribedTypeSystemDefinition<S, Ty = Type<Name<S>>> =
+  Described<TypeSystemDefinition<S, Ty>, S>;
+
+/// Type-system extension: a named type or schema extension.
+pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
+  crate::type_system::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
+
+/// A type-system definition (with optional description) or extension.
+pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
+  crate::type_system::TypeSystemDefinitionOrExtension<
+    DescribedTypeSystemDefinition<S, Ty>,
+    TypeSystemExtension<S, Ty>,
+  >;
+
+/// A nonempty GraphQL type-system document.
+pub type TypeSystemDocument<S, Ty = Type<Name<S>>> =
+  crate::executable::Document<TypeSystemDefinitionOrExtension<S, Ty>>;

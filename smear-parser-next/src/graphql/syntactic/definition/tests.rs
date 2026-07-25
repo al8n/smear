@@ -15,11 +15,14 @@ use crate::graphql::{
   GraphQL,
   ast::{
     ArgumentsDefinition, Described, DirectiveDefinition, DirectiveLocations, EnumTypeDefinition,
-    EnumValueDefinition, EnumValuesDefinition, FieldDefinition, FieldsDefinition,
-    ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition, InputValueDefinition,
-    InterfaceTypeDefinition, Location, Name, ObjectTypeDefinition, RootOperationTypeDefinition,
-    RootOperationTypesDefinition, ScalarTypeDefinition, SchemaDefinition, StringValue,
-    TypeDefinition, UnionMemberTypes, UnionTypeDefinition,
+    EnumTypeExtension, EnumValueDefinition, EnumValuesDefinition, FieldDefinition,
+    FieldsDefinition, ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
+    InputObjectTypeExtension, InputValueDefinition, InterfaceTypeDefinition,
+    InterfaceTypeExtension, Location, Name, ObjectTypeDefinition, ObjectTypeExtension,
+    RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
+    ScalarTypeExtension, SchemaDefinition, SchemaExtension, StringValue, TypeDefinition,
+    TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
   },
   error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlInput, GraphqlLexer},
@@ -308,7 +311,7 @@ fn delimited_definition_groups_are_nonempty_typed_and_optional() {
 }
 
 #[test]
-fn implements_and_union_members_use_native_separated_lists() {
+fn implements_and_union_members_use_separator_driven_lists() {
   fn one_interface<S: AsRef<[u8]>>(value: ImplementInterfaces<Name<S>>) {
     assert_eq!(value.interfaces().len(), 1);
     assert_eq!(value.interfaces()[0].source_ref().as_ref(), b"Node");
@@ -335,6 +338,16 @@ fn implements_and_union_members_use_native_separated_lists() {
   }
   accept_all!(UnionMemberTypes::<Name<_>>::graphql, "= Dog", one_member);
 
+  fn contextual_member<S: AsRef<[u8]>>(value: UnionMemberTypes<Name<S>>) {
+    assert_eq!(value.members().len(), 2);
+    assert_eq!(value.members()[1].source_ref().as_ref(), b"union");
+  }
+  accept_all!(
+    UnionMemberTypes::<Name<_>>::graphql,
+    "= Dog | union",
+    contextual_member
+  );
+
   fn members<S: AsRef<[u8]>>(value: UnionMemberTypes<Name<S>>) {
     assert_eq!(value.members().len(), 2);
     assert_eq!(value.members()[1].source_ref().as_ref(), b"Cat");
@@ -343,6 +356,38 @@ fn implements_and_union_members_use_native_separated_lists() {
     UnionMemberTypes::<Name<_>>::graphql,
     "= | Dog | Cat",
     members
+  );
+
+  fn contextual_interface<S: AsRef<[u8]>>(value: ImplementInterfaces<Name<S>>) {
+    assert_eq!(value.interfaces().len(), 2);
+    assert_eq!(value.interfaces()[1].source_ref().as_ref(), b"type");
+  }
+  accept_all!(
+    ImplementInterfaces::<Name<_>>::graphql,
+    "implements Node & type",
+    contextual_interface
+  );
+
+  fn contextual_union_type<S: AsRef<[u8]>>(value: UnionTypeDefinition<S>) {
+    let members = value.member_types().expect("members").members();
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[1].source_ref().as_ref(), b"union");
+  }
+  accept_all!(
+    UnionTypeDefinition::<_>::graphql,
+    "union U = A | union",
+    contextual_union_type
+  );
+
+  fn contextual_implemented_type<S: AsRef<[u8]>>(value: ObjectTypeDefinition<S>) {
+    let interfaces = value.implements().expect("implements").interfaces();
+    assert_eq!(interfaces.len(), 2);
+    assert_eq!(interfaces[1].source_ref().as_ref(), b"type");
+  }
+  accept_all!(
+    ObjectTypeDefinition::<_>::graphql,
+    "type T implements A & type",
+    contextual_implemented_type
   );
 
   assert!(matches!(
@@ -355,6 +400,8 @@ fn implements_and_union_members_use_native_separated_lists() {
   ));
   reject_all!(ImplementInterfaces::<Name<_>>::graphql, "implements Node &");
   reject_all!(UnionMemberTypes::<Name<_>>::graphql, "= Dog |");
+  reject_all!(ObjectTypeDefinition::<_>::graphql, "type T implements A &");
+  reject_all!(UnionTypeDefinition::<_>::graphql, "union U = A |");
 }
 
 #[test]
@@ -978,26 +1025,27 @@ fn described_type_definition_commits_after_a_description() {
     undescribed
   );
 
-  let (expected, next) = drive_str(
+  let (reported_query, next) = drive_str(
     |inp| {
       let error = Described::<TypeDefinition<_>, _>::graphql(inp)
         .expect_err("a described non-type head is committed");
-      let expected = matches!(
+      let reported_query = matches!(
         error.into_iter().next().expect("one error").into_data(),
         ErrorData::UnexpectedToken(unexpected)
           if unexpected.expected() == &Expectation::Keyword("type definition")
+            && unexpected.found() == Some(&SyntacticTokenKind::Identifier)
       );
       let next = inp
         .next()?
-        .expect("the invalid head remains available")
+        .expect("the token after the consumed fused head remains available")
         .data()
         .kind();
-      Ok::<_, GraphqlErrors<&str>>((expected, next))
+      Ok::<_, GraphqlErrors<&str>>((reported_query, next))
     },
-    "\"doc\" query",
+    "\"doc\" query tail",
   )
-  .expect("the committed diagnostic retains its rejected token");
-  assert!(expected);
+  .expect("the committed diagnostic reports the fused consumed head");
+  assert!(reported_query);
   assert_eq!(next, SyntacticTokenKind::Identifier);
 }
 
@@ -1018,4 +1066,278 @@ fn source_typed_associated_api_remains_inferred_from_the_input() {
       drive_bytes(InputValueDefinition::<_>::graphql, &bytes).expect("Bytes source is inferred");
     assert_eq!(value.name().source_ref(), &&b"x"[..]);
   }
+}
+
+#[test]
+fn extension_apis_require_a_nonempty_payload_and_preserve_the_extend_span() {
+  fn scalar<S: AsRef<[u8]>>(value: ScalarTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"Date");
+    assert_eq!(value.directives().directives().len(), 1);
+  }
+  accept_all!(
+    ScalarTypeExtension::<_>::graphql,
+    "extend scalar Date @specifiedBy",
+    scalar
+  );
+
+  fn object<S: AsRef<[u8]>>(value: ObjectTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"User");
+    assert!(value.implements().is_some());
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .fields_definition()
+        .expect("fields extension payload")
+        .field_definitions()
+        .len(),
+      1
+    );
+  }
+  accept_all!(
+    ObjectTypeExtension::<_>::graphql,
+    "extend type User implements Node @dir { id: ID }",
+    object
+  );
+
+  fn interface<S: AsRef<[u8]>>(value: InterfaceTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"Named");
+    assert!(value.implements().is_some());
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .fields_definition()
+        .expect("fields extension payload")
+        .field_definitions()
+        .len(),
+      1
+    );
+  }
+  accept_all!(
+    InterfaceTypeExtension::<_>::graphql,
+    "extend interface Named implements Node @dir { name: String }",
+    interface
+  );
+
+  fn union<S: AsRef<[u8]>>(value: UnionTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"Search");
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .member_types()
+        .expect("member extension payload")
+        .members()
+        .len(),
+      2
+    );
+  }
+  accept_all!(
+    UnionTypeExtension::<_>::graphql,
+    "extend union Search @dir = User | Photo",
+    union
+  );
+
+  fn enumeration<S: AsRef<[u8]>>(value: EnumTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"Role");
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .enum_values_definition()
+        .expect("enum-values extension payload")
+        .enum_value_definitions()
+        .len(),
+      1
+    );
+  }
+  accept_all!(
+    EnumTypeExtension::<_>::graphql,
+    "extend enum Role @dir { ADMIN }",
+    enumeration
+  );
+
+  fn input_object<S: AsRef<[u8]>>(value: InputObjectTypeExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"Filter");
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .fields_definition()
+        .expect("input-fields extension payload")
+        .input_value_definitions()
+        .len(),
+      1
+    );
+  }
+  accept_all!(
+    InputObjectTypeExtension::<_>::graphql,
+    "extend input Filter @dir { limit: Int }",
+    input_object
+  );
+
+  fn schema<S: AsRef<[u8]>>(value: SchemaExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert!(value.directives().is_some());
+    assert_eq!(
+      value
+        .root_operation_types_definition()
+        .expect("root-operation extension payload")
+        .root_operation_type_definitions()
+        .len(),
+      1
+    );
+  }
+  accept_all!(
+    SchemaExtension::<_>::graphql,
+    "extend schema @dir { query: Query }",
+    schema
+  );
+
+  reject_all!(ScalarTypeExtension::<_>::graphql, "extend scalar Date");
+  reject_all!(ObjectTypeExtension::<_>::graphql, "extend type User");
+  reject_all!(
+    InterfaceTypeExtension::<_>::graphql,
+    "extend interface Named"
+  );
+  reject_all!(UnionTypeExtension::<_>::graphql, "extend union Search");
+  reject_all!(EnumTypeExtension::<_>::graphql, "extend enum Role");
+  reject_all!(
+    InputObjectTypeExtension::<_>::graphql,
+    "extend input Filter"
+  );
+  reject_all!(SchemaExtension::<_>::graphql, "extend schema");
+}
+
+#[test]
+fn type_system_dispatches_definitions_extensions_and_descriptions() {
+  fn described<S: AsRef<[u8]>>(value: Described<TypeSystemDefinition<S>, S>) {
+    assert!(value.description().is_some());
+  }
+
+  for source in [
+    "\"schema doc\" schema { query: Query }",
+    "\"directive doc\" directive @tag on FIELD",
+    "\"scalar doc\" scalar Date",
+    "\"object doc\" type User { id: ID }",
+    "\"interface doc\" interface Node { id: ID }",
+    "\"union doc\" union Search = User",
+    "\"enum doc\" enum Role { ADMIN }",
+    "\"input doc\" input Filter { limit: Int }",
+  ] {
+    assert!(
+      drive_str(Described::<TypeSystemDefinition<_>, _>::graphql, source).is_ok(),
+      "str described type-system definition accepts {source:?}",
+    );
+    assert!(
+      drive_slice(
+        Described::<TypeSystemDefinition<_>, _>::graphql,
+        source.as_bytes(),
+      )
+      .is_ok(),
+      "[u8] described type-system definition accepts {source:?}",
+    );
+  }
+  accept_all!(
+    Described::<TypeSystemDefinition<_>, _>::graphql,
+    "\"object doc\" type User { id: ID }",
+    described
+  );
+
+  for source in [
+    "extend scalar Date @dir",
+    "extend type User { id: ID }",
+    "extend interface Node { id: ID }",
+    "extend union Search = User",
+    "extend enum Role { ADMIN }",
+    "extend input Filter { limit: Int }",
+  ] {
+    assert!(
+      drive_str(TypeExtension::<_>::graphql, source).is_ok(),
+      "type-extension fused dispatch accepts {source:?}",
+    );
+  }
+
+  for source in [
+    "extend scalar Date @dir",
+    "extend type User { id: ID }",
+    "extend interface Node { id: ID }",
+    "extend union Search = User",
+    "extend enum Role { ADMIN }",
+    "extend input Filter { limit: Int }",
+    "extend schema { query: Query }",
+  ] {
+    assert!(
+      drive_str(TypeSystemExtension::<_>::graphql, source).is_ok(),
+      "type-system-extension fused dispatch accepts {source:?}",
+    );
+  }
+
+  fn definition_or_extension<S: AsRef<[u8]>>(value: TypeSystemDefinitionOrExtension<S>) {
+    assert!(value.is_definition());
+    assert!(value.unwrap_definition().description().is_some());
+  }
+  accept_all!(
+    TypeSystemDefinitionOrExtension::<_>::graphql,
+    "\"object doc\" type User { id: ID }",
+    definition_or_extension
+  );
+
+  reject_all!(
+    TypeSystemDefinitionOrExtension::<_>::graphql,
+    "\"extension doc\" extend type User { id: ID }"
+  );
+}
+
+#[test]
+fn type_system_document_accepts_described_definitions_and_extensions() {
+  fn document<S: AsRef<[u8]>>(value: TypeSystemDocument<S>) {
+    assert_eq!(value.definitions().len(), 4);
+    assert!(value.definitions()[0].is_definition());
+    assert!(value.definitions()[1].is_extension());
+    assert!(value.definitions()[2].is_definition());
+    assert!(value.definitions()[3].is_extension());
+    assert_eq!(value.span().start(), 0);
+  }
+
+  const PREFIX_1: &str = "\"query docs\" type Query { id: ID }";
+  const PREFIX_2: &str = "\"query docs\" type Query { id: ID }\nextend type Query { name: String }";
+  const PREFIX_3: &str = "\"query docs\" type Query { id: ID }\nextend type Query { name: String }\n\"directive docs\" directive @tag on FIELD";
+  const FULL_DOCUMENT: &str = "\"query docs\" type Query { id: ID }\nextend type Query { name: String }\n\"directive docs\" directive @tag on FIELD\nextend schema { query: Query }";
+  const UNION_BOUNDARY: &str = "union U = A\nunion V = B";
+  const UNION_MEMBER_BOUNDARY: &str =
+    "union Feed = Story | Article | Advert\nunion AnnotatedUnion @onUnion = A | B";
+  const IMPLEMENTS_BOUNDARY: &str = "type T implements A\ntype U { id: ID }";
+
+  assert!(
+    drive_str(
+      TypeSystemDefinitionOrExtension::<_>::graphql,
+      "extend schema { query: Query }",
+    )
+    .is_ok(),
+    "the final schema extension is a standalone document entry",
+  );
+  for source in [PREFIX_1, PREFIX_2, PREFIX_3, FULL_DOCUMENT] {
+    assert!(
+      drive_str(TypeSystemDocument::<_>::graphql, source).is_ok(),
+      "type-system document accepts prefix {source:?}",
+    );
+  }
+
+  for source in [UNION_BOUNDARY, UNION_MEMBER_BOUNDARY, IMPLEMENTS_BOUNDARY] {
+    assert!(
+      drive_str(TypeSystemDocument::<_>::graphql, source).is_ok(),
+      "named-type lists leave their next document entry available: {source:?}",
+    );
+  }
+
+  accept_all!(
+    TypeSystemDocument::<_>::graphql,
+    "\"query docs\" type Query { id: ID }\nextend type Query { name: String }\n\"directive docs\" directive @tag on FIELD\nextend schema { query: Query }",
+    document
+  );
+
+  reject_all!(TypeSystemDocument::<_>::graphql, "");
 }

@@ -9,13 +9,13 @@ use std::vec::Vec;
 
 use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Ampersand, Brace, Bracket, Paren, Pipe},
-  span::Spanned,
+  punct::{Brace, Bracket, Paren, Pipe},
+  span::{AsSpan, Spanned},
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
@@ -30,12 +30,16 @@ use crate::{
   graphql::{
     GraphQL,
     ast::{
-      ArgumentsDefinition, ConstDirectives, Described, DirectiveDefinition, DirectiveLocations,
-      EnumTypeDefinition, EnumValueDefinition, EnumValuesDefinition, FieldDefinition,
-      FieldsDefinition, ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
-      InputValueDefinition, InterfaceTypeDefinition, Location, Name, ObjectTypeDefinition,
+      ArgumentsDefinition, ConstDirectives, Described, DescribedTypeSystemDefinition,
+      DirectiveDefinition, DirectiveLocations, EnumTypeDefinition, EnumTypeExtension,
+      EnumValueDefinition, EnumValuesDefinition, FieldDefinition, FieldsDefinition,
+      ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
+      InputObjectTypeExtension, InputValueDefinition, InterfaceTypeDefinition,
+      InterfaceTypeExtension, Location, Name, ObjectTypeDefinition, ObjectTypeExtension,
       RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-      SchemaDefinition, StringValue, TypeDefinition, UnionMemberTypes, UnionTypeDefinition,
+      ScalarTypeExtension, SchemaDefinition, SchemaExtension, StringValue, TypeDefinition,
+      TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+      TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
     },
     error::{Expectation, GraphqlError as DialectGraphqlError},
     keyword::{try_implements as try_implements_keyword, try_repeatable as try_repeatable_keyword},
@@ -257,6 +261,19 @@ pub use schema::{
 
 mod type_definition;
 pub use type_definition::{described_type_definition, type_definition};
+
+mod extension;
+pub use extension::{
+  enum_type_extension, input_object_type_extension, interface_type_extension,
+  object_type_extension, scalar_type_extension, schema_extension, type_extension,
+  type_system_extension, union_type_extension,
+};
+
+mod document;
+pub use document::{
+  described_type_system_definition, type_system_definition, type_system_definition_or_extension,
+  type_system_document,
+};
 
 #[cfg(test)]
 mod tests;

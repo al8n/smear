@@ -43,3 +43,8 @@ cynic-parser = "=0.11.2"
 name = "executables"
 path = "benches/executables.rs"
 harness = false
+
+[[bench]]
+name = "type_system"
+path = "benches/type_system.rs"
+harness = false

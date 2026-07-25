@@ -43,6 +43,41 @@ definition_parser!(
   }
 );
 
+/// Enters a schema-definition tail after its `schema` keyword was consumed.
+pub(super) fn schema_after_keyword<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+) -> Result<SchemaDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  let directives = optional_const_directives(inp)?;
+  let root_operation_types_definition = root_operation_types_definition(inp)?;
+  Ok(SchemaDefinition::new(
+    SimpleSpan::new(start, root_operation_types_definition.span().end()),
+    directives,
+    root_operation_types_definition,
+  ))
+}
+
 definition_parser!(
   /// Parses a schema definition.
   ///
@@ -53,13 +88,7 @@ definition_parser!(
   [contextual],
   {
     let start = take_contextual_keyword(inp, ContextualKeyword::Schema)?.start();
-    let directives = optional_const_directives(inp)?;
-    let root_operation_types_definition = root_operation_types_definition(inp)?;
-    Ok(SchemaDefinition::new(
-      SimpleSpan::new(start, root_operation_types_definition.span().end()),
-      directives,
-      root_operation_types_definition,
-    ))
+    schema_after_keyword(inp, start)
   }
 );
 

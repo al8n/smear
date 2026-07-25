@@ -1545,6 +1545,965 @@ impl<Name, Directives, Fields, Span> InputObjectTypeDefinition<Name, Directives,
   }
 }
 
+/// The payload contributed by an object or interface type extension.
+///
+/// Each variant represents one of GraphQL's legal nonempty extension forms.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
+  /// Adds one or more implemented interfaces only.
+  Implements(Implements),
+  /// Adds directives, with optional implemented interfaces.
+  Directives {
+    /// The optional implemented interfaces.
+    implements: Option<Implements>,
+    /// The directives being added.
+    directives: Directives,
+  },
+  /// Adds fields, with optional interfaces and directives.
+  Fields {
+    /// The optional implemented interfaces.
+    implements: Option<Implements>,
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty fields definition being added.
+    fields_definition: Fields,
+  },
+}
+
+impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directives, Fields> {
+  /// Returns the added implemented interfaces, if any.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    match self {
+      Self::Implements(implements) => Some(implements),
+      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+    }
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives { directives, .. } => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Implements(_) => None,
+    }
+  }
+
+  /// Returns the added fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    match self {
+      Self::Fields {
+        fields_definition, ..
+      } => Some(fields_definition),
+      Self::Implements(_) | Self::Directives { .. } => None,
+    }
+  }
+}
+
+/// An object type extension (`extend type Name …`).
+///
+/// See the [GraphQL Object Type Extension specification](https://spec.graphql.org/draft/#ObjectTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  data: ObjectTypeExtensionData<Implements, Directives, Fields>,
+}
+
+impl_node_traits!(
+  ObjectTypeExtension<Name, Implements, Directives, Fields, Span>,
+  (Span, Name, ObjectTypeExtensionData<Implements, Directives, Fields>),
+  (span, name, data)
+);
+
+impl<Name, Implements, Directives, Fields, Span>
+  ObjectTypeExtension<Name, Implements, Directives, Fields, Span>
+{
+  /// Creates an object type extension from its complete span, name, and payload.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: ObjectTypeExtensionData<Implements, Directives, Fields>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended object type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &ObjectTypeExtensionData<Implements, Directives, Fields> {
+    &self.data
+  }
+
+  /// Returns the added implemented interfaces, if any.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.data.implements()
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    self.data.fields_definition()
+  }
+}
+
+/// The payload contributed by an interface type extension.
+///
+/// Each variant represents one of GraphQL's legal nonempty extension forms.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum InterfaceTypeExtensionData<Implements, Directives, Fields> {
+  /// Adds one or more implemented interfaces only.
+  Implements(Implements),
+  /// Adds directives, with optional implemented interfaces.
+  Directives {
+    /// The optional implemented interfaces.
+    implements: Option<Implements>,
+    /// The directives being added.
+    directives: Directives,
+  },
+  /// Adds fields, with optional interfaces and directives.
+  Fields {
+    /// The optional implemented interfaces.
+    implements: Option<Implements>,
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty fields definition being added.
+    fields_definition: Fields,
+  },
+}
+
+impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Directives, Fields> {
+  /// Returns the added implemented interfaces, if any.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    match self {
+      Self::Implements(implements) => Some(implements),
+      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+    }
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives { directives, .. } => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Implements(_) => None,
+    }
+  }
+
+  /// Returns the added fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    match self {
+      Self::Fields {
+        fields_definition, ..
+      } => Some(fields_definition),
+      Self::Implements(_) | Self::Directives { .. } => None,
+    }
+  }
+}
+
+/// An interface type extension (`extend interface Name …`).
+///
+/// See the [GraphQL Interface Type Extension specification](https://spec.graphql.org/draft/#InterfaceTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct InterfaceTypeExtension<Name, Implements, Directives, Fields, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  data: InterfaceTypeExtensionData<Implements, Directives, Fields>,
+}
+
+impl_node_traits!(
+  InterfaceTypeExtension<Name, Implements, Directives, Fields, Span>,
+  (Span, Name, InterfaceTypeExtensionData<Implements, Directives, Fields>),
+  (span, name, data)
+);
+
+impl<Name, Implements, Directives, Fields, Span>
+  InterfaceTypeExtension<Name, Implements, Directives, Fields, Span>
+{
+  /// Creates an interface type extension from its complete span, name, and payload.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InterfaceTypeExtensionData<Implements, Directives, Fields>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended interface type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &InterfaceTypeExtensionData<Implements, Directives, Fields> {
+    &self.data
+  }
+
+  /// Returns the added implemented interfaces, if any.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.data.implements()
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    self.data.fields_definition()
+  }
+}
+
+/// The payload contributed by a union type extension.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum UnionTypeExtensionData<Directives, MemberTypes> {
+  /// Adds directives only.
+  Directives(Directives),
+  /// Adds union member types, with optional directives.
+  Members {
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty member-types clause being added.
+    member_types: MemberTypes,
+  },
+}
+
+impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Members { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the added member-types clause, if any.
+  #[inline]
+  pub const fn member_types(&self) -> Option<&MemberTypes> {
+    match self {
+      Self::Members { member_types, .. } => Some(member_types),
+      Self::Directives(_) => None,
+    }
+  }
+}
+
+/// A union type extension (`extend union Name …`).
+///
+/// See the [GraphQL Union Type Extension specification](https://spec.graphql.org/draft/#UnionTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct UnionTypeExtension<Name, Directives, MemberTypes, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  data: UnionTypeExtensionData<Directives, MemberTypes>,
+}
+
+impl_node_traits!(
+  UnionTypeExtension<Name, Directives, MemberTypes, Span>,
+  (Span, Name, UnionTypeExtensionData<Directives, MemberTypes>),
+  (span, name, data)
+);
+
+impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, MemberTypes, Span> {
+  /// Creates a union type extension from its complete span, name, and payload.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: UnionTypeExtensionData<Directives, MemberTypes>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended union type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &UnionTypeExtensionData<Directives, MemberTypes> {
+    &self.data
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added union-member-types clause, if any.
+  #[inline]
+  pub const fn member_types(&self) -> Option<&MemberTypes> {
+    self.data.member_types()
+  }
+}
+
+/// The payload contributed by an enum type extension.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum EnumTypeExtensionData<Directives, Values> {
+  /// Adds directives only.
+  Directives(Directives),
+  /// Adds enum values, with optional directives.
+  Values {
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty enum-values definition being added.
+    enum_values_definition: Values,
+  },
+}
+
+impl<Directives, Values> EnumTypeExtensionData<Directives, Values> {
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Values { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the added enum-values definition, if any.
+  #[inline]
+  pub const fn enum_values_definition(&self) -> Option<&Values> {
+    match self {
+      Self::Values {
+        enum_values_definition,
+        ..
+      } => Some(enum_values_definition),
+      Self::Directives(_) => None,
+    }
+  }
+}
+
+/// An enum type extension (`extend enum Name …`).
+///
+/// See the [GraphQL Enum Type Extension specification](https://spec.graphql.org/draft/#EnumTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct EnumTypeExtension<Name, Directives, Values, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  data: EnumTypeExtensionData<Directives, Values>,
+}
+
+impl_node_traits!(
+  EnumTypeExtension<Name, Directives, Values, Span>,
+  (Span, Name, EnumTypeExtensionData<Directives, Values>),
+  (span, name, data)
+);
+
+impl<Name, Directives, Values, Span> EnumTypeExtension<Name, Directives, Values, Span> {
+  /// Creates an enum type extension from its complete span, name, and payload.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: EnumTypeExtensionData<Directives, Values>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended enum type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &EnumTypeExtensionData<Directives, Values> {
+    &self.data
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added enum-values definition, if any.
+  #[inline]
+  pub const fn enum_values_definition(&self) -> Option<&Values> {
+    self.data.enum_values_definition()
+  }
+}
+
+/// The payload contributed by an input object type extension.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum InputObjectTypeExtensionData<Directives, Fields> {
+  /// Adds directives only.
+  Directives(Directives),
+  /// Adds input fields, with optional directives.
+  Fields {
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty input-fields definition being added.
+    fields_definition: Fields,
+  },
+}
+
+impl<Directives, Fields> InputObjectTypeExtensionData<Directives, Fields> {
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Fields { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the added input-fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    match self {
+      Self::Fields {
+        fields_definition, ..
+      } => Some(fields_definition),
+      Self::Directives(_) => None,
+    }
+  }
+}
+
+/// An input object type extension (`extend input Name …`).
+///
+/// See the [GraphQL Input Object Type Extension specification](https://spec.graphql.org/draft/#InputObjectTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct InputObjectTypeExtension<Name, Directives, Fields, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  data: InputObjectTypeExtensionData<Directives, Fields>,
+}
+
+impl_node_traits!(
+  InputObjectTypeExtension<Name, Directives, Fields, Span>,
+  (Span, Name, InputObjectTypeExtensionData<Directives, Fields>),
+  (span, name, data)
+);
+
+impl<Name, Directives, Fields, Span> InputObjectTypeExtension<Name, Directives, Fields, Span> {
+  /// Creates an input object type extension from its complete span, name, and payload.
+  #[inline]
+  pub const fn new(
+    span: Span,
+    name: Name,
+    data: InputObjectTypeExtensionData<Directives, Fields>,
+  ) -> Self {
+    Self { span, name, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended input object type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &InputObjectTypeExtensionData<Directives, Fields> {
+    &self.data
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added input-fields definition, if any.
+  #[inline]
+  pub const fn fields_definition(&self) -> Option<&Fields> {
+    self.data.fields_definition()
+  }
+}
+
+/// The payload contributed by a schema extension.
+#[derive(Debug, Clone, Copy, IsVariant)]
+pub enum SchemaExtensionData<Directives, RootOperations> {
+  /// Adds directives only.
+  Directives(Directives),
+  /// Adds root operation types, with optional directives.
+  Operations {
+    /// The optional directives being added.
+    directives: Option<Directives>,
+    /// The nonempty root-operation-types definition being added.
+    root_operation_types_definition: RootOperations,
+  },
+}
+
+impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations> {
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    match self {
+      Self::Directives(directives) => Some(directives),
+      Self::Operations { directives, .. } => directives.as_ref(),
+    }
+  }
+
+  /// Returns the added root-operation-types definition, if any.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> Option<&RootOperations> {
+    match self {
+      Self::Operations {
+        root_operation_types_definition,
+        ..
+      } => Some(root_operation_types_definition),
+      Self::Directives(_) => None,
+    }
+  }
+}
+
+/// A schema extension (`extend schema …`).
+///
+/// See the [GraphQL Schema Extension specification](https://spec.graphql.org/draft/#SchemaExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct SchemaExtension<Directives, RootOperations, Span = SimpleSpan> {
+  span: Span,
+  data: SchemaExtensionData<Directives, RootOperations>,
+}
+
+impl_node_traits!(
+  SchemaExtension<Directives, RootOperations, Span>,
+  (Span, SchemaExtensionData<Directives, RootOperations>),
+  (span, data)
+);
+
+impl<Directives, RootOperations, Span> SchemaExtension<Directives, RootOperations, Span> {
+  /// Creates a schema extension from its complete span and nonempty payload.
+  #[inline]
+  pub const fn new(span: Span, data: SchemaExtensionData<Directives, RootOperations>) -> Self {
+    Self { span, data }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the nonempty extension payload.
+  #[inline]
+  pub const fn data(&self) -> &SchemaExtensionData<Directives, RootOperations> {
+    &self.data
+  }
+
+  /// Returns the added directives, if any.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.data.directives()
+  }
+
+  /// Returns the added root-operation-types definition, if any.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> Option<&RootOperations> {
+    self.data.root_operation_types_definition()
+  }
+}
+
+/// A scalar type extension (`extend scalar Name Directives`).
+///
+/// See the [GraphQL Scalar Type Extension specification](https://spec.graphql.org/draft/#ScalarTypeExtension).
+#[derive(Debug, Clone, Copy)]
+pub struct ScalarTypeExtension<Name, Directives, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  directives: Directives,
+}
+
+impl_node_traits!(
+  ScalarTypeExtension<Name, Directives, Span>,
+  (Span, Name, Directives),
+  (span, name, directives)
+);
+
+impl<Name, Directives, Span> ScalarTypeExtension<Name, Directives, Span> {
+  /// Creates a scalar type extension from its complete span, name, and directives.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+    }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended scalar type name.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the required directives being added.
+  #[inline]
+  pub const fn directives(&self) -> &Directives {
+    &self.directives
+  }
+}
+
+/// One of GraphQL's six named type extension shapes.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeExtension<
+  ScalarTypeExtension,
+  ObjectTypeExtension,
+  InterfaceTypeExtension,
+  UnionTypeExtension,
+  EnumTypeExtension,
+  InputObjectTypeExtension,
+> {
+  /// A scalar type extension.
+  Scalar(ScalarTypeExtension),
+  /// An object type extension.
+  Object(ObjectTypeExtension),
+  /// An interface type extension.
+  Interface(InterfaceTypeExtension),
+  /// A union type extension.
+  Union(UnionTypeExtension),
+  /// An enum type extension.
+  Enum(EnumTypeExtension),
+  /// An input object type extension.
+  InputObject(InputObjectTypeExtension),
+}
+
+impl<
+  ScalarTypeExtension,
+  ObjectTypeExtension,
+  InterfaceTypeExtension,
+  UnionTypeExtension,
+  EnumTypeExtension,
+  InputObjectTypeExtension,
+  Span,
+> AsSpan<Span>
+  for TypeExtension<
+    ScalarTypeExtension,
+    ObjectTypeExtension,
+    InterfaceTypeExtension,
+    UnionTypeExtension,
+    EnumTypeExtension,
+    InputObjectTypeExtension,
+  >
+where
+  ScalarTypeExtension: AsSpan<Span>,
+  ObjectTypeExtension: AsSpan<Span>,
+  InterfaceTypeExtension: AsSpan<Span>,
+  UnionTypeExtension: AsSpan<Span>,
+  EnumTypeExtension: AsSpan<Span>,
+  InputObjectTypeExtension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Scalar(value) => value.as_span(),
+      Self::Object(value) => value.as_span(),
+      Self::Interface(value) => value.as_span(),
+      Self::Union(value) => value.as_span(),
+      Self::Enum(value) => value.as_span(),
+      Self::InputObject(value) => value.as_span(),
+    }
+  }
+}
+
+impl<
+  ScalarTypeExtension,
+  ObjectTypeExtension,
+  InterfaceTypeExtension,
+  UnionTypeExtension,
+  EnumTypeExtension,
+  InputObjectTypeExtension,
+>
+  TypeExtension<
+    ScalarTypeExtension,
+    ObjectTypeExtension,
+    InterfaceTypeExtension,
+    UnionTypeExtension,
+    EnumTypeExtension,
+    InputObjectTypeExtension,
+  >
+{
+  /// Returns the span of the selected extension arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    ScalarTypeExtension: AsSpan<Span>,
+    ObjectTypeExtension: AsSpan<Span>,
+    InterfaceTypeExtension: AsSpan<Span>,
+    UnionTypeExtension: AsSpan<Span>,
+    EnumTypeExtension: AsSpan<Span>,
+    InputObjectTypeExtension: AsSpan<Span>,
+  {
+    self.as_span()
+  }
+}
+
+impl<
+  ScalarTypeExtension,
+  ObjectTypeExtension,
+  InterfaceTypeExtension,
+  UnionTypeExtension,
+  EnumTypeExtension,
+  InputObjectTypeExtension,
+  Span,
+> IntoSpan<Span>
+  for TypeExtension<
+    ScalarTypeExtension,
+    ObjectTypeExtension,
+    InterfaceTypeExtension,
+    UnionTypeExtension,
+    EnumTypeExtension,
+    InputObjectTypeExtension,
+  >
+where
+  ScalarTypeExtension: IntoSpan<Span>,
+  ObjectTypeExtension: IntoSpan<Span>,
+  InterfaceTypeExtension: IntoSpan<Span>,
+  UnionTypeExtension: IntoSpan<Span>,
+  EnumTypeExtension: IntoSpan<Span>,
+  InputObjectTypeExtension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Scalar(value) => value.into_span(),
+      Self::Object(value) => value.into_span(),
+      Self::Interface(value) => value.into_span(),
+      Self::Union(value) => value.into_span(),
+      Self::Enum(value) => value.into_span(),
+      Self::InputObject(value) => value.into_span(),
+    }
+  }
+}
+
+/// A type-system definition: named type, directive, or schema.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition> {
+  /// A named type definition.
+  Type(TypeDefinition),
+  /// A directive definition.
+  Directive(DirectiveDefinition),
+  /// A schema definition.
+  Schema(SchemaDefinition),
+}
+
+impl<TypeDefinition, DirectiveDefinition, SchemaDefinition, Span> AsSpan<Span>
+  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
+where
+  TypeDefinition: AsSpan<Span>,
+  DirectiveDefinition: AsSpan<Span>,
+  SchemaDefinition: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Type(value) => value.as_span(),
+      Self::Directive(value) => value.as_span(),
+      Self::Schema(value) => value.as_span(),
+    }
+  }
+}
+
+impl<TypeDefinition, DirectiveDefinition, SchemaDefinition, Span> IntoSpan<Span>
+  for TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
+where
+  TypeDefinition: IntoSpan<Span>,
+  DirectiveDefinition: IntoSpan<Span>,
+  SchemaDefinition: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Type(value) => value.into_span(),
+      Self::Directive(value) => value.into_span(),
+      Self::Schema(value) => value.into_span(),
+    }
+  }
+}
+
+impl<TypeDefinition, DirectiveDefinition, SchemaDefinition>
+  TypeSystemDefinition<TypeDefinition, DirectiveDefinition, SchemaDefinition>
+{
+  /// Returns the span of the selected definition arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    TypeDefinition: AsSpan<Span>,
+    DirectiveDefinition: AsSpan<Span>,
+    SchemaDefinition: AsSpan<Span>,
+  {
+    self.as_span()
+  }
+}
+
+/// A type-system extension: named type or schema.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeSystemExtension<TypeExtension, SchemaExtension> {
+  /// A named type extension.
+  Type(TypeExtension),
+  /// A schema extension.
+  Schema(SchemaExtension),
+}
+
+impl<TypeExtension, SchemaExtension, Span> AsSpan<Span>
+  for TypeSystemExtension<TypeExtension, SchemaExtension>
+where
+  TypeExtension: AsSpan<Span>,
+  SchemaExtension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Type(value) => value.as_span(),
+      Self::Schema(value) => value.as_span(),
+    }
+  }
+}
+
+impl<TypeExtension, SchemaExtension, Span> IntoSpan<Span>
+  for TypeSystemExtension<TypeExtension, SchemaExtension>
+where
+  TypeExtension: IntoSpan<Span>,
+  SchemaExtension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Type(value) => value.into_span(),
+      Self::Schema(value) => value.into_span(),
+    }
+  }
+}
+
+impl<TypeExtension, SchemaExtension> TypeSystemExtension<TypeExtension, SchemaExtension> {
+  /// Returns the span of the selected extension arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    TypeExtension: AsSpan<Span>,
+    SchemaExtension: AsSpan<Span>,
+  {
+    self.as_span()
+  }
+}
+
+/// Either a described type-system definition or a type-system extension.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum TypeSystemDefinitionOrExtension<Definition, Extension> {
+  /// A type-system definition, including its optional description.
+  Definition(Definition),
+  /// A type-system extension, which cannot carry a description.
+  Extension(Extension),
+}
+
+impl<Definition, Extension, Span> AsSpan<Span>
+  for TypeSystemDefinitionOrExtension<Definition, Extension>
+where
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Definition(value) => value.as_span(),
+      Self::Extension(value) => value.as_span(),
+    }
+  }
+}
+
+impl<Definition, Extension, Span> IntoSpan<Span>
+  for TypeSystemDefinitionOrExtension<Definition, Extension>
+where
+  Definition: IntoSpan<Span>,
+  Extension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Definition(value) => value.into_span(),
+      Self::Extension(value) => value.into_span(),
+    }
+  }
+}
+
+impl<Definition, Extension> TypeSystemDefinitionOrExtension<Definition, Extension> {
+  /// Returns the span of the selected document-entry arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    Definition: AsSpan<Span>,
+    Extension: AsSpan<Span>,
+  {
+    self.as_span()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use core::borrow::Borrow;

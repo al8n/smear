@@ -1,6 +1,7 @@
 //! SDL implemented-interface parsing.
 
 use super::*;
+use crate::combinator::{ampersand, try_ampersand};
 
 fn implements_after_keyword<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -11,6 +12,7 @@ where
   GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
     + From<
@@ -26,20 +28,22 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let Spanned {
-    span,
-    data: interfaces,
-  } = take_name
-    // `separated_by_ampersand_while` currently defaults its separator marker's
-    // language to `()`. Keep the native engine while selecting GraphQL explicitly.
-    .separated_while::<Ampersand<(), (), GraphQL>, _, U1>(decide_identifier_tail::<Src, Ctx>)
-    .allow_leading()
-    .at_least(1)
+  let _leading = try_ampersand(inp)?;
+  let first = take_name(inp)?;
+  let tail: Vec<Name<GraphqlSlice<'inp, Src>>> = ampersand
+    .then(take_name)
+    .map(|(_, name)| name)
+    .repeated_while::<_, U1>(decide_ampersand_tail::<Src, Ctx>)
     .collect_with(Vec::new())
-    .spanned()
     .parse_input(inp)?;
+  let end = tail
+    .last()
+    .map_or_else(|| first.span().end(), |name| name.span().end());
+  let mut interfaces = Vec::with_capacity(tail.len() + 1);
+  interfaces.push(first);
+  interfaces.extend(tail);
   Ok(ImplementInterfaces::new(
-    SimpleSpan::new(start, span.end()),
+    SimpleSpan::new(start, end),
     interfaces,
   ))
 }

@@ -247,7 +247,8 @@ where
   })
 }
 
-pub(super) fn decide_identifier_tail<'inp, Src, Ctx>(
+/// Continues a union-member tail only at an explicit `|` separator.
+pub(super) fn decide_pipe_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
   _: &mut Ctx::Emitter,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
@@ -259,7 +260,25 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
   Ok(match peeked.pop_front() {
-    Some(token) if token.token().is_identifier() => Action::Continue,
+    Some(token) if token.token().is_pipe() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+/// Continues an implemented-interface tail only at an explicit `&` separator.
+pub(super) fn decide_ampersand_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_ampersand() => Action::Continue,
     _ => Action::Stop,
   })
 }

@@ -46,6 +46,57 @@ fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Loc
   })
 }
 
+#[inline]
+fn is_location_keyword(keyword: ContextualKeyword) -> bool {
+  matches!(
+    keyword,
+    ContextualKeyword::QueryLocation
+      | ContextualKeyword::MutationLocation
+      | ContextualKeyword::SubscriptionLocation
+      | ContextualKeyword::FieldLocation
+      | ContextualKeyword::FragmentDefinitionLocation
+      | ContextualKeyword::FragmentSpreadLocation
+      | ContextualKeyword::InlineFragmentLocation
+      | ContextualKeyword::VariableDefinitionLocation
+      | ContextualKeyword::SchemaLocation
+      | ContextualKeyword::ScalarLocation
+      | ContextualKeyword::ObjectLocation
+      | ContextualKeyword::FieldDefinitionLocation
+      | ContextualKeyword::ArgumentDefinitionLocation
+      | ContextualKeyword::InterfaceLocation
+      | ContextualKeyword::UnionLocation
+      | ContextualKeyword::EnumLocation
+      | ContextualKeyword::EnumValueLocation
+      | ContextualKeyword::InputObjectLocation
+      | ContextualKeyword::InputFieldDefinitionLocation
+  )
+}
+
+fn decide_directive_location_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token)
+      if token
+        .token()
+        .downcast_ref()
+        .is_some_and(is_location_keyword) =>
+    {
+      Action::Continue
+    }
+    Some(_) | None => Action::Stop,
+  })
+}
+
 definition_parser!(
   /// Parses one GraphQL directive location.
   ///
@@ -93,7 +144,9 @@ definition_parser!(
       span,
       data: locations,
     } = location
-      .separated_while::<Pipe<(), (), GraphQL>, _, U1>(decide_identifier_tail::<Src, Ctx>)
+      .separated_while::<Pipe<(), (), GraphQL>, _, U1>(
+        decide_directive_location_tail::<Src, Ctx>,
+      )
       .allow_leading()
       .at_least(1)
       .collect_with(Vec::new())
@@ -102,6 +155,51 @@ definition_parser!(
     Ok(DirectiveLocations::new(span, locations))
   }
 );
+
+/// Enters a directive-definition tail after its `directive` keyword was consumed.
+pub(super) fn directive_after_keyword<'inp, Src, Ctx>(
+  inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
+  start: usize,
+) -> Result<DirectiveDefinition<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+  Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
+  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlToken<'inp, Src>,
+        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
+    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
+    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
+    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+{
+  guard_definition_phase(inp, Expectation::At, |token| token.is_at())?;
+  at(inp)?;
+  let name = take_name(inp)?;
+  let arguments_definition = match try_arguments_definition(inp)? {
+    ParseAttempt::Accept(arguments) => Some(arguments),
+    ParseAttempt::Decline => None,
+  };
+  let repeatable = matches!(try_repeatable_keyword(inp)?, ParseAttempt::Accept(_));
+  take_contextual_keyword(inp, ContextualKeyword::On)?;
+  let locations = directive_locations(inp)?;
+  Ok(DirectiveDefinition::new(
+    SimpleSpan::new(start, locations.span().end()),
+    name,
+    arguments_definition,
+    repeatable,
+    locations,
+  ))
+}
 
 definition_parser!(
   /// Parses a directive definition.
@@ -113,23 +211,7 @@ definition_parser!(
   [contextual],
   {
     let start = take_contextual_keyword(inp, ContextualKeyword::Directive)?.start();
-    guard_definition_phase(inp, Expectation::At, |token| token.is_at())?;
-    at(inp)?;
-    let name = take_name(inp)?;
-    let arguments_definition = match try_arguments_definition(inp)? {
-      ParseAttempt::Accept(arguments) => Some(arguments),
-      ParseAttempt::Decline => None,
-    };
-    let repeatable = matches!(try_repeatable_keyword(inp)?, ParseAttempt::Accept(_));
-    take_contextual_keyword(inp, ContextualKeyword::On)?;
-    let locations = directive_locations(inp)?;
-    Ok(DirectiveDefinition::new(
-      SimpleSpan::new(start, locations.span().end()),
-      name,
-      arguments_definition,
-      repeatable,
-      locations,
-    ))
+    directive_after_keyword(inp, start)
   }
 );
 

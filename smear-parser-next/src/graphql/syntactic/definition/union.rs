@@ -1,6 +1,7 @@
 //! SDL union type-definition parsing.
 
 use super::*;
+use crate::combinator::{pipe, try_pipe};
 
 fn take_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -50,20 +51,21 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQL>>
     + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let Spanned {
-    span,
-    data: members,
-  } = take_name
-    .separated_while::<Pipe<(), (), GraphQL>, _, U1>(decide_identifier_tail::<Src, Ctx>)
-    .allow_leading()
-    .at_least(1)
+  let _leading = try_pipe(inp)?;
+  let first = take_name(inp)?;
+  let tail: Vec<Name<GraphqlSlice<'inp, Src>>> = pipe
+    .then(take_name)
+    .map(|(_, name)| name)
+    .repeated_while::<_, U1>(decide_pipe_tail::<Src, Ctx>)
     .collect_with(Vec::new())
-    .spanned()
     .parse_input(inp)?;
-  Ok(UnionMemberTypes::new(
-    SimpleSpan::new(start, span.end()),
-    members,
-  ))
+  let end = tail
+    .last()
+    .map_or_else(|| first.span().end(), |name| name.span().end());
+  let mut members = Vec::with_capacity(tail.len() + 1);
+  members.push(first);
+  members.extend(tail);
+  Ok(UnionMemberTypes::new(SimpleSpan::new(start, end), members))
 }
 
 definition_parser!(
