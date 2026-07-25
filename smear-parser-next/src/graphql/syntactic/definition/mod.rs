@@ -62,31 +62,6 @@ macro_rules! definition_parser {
       $body
     );
   };
-  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [bytes], $body:block) => {
-    definition_parser!(
-      @impl
-      $(#[$meta])*
-      $visibility $name,
-      $input,
-      $output,
-      [GraphqlSlice<'inp, Src>: AsRef<[u8]>,],
-      $body
-    );
-  };
-  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [contextual, bytes], $body:block) => {
-    definition_parser!(
-      @impl
-      $(#[$meta])*
-      $visibility $name,
-      $input,
-      $output,
-      [
-        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        GraphqlSlice<'inp, Src>: AsRef<[u8]>,
-      ],
-      $body
-    );
-  };
   (@impl $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [$($bounds:tt)*], $body:block) => {
     $(#[$meta])*
     $visibility fn $name<'inp, Src, Ctx>(
@@ -794,27 +769,45 @@ definition_parser!(
 );
 
 #[inline]
-fn classify_location(source: &[u8], span: SimpleSpan) -> Option<Location> {
-  Some(match source {
-    b"QUERY" => ExecutableDirectiveLocation::query(span).into(),
-    b"MUTATION" => ExecutableDirectiveLocation::mutation(span).into(),
-    b"SUBSCRIPTION" => ExecutableDirectiveLocation::subscription(span).into(),
-    b"FIELD" => ExecutableDirectiveLocation::field(span).into(),
-    b"FRAGMENT_DEFINITION" => ExecutableDirectiveLocation::fragment_definition(span).into(),
-    b"FRAGMENT_SPREAD" => ExecutableDirectiveLocation::fragment_spread(span).into(),
-    b"INLINE_FRAGMENT" => ExecutableDirectiveLocation::inline_fragment(span).into(),
-    b"VARIABLE_DEFINITION" => ExecutableDirectiveLocation::variable_definition(span).into(),
-    b"SCHEMA" => TypeSystemDirectiveLocation::schema(span).into(),
-    b"SCALAR" => TypeSystemDirectiveLocation::scalar(span).into(),
-    b"OBJECT" => TypeSystemDirectiveLocation::object(span).into(),
-    b"FIELD_DEFINITION" => TypeSystemDirectiveLocation::field_definition(span).into(),
-    b"ARGUMENT_DEFINITION" => TypeSystemDirectiveLocation::argument_definition(span).into(),
-    b"INTERFACE" => TypeSystemDirectiveLocation::interface(span).into(),
-    b"UNION" => TypeSystemDirectiveLocation::union(span).into(),
-    b"ENUM" => TypeSystemDirectiveLocation::r#enum(span).into(),
-    b"ENUM_VALUE" => TypeSystemDirectiveLocation::enum_value(span).into(),
-    b"INPUT_OBJECT" => TypeSystemDirectiveLocation::input_object(span).into(),
-    b"INPUT_FIELD_DEFINITION" => TypeSystemDirectiveLocation::input_field_definition(span).into(),
+fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
+  Some(match keyword {
+    ContextualKeyword::QueryLocation => ExecutableDirectiveLocation::query(span).into(),
+    ContextualKeyword::MutationLocation => ExecutableDirectiveLocation::mutation(span).into(),
+    ContextualKeyword::SubscriptionLocation => {
+      ExecutableDirectiveLocation::subscription(span).into()
+    }
+    ContextualKeyword::FieldLocation => ExecutableDirectiveLocation::field(span).into(),
+    ContextualKeyword::FragmentDefinitionLocation => {
+      ExecutableDirectiveLocation::fragment_definition(span).into()
+    }
+    ContextualKeyword::FragmentSpreadLocation => {
+      ExecutableDirectiveLocation::fragment_spread(span).into()
+    }
+    ContextualKeyword::InlineFragmentLocation => {
+      ExecutableDirectiveLocation::inline_fragment(span).into()
+    }
+    ContextualKeyword::VariableDefinitionLocation => {
+      ExecutableDirectiveLocation::variable_definition(span).into()
+    }
+    ContextualKeyword::SchemaLocation => TypeSystemDirectiveLocation::schema(span).into(),
+    ContextualKeyword::ScalarLocation => TypeSystemDirectiveLocation::scalar(span).into(),
+    ContextualKeyword::ObjectLocation => TypeSystemDirectiveLocation::object(span).into(),
+    ContextualKeyword::FieldDefinitionLocation => {
+      TypeSystemDirectiveLocation::field_definition(span).into()
+    }
+    ContextualKeyword::ArgumentDefinitionLocation => {
+      TypeSystemDirectiveLocation::argument_definition(span).into()
+    }
+    ContextualKeyword::InterfaceLocation => TypeSystemDirectiveLocation::interface(span).into(),
+    ContextualKeyword::UnionLocation => TypeSystemDirectiveLocation::union(span).into(),
+    ContextualKeyword::EnumLocation => TypeSystemDirectiveLocation::r#enum(span).into(),
+    ContextualKeyword::EnumValueLocation => TypeSystemDirectiveLocation::enum_value(span).into(),
+    ContextualKeyword::InputObjectLocation => {
+      TypeSystemDirectiveLocation::input_object(span).into()
+    }
+    ContextualKeyword::InputFieldDefinitionLocation => {
+      TypeSystemDirectiveLocation::input_field_definition(span).into()
+    }
     _ => return None,
   })
 }
@@ -822,31 +815,28 @@ fn classify_location(source: &[u8], span: SimpleSpan) -> Option<Location> {
 definition_parser!(
   /// Parses one GraphQL directive location.
   ///
-  /// It consumes the identifier payload once and classifies its uppercase spelling
-  /// directly, avoiding a second source slice lookup.
+  /// It consumes one token and classifies its contextual keyword once.
   /// See the [GraphQL Directive Location specification](https://spec.graphql.org/draft/#DirectiveLocation).
   pub location,
   inp,
   Location,
-  [bytes],
+  [contextual],
   {
     match inp.next()? {
       Some(spanned) => {
         let (span, token) = spanned.into_components();
-        match token {
-          GraphqlToken::<'inp, Src>::Identifier(value) => {
-            classify_location(value.as_ref(), span).ok_or_else(|| {
-              DialectGraphqlError::unexpected_token(
-                SyntacticTokenKind::Identifier,
-                Expectation::DirectiveLocation,
-                span,
-              )
-              .into()
-            })
-          }
-          token => Err(
-            DialectGraphqlError::unexpected_token(token.kind(), Expectation::DirectiveLocation, span)
-              .into(),
+        match token
+          .downcast_ref()
+          .and_then(|keyword| classify_location(keyword, span))
+        {
+          Some(location) => Ok(location),
+          None => Err(
+            DialectGraphqlError::unexpected_token(
+              token.kind(),
+              Expectation::DirectiveLocation,
+              span,
+            )
+            .into(),
           ),
         }
       }
@@ -863,7 +853,7 @@ definition_parser!(
   pub directive_locations,
   inp,
   DirectiveLocations<Location>,
-  [bytes],
+  [contextual],
   {
     let Spanned {
       span,
@@ -1312,7 +1302,7 @@ definition_parser!(
   pub directive_definition,
   inp,
   DirectiveDefinition<GraphqlSlice<'inp, Src>>,
-  [contextual, bytes],
+  [contextual],
   {
     let start = take_contextual_keyword(inp, ContextualKeyword::Directive)?.start();
     guard_definition_phase(inp, Expectation::At, |token| token.is_at())?;
@@ -1581,29 +1571,6 @@ macro_rules! impl_definition_api {
       $node,
       $parser,
       [GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
-    );
-  };
-  ($(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident, [bytes]) => {
-    impl_definition_api!(
-      @impl
-      $(#[$meta])*
-      $slice,
-      $node,
-      $parser,
-      [$slice: AsRef<[u8]>,]
-    );
-  };
-  ($(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident, [contextual, bytes]) => {
-    impl_definition_api!(
-      @impl
-      $(#[$meta])*
-      $slice,
-      $node,
-      $parser,
-      [
-        GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        $slice: AsRef<[u8]>,
-      ]
     );
   };
   (@impl $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident, [$($bounds:tt)*]) => {
@@ -1916,7 +1883,7 @@ impl_definition_api!(
   S,
   DirectiveDefinition<S>,
   directive_definition,
-  [contextual, bytes]
+  [contextual]
 );
 impl_definition_api!(
   /// Parses a schema definition.
@@ -1956,9 +1923,10 @@ impl DirectiveLocations<Location> {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: Slice<'inp> + AsRef<[u8]> + Clone + 'inp,
+    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
     GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
       + From<
@@ -1988,9 +1956,10 @@ impl Location {
   ) -> Result<Self, GraphqlError<'inp, Src, Ctx>>
   where
     Src: Source<usize> + ?Sized,
-    GraphqlSlice<'inp, Src>: Slice<'inp> + AsRef<[u8]> + Clone + 'inp,
+    GraphqlSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
     GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
       + From<

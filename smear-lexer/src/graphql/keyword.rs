@@ -4,7 +4,7 @@ use tokora::utils::DowncastRef;
 
 use super::{lossless::LosslessToken, syntactic::SyntacticToken};
 
-/// A GraphQL keyword recognized from an identifier spelling.
+/// A GraphQL contextual spelling recognized from an identifier.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum ContextualKeyword {
   /// `type`
@@ -45,10 +45,48 @@ pub enum ContextualKeyword {
   False,
   /// `null`
   Null,
+  /// `QUERY`
+  QueryLocation,
+  /// `MUTATION`
+  MutationLocation,
+  /// `SUBSCRIPTION`
+  SubscriptionLocation,
+  /// `FIELD`
+  FieldLocation,
+  /// `FRAGMENT_DEFINITION`
+  FragmentDefinitionLocation,
+  /// `FRAGMENT_SPREAD`
+  FragmentSpreadLocation,
+  /// `INLINE_FRAGMENT`
+  InlineFragmentLocation,
+  /// `VARIABLE_DEFINITION`
+  VariableDefinitionLocation,
+  /// `SCHEMA`
+  SchemaLocation,
+  /// `SCALAR`
+  ScalarLocation,
+  /// `OBJECT`
+  ObjectLocation,
+  /// `FIELD_DEFINITION`
+  FieldDefinitionLocation,
+  /// `ARGUMENT_DEFINITION`
+  ArgumentDefinitionLocation,
+  /// `INTERFACE`
+  InterfaceLocation,
+  /// `UNION`
+  UnionLocation,
+  /// `ENUM`
+  EnumLocation,
+  /// `ENUM_VALUE`
+  EnumValueLocation,
+  /// `INPUT_OBJECT`
+  InputObjectLocation,
+  /// `INPUT_FIELD_DEFINITION`
+  InputFieldDefinitionLocation,
 }
 
 impl ContextualKeyword {
-  /// Returns the keyword's raw GraphQL spelling.
+  /// Returns the contextual spelling.
   #[inline]
   pub const fn as_str(self) -> &'static str {
     match self {
@@ -71,6 +109,25 @@ impl ContextualKeyword {
       Self::True => "true",
       Self::False => "false",
       Self::Null => "null",
+      Self::QueryLocation => "QUERY",
+      Self::MutationLocation => "MUTATION",
+      Self::SubscriptionLocation => "SUBSCRIPTION",
+      Self::FieldLocation => "FIELD",
+      Self::FragmentDefinitionLocation => "FRAGMENT_DEFINITION",
+      Self::FragmentSpreadLocation => "FRAGMENT_SPREAD",
+      Self::InlineFragmentLocation => "INLINE_FRAGMENT",
+      Self::VariableDefinitionLocation => "VARIABLE_DEFINITION",
+      Self::SchemaLocation => "SCHEMA",
+      Self::ScalarLocation => "SCALAR",
+      Self::ObjectLocation => "OBJECT",
+      Self::FieldDefinitionLocation => "FIELD_DEFINITION",
+      Self::ArgumentDefinitionLocation => "ARGUMENT_DEFINITION",
+      Self::InterfaceLocation => "INTERFACE",
+      Self::UnionLocation => "UNION",
+      Self::EnumLocation => "ENUM",
+      Self::EnumValueLocation => "ENUM_VALUE",
+      Self::InputObjectLocation => "INPUT_OBJECT",
+      Self::InputFieldDefinitionLocation => "INPUT_FIELD_DEFINITION",
     }
   }
 }
@@ -97,6 +154,25 @@ fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
     b"true" => Some(ContextualKeyword::True),
     b"false" => Some(ContextualKeyword::False),
     b"null" => Some(ContextualKeyword::Null),
+    b"QUERY" => Some(ContextualKeyword::QueryLocation),
+    b"MUTATION" => Some(ContextualKeyword::MutationLocation),
+    b"SUBSCRIPTION" => Some(ContextualKeyword::SubscriptionLocation),
+    b"FIELD" => Some(ContextualKeyword::FieldLocation),
+    b"FRAGMENT_DEFINITION" => Some(ContextualKeyword::FragmentDefinitionLocation),
+    b"FRAGMENT_SPREAD" => Some(ContextualKeyword::FragmentSpreadLocation),
+    b"INLINE_FRAGMENT" => Some(ContextualKeyword::InlineFragmentLocation),
+    b"VARIABLE_DEFINITION" => Some(ContextualKeyword::VariableDefinitionLocation),
+    b"SCHEMA" => Some(ContextualKeyword::SchemaLocation),
+    b"SCALAR" => Some(ContextualKeyword::ScalarLocation),
+    b"OBJECT" => Some(ContextualKeyword::ObjectLocation),
+    b"FIELD_DEFINITION" => Some(ContextualKeyword::FieldDefinitionLocation),
+    b"ARGUMENT_DEFINITION" => Some(ContextualKeyword::ArgumentDefinitionLocation),
+    b"INTERFACE" => Some(ContextualKeyword::InterfaceLocation),
+    b"UNION" => Some(ContextualKeyword::UnionLocation),
+    b"ENUM" => Some(ContextualKeyword::EnumLocation),
+    b"ENUM_VALUE" => Some(ContextualKeyword::EnumValueLocation),
+    b"INPUT_OBJECT" => Some(ContextualKeyword::InputObjectLocation),
+    b"INPUT_FIELD_DEFINITION" => Some(ContextualKeyword::InputFieldDefinitionLocation),
     _ => None,
   }
 }
@@ -146,8 +222,8 @@ mod tests {
   }
 
   #[test]
-  fn classifies_every_graphql_keyword() {
-    const KEYWORDS: [ContextualKeyword; 19] = [
+  fn classifies_every_contextual_spelling() {
+    const KEYWORDS: [ContextualKeyword; 38] = [
       ContextualKeyword::Type,
       ContextualKeyword::Interface,
       ContextualKeyword::Union,
@@ -167,6 +243,25 @@ mod tests {
       ContextualKeyword::True,
       ContextualKeyword::False,
       ContextualKeyword::Null,
+      ContextualKeyword::QueryLocation,
+      ContextualKeyword::MutationLocation,
+      ContextualKeyword::SubscriptionLocation,
+      ContextualKeyword::FieldLocation,
+      ContextualKeyword::FragmentDefinitionLocation,
+      ContextualKeyword::FragmentSpreadLocation,
+      ContextualKeyword::InlineFragmentLocation,
+      ContextualKeyword::VariableDefinitionLocation,
+      ContextualKeyword::SchemaLocation,
+      ContextualKeyword::ScalarLocation,
+      ContextualKeyword::ObjectLocation,
+      ContextualKeyword::FieldDefinitionLocation,
+      ContextualKeyword::ArgumentDefinitionLocation,
+      ContextualKeyword::InterfaceLocation,
+      ContextualKeyword::UnionLocation,
+      ContextualKeyword::EnumLocation,
+      ContextualKeyword::EnumValueLocation,
+      ContextualKeyword::InputObjectLocation,
+      ContextualKeyword::InputFieldDefinitionLocation,
     ];
 
     for keyword in KEYWORDS {
@@ -181,6 +276,65 @@ mod tests {
 
     let lossless = LosslessToken::Identifier("field");
     assert_eq!(lossless.downcast_ref(), None);
+  }
+
+  #[test]
+  fn distinguishes_lowercase_keywords_from_uppercase_locations() {
+    const OVERLAPS: [(&str, ContextualKeyword, &str, ContextualKeyword); 8] = [
+      (
+        "query",
+        ContextualKeyword::Query,
+        "QUERY",
+        ContextualKeyword::QueryLocation,
+      ),
+      (
+        "mutation",
+        ContextualKeyword::Mutation,
+        "MUTATION",
+        ContextualKeyword::MutationLocation,
+      ),
+      (
+        "subscription",
+        ContextualKeyword::Subscription,
+        "SUBSCRIPTION",
+        ContextualKeyword::SubscriptionLocation,
+      ),
+      (
+        "schema",
+        ContextualKeyword::Schema,
+        "SCHEMA",
+        ContextualKeyword::SchemaLocation,
+      ),
+      (
+        "scalar",
+        ContextualKeyword::Scalar,
+        "SCALAR",
+        ContextualKeyword::ScalarLocation,
+      ),
+      (
+        "interface",
+        ContextualKeyword::Interface,
+        "INTERFACE",
+        ContextualKeyword::InterfaceLocation,
+      ),
+      (
+        "union",
+        ContextualKeyword::Union,
+        "UNION",
+        ContextualKeyword::UnionLocation,
+      ),
+      (
+        "enum",
+        ContextualKeyword::Enum,
+        "ENUM",
+        ContextualKeyword::EnumLocation,
+      ),
+    ];
+
+    for (keyword_source, keyword, location_source, location) in OVERLAPS {
+      assert_contextual_keyword(keyword_source, keyword);
+      assert_contextual_keyword(location_source, location);
+    }
   }
 
   #[test]
@@ -213,6 +367,7 @@ mod tests {
   #[test]
   fn classifies_byte_slices() {
     assert_contextual_keyword::<&[u8]>(b"query", ContextualKeyword::Query);
+    assert_contextual_keyword::<&[u8]>(b"QUERY", ContextualKeyword::QueryLocation);
   }
 
   #[cfg(feature = "bytes")]
@@ -222,12 +377,17 @@ mod tests {
       bytes::Bytes::from_static(b"query"),
       ContextualKeyword::Query,
     );
+    assert_contextual_keyword(
+      bytes::Bytes::from_static(b"QUERY"),
+      ContextualKeyword::QueryLocation,
+    );
   }
 
   #[cfg(feature = "bstr")]
   #[test]
   fn classifies_bstr() {
     assert_contextual_keyword(bstr::BStr::new(b"query"), ContextualKeyword::Query);
+    assert_contextual_keyword(bstr::BStr::new(b"QUERY"), ContextualKeyword::QueryLocation);
   }
 
   #[cfg(feature = "hipstr")]
@@ -235,8 +395,16 @@ mod tests {
   fn classifies_hipstr_sources() {
     assert_contextual_keyword(hipstr::HipStr::from("query"), ContextualKeyword::Query);
     assert_contextual_keyword(
+      hipstr::HipStr::from("QUERY"),
+      ContextualKeyword::QueryLocation,
+    );
+    assert_contextual_keyword(
       hipstr::HipByt::from(b"query" as &[u8]),
       ContextualKeyword::Query,
+    );
+    assert_contextual_keyword(
+      hipstr::HipByt::from(b"QUERY" as &[u8]),
+      ContextualKeyword::QueryLocation,
     );
   }
 
@@ -248,16 +416,32 @@ mod tests {
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
+      smol_bytes::shared::Bytes::from_static(b"QUERY"),
+      ContextualKeyword::QueryLocation,
+    );
+    assert_contextual_keyword(
       smol_bytes::compact::Bytes::from_static(b"query"),
       ContextualKeyword::Query,
+    );
+    assert_contextual_keyword(
+      smol_bytes::compact::Bytes::from_static(b"QUERY"),
+      ContextualKeyword::QueryLocation,
     );
     assert_contextual_keyword(
       smol_bytes::Utf8Bytes::from_static("query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
+      smol_bytes::Utf8Bytes::from_static("QUERY"),
+      ContextualKeyword::QueryLocation,
+    );
+    assert_contextual_keyword(
       smol_bytes::compact::Utf8Bytes::from_static("query"),
       ContextualKeyword::Query,
+    );
+    assert_contextual_keyword(
+      smol_bytes::compact::Utf8Bytes::from_static("QUERY"),
+      ContextualKeyword::QueryLocation,
     );
   }
 }

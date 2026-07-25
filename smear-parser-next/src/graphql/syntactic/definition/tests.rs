@@ -424,21 +424,125 @@ fn optional_sdl_groups_accept_after_their_opener() {
 
 #[test]
 fn directive_locations_are_exact_and_lossless_at_the_token_level() {
-  fn one(location: Location) {
-    assert_eq!(location.as_str(), "FIELD_DEFINITION");
-    assert_eq!(*location.span(), SimpleSpan::new(0, 16));
+  const LOCATIONS: [&str; 19] = [
+    "QUERY",
+    "MUTATION",
+    "SUBSCRIPTION",
+    "FIELD",
+    "FRAGMENT_DEFINITION",
+    "FRAGMENT_SPREAD",
+    "INLINE_FRAGMENT",
+    "VARIABLE_DEFINITION",
+    "SCHEMA",
+    "SCALAR",
+    "OBJECT",
+    "FIELD_DEFINITION",
+    "ARGUMENT_DEFINITION",
+    "INTERFACE",
+    "UNION",
+    "ENUM",
+    "ENUM_VALUE",
+    "INPUT_OBJECT",
+    "INPUT_FIELD_DEFINITION",
+  ];
+
+  fn assert_location(source: &str) {
+    let location = drive_str(Location::graphql, source).expect("str accepts directive location");
+    assert_eq!(location.as_str(), source);
+    assert_eq!(*location.span(), SimpleSpan::new(0, source.len()));
+
+    let location =
+      drive_slice(Location::graphql, source.as_bytes()).expect("[u8] accepts directive location");
+    assert_eq!(location.as_str(), source);
+    assert_eq!(*location.span(), SimpleSpan::new(0, source.len()));
+
+    #[cfg(feature = "bytes")]
+    {
+      let bytes = ::bytes::Bytes::copy_from_slice(source.as_bytes());
+      let location =
+        drive_bytes(Location::graphql, &bytes).expect("Bytes accepts directive location");
+      assert_eq!(location.as_str(), source);
+      assert_eq!(*location.span(), SimpleSpan::new(0, source.len()));
+    }
   }
-  accept_all!(Location::graphql, "FIELD_DEFINITION", one);
+
+  for location in LOCATIONS {
+    assert_location(location);
+  }
 
   fn all(locations: DirectiveLocations<Location>) {
     assert_eq!(locations.locations().len(), 19);
+    assert_eq!(
+      locations
+        .locations()
+        .iter()
+        .map(Location::as_str)
+        .collect::<Vec<_>>(),
+      LOCATIONS,
+    );
   }
   accept_all!(
     DirectiveLocations::<Location>::graphql,
     "| QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION",
     all
   );
-  reject_all!(Location::graphql, "FIELD_DEFINITIONS");
+
+  fn assert_not_location(source: &str) {
+    assert!(
+      drive_str(|inp| Location::graphql(inp).map(|_| ()), source).is_err(),
+      "str rejects non-location {source:?}",
+    );
+    assert!(
+      drive_slice(|inp| Location::graphql(inp).map(|_| ()), source.as_bytes()).is_err(),
+      "[u8] rejects non-location {source:?}",
+    );
+    #[cfg(feature = "bytes")]
+    {
+      let bytes = ::bytes::Bytes::copy_from_slice(source.as_bytes());
+      assert!(
+        drive_bytes(|inp| Location::graphql(inp).map(|_| ()), &bytes).is_err(),
+        "Bytes rejects non-location {source:?}",
+      );
+    }
+  }
+
+  for keyword in [
+    "query",
+    "mutation",
+    "subscription",
+    "schema",
+    "scalar",
+    "interface",
+    "union",
+    "enum",
+  ] {
+    assert_not_location(keyword);
+  }
+
+  assert_unexpected(
+    drive_str(
+      |inp| Location::graphql(inp).map(|_| ()),
+      "FIELD_DEFINITIONS",
+    ),
+    Expectation::DirectiveLocation,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  let next = drive_str(
+    |inp| {
+      Location::graphql(inp).expect_err("unknown directive location is rejected");
+      Ok::<_, GraphqlErrors<&str>>(
+        inp
+          .next()?
+          .expect("unknown directive location is consumed")
+          .data()
+          .kind(),
+      )
+    },
+    "FIELD_DEFINITIONS :",
+  )
+  .expect("the token after an unknown directive location remains available");
+  assert_eq!(next, SyntacticTokenKind::Colon);
+
   reject_all!(DirectiveLocations::<Location>::graphql, "");
   reject_all!(DirectiveLocations::<Location>::graphql, "BOGUS");
   reject_all!(DirectiveLocations::<Location>::graphql, "FIELD |");
