@@ -3,8 +3,13 @@ use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
+  punct::{
+    Ampersand, Asterisk, At, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon, Dollar,
+    DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
+    OpenParen, Pipe, Plus, Spread,
+  },
   state::recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-  utils::CharLen,
+  utils::{CharLen, DowncastRef},
 };
 
 use crate::{
@@ -26,7 +31,7 @@ pub use crate::simd::DEFAULT_RECURSION_LIMIT;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  LitFloat, LitInt, error,
+  ContextualKeyword, LitFloat, LitInt, error,
 };
 
 /// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
@@ -251,9 +256,21 @@ where
   }
 }
 
+impl<'a, S> tokora::token::KeywordToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+  SyntacticToken<S>: DowncastRef<ContextualKeyword>,
+{
+  #[inline(always)]
+  fn keyword(&self) -> Option<&'static str> {
+    self.downcast_ref().map(ContextualKeyword::as_str)
+  }
+}
+
 impl<'a, S> tokora::token::LitToken<'a> for SyntacticToken<S>
 where
   S: tokora::Slice<'a> + Clone + 'a,
+  SyntacticToken<S>: DowncastRef<ContextualKeyword>,
 {
   // GraphQLx preserves the integer radix in the `LitInt` payload, so each radix
   // predicate inspects the payload variant rather than merely the token variant.
@@ -303,6 +320,131 @@ where
   #[inline(always)]
   fn is_multiline_string_literal(&self) -> bool {
     matches!(self, Self::LitBlockStr(_))
+  }
+
+  #[inline(always)]
+  fn is_true_literal(&self) -> bool {
+    self.downcast_ref() == Some(ContextualKeyword::True)
+  }
+
+  #[inline(always)]
+  fn is_false_literal(&self) -> bool {
+    self.downcast_ref() == Some(ContextualKeyword::False)
+  }
+
+  #[inline(always)]
+  fn is_null_literal(&self) -> bool {
+    self.downcast_ref() == Some(ContextualKeyword::Null)
+  }
+}
+
+impl<'a, S> tokora::token::PunctuatorToken<'a> for SyntacticToken<S>
+where
+  S: tokora::Slice<'a> + Clone + 'a,
+{
+  #[inline(always)]
+  fn open_angle() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LAngle)
+  }
+
+  #[inline(always)]
+  fn close_angle() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RAngle)
+  }
+
+  #[inline(always)]
+  fn open_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBrace)
+  }
+
+  #[inline(always)]
+  fn close_brace() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBrace)
+  }
+
+  #[inline(always)]
+  fn open_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LParen)
+  }
+
+  #[inline(always)]
+  fn close_paren() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RParen)
+  }
+
+  #[inline(always)]
+  fn open_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::LBracket)
+  }
+
+  #[inline(always)]
+  fn close_bracket() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::RBracket)
+  }
+
+  #[inline(always)]
+  fn at() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::At)
+  }
+
+  #[inline(always)]
+  fn asterisk() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Asterisk)
+  }
+
+  #[inline(always)]
+  fn ampersand() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Ampersand)
+  }
+
+  #[inline(always)]
+  fn colon() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Colon)
+  }
+
+  #[inline(always)]
+  fn dollar() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Dollar)
+  }
+
+  #[inline(always)]
+  fn equal() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Equal)
+  }
+
+  #[inline(always)]
+  fn exclamation() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Bang)
+  }
+
+  #[inline(always)]
+  fn minus() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Minus)
+  }
+
+  #[inline(always)]
+  fn pipe() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Pipe)
+  }
+
+  #[inline(always)]
+  fn plus() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Plus)
+  }
+
+  #[inline(always)]
+  fn fat_arrow() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::FatArrow)
+  }
+
+  #[inline(always)]
+  fn double_colon() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::PathSeparator)
+  }
+
+  #[inline(always)]
+  fn spread() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Spread)
   }
 }
 
@@ -368,6 +510,43 @@ pub enum SyntacticTokenKind {
   /// Path separator `::` token
   PathSeparator,
 }
+
+macro_rules! into_token_kind {
+  ($($ty:ident::$kind:ident),* $(,)?) => {
+    $(
+      impl<S, C, Lang: ?Sized> From<$ty<S, C, Lang>> for SyntacticTokenKind {
+        #[inline(always)]
+        fn from(_: $ty<S, C, Lang>) -> Self {
+          Self::$kind
+        }
+      }
+    )*
+  };
+}
+
+into_token_kind!(
+  Asterisk::Asterisk,
+  Ampersand::Ampersand,
+  At::At,
+  OpenAngle::LAngle,
+  CloseAngle::RAngle,
+  OpenBrace::LBrace,
+  CloseBrace::RBrace,
+  OpenParen::LParen,
+  CloseParen::RParen,
+  OpenBracket::LBracket,
+  CloseBracket::RBracket,
+  Colon::Colon,
+  Dollar::Dollar,
+  DoubleColon::PathSeparator,
+  Equal::Equal,
+  Exclamation::Bang,
+  FatArrow::FatArrow,
+  Hyphen::Minus,
+  Pipe::Pipe,
+  Plus::Plus,
+  Spread::Spread,
+);
 
 impl core::fmt::Display for SyntacticTokenKind {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
