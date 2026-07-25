@@ -4,7 +4,7 @@ use super::*;
 
 /// Enters a type-system-definition tail after its leading keyword was consumed
 /// and classified by fused dispatch.
-fn type_system_definition_after_keyword<'inp, Src, Ctx>(
+pub(crate) fn type_system_definition_after_keyword<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   keyword: ContextualKeyword,
   start: usize,

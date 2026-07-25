@@ -263,6 +263,7 @@ mod type_definition;
 pub use type_definition::{described_type_definition, type_definition};
 
 mod extension;
+pub(crate) use extension::type_system_extension_after_extend;
 pub use extension::{
   enum_type_extension, input_object_type_extension, interface_type_extension,
   object_type_extension, scalar_type_extension, schema_extension, type_extension,
@@ -270,6 +271,7 @@ pub use extension::{
 };
 
 mod document;
+pub(crate) use document::type_system_definition_after_keyword;
 pub use document::{
   described_type_system_definition, type_system_definition, type_system_definition_or_extension,
   type_system_document,

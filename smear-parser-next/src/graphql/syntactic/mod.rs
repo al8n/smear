@@ -63,10 +63,13 @@ where
 pub mod argument;
 pub mod definition;
 pub mod directive;
+pub mod document;
 pub mod executable;
 pub mod selection;
 pub mod ty;
 pub mod value;
+
+pub use document::{definition, definition_or_extension, described_definition, document};
 
 fn name<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,

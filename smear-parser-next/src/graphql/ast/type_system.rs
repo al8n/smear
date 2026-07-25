@@ -10,7 +10,9 @@ use tokora::{
   span::{AsSpan, IntoSpan},
 };
 
-use super::{ConstDirectives, DefaultInputValue, Described, Name, OperationType, Type};
+use super::{
+  ConstDirectives, DefaultInputValue, Described, ExecutableDefinition, Name, OperationType, Type,
+};
 
 pub use crate::type_system::{
   DirectiveLocations, ExecutableDirectiveLocation, ImplementInterfaces, Location,
@@ -269,3 +271,25 @@ pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =
 /// A nonempty GraphQL type-system document.
 pub type TypeSystemDocument<S, Ty = Type<Name<S>>> =
   crate::executable::Document<TypeSystemDefinitionOrExtension<S, Ty>>;
+
+/// A GraphQL definition: either a type-system or executable definition.
+pub type Definition<S, Ty = Type<Name<S>>> =
+  crate::executable::Definition<TypeSystemDefinition<S, Ty>, ExecutableDefinition<S, Ty>>;
+
+/// A GraphQL definition with an optional leading description.
+///
+/// Descriptions on executable definitions are frozen-parser/dialect
+/// compatibility, not standard GraphQL executable syntax.
+pub type DescribedDefinition<S, Ty = Type<Name<S>>> = Described<Definition<S, Ty>, S>;
+
+/// A GraphQL definition with an optional description, or a type-system extension.
+pub type DefinitionOrExtension<S, Ty = Type<Name<S>>> =
+  crate::executable::DefinitionOrExtension<DescribedDefinition<S, Ty>, TypeSystemExtension<S, Ty>>;
+
+/// A nonempty full GraphQL document.
+///
+/// Its entries may be executable definitions, type-system definitions, or
+/// type-system extensions. Executable descriptions are retained for
+/// frozen-parser/dialect compatibility.
+pub type Document<S, Ty = Type<Name<S>>> =
+  crate::executable::Document<DefinitionOrExtension<S, Ty>>;

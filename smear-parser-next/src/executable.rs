@@ -8,6 +8,7 @@ use core::{
   ops::{Deref, DerefMut},
 };
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use std::vec::Vec;
 
 use tokora::{
@@ -521,7 +522,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> I
   }
 }
 
-/// A GraphQL-family executable document.
+/// A GraphQL-family document.
 #[derive(Debug, Clone, Copy)]
 pub struct Document<Definition, Span = SimpleSpan, Container = Vec<Definition>> {
   span: Span,
@@ -530,7 +531,7 @@ pub struct Document<Definition, Span = SimpleSpan, Container = Vec<Definition>> 
 }
 
 impl<Definition, Span, Container> Document<Definition, Span, Container> {
-  /// Creates an executable document from its span and definitions.
+  /// Creates a document from its span and definitions.
   #[inline]
   pub const fn new(span: Span, definitions: Container) -> Self {
     Self {
@@ -582,6 +583,109 @@ impl<Definition, Span, Container> IntoComponents for Document<Definition, Span, 
   #[inline]
   fn into_components(self) -> Self::Components {
     (self.span, self.definitions)
+  }
+}
+
+/// A GraphQL-family definition: either type-system or executable syntax.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum Definition<TypeSystem, Executable> {
+  /// A type-system definition.
+  TypeSystem(TypeSystem),
+  /// An executable definition.
+  Executable(Executable),
+}
+
+impl<TypeSystem, Executable, Span> AsSpan<Span> for Definition<TypeSystem, Executable>
+where
+  TypeSystem: AsSpan<Span>,
+  Executable: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::TypeSystem(value) => value.as_span(),
+      Self::Executable(value) => value.as_span(),
+    }
+  }
+}
+
+impl<TypeSystem, Executable, Span> IntoSpan<Span> for Definition<TypeSystem, Executable>
+where
+  TypeSystem: IntoSpan<Span>,
+  Executable: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::TypeSystem(value) => value.into_span(),
+      Self::Executable(value) => value.into_span(),
+    }
+  }
+}
+
+impl<TypeSystem, Executable> Definition<TypeSystem, Executable> {
+  /// Returns the span of the selected definition arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    TypeSystem: AsSpan<Span>,
+    Executable: AsSpan<Span>,
+  {
+    self.as_span()
+  }
+}
+
+/// A GraphQL-family definition with its optional description, or a type-system
+/// extension that cannot carry one.
+#[derive(Debug, Clone, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+pub enum DefinitionOrExtension<Definition, Extension> {
+  /// A definition, including its optional description.
+  Definition(Definition),
+  /// A type-system extension.
+  Extension(Extension),
+}
+
+impl<Definition, Extension, Span> AsSpan<Span> for DefinitionOrExtension<Definition, Extension>
+where
+  Definition: AsSpan<Span>,
+  Extension: AsSpan<Span>,
+{
+  #[inline]
+  fn as_span(&self) -> &Span {
+    match self {
+      Self::Definition(value) => value.as_span(),
+      Self::Extension(value) => value.as_span(),
+    }
+  }
+}
+
+impl<Definition, Extension, Span> IntoSpan<Span> for DefinitionOrExtension<Definition, Extension>
+where
+  Definition: IntoSpan<Span>,
+  Extension: IntoSpan<Span>,
+{
+  #[inline]
+  fn into_span(self) -> Span {
+    match self {
+      Self::Definition(value) => value.into_span(),
+      Self::Extension(value) => value.into_span(),
+    }
+  }
+}
+
+impl<Definition, Extension> DefinitionOrExtension<Definition, Extension> {
+  /// Returns the span of the selected document-entry arm.
+  #[inline]
+  pub fn span<Span>(&self) -> &Span
+  where
+    Definition: AsSpan<Span>,
+    Extension: AsSpan<Span>,
+  {
+    self.as_span()
   }
 }
 

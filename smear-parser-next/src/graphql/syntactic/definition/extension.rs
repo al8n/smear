@@ -445,7 +445,7 @@ where
 
 /// Enters a type-system-extension tail after `extend` was consumed by fused
 /// dispatch, consuming and classifying its next identifier exactly once.
-pub(super) fn type_system_extension_after_extend<'inp, Src, Ctx>(
+pub(crate) fn type_system_extension_after_extend<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
   start: usize,
 ) -> Result<TypeSystemExtension<GraphqlSlice<'inp, Src>>, GraphqlError<'inp, Src, Ctx>>
