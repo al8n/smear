@@ -3,6 +3,8 @@
 //! GraphQLx extends GraphQL's named/list references with paths, generic type
 //! arguments, set types (`<T>`), and map types (`<K => V>`). A trailing `!`
 //! is folded into the node it immediately follows.
+//!
+//! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
 use std::{boxed::Box, vec::Vec};
 use tokora::{
@@ -20,8 +22,8 @@ use tokora::{
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
 
 use super::{
-  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, next_is,
-  path_after_first, peek_kind, unexpected_here,
+  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, path_after_first,
+  peek_kind, unexpected_here,
 };
 use crate::{
   combinator::{ParseCtx, try_bang, try_fat_arrow},
@@ -66,14 +68,17 @@ where
   })
 }
 
-fn type_generics<'inp, Src, Ctx>(
+/// Parses one nonempty angle-delimited GraphQLx type-argument list.
+///
+/// This helper is shared by GraphQLx productions that attach optional type
+/// arguments to a path, rather than duplicating recursive type parsing.
+pub(crate) fn type_generics<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<TypeGenerics<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -100,14 +105,32 @@ where
     .map(|Spanned { span, data }| TypeGenerics::new(span, data))
 }
 
-fn try_type_generics<'inp, Src, Ctx>(
+fn decide_type_generics_opener<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::LAngle) => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+/// Attempts an optional GraphQLx type-argument list without consuming when
+/// the next token is not an opening angle bracket.
+pub(crate) fn try_type_generics<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<Option<TypeGenerics<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -124,13 +147,13 @@ where
     + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  if next_is(inp, |token| {
-    matches!(token, GraphqlxToken::<'inp, Src>::LAngle)
-  })? {
-    type_generics(inp).map(Some)
-  } else {
-    Ok(None)
-  }
+  type_generics
+    .peek_then_try::<_, U1>(decide_type_generics_opener::<Src, Ctx>)
+    .try_parse_input(inp)
+    .map(|attempt| match attempt {
+      ParseAttempt::Accept(generics) => Some(generics),
+      ParseAttempt::Decline => None,
+    })
 }
 
 fn path_type_after_path<'inp, Src, Ctx>(
@@ -140,8 +163,7 @@ fn path_type_after_path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -168,8 +190,7 @@ fn list_type_core<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -198,8 +219,7 @@ fn angle_type_core<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -229,14 +249,19 @@ where
 }
 
 /// Parses a committed recursive GraphQLx type reference.
+///
+/// GraphQLx retains GraphQL's named/list references and trailing `!`, while
+/// extending named types to paths with optional type arguments and adding set
+/// (`<T>`) and map (`<K => V>`) references.
+///
+/// See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 pub fn ty<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<Type<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -285,10 +310,7 @@ where
     ParseAttempt::Decline => match peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => list_type_core(inp)?,
       Some(SyntacticTokenKind::LAngle) => angle_type_core(inp)?,
-      _ => {
-        unexpected_here(inp, Expectation::Type)?;
-        unreachable!("unexpected_here always returns an error")
-      }
+      _ => return unexpected_here(inp, Expectation::Type),
     },
   };
   let required = matches!(try_bang(inp)?, ParseAttempt::Accept(_));
@@ -309,14 +331,18 @@ where
 
 impl<S> Type<S> {
   /// Parses one committed GraphQLx type reference.
+  ///
+  /// The parser follows GraphQL's type-reference structure, extended with
+  /// GraphQLx paths, generic type arguments, set types, and map types.
+  ///
+  /// See [`ty`] and the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
   pub fn graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    GraphqlxToken<'inp, Src>:
-      Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
+    GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
