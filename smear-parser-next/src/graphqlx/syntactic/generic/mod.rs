@@ -29,7 +29,7 @@ use super::{
   ty::try_type_generics, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, colon, try_ampersand, try_equal},
+  combinator::{ParseCtx, ampersand, colon, try_equal},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -172,6 +172,23 @@ where
 {
   Ok(match peeked.pop_front() {
     Some(token) if token.token().is_l_angle() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+fn decide_ampersand_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_ampersand() => Action::Continue,
     _ => Action::Stop,
   })
 }
@@ -472,15 +489,21 @@ generic_parser!(
     + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
   ];
   {
-    let cursor = *inp.cursor();
     let bounded_type = type_path(inp)?;
     colon(inp)?;
-    let mut bounds = Vec::from([type_path(inp)?]);
-    while matches!(try_ampersand(inp)?, ParseAttempt::Accept(_)) {
-      bounds.push(type_path(inp)?);
-    }
+    let first = type_path(inp)?;
+    let bounds: Vec<TypePath<GraphqlxSlice<'inp, Src>>> = ampersand
+      .ignore_then(type_path)
+      .repeated_while::<_, U1>(decide_ampersand_tail::<Src, Ctx>)
+      .collect_with(Vec::from([first]))
+      .parse_input(inp)?;
+    let end = bounds
+      .last()
+      .expect("where predicates contain their first bound")
+      .span()
+      .end();
     Ok(WherePredicate::new(
-      inp.span_since(&cursor),
+      SimpleSpan::new(bounded_type.span().start(), end),
       bounded_type,
       bounds,
     ))
@@ -512,9 +535,10 @@ where
   )
 }
 
-fn has_where_predicate_head<'inp, Src, Ctx>(
-  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<bool, GraphqlxError<'inp, Src, Ctx>>
+fn decide_where_predicate_tail<'inp, Src, Ctx>(
+  peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U2>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -522,7 +546,11 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  inp.peek::<U2>().map(predicate_head_in_window)
+  Ok(if predicate_head_in_window(peeked) {
+    Action::Continue
+  } else {
+    Action::Stop
+  })
 }
 
 /// Enters a GraphQLx `where` clause after its keyword has been consumed.
@@ -553,10 +581,11 @@ where
     + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let mut predicates = Vec::from([where_predicate(inp)?]);
-  while has_where_predicate_head(inp)? {
-    predicates.push(where_predicate(inp)?);
-  }
+  let first = where_predicate(inp)?;
+  let predicates: Vec<WherePredicate<GraphqlxSlice<'inp, Src>>> = where_predicate
+    .repeated_while::<_, U2>(decide_where_predicate_tail::<Src, Ctx>)
+    .collect_with(Vec::from([first]))
+    .parse_input(inp)?;
   let end = predicates
     .last()
     .expect("a GraphQLx where clause has one predicate")

@@ -1,7 +1,9 @@
 //! Focused GraphQLx selection-production tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, try_parse_input::ParseAttempt, utils::cmp::Equivalent};
+use tokora::{
+  FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,
+};
 
 use super::{field, fragment_spread, inline_fragment, selection, selection_set, type_condition};
 use crate::graphqlx::{
@@ -143,6 +145,10 @@ fn direct_field_api_accepts_alias_arguments_directives_and_nested_selections() {
 #[test]
 fn type_conditions_and_spread_dispatch_preserve_graphqlx_paths_and_generics() {
   fn check_condition<S: AsRef<[u8]>>(condition: ast::TypeCondition<S>) {
+    assert_eq!(
+      condition.span(),
+      &SimpleSpan::new(0, "on ::pkg::User<Node>".len())
+    );
     let path = condition.name();
     assert!(path.path().is_fully_qualified());
     assert_eq!(path.path().segments().len(), 2);

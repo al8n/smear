@@ -1,7 +1,7 @@
 //! Focused GraphQLx generic-production tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::super::{GraphqlxInput, GraphqlxLexer};
 use crate::graphqlx::{
@@ -277,6 +277,41 @@ fn type_paths_and_where_constraints_are_source_generic() {
     "where T: Node U<String>: Serializable",
     check_clause
   );
+}
+
+#[test]
+fn where_tails_preserve_multi_bound_and_predicate_spans() {
+  let predicate_source = "T: Node & Serializable";
+  let predicate =
+    drive_str(ast::WherePredicate::graphqlx, predicate_source).expect("multiple where bounds");
+  assert_eq!(predicate.bounds().len(), 2);
+  assert_eq!(
+    predicate.span(),
+    &SimpleSpan::new(0, predicate_source.len())
+  );
+
+  let clause_source = "where T: Node & Serializable U: Resource & Named";
+  let clause =
+    drive_str(ast::WhereClause::graphqlx, clause_source).expect("multiple where predicates");
+  assert_eq!(clause.predicates().len(), 2);
+  assert_eq!(clause.predicates()[0].bounds().len(), 2);
+  assert_eq!(clause.predicates()[1].bounds().len(), 2);
+  assert_eq!(clause.span(), &SimpleSpan::new(0, clause_source.len()));
+
+  let trailing_source = "where T: Node &";
+  let error = drive_str(ast::WhereClause::graphqlx, trailing_source)
+    .expect_err("an ampersand commits to its following bound")
+    .into_iter()
+    .next()
+    .expect("typed error");
+  assert_eq!(
+    error.span(),
+    SimpleSpan::new(trailing_source.len(), trailing_source.len())
+  );
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected) if unexpected.found().is_none()
+  ));
 }
 
 #[test]

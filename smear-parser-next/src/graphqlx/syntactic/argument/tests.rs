@@ -120,12 +120,14 @@ fn direct_argument_apis_accept_standard_graphql_forms_over_every_source() {
   fn check_argument<S: AsRef<[u8]>>(argument: ast::Argument<S>) {
     assert!("count".equivalent(argument.name().source()));
     assert!(matches!(argument.value(), ast::InputValue::Int(_)));
+    assert_eq!(argument.span(), &SimpleSpan::new(0, 8));
   }
   accept_all!(ast::Argument::graphqlx, "count: 1", check_argument);
 
   fn check_const_argument<S: AsRef<[u8]>>(argument: ast::ConstArgument<S>) {
     assert!("enabled".equivalent(argument.name().source()));
     assert!(matches!(argument.value(), ast::ConstInputValue::Boolean(_)));
+    assert_eq!(argument.span(), &SimpleSpan::new(0, 13));
   }
   accept_all!(
     ast::ConstArgument::graphqlx,
@@ -155,6 +157,34 @@ fn direct_argument_apis_accept_standard_graphql_forms_over_every_source() {
 }
 
 #[test]
+fn direct_arguments_preserve_phase_local_expectations() {
+  assert_unexpected(
+    |inp| ast::Argument::graphqlx(inp).map(|_| ()),
+    "",
+    Expectation::Name,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::ConstArgument::graphqlx(inp).map(|_| ()),
+    "item",
+    Expectation::Colon,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::Argument::graphqlx(inp).map(|_| ()),
+    "item:",
+    Expectation::InputValue,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::ConstArgument::graphqlx(inp).map(|_| ()),
+    "item:",
+    Expectation::ConstInputValue,
+    None,
+  );
+}
+
+#[test]
 fn argument_collections_are_absent_or_empty_without_losing_the_following_token() {
   let (empty, following) = drive_str(
     |inp| {
@@ -167,6 +197,19 @@ fn argument_collections_are_absent_or_empty_without_losing_the_following_token()
   .expect("absent arguments should not consume the following name");
   assert!(empty.arguments().is_empty());
   assert_eq!(empty.span(), &SimpleSpan::new(0, 0));
+  assert!("field".equivalent(following.source()));
+
+  let (empty_const, following) = drive_str(
+    |inp| {
+      let arguments = ast::ConstArguments::graphqlx(inp)?;
+      let following = super::super::name(inp)?;
+      Ok((arguments, following))
+    },
+    "field",
+  )
+  .expect("absent constant arguments should not consume the following name");
+  assert!(empty_const.arguments().is_empty());
+  assert_eq!(empty_const.span(), &SimpleSpan::new(0, 0));
   assert!("field".equivalent(following.source()));
 
   fn check_empty<S: AsRef<[u8]>>(arguments: ast::Arguments<S>) {
@@ -220,6 +263,16 @@ fn argument_collections_commit_malformed_members_and_report_unclosed_parens() {
     .into_iter()
     .next()
     .expect("unterminated arguments should emit an error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::Unclosed(Unclosed::Parentheses)
+  ));
+
+  let error = drive_str(ast::ConstArguments::graphqlx, "(arg: 1")
+    .expect_err("unterminated constant arguments should fail")
+    .into_iter()
+    .next()
+    .expect("unterminated constant arguments should emit an error");
   assert!(matches!(
     error.into_data(),
     ErrorData::Unclosed(Unclosed::Parentheses)

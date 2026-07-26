@@ -242,8 +242,11 @@ selection_parser!(
   TypeCondition<GraphqlxSlice<'inp, Src>>,
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
-    let on = take_on(inp)?;
-    type_condition_after_on(on, inp)
+    take_on
+      .ignore_then(super::generic::type_path)
+      .spanned()
+      .map(|Spanned { span, data }| TypeCondition::new(span, data))
+      .parse_input(inp)
   }
 );
 

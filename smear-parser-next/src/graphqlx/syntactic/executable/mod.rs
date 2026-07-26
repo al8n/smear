@@ -14,7 +14,7 @@ use tokora::{
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Angle, Brace, Bracket, Paren},
+  punct::{Angle, Brace, Bracket, Colon, Dollar, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -243,6 +243,44 @@ where
   }
 }
 
+/// Parses a committed `$` with the local variable-definition diagnostic.
+fn take_dollar<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<Dollar<SimpleSpan, (), GraphQLx>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>:
+    From<UnexpectedEot<usize, GraphQLx>> + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match try_dollar(inp)? {
+    ParseAttempt::Accept(dollar) => Ok(dollar),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::Dollar),
+  }
+}
+
+/// Parses a committed `:` with the local variable-definition diagnostic.
+fn take_colon<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<Colon<SimpleSpan, (), GraphQLx>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>:
+    From<UnexpectedEot<usize, GraphQLx>> + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match try_colon(inp)? {
+    ParseAttempt::Accept(colon) => Ok(colon),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::Colon),
+  }
+}
+
 fn try_description<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ParseAttempt<StringValue<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
@@ -307,31 +345,25 @@ where
     + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
-  let dollar = match try_dollar(inp)? {
-    ParseAttempt::Accept(dollar) => dollar,
-    ParseAttempt::Decline => return unexpected_here(inp, Expectation::Dollar),
-  };
-  let name = take_name(inp)?;
-  let variable = VariableValue::new(
-    SimpleSpan::new(dollar.span().start(), name.span().end()),
-    name,
-  );
-  match try_colon(inp)? {
-    ParseAttempt::Accept(_) => {}
-    ParseAttempt::Decline => return unexpected_here(inp, Expectation::Colon),
-  }
-  let ty = ty(inp)?;
-  let default = default_value(inp)?;
-  let directives = const_directives(inp)?;
-  let directives = (!directives.directives().is_empty()).then_some(directives);
-  Ok(VariableDefinition::new(
-    inp.span_since(&cursor),
-    variable,
-    ty,
-    default,
-    directives,
-  ))
+  take_dollar
+    .ignore_then(take_name)
+    .spanned()
+    .map(|Spanned { span, data }| VariableValue::new(span, data))
+    .then_ignore(take_colon)
+    .then(ty)
+    .then(default_value)
+    .then(const_directives)
+    .spanned()
+    .map(
+      |Spanned {
+         span,
+         data: (((variable, ty), default), directives),
+       }| {
+        let directives = (!directives.directives().is_empty()).then_some(directives);
+        VariableDefinition::new(span, variable, ty, default, directives)
+      },
+    )
+    .parse_input(inp)
 }
 
 executable_parser!(

@@ -1,6 +1,7 @@
 //! GraphQLx union type definitions and member paths.
 
 use super::*;
+use crate::combinator::{pipe, try_pipe};
 
 fn union_members_after_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -27,10 +28,12 @@ where
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let _leading = try_pipe(inp)?;
-  let mut members = Vec::from([type_path(inp)?]);
-  while matches!(try_pipe(inp)?, ParseAttempt::Accept(_)) {
-    members.push(type_path(inp)?);
-  }
+  let first = type_path(inp)?;
+  let members: Vec<TypePath<GraphqlxSlice<'inp, Src>>> = pipe
+    .ignore_then(type_path)
+    .repeated_while::<_, U1>(decide_pipe_tail::<Src, Ctx>)
+    .collect_with(Vec::from([first]))
+    .parse_input(inp)?;
   let end = members
     .last()
     .expect("union member clauses contain their first path")

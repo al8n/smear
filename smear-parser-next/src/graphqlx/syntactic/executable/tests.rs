@@ -151,6 +151,15 @@ fn variables_support_descriptions_defaults_and_constant_directives() {
     .expect("an absent variable list is a zero-width optional collection");
   assert!(absent.variable_definitions().is_empty());
   assert_eq!(absent.span(), &SimpleSpan::new(0, 0));
+
+  let source = "$value: Int";
+  let variable = drive_str(ast::DescribedVariableDefinition::graphqlx, source)
+    .expect("a variable definition preserves its outer and variable spans");
+  assert_eq!(variable.span(), &SimpleSpan::new(0, source.len()));
+  assert_eq!(
+    variable.variable().span(),
+    &SimpleSpan::new(0, "$value".len())
+  );
 }
 
 #[test]
@@ -330,6 +339,16 @@ fn executable_document_accepts_graphqlx_executable_fixtures() {
 
 #[test]
 fn executable_productions_commit_required_tails_and_keep_delimiter_diagnostics() {
+  assert_unexpected(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "value: Int"),
+    Expectation::Dollar,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    drive_str(|inp| variable_definition(inp).map(|_| ()), "$: Int"),
+    Expectation::Name,
+    Some(SyntacticTokenKind::Colon),
+  );
   assert_unexpected(
     drive_str(|inp| variable_definition(inp).map(|_| ()), "$value Int"),
     Expectation::Colon,

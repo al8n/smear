@@ -11,10 +11,10 @@
 use std::vec::Vec;
 
 use tokora::{
-  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
+  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
-  parser::Action,
+  parser::{Action, try_parens},
   punct::{Brace, Bracket, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
@@ -32,7 +32,7 @@ use crate::{
   combinator::{ParseCtx, try_colon},
   graphqlx::{
     GraphQLx,
-    ast::{Argument, Arguments, ConstArgument, ConstArguments},
+    ast::{Argument, Arguments, ConstArgument, ConstArguments, Name},
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
 };
@@ -75,6 +75,59 @@ macro_rules! argument_parser {
   };
 }
 
+fn take_argument_name<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<Name<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlxToken<'inp, Src>,
+        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQLx,
+      >,
+    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match try_name(inp)? {
+    ParseAttempt::Accept(name) => Ok(name),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::Name),
+  }
+}
+
+fn take_argument_colon<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlxToken<'inp, Src>,
+        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQLx,
+      >,
+    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match try_colon(inp)? {
+    ParseAttempt::Accept(_) => Ok(()),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::Colon),
+  }
+}
+
 argument_parser!(
   /// Parses one committed executable GraphQLx `Argument` production.
   ///
@@ -90,17 +143,12 @@ argument_parser!(
     + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
   ];
   {
-    let cursor = *inp.cursor();
-    let name = match try_name(inp)? {
-      ParseAttempt::Accept(name) => name,
-      ParseAttempt::Decline => return unexpected_here(inp, Expectation::Name),
-    };
-    match try_colon(inp)? {
-      ParseAttempt::Accept(_) => {}
-      ParseAttempt::Decline => return unexpected_here(inp, Expectation::Colon),
-    }
-    let value = value(inp)?;
-    Ok(Argument::new(inp.span_since(&cursor), name, value))
+    take_argument_name
+      .then_ignore(take_argument_colon)
+      .then(value)
+      .spanned()
+      .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
+      .parse_input(inp)
   }
 );
 
@@ -119,17 +167,12 @@ argument_parser!(
     + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
   ];
   {
-    let cursor = *inp.cursor();
-    let name = match try_name(inp)? {
-      ParseAttempt::Accept(name) => name,
-      ParseAttempt::Decline => return unexpected_here(inp, Expectation::Name),
-    };
-    match try_colon(inp)? {
-      ParseAttempt::Accept(_) => {}
-      ParseAttempt::Decline => return unexpected_here(inp, Expectation::Colon),
-    }
-    let value = const_value(inp)?;
-    Ok(ConstArgument::new(inp.span_since(&cursor), name, value))
+    take_argument_name
+      .then_ignore(take_argument_colon)
+      .then(const_value)
+      .spanned()
+      .map(|Spanned { span, data: (name, value) }| ConstArgument::new(span, name, value))
+      .parse_input(inp)
   }
 );
 
@@ -150,63 +193,6 @@ where
     None => Action::Stop,
   })
 }
-
-fn decide_arguments_head<'inp, Src, Ctx>(
-  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
-) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-{
-  Ok(match peeked.pop_front() {
-    Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::LParen) => Action::Continue,
-    _ => Action::Stop,
-  })
-}
-
-argument_parser!(
-  committed_arguments,
-  inp,
-  Arguments<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
-  {
-    (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
-      .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
-      .delimited_by_parens()
-      .collect_with(Vec::new())
-      .spanned()
-      .parse_input(inp)
-      .map(|Spanned { span, data }| Arguments::new(span, data))
-  }
-);
-
-argument_parser!(
-  committed_const_arguments,
-  inp,
-  ConstArguments<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
-  {
-    (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_argument(inp))
-      .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
-      .delimited_by_parens()
-      .collect_with(Vec::new())
-      .spanned()
-      .parse_input(inp)
-      .map(|Spanned { span, data }| ConstArguments::new(span, data))
-  }
-);
 
 argument_parser!(
   /// Parses an executable GraphQLx `Arguments` collection.
@@ -229,12 +215,17 @@ argument_parser!(
   ];
   {
     let start = *inp.offset();
-    committed_arguments
-      .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
-      .try_parse_input(inp)
-      .map(|attempt| match attempt {
-        ParseAttempt::Accept(arguments) => arguments,
-        ParseAttempt::Decline => Arguments::new(SimpleSpan::new(start, start), Vec::new()),
+    try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
+      (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
+        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
+        .collect_with(Vec::new()),
+    )(inp)
+      .map(|arguments| match arguments {
+        Some(arguments) => {
+          let (span, _, _, arguments) = arguments.into_components();
+          Arguments::new(span, arguments)
+        }
+        None => Arguments::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
 );
@@ -260,12 +251,17 @@ argument_parser!(
   ];
   {
     let start = *inp.offset();
-    committed_const_arguments
-      .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
-      .try_parse_input(inp)
-      .map(|attempt| match attempt {
-        ParseAttempt::Accept(arguments) => arguments,
-        ParseAttempt::Decline => ConstArguments::new(SimpleSpan::new(start, start), Vec::new()),
+    try_parens::<_, _, _, _, Vec<ConstArgument<GraphqlxSlice<'inp, Src>>>, _>(
+      (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_argument(inp))
+        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
+        .collect_with(Vec::new()),
+    )(inp)
+      .map(|arguments| match arguments {
+        Some(arguments) => {
+          let (span, _, _, arguments) = arguments.into_components();
+          ConstArguments::new(span, arguments)
+        }
+        None => ConstArguments::new(SimpleSpan::new(start, start), Vec::new()),
       })
   }
 );

@@ -145,14 +145,14 @@ definition_parser!(
   DescribedTypeSystemDefinition<GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    let cursor = *inp.cursor();
-    let description = description(inp)?;
-    let definition = type_system_definition(inp)?;
-    Ok(Described::new(
-      inp.span_since(&cursor),
-      description,
-      definition,
-    ))
+    description
+      .then(type_system_definition)
+      .spanned()
+      .parse_input(inp)
+      .map(|Spanned {
+        span,
+        data: (description, definition),
+      }| Described::new(span, description, definition))
   }
 );
 

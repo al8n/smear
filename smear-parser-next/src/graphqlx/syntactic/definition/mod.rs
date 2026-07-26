@@ -29,7 +29,7 @@ use super::{
   value::default_value,
 };
 use crate::{
-  combinator::{ParseCtx, try_ampersand, try_at, try_colon, try_equal, try_pipe},
+  combinator::{ParseCtx, try_at, try_colon, try_equal},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -41,8 +41,9 @@ use crate::{
       InterfaceTypeExtension, Location, Name, ObjectTypeDefinition, ObjectTypeExtension,
       RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
       ScalarTypeExtension, SchemaDefinition, SchemaExtension, StringValue, TypeDefinition,
-      TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
-      TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, WhereClause,
+      TypeExtension, TypePath, TypeSystemDefinition, TypeSystemDefinitionOrExtension,
+      TypeSystemDocument, TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
+      UnionTypeExtension, WhereClause,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },

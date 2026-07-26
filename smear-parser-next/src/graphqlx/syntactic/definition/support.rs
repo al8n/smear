@@ -215,3 +215,39 @@ where
     _ => Action::Stop,
   })
 }
+
+/// Continues a union-member or directive-location tail only at an explicit `|`.
+pub(super) fn decide_pipe_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_pipe() => Action::Continue,
+    _ => Action::Stop,
+  })
+}
+
+/// Continues an implemented-interface tail only at an explicit `&`.
+pub(super) fn decide_ampersand_tail<'inp, Src, Ctx>(
+  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
+  _: &mut Ctx::Emitter,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  Ok(match peeked.pop_front() {
+    Some(token) if token.token().is_ampersand() => Action::Continue,
+    _ => Action::Stop,
+  })
+}

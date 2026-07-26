@@ -1,6 +1,7 @@
 //! Focused GraphQLx SDL and import-document tests.
 
-use tokora::{FatalContext, Parse, Parser, utils::cmp::Equivalent};
+use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 
 use super::*;
 use crate::graphqlx::{
@@ -226,6 +227,77 @@ fn type_system_definitions_commit_where_and_delimiter_diagnostics() {
       if unexpected.expected() == &Expectation::Keyword("directive location")
         && unexpected.found().is_none()
   ));
+}
+
+#[test]
+fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
+  let source = "| QUERY | FIELD";
+  let locations = drive_str(ast::DirectiveLocations::graphqlx, source)
+    .expect("leading directive-location separator");
+  assert_eq!(locations.locations().len(), 2);
+  assert_eq!(locations.span(), &SimpleSpan::new(0, source.len()));
+
+  let locations = drive_slice(ast::DirectiveLocations::graphqlx, source.as_bytes())
+    .expect("slice leading directive-location separator");
+  assert_eq!(locations.locations().len(), 2);
+  assert_eq!(locations.span(), &SimpleSpan::new(0, source.len()));
+
+  let error = drive_str(ast::DirectiveLocations::graphqlx, "QUERY | type")
+    .expect_err("the location after a separator remains committed")
+    .into_iter()
+    .next()
+    .expect("typed error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::Keyword("directive location")
+        && unexpected.found().copied() == Some(SyntacticTokenKind::Identifier)
+  ));
+
+  let error = drive_str(ast::DirectiveLocations::graphqlx, "QUERY |")
+    .expect_err("a trailing directive-location separator remains local")
+    .into_iter()
+    .next()
+    .expect("typed error");
+  assert!(matches!(
+    error.into_data(),
+    ErrorData::UnexpectedToken(unexpected)
+      if unexpected.expected() == &Expectation::Keyword("directive location")
+        && unexpected.found().is_none()
+  ));
+
+  let object_source = "type User implements & ::pkg::Node & Resource<T> where T: Node { id: ID }";
+  let object = drive_str(ast::ObjectTypeDefinition::graphqlx, object_source)
+    .expect("leading implements separator and following where clause");
+  let implements = object.implements().expect("implements clause");
+  assert_eq!(implements.interfaces().len(), 2);
+  assert_eq!(implements.span().start(), "type User ".len());
+  assert_eq!(
+    implements.span().end(),
+    object_source.find(" where").expect("where boundary")
+  );
+  assert!(
+    object
+      .fields_definition()
+      .expect("fields definition")
+      .where_clause()
+      .is_some()
+  );
+
+  let members_source = "= | ::pkg::User | Post<T>";
+  let members = drive_str(ast::UnionMemberTypes::graphqlx, members_source)
+    .expect("leading union-member separator");
+  assert_eq!(members.members().len(), 2);
+  assert_eq!(members.span(), &SimpleSpan::new(0, members_source.len()));
+}
+
+#[test]
+fn described_type_system_definition_spans_optional_descriptions() {
+  for source in ["\"doc\" type User", "type User"] {
+    let definition = drive_str(ast::DescribedTypeSystemDefinition::graphqlx, source)
+      .expect("described type-system definition");
+    assert_eq!(definition.span(), &SimpleSpan::new(0, source.len()));
+  }
 }
 
 #[test]

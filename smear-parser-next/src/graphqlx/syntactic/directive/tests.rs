@@ -198,6 +198,11 @@ fn directives_use_generic_capable_type_paths_and_store_empty_or_absent_arguments
     assert_eq!(directive.span(), &SimpleSpan::new(0, 6));
   }
   accept_all!(ast::Directive::graphqlx, "@cache", check_absent_arguments);
+
+  let directive = drive_str(ast::ConstDirective::graphqlx, "@cache()")
+    .expect("constant directive with empty arguments should parse");
+  assert!(directive.arguments().is_none());
+  assert_eq!(directive.span(), &SimpleSpan::new(0, 8));
 }
 
 #[test]

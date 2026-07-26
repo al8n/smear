@@ -1,6 +1,7 @@
 //! GraphQLx SDL directive definitions and directive locations.
 
 use super::*;
+use crate::combinator::{pipe, try_pipe};
 
 #[inline]
 fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
@@ -89,10 +90,11 @@ definition_parser!(
       ParseAttempt::Accept(pipe) => pipe.span().start(),
       ParseAttempt::Decline => first.span().start(),
     };
-    let mut locations = Vec::from([first]);
-    while matches!(try_pipe(inp)?, ParseAttempt::Accept(_)) {
-      locations.push(location(inp)?);
-    }
+    let locations: Vec<Location> = pipe
+      .ignore_then(location)
+      .repeated_while::<_, U1>(decide_pipe_tail::<Src, Ctx>)
+      .collect_with(Vec::from([first]))
+      .parse_input(inp)?;
     let end = locations
       .last()
       .expect("directive location lists contain their first location")

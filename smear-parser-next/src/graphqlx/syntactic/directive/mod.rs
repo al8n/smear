@@ -12,9 +12,10 @@
 use std::vec::Vec;
 
 use tokora::{
-  Lexer, SimpleSpan, Slice, Source, Token,
+  Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   punct::{Angle, At, Brace, Bracket, Paren},
+  span::Spanned,
   try_parse_input::ParseAttempt,
   utils::DowncastRef,
 };
@@ -158,15 +159,22 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
-  let name = take_directive_type_path(inp)?;
-  let arguments = arguments(inp)?;
-  let arguments = (!arguments.arguments().is_empty()).then_some(arguments);
-  Ok(Directive::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
-    name,
-    arguments,
-  ))
+  take_directive_type_path
+    .then(arguments)
+    .spanned()
+    .map(
+      |Spanned {
+         span,
+         data: (name, arguments),
+       }| {
+        Directive::new(
+          SimpleSpan::new(start, span.end()),
+          name,
+          (!arguments.arguments().is_empty()).then_some(arguments),
+        )
+      },
+    )
+    .parse_input(inp)
 }
 
 fn const_directive_after_at<'inp, Src, Ctx>(
@@ -195,15 +203,22 @@ where
     + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
     + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
-  let name = take_directive_type_path(inp)?;
-  let arguments = const_arguments(inp)?;
-  let arguments = (!arguments.arguments().is_empty()).then_some(arguments);
-  Ok(ConstDirective::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
-    name,
-    arguments,
-  ))
+  take_directive_type_path
+    .then(const_arguments)
+    .spanned()
+    .map(
+      |Spanned {
+         span,
+         data: (name, arguments),
+       }| {
+        ConstDirective::new(
+          SimpleSpan::new(start, span.end()),
+          name,
+          (!arguments.arguments().is_empty()).then_some(arguments),
+        )
+      },
+    )
+    .parse_input(inp)
 }
 
 fn directives_after_at<'inp, Src, Ctx>(
