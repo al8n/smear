@@ -44,3 +44,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(smear_lexer_disable_avx512)',
   'cfg(smear_lexer_disable_avx2)',
 ] }
+
+[patch.crates-io]
+tokora = { path = "../tokit/tokora" }
