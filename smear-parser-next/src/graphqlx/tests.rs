@@ -653,3 +653,140 @@ fn failures_keep_typed_expectations_and_unclosed_kinds() {
     ErrorData::Unclosed(Unclosed::Object)
   ));
 }
+
+#[test]
+fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() {
+  const FIXTURES: &[&str] = &[
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0001_import_named.graphqlx"),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0002_import_wildcard.graphqlx"),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0003_import_with_alias.graphqlx"
+    ),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0004_generics_simple.graphqlx"),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0005_generics_multiple_params.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0006_where_clause_simple.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0007_where_clause_multiple_bounds.graphqlx"
+    ),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0008_map_value_simple.graphqlx"),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0009_map_value_nested.graphqlx"),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0010_generics_with_default.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0011_interface_with_generics.graphqlx"
+    ),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0012_path_type.graphqlx"),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0014_generics_nested.graphqlx"),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0017_union_with_path_types.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0018_union_with_path_types_and_generics.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0019_input_with_map_default.graphqlx"
+    ),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0020_where_multiple_predicates.graphqlx"
+    ),
+    include_str!("../../../smear/tests/fixtures/parser/graphqlx/ok/0021_fat_arrow_in_map.graphqlx"),
+    include_str!(
+      "../../../smear/tests/fixtures/parser/graphqlx/ok/0022_complex_fragments.graphqlx"
+    ),
+  ];
+
+  fn check_document<S: AsRef<[u8]>>(document: ast::Document<S>) {
+    assert!(!document.definitions().is_empty());
+  }
+
+  for source in FIXTURES {
+    check_document(
+      drive_str(ast::Document::graphqlx, source).expect("str accepts complete GraphQLx fixture"),
+    );
+    check_document(
+      drive_slice(ast::Document::graphqlx, source.as_bytes())
+        .expect("slice accepts complete GraphQLx fixture"),
+    );
+    #[cfg(feature = "bytes")]
+    {
+      let owned = ::bytes::Bytes::from_static(source.as_bytes());
+      check_document(
+        drive_bytes_as_slice(ast::Document::graphqlx, &owned)
+          .expect("Bytes slice accepts complete GraphQLx fixture"),
+      );
+    }
+  }
+}
+
+#[test]
+fn complete_document_preserves_mixed_entries_and_definition_descriptions() {
+  let document = drive_str(
+    ast::Document::graphqlx,
+    "import { User } from \"types.graphqlx\"\n\"a documented type\" type User<T> where T: Node { id: ID }\nquery GetUser { user { id } }\nextend type User<String> { displayName: String }",
+  )
+  .expect("mixed GraphQLx document");
+
+  assert_eq!(document.definitions().len(), 4);
+  assert!(document.definitions()[0].is_import());
+  assert!(document.definitions()[3].is_extension());
+
+  let ast::ImportOrDefinitionOrExtension::Definition(type_definition) = &document.definitions()[1]
+  else {
+    panic!("expected a described type-system definition");
+  };
+  assert!(type_definition.description().is_some());
+  assert!(matches!(
+    type_definition.node(),
+    ast::Definition::TypeSystem(ast::TypeSystemDefinition::Type(_))
+  ));
+
+  let ast::ImportOrDefinitionOrExtension::Definition(executable_definition) =
+    &document.definitions()[2]
+  else {
+    panic!("expected an executable definition");
+  };
+  assert!(executable_definition.description().is_none());
+  assert!(matches!(
+    executable_definition.node(),
+    ast::Definition::Executable(ast::ExecutableDefinition::Operation(_))
+  ));
+}
+
+#[cfg(feature = "bytes")]
+#[test]
+fn complete_document_direct_api_preserves_owned_bytes() {
+  let source = ::bytes::Bytes::from_static(
+    b"import { User } from \"types.graphqlx\"\ntype User { id: ID }\nquery Users { users { id } }",
+  );
+  let document: ast::Document<::bytes::Bytes> =
+    drive_owned_bytes(ast::Document::graphqlx, &source).expect("owned Bytes document");
+  assert_eq!(document.definitions().len(), 3);
+}
+
+#[test]
+fn complete_document_rejects_descriptions_before_imports_and_extensions() {
+  assert_unexpected(
+    |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
+    "\"description\" import { User } from \"types.graphqlx\"",
+    Expectation::Keyword("definition after description"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
+    "\"description\" extend type User { id: ID }",
+    Expectation::Keyword("definition after description"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+}

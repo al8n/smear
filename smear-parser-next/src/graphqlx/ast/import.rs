@@ -135,16 +135,16 @@ impl<S, Span, PathContainer> IntoComponents for WildcardSpecifier<S, Span, PathC
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ImportMember<S> {
+pub enum ImportMember<S, Span = SimpleSpan> {
   /// A named import specifier.
-  Named(NamedSpecifier<S>),
+  Named(NamedSpecifier<S, Span>),
   /// A wildcard import specifier.
-  Wildcard(WildcardSpecifier<S>),
+  Wildcard(WildcardSpecifier<S, Span>),
 }
 
-impl<S> AsSpan<SimpleSpan> for ImportMember<S> {
+impl<S, Span> AsSpan<Span> for ImportMember<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     match self {
       Self::Named(value) => value.as_span(),
       Self::Wildcard(value) => value.as_span(),
@@ -152,9 +152,9 @@ impl<S> AsSpan<SimpleSpan> for ImportMember<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ImportMember<S> {
+impl<S, Span> IntoSpan<Span> for ImportMember<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     match self {
       Self::Named(value) => value.into_span(),
       Self::Wildcard(value) => value.into_span(),
@@ -164,16 +164,16 @@ impl<S> IntoSpan<SimpleSpan> for ImportMember<S> {
 
 /// A braced list of GraphQLx import members.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImportList<S, Container = Vec<ImportMember<S>>> {
-  span: SimpleSpan,
+pub struct ImportList<S, Span = SimpleSpan, Container = Vec<ImportMember<S, Span>>> {
+  span: Span,
   members: Container,
-  _member: PhantomData<ImportMember<S>>,
+  _member: PhantomData<ImportMember<S, Span>>,
 }
 
-impl<S, Container> ImportList<S, Container> {
+impl<S, Span, Container> ImportList<S, Span, Container> {
   /// Creates an import list from its brace-delimited span and members.
   #[inline]
-  pub const fn new(span: SimpleSpan, members: Container) -> Self {
+  pub const fn new(span: Span, members: Container) -> Self {
     Self {
       span,
       members,
@@ -183,15 +183,15 @@ impl<S, Container> ImportList<S, Container> {
 
   /// Returns the complete list span.
   #[inline]
-  pub const fn span(&self) -> &SimpleSpan {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns import members as a slice.
   #[inline]
-  pub fn members(&self) -> &[ImportMember<S>]
+  pub fn members(&self) -> &[ImportMember<S, Span>]
   where
-    Container: AsRef<[ImportMember<S>]>,
+    Container: AsRef<[ImportMember<S, Span>]>,
   {
     self.members.as_ref()
   }
@@ -203,22 +203,22 @@ impl<S, Container> ImportList<S, Container> {
   }
 }
 
-impl<S, Container> AsSpan<SimpleSpan> for ImportList<S, Container> {
+impl<S, Span, Container> AsSpan<Span> for ImportList<S, Span, Container> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Container> IntoSpan<SimpleSpan> for ImportList<S, Container> {
+impl<S, Span, Container> IntoSpan<Span> for ImportList<S, Span, Container> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Container> IntoComponents for ImportList<S, Container> {
-  type Components = (SimpleSpan, Container);
+impl<S, Span, Container> IntoComponents for ImportList<S, Span, Container> {
+  type Components = (Span, Container);
 
   #[inline]
   fn into_components(self) -> Self::Components {
@@ -240,16 +240,16 @@ impl<S, Container> IntoComponents for ImportList<S, Container> {
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ImportClause<S> {
+pub enum ImportClause<S, Span = SimpleSpan> {
   /// A braced member list.
-  List(ImportList<S>),
+  List(ImportList<S, Span>),
   /// A wildcard member outside braces.
-  Wildcard(WildcardSpecifier<S>),
+  Wildcard(WildcardSpecifier<S, Span>),
 }
 
-impl<S> AsSpan<SimpleSpan> for ImportClause<S> {
+impl<S, Span> AsSpan<Span> for ImportClause<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     match self {
       Self::List(value) => value.as_span(),
       Self::Wildcard(value) => value.as_span(),
@@ -257,9 +257,9 @@ impl<S> AsSpan<SimpleSpan> for ImportClause<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ImportClause<S> {
+impl<S, Span> IntoSpan<Span> for ImportClause<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     match self {
       Self::List(value) => value.into_span(),
       Self::Wildcard(value) => value.into_span(),
@@ -269,55 +269,59 @@ impl<S> IntoSpan<SimpleSpan> for ImportClause<S> {
 
 /// A complete `import <clause> from <inline-string>` definition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImportDefinition<S> {
-  span: SimpleSpan,
-  clause: ImportClause<S>,
-  file: InlineStringValue<S>,
+pub struct ImportDefinition<S, Span = SimpleSpan> {
+  span: Span,
+  clause: ImportClause<S, Span>,
+  file: InlineStringValue<S, Span>,
 }
 
-impl<S> ImportDefinition<S> {
+impl<S, Span> ImportDefinition<S, Span> {
   /// Creates an import definition from its complete span, clause, and file
   /// inline string.
   #[inline]
-  pub const fn new(span: SimpleSpan, clause: ImportClause<S>, file: InlineStringValue<S>) -> Self {
+  pub const fn new(
+    span: Span,
+    clause: ImportClause<S, Span>,
+    file: InlineStringValue<S, Span>,
+  ) -> Self {
     Self { span, clause, file }
   }
 
   /// Returns the complete definition span.
   #[inline]
-  pub const fn span(&self) -> &SimpleSpan {
+  pub const fn span(&self) -> &Span {
     &self.span
   }
 
   /// Returns the imported clause.
   #[inline]
-  pub const fn clause(&self) -> &ImportClause<S> {
+  pub const fn clause(&self) -> &ImportClause<S, Span> {
     &self.clause
   }
 
   /// Returns the module file inline string.
   #[inline]
-  pub const fn file(&self) -> &InlineStringValue<S> {
+  pub const fn file(&self) -> &InlineStringValue<S, Span> {
     &self.file
   }
 }
 
-impl<S> AsSpan<SimpleSpan> for ImportDefinition<S> {
+impl<S, Span> AsSpan<Span> for ImportDefinition<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ImportDefinition<S> {
+impl<S, Span> IntoSpan<Span> for ImportDefinition<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S> IntoComponents for ImportDefinition<S> {
-  type Components = (SimpleSpan, ImportClause<S>, InlineStringValue<S>);
+impl<S, Span> IntoComponents for ImportDefinition<S, Span> {
+  type Components = (Span, ImportClause<S, Span>, InlineStringValue<S, Span>);
 
   #[inline]
   fn into_components(self) -> Self::Components {

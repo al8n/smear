@@ -24,6 +24,10 @@ mod name;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod path;
 
+/// Generic-definition carriers shared by extended GraphQL-family dialect ASTs.
+#[cfg(feature = "graphqlx")]
+mod generic;
+
 /// Selection-node carriers shared by the GraphQL-family dialect ASTs.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod selection;

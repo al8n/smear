@@ -11,9 +11,31 @@ use tokora::{
 
 use crate::graphqlx::GraphQLx;
 
-pub use import::*;
+/// GraphQLx argument AST aliases.
+pub mod argument;
+/// GraphQLx directive AST aliases.
+pub mod directive;
+/// GraphQLx document AST aliases and top-level variants.
+pub mod document;
+/// GraphQLx executable-definition AST aliases and enums.
+pub mod executable;
+/// GraphQLx generic-definition AST aliases.
+pub mod generic;
+/// GraphQLx import AST nodes.
+pub mod import;
+/// GraphQLx selection and field AST aliases.
+pub mod selection;
+/// GraphQLx type-system AST aliases and enums.
+pub mod type_system;
 
-mod import;
+pub use argument::*;
+pub use directive::*;
+pub use document::*;
+pub use executable::*;
+pub use generic::*;
+pub use import::*;
+pub use selection::*;
+pub use type_system::*;
 
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
@@ -59,48 +81,56 @@ pub type EnumValue<S, Span = SimpleSpan> = crate::value::EnumValue<Path<S, Span>
 pub type VariableValue<S, Span = SimpleSpan> = crate::value::VariableValue<Name<S, Span>, Span>;
 
 /// A GraphQLx list value.
-pub type List<S, Container = DefaultVec<InputValue<S>>> =
-  crate::value::List<InputValue<S>, SimpleSpan, Container>;
+pub type List<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+  crate::value::List<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx set value.
-pub type Set<S, Container = DefaultVec<InputValue<S>>> =
-  crate::value::Set<InputValue<S>, SimpleSpan, Container>;
+pub type Set<S, Span = SimpleSpan, Container = DefaultVec<InputValue<S, Span>>> =
+  crate::value::Set<InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx map entry.
-pub type MapEntry<S> = crate::value::MapEntry<InputValue<S>, InputValue<S>>;
+pub type MapEntry<S, Span = SimpleSpan> =
+  crate::value::MapEntry<InputValue<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx map value.
-pub type Map<S, Container = DefaultVec<MapEntry<S>>> =
-  crate::value::Map<InputValue<S>, InputValue<S>, SimpleSpan, Container>;
+pub type Map<S, Span = SimpleSpan, Container = DefaultVec<MapEntry<S, Span>>> =
+  crate::value::Map<InputValue<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A GraphQLx object field.
-pub type ObjectField<S> = crate::value::ObjectField<Name<S>, InputValue<S>>;
+pub type ObjectField<S, Span = SimpleSpan> =
+  crate::value::ObjectField<Name<S, Span>, InputValue<S, Span>, Span>;
 
 /// A GraphQLx object value.
-pub type Object<S, Container = DefaultVec<ObjectField<S>>> =
-  crate::value::Object<Name<S>, InputValue<S>, SimpleSpan, Container>;
+pub type Object<S, Span = SimpleSpan, Container = DefaultVec<ObjectField<S, Span>>> =
+  crate::value::Object<Name<S, Span>, InputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx list value.
-pub type ConstList<S, Container = DefaultVec<ConstInputValue<S>>> =
-  crate::value::List<ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstList<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+  crate::value::List<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx set value.
-pub type ConstSet<S, Container = DefaultVec<ConstInputValue<S>>> =
-  crate::value::Set<ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstSet<S, Span = SimpleSpan, Container = DefaultVec<ConstInputValue<S, Span>>> =
+  crate::value::Set<ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx map entry.
-pub type ConstMapEntry<S> = crate::value::MapEntry<ConstInputValue<S>, ConstInputValue<S>>;
+pub type ConstMapEntry<S, Span = SimpleSpan> =
+  crate::value::MapEntry<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx map value.
-pub type ConstMap<S, Container = DefaultVec<ConstMapEntry<S>>> =
-  crate::value::Map<ConstInputValue<S>, ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstMap<S, Span = SimpleSpan, Container = DefaultVec<ConstMapEntry<S, Span>>> =
+  crate::value::Map<ConstInputValue<S, Span>, ConstInputValue<S, Span>, Span, Container>;
 
 /// A constant GraphQLx object field.
-pub type ConstObjectField<S> = crate::value::ObjectField<Name<S>, ConstInputValue<S>>;
+pub type ConstObjectField<S, Span = SimpleSpan> =
+  crate::value::ObjectField<Name<S, Span>, ConstInputValue<S, Span>, Span>;
 
 /// A constant GraphQLx object value.
-pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
-  crate::value::Object<Name<S>, ConstInputValue<S>, SimpleSpan, Container>;
+pub type ConstObject<S, Span = SimpleSpan, Container = DefaultVec<ConstObjectField<S, Span>>> =
+  crate::value::Object<Name<S, Span>, ConstInputValue<S, Span>, Span, Container>;
+
+/// A GraphQLx default input value assignment.
+pub type DefaultInputValue<S, Span = SimpleSpan> =
+  crate::value::DefaultInputValue<ConstInputValue<S, Span>, Span>;
 
 /// A GraphQLx input value, including variables and extended collections.
 #[derive(
@@ -113,34 +143,34 @@ pub type ConstObject<S, Container = DefaultVec<ConstObjectField<S>>> =
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum InputValue<S> {
+pub enum InputValue<S, Span = SimpleSpan> {
   /// A variable reference (`$name`).
-  Variable(VariableValue<S>),
+  Variable(VariableValue<S, Span>),
   /// A boolean literal.
-  Boolean(BooleanValue<S>),
+  Boolean(BooleanValue<S, Span>),
   /// A string literal.
-  String(StringValue<S>),
+  String(StringValue<S, Span>),
   /// A floating-point literal.
-  Float(FloatValue<S>),
+  Float(FloatValue<S, Span>),
   /// An integer literal.
-  Int(IntValue<S>),
+  Int(IntValue<S, Span>),
   /// An enum path.
-  Enum(EnumValue<S>),
+  Enum(EnumValue<S, Span>),
   /// The `null` literal.
-  Null(NullValue<S>),
+  Null(NullValue<S, Span>),
   /// A list literal.
-  List(List<S>),
+  List(List<S, Span>),
   /// A `set { ... }` literal.
-  Set(Set<S>),
+  Set(Set<S, Span>),
   /// A `map { key => value ... }` literal.
-  Map(Map<S>),
+  Map(Map<S, Span>),
   /// An object literal.
-  Object(Object<S>),
+  Object(Object<S, Span>),
 }
 
-impl<S> AsSpan<SimpleSpan> for InputValue<S> {
+impl<S, Span> AsSpan<Span> for InputValue<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     match self {
       Self::Variable(value) => value.as_span(),
       Self::Boolean(value) => value.as_span(),
@@ -157,9 +187,9 @@ impl<S> AsSpan<SimpleSpan> for InputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
+impl<S, Span> IntoSpan<Span> for InputValue<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     match self {
       Self::Variable(value) => value.into_span(),
       Self::Boolean(value) => value.into_span(),
@@ -180,32 +210,32 @@ impl<S> IntoSpan<SimpleSpan> for InputValue<S> {
 #[derive(Debug, Clone, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum ConstInputValue<S> {
+pub enum ConstInputValue<S, Span = SimpleSpan> {
   /// A boolean literal.
-  Boolean(BooleanValue<S>),
+  Boolean(BooleanValue<S, Span>),
   /// A string literal.
-  String(StringValue<S>),
+  String(StringValue<S, Span>),
   /// A floating-point literal.
-  Float(FloatValue<S>),
+  Float(FloatValue<S, Span>),
   /// An integer literal.
-  Int(IntValue<S>),
+  Int(IntValue<S, Span>),
   /// An enum path.
-  Enum(EnumValue<S>),
+  Enum(EnumValue<S, Span>),
   /// The `null` literal.
-  Null(NullValue<S>),
+  Null(NullValue<S, Span>),
   /// A constant list literal.
-  List(ConstList<S>),
+  List(ConstList<S, Span>),
   /// A constant set literal.
-  Set(ConstSet<S>),
+  Set(ConstSet<S, Span>),
   /// A constant map literal.
-  Map(ConstMap<S>),
+  Map(ConstMap<S, Span>),
   /// A constant object literal.
-  Object(ConstObject<S>),
+  Object(ConstObject<S, Span>),
 }
 
-impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     match self {
       Self::Boolean(value) => value.as_span(),
       Self::String(value) => value.as_span(),
@@ -221,9 +251,9 @@ impl<S> AsSpan<SimpleSpan> for ConstInputValue<S> {
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
+impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     match self {
       Self::Boolean(value) => value.into_span(),
       Self::String(value) => value.into_span(),
@@ -240,15 +270,16 @@ impl<S> IntoSpan<SimpleSpan> for ConstInputValue<S> {
 }
 
 /// Generic type arguments used by a GraphQLx type path.
-pub type TypeGenerics<S, Container = DefaultVec<Type<S>>> =
-  crate::ty::TypeGenerics<Type<S>, SimpleSpan, Container>;
+pub type TypeGenerics<S, Span = SimpleSpan, Container = DefaultVec<Type<S, Span>>> =
+  crate::ty::TypeGenerics<Type<S, Span>, Span, Container>;
 
 /// A path type, its optional generic type arguments, and a non-null modifier.
 pub type DefinitionTypePath<
   S,
-  PathContainer = DefaultVec<Name<S>>,
-  TypeContainer = DefaultVec<Type<S>>,
-> = crate::ty::DefinitionTypePath<Name<S>, Type<S>, SimpleSpan, PathContainer, TypeContainer>;
+  Span = SimpleSpan,
+  PathContainer = DefaultVec<Name<S, Span>>,
+  TypeContainer = DefaultVec<Type<S, Span>>,
+> = crate::ty::DefinitionTypePath<Name<S, Span>, Type<S, Span>, Span, PathContainer, TypeContainer>;
 
 /// A recursive GraphQLx type reference.
 #[derive(
@@ -261,21 +292,21 @@ pub type DefinitionTypePath<
 )]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum Type<S> {
+pub enum Type<S, Span = SimpleSpan> {
   /// A namespaced path with optional generic arguments.
-  Path(DefinitionTypePath<S>),
+  Path(DefinitionTypePath<S, Span>),
   /// A list type (`[T]`).
-  List(Box<crate::ty::ListType<Self>>),
+  List(Box<crate::ty::ListType<Self, Span>>),
   /// A set type (`<T>`).
-  Set(Box<crate::ty::SetType<Self>>),
+  Set(Box<crate::ty::SetType<Self, Span>>),
   /// A map type (`<K => V>`).
-  Map(Box<crate::ty::MapType<Self, Self>>),
+  Map(Box<crate::ty::MapType<Self, Self, Span>>),
 }
 
-impl<S> Type<S> {
+impl<S, Span> Type<S, Span> {
   /// Returns the span covering this complete type reference.
   #[inline]
-  pub fn span(&self) -> &SimpleSpan {
+  pub fn span(&self) -> &Span {
     match self {
       Self::Path(value) => value.span(),
       Self::List(value) => value.span(),
@@ -296,16 +327,16 @@ impl<S> Type<S> {
   }
 }
 
-impl<S> AsSpan<SimpleSpan> for Type<S> {
+impl<S, Span> AsSpan<Span> for Type<S, Span> {
   #[inline]
-  fn as_span(&self) -> &SimpleSpan {
+  fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S> IntoSpan<SimpleSpan> for Type<S> {
+impl<S, Span> IntoSpan<Span> for Type<S, Span> {
   #[inline]
-  fn into_span(self) -> SimpleSpan {
+  fn into_span(self) -> Span {
     match self {
       Self::Path(value) => value.into_span(),
       Self::List(value) => value.into_span(),
@@ -314,3 +345,6 @@ impl<S> IntoSpan<SimpleSpan> for Type<S> {
     }
   }
 }
+
+#[cfg(test)]
+mod tests;

@@ -48,3 +48,9 @@ harness = false
 name = "type_system"
 path = "benches/type_system.rs"
 harness = false
+
+[[bench]]
+name = "graphqlx"
+path = "benches/graphqlx.rs"
+harness = false
+required-features = ["graphqlx"]

@@ -58,9 +58,18 @@ where
   Ctx: ParseContext<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 = InputRef<'inp, 'input, GraphqlxLexer<'inp, Src>, Ctx, GraphQLx>;
 
+pub mod argument;
+pub mod definition;
+pub mod directive;
+pub mod document;
+pub mod executable;
+pub mod generic;
 pub mod import;
+pub mod selection;
 pub mod ty;
 pub mod value;
+
+pub use document::{document, import_or_definition_or_extension};
 
 /// Returns the GraphQLx contextual classification for an identifier token.
 #[inline]
@@ -124,8 +133,6 @@ pub fn path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -157,8 +164,6 @@ pub fn try_path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -191,8 +196,6 @@ pub(crate) fn path_after_first<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxToken<'inp, Src>:
-    Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
@@ -238,31 +241,11 @@ where
   Ok(peeked.pop_front().map(|token| token.token().kind()))
 }
 
-/// Returns whether the next token matches `predicate` without consuming it.
-pub(crate) fn next_is<'inp, Src, Ctx>(
-  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-  mut predicate: impl FnMut(&GraphqlxToken<'inp, Src>) -> bool,
-) -> Result<bool, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-{
-  let mut peeked = inp.peek::<U1>()?;
-  Ok(
-    peeked
-      .pop_front()
-      .is_some_and(|token| predicate(token.token())),
-  )
-}
-
 /// Produces a typed GraphQLx unexpected-token error at the current input head.
-pub(crate) fn unexpected_here<'inp, Src, Ctx>(
+pub(crate) fn unexpected_here<'inp, Src, Ctx, T>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   expected: Expectation,
-) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+) -> Result<T, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
@@ -289,6 +272,10 @@ where
 
 impl<S> ast::Name<S> {
   /// Parses one committed GraphQLx name.
+  ///
+  /// GraphQLx retains GraphQL's `Name` lexical production.
+  ///
+  /// See the [GraphQL Names specification](https://spec.graphql.org/draft/#sec-Names).
   pub fn graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
@@ -327,15 +314,16 @@ impl<S> ast::Name<S> {
 }
 
 impl<S> ast::Path<S> {
-  /// Parses one committed GraphQLx path.
+  /// Parses one committed GraphQLx qualified path.
+  ///
+  /// `::`-separated paths are a GraphQLx extension, so GraphQL has no
+  /// corresponding grammar anchor.
   pub fn graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    GraphqlxToken<'inp, Src>:
-      Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
@@ -352,15 +340,16 @@ impl<S> ast::Path<S> {
     path(inp)
   }
 
-  /// Attempts one GraphQLx path without consuming on a non-path head.
+  /// Attempts one GraphQLx qualified path without consuming on a non-path head.
+  ///
+  /// `::`-separated paths are a GraphQLx extension, so GraphQL has no
+  /// corresponding grammar anchor.
   pub fn try_graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<ParseAttempt<Self>, GraphqlxError<'inp, Src, Ctx>>
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp,
-    GraphqlxToken<'inp, Src>:
-      Token<'inp, Kind = SyntacticTokenKind> + tokora::token::PunctuatorToken<'inp>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
