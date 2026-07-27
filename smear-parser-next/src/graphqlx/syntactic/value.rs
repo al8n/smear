@@ -14,9 +14,7 @@ use tokora::{
   Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Brace, Bracket},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -61,16 +59,6 @@ macro_rules! value_parser {
       $input,
       $output,
       [
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >,
       ],
       $body
     );
@@ -82,16 +70,6 @@ macro_rules! value_parser {
       $output,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >,
       ],
       $body
     );
@@ -103,17 +81,6 @@ macro_rules! value_parser {
       $output,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQLx>>,
       ],
       $body
     );
@@ -296,16 +263,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   path_after_first(start, first, fully_qualified, inp)
     .map(|path| EnumValue::new(*path.span(), path))
@@ -420,16 +377,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   let name = super::name(inp)?;
   Ok(VariableValue::new(
@@ -714,18 +661,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
@@ -747,18 +683,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
@@ -780,18 +705,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
@@ -813,18 +727,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
@@ -1061,18 +964,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let cursor = *inp.cursor();
   match try_equal(inp)? {
@@ -1103,18 +995,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   try_default_value(inp).map(Into::into)
 }
@@ -1135,16 +1016,6 @@ macro_rules! graphqlx_value_api {
       @impl $(#[$meta])* $node,
       $parse,
       [
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >,
       ]
     );
   };
@@ -1154,16 +1025,6 @@ macro_rules! graphqlx_value_api {
       $parse,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >,
       ]
     );
   };
@@ -1173,17 +1034,6 @@ macro_rules! graphqlx_value_api {
       $parse,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQLx>>,
       ]
     );
   };
@@ -1416,18 +1266,7 @@ impl<S> DefaultInputValue<S> {
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-      + From<DialectGraphqlxError<S>>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
     default_value(inp)
   }
@@ -1447,18 +1286,7 @@ impl<S> DefaultInputValue<S> {
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      > + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-      + From<DialectGraphqlxError<S>>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
     try_default_value(inp)
   }

@@ -2,8 +2,9 @@
 
 use smear_lexer::tokora::{
   FatalContext, InputRef, Lexer, Parse, Parser,
-  emitter::{FullContainerEmitter, SeparatedEmitter, TooFewEmitter},
+  emitter::{FromUnclosed, FullContainerEmitter, SeparatedEmitter, TooFewEmitter},
   error::{
+    Unclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken},
   },
@@ -47,6 +48,20 @@ impl<'a, Kind: Clone, O, Lang: ?Sized> From<MissingToken<'a, Kind, O, Lang>> for
 
 impl<O, Lang: ?Sized> From<MissingSyntax<O, Lang>> for TestError {
   fn from(_: MissingSyntax<O, Lang>) -> Self {
+    Self
+  }
+}
+
+// One `Set`-generic impl covers both end-of-input members of `FromTokenErrors`: the
+// default `&'static str` set and a dispatch driver's `&'static [Kind]` table.
+impl<O, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<O, Lang, Set>> for TestError {
+  fn from(_: UnexpectedEot<O, Lang, Set>) -> Self {
+    Self
+  }
+}
+
+impl<'a, L: Lexer<'a>, Lang: ?Sized> FromUnclosed<'a, L, Lang> for TestError {
+  fn from_unclosed<D>(_: Unclosed<D, L::Span, Lang>) -> Self {
     Self
   }
 }

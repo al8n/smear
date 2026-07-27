@@ -7,11 +7,8 @@
 
 use std::vec::Vec;
 use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, Token,
-  cache::PeekedTokenExt,
-  error::{UnexpectedEot, token::UnexpectedToken},
-  try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, cache::PeekedTokenExt,
+  try_parse_input::ParseAttempt, utils::typenum::U1,
 };
 
 use smear_lexer::graphqlx::{
@@ -93,16 +90,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   ident(inp).map(ast::Name::from)
 }
@@ -117,7 +104,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
   try_ident(inp).map(|attempt| attempt.map(ast::Name::from))
 }
@@ -136,16 +122,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   let leading_separator = try_double_colon(inp)?;
   let fully_qualified = matches!(&leading_separator, ParseAttempt::Accept(_));
@@ -167,16 +143,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   match peek_kind(inp)? {
     Some(SyntacticTokenKind::Identifier | SyntacticTokenKind::PathSeparator) => {
@@ -199,16 +165,6 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    >,
 {
   let mut segments = Vec::from([first]);
   while matches!(try_double_colon(inp)?, ParseAttempt::Accept(_)) {
@@ -284,16 +240,6 @@ impl<S> ast::Name<S> {
     S: Slice<'inp> + Clone + 'inp,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      >,
   {
     name(inp)
   }
@@ -307,7 +253,6 @@ impl<S> ast::Name<S> {
     S: Slice<'inp> + Clone + 'inp,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
   {
     try_name(inp)
   }
@@ -326,16 +271,6 @@ impl<S> ast::Path<S> {
     S: Slice<'inp> + Clone + 'inp,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      >,
   {
     path(inp)
   }
@@ -352,16 +287,6 @@ impl<S> ast::Path<S> {
     S: Slice<'inp> + Clone + 'inp,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      >,
   {
     try_path(inp)
   }

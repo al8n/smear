@@ -11,13 +11,8 @@ use std::boxed::Box;
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
-  Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token, TryParseInput,
-  cache::PeekedTokenExt,
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
-  punct::Bracket,
-  span::Spanned,
-  try_parse_input::ParseAttempt,
-  utils::typenum::U1,
+  Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
+  cache::PeekedTokenExt, span::Spanned, try_parse_input::ParseAttempt, utils::typenum::U1,
 };
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
@@ -44,17 +39,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   ty.delimited_by_brackets()
     .parse_input(inp)
@@ -77,17 +62,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
     let named_head_arm =
@@ -170,17 +145,7 @@ impl<S> Type<Name<S>> {
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlToken<'inp, Src>,
-          <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQL,
-        >,
-      > + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-      + From<DialectGraphqlError<S>>,
+    GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<S>>,
   {
     ty(inp)
   }

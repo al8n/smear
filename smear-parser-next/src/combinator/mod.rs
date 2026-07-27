@@ -33,7 +33,9 @@
 mod token;
 
 pub use token::*;
-pub use tokora::{ComposableEmitter, ErrorOf, ParseCtx, SliceOf, utils::cmp::Equivalent};
+pub use tokora::{
+  ComposableEmitter, ComposableParseContext as ParseCtx, ErrorOf, SliceOf, utils::cmp::Equivalent,
+};
 
 #[cfg(test)]
 mod tests;

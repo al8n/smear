@@ -115,20 +115,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match try_at(inp)? {
     ParseAttempt::Accept(_) => {}
@@ -212,20 +199,7 @@ impl DirectiveLocations {
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      > + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-      + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
   {
     directive_locations(inp)
   }
@@ -245,20 +219,7 @@ impl Location {
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-    GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlxToken<'inp, Src>,
-          <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQLx,
-        >,
-      > + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-      + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-      + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
   {
     location(inp)
   }

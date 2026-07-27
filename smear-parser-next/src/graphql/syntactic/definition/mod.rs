@@ -9,12 +9,10 @@ use std::vec::Vec;
 
 use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
-  TryParseInput,
+  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Brace, Bracket, Paren, Pipe},
+  punct::Pipe,
   span::{AsSpan, Spanned},
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -83,20 +81,7 @@ macro_rules! definition_parser {
       >,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
       $($bounds)*
-      GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlToken<'inp, Src>,
-            <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQL,
-          >,
-        >
-        + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-        + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-        + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-        + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+      GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
     $body
   };
 }
@@ -135,20 +120,7 @@ macro_rules! impl_definition_api {
         >,
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
         $($bounds)*
-        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlToken<'inp, Src>,
-              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQL,
-            >,
-          >
-          + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-          + From<DialectGraphqlError<$slice>>,
+        GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<$slice>>,
       {
         $parser(inp)
       }
@@ -190,20 +162,7 @@ macro_rules! impl_definition_try_api {
         >,
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
         $($bounds)*
-        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlToken<'inp, Src>,
-              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQL,
-            >,
-          >
-          + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-          + From<DialectGraphqlError<$slice>>,
+        GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<$slice>>,
       {
         $parser(inp)
       }

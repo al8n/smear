@@ -12,9 +12,7 @@ use tokora::{
   Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Angle, Brace, Bracket, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -86,21 +84,7 @@ macro_rules! definition_parser {
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
       $($bounds)*
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        >
-        + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
   };
 }
@@ -138,21 +122,7 @@ macro_rules! impl_definition_api {
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
         $($bounds)*
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >
-          + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-          + From<DialectGraphqlxError<$slice>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
       {
         $parser(inp)
       }

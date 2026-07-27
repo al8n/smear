@@ -16,9 +16,8 @@ use smear_lexer::graphql::{
   syntactic::{SyntacticLexer, SyntacticToken},
 };
 use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, Token,
+  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source,
   cache::PeekedTokenExt,
-  error::{UnexpectedEot, token::UnexpectedToken},
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, IntoComponents, typenum::U1},
 };
@@ -80,16 +79,6 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    >,
 {
   ident(inp).map(ast::Name::from)
 }
@@ -103,7 +92,6 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
 {
   try_ident(inp).map(|attempt| attempt.map(ast::Name::from))
 }
@@ -123,16 +111,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let offset = *inp.offset();
   {
@@ -184,16 +163,6 @@ impl<S> ast::Name<S> {
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlToken<'inp, Src>,
-          <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQL,
-        >,
-      >,
   {
     name(inp)
   }
@@ -212,7 +181,6 @@ impl<S> ast::Name<S> {
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
   {
     try_name(inp)
   }
@@ -234,16 +202,7 @@ impl<S> ast::FragmentName<S> {
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlToken<'inp, Src>,
-          <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQL,
-        >,
-      > + From<DialectGraphqlError<S>>,
+    GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<S>>,
   {
     fragment_name(inp)
   }

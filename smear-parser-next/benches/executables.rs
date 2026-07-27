@@ -63,7 +63,7 @@ const FIXTURES: &[Fixture] = &[
 fn parse_smear_parser_next<'inp>(
   source: &'inp str,
 ) -> Result<ExecutableDocument<&'inp str>, GraphqlErrors<&'inp str>> {
-  Parser::with_parser_of::<
+  Parser::with_parser::<
     'inp,
     GraphqlLexer<'inp, str>,
     ExecutableDocument<&'inp str>,
