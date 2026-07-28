@@ -5,10 +5,10 @@
 // atom runs over the full source matrix (`str`, `[u8]`, and `Bytes`).
 
 use smear_lexer::tokora::{
-  Emitter, InputRef, Parse, Parser, ParserContext, SimpleSpan,
-  emitter::{Fatal, Verbose},
+  Emitter, InputRef, Lexer, Parse, Parser, ParserContext, SimpleSpan,
+  emitter::{Fatal, FromUnclosed, Verbose},
   error::{
-    UnexpectedEot,
+    Unclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken},
   },
@@ -52,8 +52,16 @@ impl<'a, Kind: Clone, O, Lang: ?Sized> From<MissingToken<'a, Kind, O, Lang>> for
   }
 }
 
-impl<O, Lang: ?Sized> From<UnexpectedEot<O, Lang>> for TestError {
-  fn from(_: UnexpectedEot<O, Lang>) -> Self {
+// One `Set`-generic impl covers both end-of-input members of `FromTokenErrors`: the
+// default `&'static str` set and a dispatch driver's `&'static [Kind]` table.
+impl<O, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<O, Lang, Set>> for TestError {
+  fn from(_: UnexpectedEot<O, Lang, Set>) -> Self {
+    Self
+  }
+}
+
+impl<'a, L: Lexer<'a>, Lang: ?Sized> FromUnclosed<'a, L, Lang> for TestError {
+  fn from_unclosed<D>(_: Unclosed<D, L::Span, Lang>) -> Self {
     Self
   }
 }
@@ -651,9 +659,16 @@ impl<'a, Kind: Clone, O, Lang: ?Sized> From<MissingToken<'a, Kind, O, Lang>> for
 }
 
 #[cfg(feature = "graphql")]
-impl<O, Lang: ?Sized> From<UnexpectedEot<O, Lang>> for SpanOnly {
-  fn from(_: UnexpectedEot<O, Lang>) -> Self {
+impl<O, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<O, Lang, Set>> for SpanOnly {
+  fn from(_: UnexpectedEot<O, Lang, Set>) -> Self {
     unreachable!("enum_value span tests never run past end of input")
+  }
+}
+
+#[cfg(feature = "graphql")]
+impl<'a, L: Lexer<'a>, Lang: ?Sized> FromUnclosed<'a, L, Lang> for SpanOnly {
+  fn from_unclosed<D>(_: Unclosed<D, L::Span, Lang>) -> Self {
+    unreachable!("enum_value span tests never open a delimiter")
   }
 }
 

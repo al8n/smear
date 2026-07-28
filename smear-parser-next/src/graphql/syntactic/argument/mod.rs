@@ -9,11 +9,9 @@
 use std::vec::Vec;
 
 use tokora::{
-  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
+  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Brace, Bracket, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -35,21 +33,7 @@ use crate::{
 };
 
 macro_rules! argument_parser {
-  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [], $body:block) => {
-    argument_parser!(@impl $(#[$meta])* $visibility $name, $input, $output, [], $body);
-  };
-  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [delimited], $body:block) => {
-    argument_parser!(
-      @impl $(#[$meta])* $visibility $name, $input,
-      $output,
-      [
-        GraphqlError<'inp, Src, Ctx>:
-          From<Unclosed<Paren, SimpleSpan, GraphQL>>,
-      ],
-      $body
-    );
-  };
-  (@impl $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, [$($bounds:tt)*], $body:block) => {
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
     $(#[$meta])*
     $visibility fn $name<'inp, Src, Ctx>(
       $input: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -65,21 +49,8 @@ macro_rules! argument_parser {
         Offset = usize,
       >,
       GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-      $($bounds)*
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-      GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlToken<'inp, Src>,
-            <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQL,
-          >,
-        >
-        + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-        + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-        + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+      GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
     $body
   };
 }
@@ -126,7 +97,6 @@ argument_parser!(
   pub argument,
   inp,
   Argument<GraphqlSlice<'inp, Src>>,
-  [],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       guard_argument_phase(inp, Expectation::Name, |token| {
@@ -162,7 +132,6 @@ argument_parser!(
   pub const_argument,
   inp,
   ConstArgument<GraphqlSlice<'inp, Src>>,
-  [],
   {
     (|inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| {
       guard_argument_phase(inp, Expectation::Name, |token| {
@@ -227,7 +196,6 @@ argument_parser!(
   committed_arguments,
   inp,
   Arguments<GraphqlSlice<'inp, Src>>,
-  [delimited],
   {
     argument
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
@@ -243,7 +211,6 @@ argument_parser!(
   committed_const_arguments,
   inp,
   ConstArguments<GraphqlSlice<'inp, Src>>,
-  [delimited],
   {
     const_argument
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
@@ -266,7 +233,6 @@ argument_parser!(
   pub arguments,
   inp,
   Arguments<GraphqlSlice<'inp, Src>>,
-  [delimited],
   {
     let start = *inp.offset();
     committed_arguments
@@ -291,7 +257,6 @@ argument_parser!(
   pub const_arguments,
   inp,
   ConstArguments<GraphqlSlice<'inp, Src>>,
-  [delimited],
   {
     let start = *inp.offset();
     committed_const_arguments
@@ -309,8 +274,7 @@ macro_rules! impl_argument_api {
     $(#[$meta:meta])*
     $slice:ident,
     $node:ty,
-    $parser:ident,
-    [$($bounds:tt)*]
+    $parser:ident $(,)?
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
@@ -330,21 +294,8 @@ macro_rules! impl_argument_api {
           Offset = usize,
         >,
         GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-        $($bounds)*
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlToken<'inp, Src>,
-              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQL,
-            >,
-          >
-          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-          + From<DialectGraphqlError<$slice>>,
+        GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<$slice>>,
       {
         $parser(inp)
       }
@@ -359,7 +310,6 @@ impl_argument_api!(
   S,
   Argument<S>,
   argument,
-  []
 );
 
 impl_argument_api!(
@@ -369,7 +319,6 @@ impl_argument_api!(
   S,
   ConstArgument<S>,
   const_argument,
-  []
 );
 
 impl_argument_api!(
@@ -380,10 +329,6 @@ impl_argument_api!(
   S,
   Arguments<S>,
   arguments,
-  [
-    GraphqlError<'inp, Src, Ctx>:
-      From<Unclosed<Paren, SimpleSpan, GraphQL>>,
-  ]
 );
 
 impl_argument_api!(
@@ -394,10 +339,6 @@ impl_argument_api!(
   S,
   ConstArguments<S>,
   const_arguments,
-  [
-    GraphqlError<'inp, Src, Ctx>:
-      From<Unclosed<Paren, SimpleSpan, GraphQL>>,
-  ]
 );
 
 #[cfg(test)]

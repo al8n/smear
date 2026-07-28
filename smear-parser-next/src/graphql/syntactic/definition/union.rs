@@ -12,16 +12,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   guard_definition_phase(inp, Expectation::Equal, |token| token.is_equal())?;
   equal(inp)
@@ -37,19 +28,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let _leading = try_pipe(inp)?;
   let first = take_name(inp)?;
@@ -109,19 +88,7 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   let cursor = *inp.cursor();
   let name = take_name(inp)?;

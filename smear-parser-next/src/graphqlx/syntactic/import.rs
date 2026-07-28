@@ -9,9 +9,7 @@ use tokora::{
   Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::Brace,
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -35,7 +33,7 @@ use crate::{
 };
 
 macro_rules! import_parser {
-  (@impl [$($unclosed:ty),*] $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
+  ($(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
     $(#[$meta])*
     #[doc = "Parses this committed GraphQLx import production."]
     $visibility fn $name<'inp, Src, Ctx>(
@@ -54,27 +52,8 @@ macro_rules! import_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        > $(+ From<$unclosed>)*
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
-  };
-  ($(#[$meta:meta])* plain $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
-    import_parser!(@impl [] $(#[$meta])* $visibility $name, $input, $output, $body);
-  };
-  ($(#[$meta:meta])* brace $visibility:vis $name:ident, $input:ident, $output:ty, $body:block) => {
-    import_parser!(
-      @impl [Unclosed<Brace, SimpleSpan, GraphQLx>]
-      $(#[$meta])* $visibility $name, $input, $output, $body
-    );
   };
 }
 
@@ -90,16 +69,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match inp.next()? {
     Some(Spanned { span, data: token }) if keyword_of(&token) == Some(keyword) => Ok(span),
@@ -120,16 +90,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match inp.try_expect_map(|token| {
     (keyword_of(token.data()) == Some(ContextualKeyword::As)).then_some(())
@@ -150,16 +111,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = name.span().start();
   let alias = optional_alias(inp)?;
@@ -184,16 +136,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let alias = optional_alias(inp)?;
   let end = alias
@@ -210,7 +153,7 @@ import_parser!(
   ///
   /// This is a GraphQLx dialect production with no corresponding GraphQL draft
   /// production.
-  plain pub named_specifier,
+  pub named_specifier,
   inp,
   NamedSpecifier<GraphqlxSlice<'inp, Src>>,
   {
@@ -224,7 +167,7 @@ import_parser!(
   ///
   /// This is a GraphQLx dialect production with no corresponding GraphQL draft
   /// production.
-  plain pub wildcard_specifier,
+  pub wildcard_specifier,
   inp,
   WildcardSpecifier<GraphqlxSlice<'inp, Src>>,
   {
@@ -238,7 +181,7 @@ import_parser!(
   ///
   /// A member is either a named or wildcard GraphQLx import specifier; this is
   /// a dialect production with no corresponding GraphQL draft production.
-  plain pub import_member,
+  pub import_member,
   inp,
   ImportMember<GraphqlxSlice<'inp, Src>>,
   {
@@ -310,7 +253,7 @@ import_parser!(
   ///
   /// This is a GraphQLx dialect production with no corresponding GraphQL draft
   /// production.
-  brace pub import_list,
+  pub import_list,
   inp,
   ImportList<GraphqlxSlice<'inp, Src>>,
   {
@@ -331,7 +274,7 @@ import_parser!(
   /// A clause is either a wildcard specifier or a nonempty braced import list.
   /// This is a GraphQLx dialect production with no corresponding GraphQL draft
   /// production.
-  brace pub import_clause,
+  pub import_clause,
   inp,
   ImportClause<GraphqlxSlice<'inp, Src>>,
   {
@@ -372,17 +315,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let clause = import_clause(inp)?;
   contextual_keyword(inp, ContextualKeyword::From, Expectation::From)?;
@@ -408,24 +341,14 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = contextual_keyword(inp, ContextualKeyword::Import, Expectation::Import)?.start();
   import_definition_after_keyword(inp, start)
 }
 
 macro_rules! graphqlx_import_api {
-  (@impl [$($unclosed:ty),*] $(#[$meta:meta])* $node:ty, $parse:ident) => {
+  ($(#[$meta:meta])* $node:ty, $parse:ident) => {
     impl<S> $node {
       $(#[$meta])*
       /// Parses this committed GraphQLx import production.
@@ -445,27 +368,11 @@ macro_rules! graphqlx_import_api {
             Offset = usize,
           >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > $(+ From<$unclosed>)*
-          + From<DialectGraphqlxError<S>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
       {
         $parse(inp)
       }
     }
-  };
-  ($(#[$meta:meta])* plain $node:ty, $parse:ident) => {
-    graphqlx_import_api!(@impl [] $(#[$meta])* $node, $parse);
-  };
-  ($(#[$meta:meta])* brace $node:ty, $parse:ident) => {
-    graphqlx_import_api!(@impl [Unclosed<Brace, SimpleSpan, GraphQLx>] $(#[$meta])* $node, $parse);
   };
 }
 
@@ -474,7 +381,7 @@ graphqlx_import_api!(
   ///
   /// See [`named_specifier`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  plain NamedSpecifier<S>,
+  NamedSpecifier<S>,
   named_specifier
 );
 graphqlx_import_api!(
@@ -482,7 +389,7 @@ graphqlx_import_api!(
   ///
   /// See [`wildcard_specifier`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  plain WildcardSpecifier<S>,
+  WildcardSpecifier<S>,
   wildcard_specifier
 );
 graphqlx_import_api!(
@@ -490,7 +397,7 @@ graphqlx_import_api!(
   ///
   /// See [`import_member`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  plain ImportMember<S>,
+  ImportMember<S>,
   import_member
 );
 graphqlx_import_api!(
@@ -498,7 +405,7 @@ graphqlx_import_api!(
   ///
   /// See [`import_list`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  brace ImportList<S>,
+  ImportList<S>,
   import_list
 );
 graphqlx_import_api!(
@@ -506,7 +413,7 @@ graphqlx_import_api!(
   ///
   /// See [`import_clause`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  brace ImportClause<S>,
+  ImportClause<S>,
   import_clause
 );
 graphqlx_import_api!(
@@ -514,6 +421,6 @@ graphqlx_import_api!(
   ///
   /// See [`import_definition`]. This is a GraphQLx dialect production with no
   /// corresponding GraphQL draft production.
-  brace ImportDefinition<S>,
+  ImportDefinition<S>,
   import_definition
 );

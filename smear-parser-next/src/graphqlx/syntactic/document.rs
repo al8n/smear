@@ -11,9 +11,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
   Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Angle, Brace, Bracket, Paren},
   span::Spanned,
   utils::{DowncastRef, typenum::U1},
 };
@@ -53,21 +51,7 @@ macro_rules! document_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        >
-        + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-        + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
   };
 }
@@ -222,20 +206,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let definition = match classify_document_head(inp)? {
     Some(DocumentHead::TypeSystem(keyword)) => {
@@ -388,21 +359,7 @@ macro_rules! impl_document_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          >
-          + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-          + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-          + From<DialectGraphqlxError<$slice>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
       {
         $parser(inp)
       }

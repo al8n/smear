@@ -9,10 +9,7 @@
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
-  FatalContext, Lexer, Parse, Parser, SimpleSpan, Source,
-  error::{UnexpectedEot, token::UnexpectedToken},
-  punct::Bracket,
-  utils::cmp::Equivalent,
+  FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, punct::Bracket, utils::cmp::Equivalent,
 };
 
 use crate::graphql::{
@@ -35,10 +32,8 @@ fn drive_str<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
-    f,
-  )
-  .parse_str(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(f)
+    .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
@@ -48,15 +43,8 @@ fn drive_slice<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
-    'inp,
-    GraphqlLexer<'inp, [u8]>,
-    O,
-    GraphqlErrors<&'inp [u8]>,
-    _,
-    GraphQL,
-  >(f)
-  .parse_slice(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(f)
+    .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
@@ -66,15 +54,8 @@ fn drive_bytes<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
-    'inp,
-    GraphqlLexer<'inp, [u8]>,
-    O,
-    GraphqlErrors<&'inp [u8]>,
-    _,
-    GraphQL,
-  >(f)
-  .parse_bytes(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(f)
+    .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,
@@ -154,16 +135,7 @@ fn type_graphql_does_not_require_equivalent() {
     GraphqlLexer<'inp, Src>:
       Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: crate::combinator::ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-    GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-      + From<
-        UnexpectedToken<
-          'inp,
-          GraphqlToken<'inp, Src>,
-          <GraphqlToken<'inp, Src> as tokora::Token<'inp>>::Kind,
-          SimpleSpan,
-          GraphQL,
-        >,
-      > + From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
+    GraphqlError<'inp, Src, Ctx>: From<tokora::error::Unclosed<Bracket, SimpleSpan, GraphQL>>
       + From<DialectGraphqlError<TypeSlice>>,
   {
     Type::graphql(inp)

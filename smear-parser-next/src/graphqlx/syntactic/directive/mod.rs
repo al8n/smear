@@ -12,12 +12,8 @@
 use std::vec::Vec;
 
 use tokora::{
-  Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
-  punct::{Angle, At, Brace, Bracket, Paren},
-  span::Spanned,
-  try_parse_input::ParseAttempt,
-  utils::DowncastRef,
+  Lexer, ParseInput, SimpleSpan, Slice, Source, Token, punct::At, span::Spanned,
+  try_parse_input::ParseAttempt, utils::DowncastRef,
 };
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
@@ -41,7 +37,6 @@ use crate::{
 macro_rules! directive_parser {
   (
     $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty;
-    error_bounds = [$($error_bounds:tt)*];
     $body:block
   ) => {
     $(#[$meta])*
@@ -61,17 +56,7 @@ macro_rules! directive_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        > $($error_bounds)*
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
   };
 }
@@ -85,8 +70,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>:
-    From<UnexpectedEot<usize, GraphQLx>> + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match try_at(inp)? {
     ParseAttempt::Accept(at) => Ok(at),
@@ -104,18 +88,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let cursor = *inp.cursor();
   let separator = try_double_colon(inp)?;
@@ -144,20 +117,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   take_directive_type_path
     .then(arguments)
@@ -188,20 +148,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   take_directive_type_path
     .then(const_arguments)
@@ -232,20 +179,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = first_at.span().start();
   let mut parsed = Vec::from([directive_after_at(inp, start)?]);
@@ -271,20 +205,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = first_at.span().start();
   let mut parsed = Vec::from([const_directive_after_at(inp, start)?]);
@@ -310,12 +231,6 @@ directive_parser!(
   pub directive,
   inp,
   Directive<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let at = take_at(inp)?;
     directive_after_at(inp, at.span().start())
@@ -332,12 +247,6 @@ directive_parser!(
   pub const_directive,
   inp,
   ConstDirective<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let at = take_at(inp)?;
     const_directive_after_at(inp, at.span().start())
@@ -355,12 +264,6 @@ directive_parser!(
   pub directives,
   inp,
   Directives<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let start = *inp.offset();
     match try_at(inp)? {
@@ -381,12 +284,6 @@ directive_parser!(
   pub const_directives,
   inp,
   ConstDirectives<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let start = *inp.offset();
     match try_at(inp)? {
@@ -402,7 +299,6 @@ directive_parser!(
 macro_rules! impl_directive_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
-    error_bounds = [$($error_bounds:tt)*];
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
@@ -424,17 +320,7 @@ macro_rules! impl_directive_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > $($error_bounds)*
-          + From<DialectGraphqlxError<$slice>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
       {
         $parser(inp)
       }
@@ -452,12 +338,6 @@ impl_directive_api!(
   S,
   Directive<S>,
   directive;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_directive_api!(
   /// Parses one committed constant GraphQLx directive.
@@ -469,12 +349,6 @@ impl_directive_api!(
   S,
   ConstDirective<S>,
   const_directive;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_directive_api!(
   /// Parses executable GraphQLx directives, returning an empty zero-width list
@@ -486,12 +360,6 @@ impl_directive_api!(
   S,
   Directives<S>,
   directives;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_directive_api!(
   /// Parses constant GraphQLx directives, returning an empty zero-width list
@@ -503,12 +371,6 @@ impl_directive_api!(
   S,
   ConstDirectives<S>,
   const_directives;
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 
 #[cfg(test)]

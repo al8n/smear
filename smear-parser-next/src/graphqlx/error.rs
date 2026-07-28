@@ -13,17 +13,15 @@ use smear_lexer::{
   tokora::error::UnexpectedEnd,
 };
 use tokora::{
-  SimpleSpan as Span,
+  Lexer, SimpleSpan as Span,
+  emitter::FromUnclosed,
   error::{
     Unclosed as TokoraUnclosed, UnexpectedEot,
     syntax::{FullContainer, MissingSyntax, TooFew},
     token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
   },
-  punct::{Angle, Brace, Bracket, Paren},
   utils::Expected,
 };
-
-use super::GraphQLx;
 
 /// Typed expectations reported by GraphQLx productions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -449,40 +447,43 @@ impl<S, Lang: ?Sized> From<TooFew<Span, Lang>> for GraphqlxErrors<S> {
   }
 }
 
-impl<S, Lang: ?Sized> From<UnexpectedEot<usize, Lang>> for GraphqlxErrors<S> {
+// The end-of-input conversion is written `Set`-generic so the one impl covers both
+// members tokora's `FromTokenErrors` bundle names: the default `&'static str` set the
+// `_or_stop` family raises, and the `&'static [Kind]` classification table a committed
+// dispatch driver feeds straight into the diagnostic.
+impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>>
+  for GraphqlxErrors<S>
+{
   #[inline]
-  fn from(err: UnexpectedEot<usize, Lang>) -> Self {
+  fn from(err: UnexpectedEot<usize, Lang, Set>) -> Self {
     let offset = err.offset();
     GraphqlxError::maybe_unexpected_token(None, Expectation::InputValue, Span::new(offset, offset))
       .into()
   }
 }
 
-impl<S> From<TokoraUnclosed<Bracket, Span, GraphQLx>> for GraphqlxErrors<S> {
+// One impl absorbs every delimiter pair. `Unclosed` carries the pair's name as data, so
+// the pair is discriminated at run time on `name_ref` rather than by a `From` impl per
+// pair; `Delimiter` is generic, so the catch-all arm is mandatory. GraphQLx opens all four
+// built-in pairs, so the catch-all only covers a user-defined pair the grammar never uses.
+impl<'inp, S, L, Lang: ?Sized> FromUnclosed<'inp, L, Lang> for GraphqlxErrors<S>
+where
+  L: Lexer<'inp, Span = Span>,
+{
   #[inline]
-  fn from(err: TokoraUnclosed<Bracket, Span, GraphQLx>) -> Self {
-    GraphqlxError::unclosed_list(err.span()).into()
-  }
-}
-
-impl<S> From<TokoraUnclosed<Paren, Span, GraphQLx>> for GraphqlxErrors<S> {
-  #[inline]
-  fn from(err: TokoraUnclosed<Paren, Span, GraphQLx>) -> Self {
-    GraphqlxError::unclosed_parentheses(err.span()).into()
-  }
-}
-
-impl<S> From<TokoraUnclosed<Brace, Span, GraphQLx>> for GraphqlxErrors<S> {
-  #[inline]
-  fn from(err: TokoraUnclosed<Brace, Span, GraphQLx>) -> Self {
-    GraphqlxError::unclosed_object(err.span()).into()
-  }
-}
-
-impl<S> From<TokoraUnclosed<Angle, Span, GraphQLx>> for GraphqlxErrors<S> {
-  #[inline]
-  fn from(err: TokoraUnclosed<Angle, Span, GraphQLx>) -> Self {
-    GraphqlxError::unclosed_angle(err.span()).into()
+  fn from_unclosed<Delimiter>(err: TokoraUnclosed<Delimiter, Span, Lang>) -> Self {
+    let span = err.span();
+    match err.name_ref() {
+      "[]" => GraphqlxError::unclosed_list(span).into(),
+      "()" => GraphqlxError::unclosed_parentheses(span).into(),
+      "{}" => GraphqlxError::unclosed_object(span).into(),
+      "<>" => GraphqlxError::unclosed_angle(span).into(),
+      _ => GraphqlxError::new(
+        span,
+        ErrorData::Other(std::borrow::Cow::Borrowed("unclosed delimiter")),
+      )
+      .into(),
+    }
   }
 }
 

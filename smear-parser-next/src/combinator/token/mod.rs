@@ -13,7 +13,7 @@
 //! type at the invocation site.
 
 use tokora::{
-  InputRef, Lexer, ParseInput, Token, TryParseInput,
+  InputRef, Lexer, ParseInput, TryParseInput,
   error::{UnexpectedEot, token::UnexpectedToken},
   token::{IdentifierToken, KeywordToken, PunctuatorToken},
   try_parse_input::ParseAttempt,
@@ -34,10 +34,8 @@ macro_rules! punct_atoms {
         L::Token: PunctuatorToken<'inp>,
         Ctx: ParseCtx<'inp, L, Lang>,
         Lang: ?Sized,
-        ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
-          + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
       {
-        tokora::punct::$Ty::parse_of(inp)
+        tokora::punct::$Ty::parse(inp)
       }
 
       #[doc = concat!("Declines (no tokens consumed) unless the next token is `", stringify!($Ty), "`.")]
@@ -50,9 +48,8 @@ macro_rules! punct_atoms {
         L::Token: PunctuatorToken<'inp>,
         Ctx: ParseCtx<'inp, L, Lang>,
         Lang: ?Sized,
-        ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
       {
-        tokora::punct::$Ty::try_parse_of(inp)
+        tokora::punct::$Ty::try_parse(inp)
       }
     )+
   };
@@ -97,10 +94,8 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
-    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  tokora::types::Ident::parse_of(inp)
+  tokora::types::Ident::parse(inp)
 }
 
 /// Declines (no tokens consumed) unless the next token is an identifier.
@@ -113,9 +108,8 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
-  tokora::types::Ident::try_parse_of(inp)
+  tokora::types::Ident::try_parse(inp)
 }
 
 /// Returns `true` for the three spellings the spec excludes from `EnumValue`:
@@ -146,8 +140,6 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
-    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
   SliceOf<'inp, L>: Equivalent<str>,
 {
   match inp.next()? {
@@ -186,7 +178,6 @@ where
   L::Token: IdentifierToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
   SliceOf<'inp, L>: Equivalent<str>,
 {
   let mut failed = None;
@@ -227,10 +218,8 @@ where
   L::Token: KeywordToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>
-    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, L::Span, Lang>>,
 {
-  tokora::types::Keyword::parse_exact_of(&kw).parse_input(inp)
+  tokora::types::Keyword::parse_exact(&kw).parse_input(inp)
 }
 
 /// Declines (no tokens consumed) unless the next token is the keyword whose
@@ -245,9 +234,8 @@ where
   L::Token: KeywordToken<'inp>,
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
-  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<L::Offset, Lang>>,
 {
-  tokora::types::Keyword::try_parse_exact_of(&kw).try_parse_input(inp)
+  tokora::types::Keyword::try_parse_exact(&kw).try_parse_input(inp)
 }
 
 /// Generates a committed/declining atom pair for one keyword spelling, mapping

@@ -13,7 +13,7 @@ fn drive_str<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   source: &'inp str,
 ) -> O {
-  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
     parser,
   )
   .parse_str(source)
@@ -26,14 +26,9 @@ fn drive_slice<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   source: &'inp [u8],
 ) -> O {
-  Parser::with_parser_of::<
-    'inp,
-    GraphqlLexer<'inp, [u8]>,
-    O,
-    GraphqlErrors<&'inp [u8]>,
-    _,
-    GraphQL,
-  >(parser)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(
+    parser,
+  )
   .parse_slice(source)
   .expect("the byte-slice parser should accept the fixture")
 }

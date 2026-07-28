@@ -11,9 +11,7 @@ use std::vec::Vec;
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Angle, Bracket},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{
@@ -45,7 +43,6 @@ macro_rules! generic_parser {
   (
     $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty,
     token_bounds = [$($token_bounds:tt)*];
-    error_bounds = [$($error_bounds:tt)*];
     $body:block
   ) => {
     $(#[$meta])*
@@ -64,17 +61,7 @@ macro_rules! generic_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        > $($error_bounds)*
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
   };
 }
@@ -103,16 +90,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match super::try_name(inp)? {
     ParseAttempt::Accept(name) => Ok(name),
@@ -203,18 +181,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   definition_type_generics
     .peek_then_try::<_, U1>(decide_langle_opener::<Src, Ctx>)
@@ -232,17 +199,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   extension_type_generics
     .peek_then_try::<_, U1>(decide_langle_opener::<Src, Ctx>)
@@ -263,17 +220,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   executable_definition_type_generics
     .peek_then_try::<_, U1>(decide_langle_opener::<Src, Ctx>)
@@ -289,10 +236,6 @@ generic_parser!(
   inp,
   DefinitionTypeParam<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     let cursor = *inp.cursor();
     let name = take_name(inp)?;
@@ -314,10 +257,6 @@ generic_parser!(
   inp,
   DefinitionTypeGenerics<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| definition_type_param(inp))
       .repeated_while::<_, U1>(decide_angle_member::<Src, Ctx>)
@@ -336,7 +275,6 @@ generic_parser!(
   inp,
   ExtensionTypeParam<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [];
   {
     let name = take_name(inp)?;
     Ok(ExtensionTypeParam::new(name.span(), name))
@@ -349,7 +287,6 @@ generic_parser!(
   inp,
   ExtensionTypeGenerics<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
   {
     (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| extension_type_param(inp))
       .repeated_while::<_, U1>(decide_angle_member::<Src, Ctx>)
@@ -368,7 +305,6 @@ generic_parser!(
   inp,
   ExecutableDefinitionTypeGenerics<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
   {
     (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| take_name(inp))
       .repeated_while::<_, U1>(decide_angle_member::<Src, Ctx>)
@@ -387,10 +323,6 @@ generic_parser!(
   inp,
   ParseAttempt<DefinitionName<GraphqlxSlice<'inp, Src>>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     let name = match super::try_name(inp)? {
       ParseAttempt::Accept(name) => name,
@@ -412,10 +344,6 @@ generic_parser!(
   inp,
   DefinitionName<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     match try_definition_name(inp)? {
       ParseAttempt::Accept(name) => Ok(name),
@@ -430,7 +358,6 @@ generic_parser!(
   inp,
   ExtensionName<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
   {
     let cursor = *inp.cursor();
     let path = path(inp)?;
@@ -445,7 +372,6 @@ generic_parser!(
   inp,
   ExecutableDefinitionName<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
   {
     let cursor = *inp.cursor();
     let name = take_name(inp)?;
@@ -464,10 +390,6 @@ generic_parser!(
   inp,
   TypePath<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     let cursor = *inp.cursor();
     let path = path(inp)?;
@@ -484,10 +406,6 @@ generic_parser!(
   inp,
   WherePredicate<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     let bounded_type = type_path(inp)?;
     colon(inp)?;
@@ -568,18 +486,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let first = where_predicate(inp)?;
   let predicates: Vec<WherePredicate<GraphqlxSlice<'inp, Src>>> = where_predicate
@@ -603,10 +510,6 @@ generic_parser!(
   inp,
   ParseAttempt<WhereClause<GraphqlxSlice<'inp, Src>>>,
   token_bounds = [+ DowncastRef<ContextualKeyword>];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     match try_where(inp)? {
       ParseAttempt::Accept(where_span) => {
@@ -626,10 +529,6 @@ generic_parser!(
   inp,
   WhereClause<GraphqlxSlice<'inp, Src>>,
   token_bounds = [+ DowncastRef<ContextualKeyword>];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
   {
     match try_where_clause(inp)? {
       ParseAttempt::Accept(where_clause) => Ok(where_clause),
@@ -642,7 +541,6 @@ macro_rules! impl_generic_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
     token_bounds = [$($token_bounds:tt)*];
-    error_bounds = [$($error_bounds:tt)*];
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
@@ -663,17 +561,7 @@ macro_rules! impl_generic_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > $($error_bounds)*
-          + From<DialectGraphqlxError<$slice>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
       {
         $parser(inp)
       }
@@ -687,10 +575,6 @@ impl_generic_api!(
   DefinitionTypeParam<S>,
   definition_type_param;
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_generic_api!(
   /// Parses one nonempty angle-delimited GraphQLx definition generic list.
@@ -698,10 +582,6 @@ impl_generic_api!(
   DefinitionTypeGenerics<S>,
   definition_type_generics;
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_generic_api!(
   /// Parses one committed GraphQLx extension generic argument.
@@ -709,7 +589,6 @@ impl_generic_api!(
   ExtensionTypeParam<S>,
   extension_type_param;
   token_bounds = [];
-  error_bounds = [];
 );
 impl_generic_api!(
   /// Parses one nonempty angle-delimited GraphQLx extension generic list.
@@ -717,7 +596,6 @@ impl_generic_api!(
   ExtensionTypeGenerics<S>,
   extension_type_generics;
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
 );
 impl_generic_api!(
   /// Parses one nonempty angle-delimited GraphQLx executable generic list.
@@ -725,7 +603,6 @@ impl_generic_api!(
   ExecutableDefinitionTypeGenerics<S>,
   executable_definition_type_generics;
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
 );
 impl_generic_api!(
   /// Parses a GraphQLx definition name with optional declared generic parameters.
@@ -733,10 +610,6 @@ impl_generic_api!(
   DefinitionName<S>,
   definition_name;
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_generic_api!(
   /// Parses a GraphQLx extension path with optional generic arguments.
@@ -744,7 +617,6 @@ impl_generic_api!(
   ExtensionName<S>,
   extension_name;
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
 );
 impl_generic_api!(
   /// Parses a GraphQLx executable definition name with optional generic names.
@@ -752,7 +624,6 @@ impl_generic_api!(
   ExecutableDefinitionName<S>,
   executable_definition_name;
   token_bounds = [];
-  error_bounds = [+ From<Unclosed<Angle, SimpleSpan, GraphQLx>>];
 );
 impl_generic_api!(
   /// Parses a GraphQLx path followed by optional recursive type arguments.
@@ -760,10 +631,6 @@ impl_generic_api!(
   TypePath<S>,
   type_path;
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_generic_api!(
   /// Parses one committed GraphQLx `where` predicate.
@@ -771,10 +638,6 @@ impl_generic_api!(
   WherePredicate<S>,
   where_predicate;
   token_bounds = [];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_generic_api!(
   /// Parses one committed GraphQLx `where` clause.
@@ -782,10 +645,6 @@ impl_generic_api!(
   WhereClause<S>,
   where_clause;
   token_bounds = [+ DowncastRef<ContextualKeyword>];
-  error_bounds = [
-    + From<Unclosed<Angle, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-  ];
 );
 
 #[cfg(test)]

@@ -27,7 +27,7 @@ fn drive_str<'inp, O>(
   ) -> Result<O, GraphqlxErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlxErrors<&'inp str>> {
-  Parser::with_parser_of::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
+  Parser::with_parser::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
     f,
   )
   .parse_str(input)
@@ -39,7 +39,7 @@ fn drive_slice<'inp, O>(
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
+  Parser::with_parser::<
     'inp,
     GraphqlxLexer<'inp, [u8]>,
     O,
@@ -57,7 +57,7 @@ fn drive_bytes_as_slice<'inp, O>(
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
+  Parser::with_parser::<
     'inp,
     GraphqlxLexer<'inp, [u8]>,
     O,
@@ -75,7 +75,7 @@ fn drive_owned_bytes<'inp, O>(
   ) -> Result<O, GraphqlxErrors<::bytes::Bytes>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlxErrors<::bytes::Bytes>> {
-  Parser::with_parser_of::<
+  Parser::with_parser::<
     'inp,
     GraphqlxLexer<'inp, ::bytes::Bytes>,
     O,

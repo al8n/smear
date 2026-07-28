@@ -14,12 +14,9 @@ use smear_lexer::{
   keywords::{Fragment, Mutation, Query, Subscription},
 };
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
-  TryParseInput,
+  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::Action,
-  punct::{Brace, Bracket, Paren},
   span::{AsSpan, Spanned},
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -62,20 +59,7 @@ macro_rules! document_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-      GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlToken<'inp, Src>,
-            <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQL,
-          >,
-        >
-        + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-        + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-        + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-        + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+      GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
     $body
   };
 }
@@ -142,19 +126,7 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   GraphqlToken<'inp, Src>: DowncastRef<ContextualKeyword>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   match keyword {
     ContextualKeyword::Query => named_operation_after_classified_head(
@@ -210,19 +182,7 @@ where
   GraphqlLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-  GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlToken<'inp, Src>,
-        <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    > + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-    + From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
+  GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
   selection_set(inp)
     .map(OperationDefinition::Shorthand)
@@ -473,20 +433,7 @@ macro_rules! impl_document_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
-        GraphqlError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlToken<'inp, Src>,
-              <GraphqlToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQL,
-            >,
-          >
-          + From<Unclosed<Paren, SimpleSpan, GraphQL>>
-          + From<Unclosed<Bracket, SimpleSpan, GraphQL>>
-          + From<Unclosed<Brace, SimpleSpan, GraphQL>>
-          + From<DialectGraphqlError<$slice>>,
+        GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<$slice>>,
       {
         $parser(inp)
       }

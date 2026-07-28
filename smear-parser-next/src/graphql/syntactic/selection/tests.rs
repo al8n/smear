@@ -36,10 +36,8 @@ fn drive_str<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp str>>,
   input: &'inp str,
 ) -> Result<O, GraphqlErrors<&'inp str>> {
-  Parser::with_parser_of::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(
-    f,
-  )
-  .parse_str(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, str>, O, GraphqlErrors<&'inp str>, _, GraphQL>(f)
+    .parse_str(input)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlErrors<&[u8]>>`.
@@ -49,15 +47,8 @@ fn drive_slice<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp [u8],
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
-    'inp,
-    GraphqlLexer<'inp, [u8]>,
-    O,
-    GraphqlErrors<&'inp [u8]>,
-    _,
-    GraphQL,
-  >(f)
-  .parse_slice(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(f)
+    .parse_slice(input)
 }
 
 #[cfg(feature = "bytes")]
@@ -67,15 +58,8 @@ fn drive_bytes<'inp, O>(
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
   input: &'inp ::bytes::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
-  Parser::with_parser_of::<
-    'inp,
-    GraphqlLexer<'inp, [u8]>,
-    O,
-    GraphqlErrors<&'inp [u8]>,
-    _,
-    GraphQL,
-  >(f)
-  .parse_bytes(input)
+  Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(f)
+    .parse_bytes(input)
 }
 
 /// Runs `parser` over `src` as `str`, `[u8]`, and (behind the feature) `Bytes`,

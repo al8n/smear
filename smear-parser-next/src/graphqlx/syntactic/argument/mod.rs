@@ -13,9 +13,7 @@ use std::vec::Vec;
 use tokora::{
   Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
   parser::{Action, try_parens},
-  punct::{Brace, Bracket, Paren},
   span::Spanned,
   try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
@@ -40,7 +38,6 @@ use crate::{
 macro_rules! argument_parser {
   (
     $(#[$meta:meta])* $visibility:vis $name:ident, $input:ident, $output:ty;
-    error_bounds = [$($error_bounds:tt)*];
     $body:block
   ) => {
     $(#[$meta])*
@@ -60,17 +57,7 @@ macro_rules! argument_parser {
         Offset = usize,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-      GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-        + From<
-          UnexpectedToken<
-            'inp,
-            GraphqlxToken<'inp, Src>,
-            <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-            SimpleSpan,
-            GraphQLx,
-          >,
-        > $($error_bounds)*
-        + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
     $body
   };
 }
@@ -84,16 +71,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match try_name(inp)? {
     ParseAttempt::Accept(name) => Ok(name),
@@ -111,16 +89,7 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlxToken<'inp, Src>,
-        <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQLx,
-      >,
-    > + From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match try_colon(inp)? {
     ParseAttempt::Accept(_) => Ok(()),
@@ -138,10 +107,6 @@ argument_parser!(
   pub argument,
   inp,
   Argument<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     take_argument_name
       .then_ignore(take_argument_colon)
@@ -162,10 +127,6 @@ argument_parser!(
   pub const_argument,
   inp,
   ConstArgument<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     take_argument_name
       .then_ignore(take_argument_colon)
@@ -208,11 +169,6 @@ argument_parser!(
   pub arguments,
   inp,
   Arguments<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let start = *inp.offset();
     try_parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
@@ -244,11 +200,6 @@ argument_parser!(
   pub const_arguments,
   inp,
   ConstArguments<GraphqlxSlice<'inp, Src>>;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
   {
     let start = *inp.offset();
     try_parens::<_, _, _, _, Vec<ConstArgument<GraphqlxSlice<'inp, Src>>>, _>(
@@ -269,7 +220,6 @@ argument_parser!(
 macro_rules! impl_argument_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
-    error_bounds = [$($error_bounds:tt)*];
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
@@ -291,17 +241,7 @@ macro_rules! impl_argument_api {
           Offset = usize,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-        GraphqlxError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>
-          + From<
-            UnexpectedToken<
-              'inp,
-              GraphqlxToken<'inp, Src>,
-              <GraphqlxToken<'inp, Src> as Token<'inp>>::Kind,
-              SimpleSpan,
-              GraphQLx,
-            >,
-          > $($error_bounds)*
-          + From<DialectGraphqlxError<$slice>>,
+        GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
       {
         $parser(inp)
       }
@@ -319,10 +259,6 @@ impl_argument_api!(
   S,
   Argument<S>,
   argument;
-  error_bounds = [
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_argument_api!(
   /// Parses one committed constant GraphQLx argument.
@@ -334,10 +270,6 @@ impl_argument_api!(
   S,
   ConstArgument<S>,
   const_argument;
-  error_bounds = [
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_argument_api!(
   /// Parses executable GraphQLx arguments, returning an empty zero-width list
@@ -349,11 +281,6 @@ impl_argument_api!(
   S,
   Arguments<S>,
   arguments;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 impl_argument_api!(
   /// Parses constant GraphQLx arguments, returning an empty zero-width list
@@ -365,11 +292,6 @@ impl_argument_api!(
   S,
   ConstArguments<S>,
   const_arguments;
-  error_bounds = [
-    + From<Unclosed<Paren, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Bracket, SimpleSpan, GraphQLx>>
-    + From<Unclosed<Brace, SimpleSpan, GraphQLx>>
-  ];
 );
 
 #[cfg(test)]

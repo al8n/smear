@@ -1,7 +1,8 @@
 use smear_lexer::graphqlx::syntactic::SyntacticLexer;
-use tokora::{FatalContext, Lexer, ParseCtx};
+use tokora::{FatalContext, Lexer};
 
 use super::*;
+use crate::{combinator::ParseCtx, graphqlx::GraphQLx};
 
 fn assert_parse_ctx<'inp, L, Ctx>()
 where
