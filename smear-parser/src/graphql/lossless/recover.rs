@@ -74,6 +74,32 @@ pub(crate) const TYPE_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBracket];
 /// The token kinds an `Argument` may begin with.
 pub(crate) const ARGUMENT_HEADS: &[Kind] = &[Kind::Identifier];
 
+/// The token kinds a `Selection` may begin with: a field's name, or the `...` of a fragment
+/// spread or inline fragment.
+pub(crate) const SELECTION_HEADS: &[Kind] = &[Kind::Identifier, Kind::Spread];
+
+/// The token kinds that may follow a `...`: a fragment name or the `on` of a type condition
+/// (both `Identifier`s), a directive's `@`, or the `{` of an untyped inline fragment's
+/// selection set.
+pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[Kind::Identifier, Kind::At, Kind::LBrace];
+
+/// The token kinds a type condition may begin with — one, and it stands for two positions.
+///
+/// `on` and the name after it are both `Identifier`s, and `expectation_of` collapses every
+/// token-kind expectation onto [`Expectation::Name`](crate::graphql::error::Expectation::Name)
+/// anyway, so a second set naming the keyword would report the same sentence. The precise
+/// "expected the keyword `on`" wording needs the dialect error rather than tokora's
+/// token-kind one, and no production here carries the bound that would reach it.
+pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds a `VariableDefinition` may begin with.
+pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] = &[Kind::Dollar];
+
+/// The token kinds an executable definition may begin with: the `{` of a shorthand operation,
+/// or the `query`/`mutation`/`subscription`/`fragment` keyword — an `Identifier` to the lexer,
+/// which is why the set cannot be finer than this.
+pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[Kind::LBrace, Kind::Identifier];
+
 /// The span of the single-byte delimiter an [`expect`](super::trivia::expect) has just
 /// committed, given the input's committed extent.
 ///
@@ -86,13 +112,28 @@ pub(crate) fn opener_span(end: usize) -> SimpleSpan {
   SimpleSpan::new(end.saturating_sub(1), end)
 }
 
-/// Where a value-position recovery is willing to stop: a token that could start a value, or a
-/// closer the enclosing shape knows how to consume.
+/// Where a recovery is willing to stop: a token that could start something the caller knows
+/// how to parse, or a closer the enclosing shape knows how to consume.
 ///
-/// The closers are in the set even though no value starts with one — stopping *before* `]` is
+/// The closers are in the set even though nothing starts with one — stopping *before* `]` is
 /// what lets an enclosing `list_value` close on its own delimiter instead of running to end of
 /// input. `sync_balanced` consults this only at depth zero, so a `]` inside skipped nesting is
 /// crossed rather than mistaken for the enclosing one.
+///
+/// # One set, not one per position
+///
+/// The set is deliberately the **union** of every head this suite can restart at, rather than
+/// the caller's own head set. A recovery that stopped only at heads the *current* production
+/// accepts would run past the closer that ends it, and past the head of the sibling that
+/// follows — so a stray token inside a field would cost the rest of the selection set. Stopping
+/// early costs at most one extra `Error` node; stopping late costs a subtree.
+///
+/// **`Spread` was added in Task 7 and is the only head that is not also a value head.** A
+/// `...` starts a selection, so a set that stopped only at names would skip straight over a
+/// fragment spread and fold it into the junk before it — pinned by
+/// `junk_before_a_spread_does_not_swallow_it`. `At`, `Colon` and `Bang` stay out: none of them
+/// begins a production this suite can restart at, so stopping there would only split one
+/// `Error` node into two.
 #[inline]
 fn is_sync_point(kind: Kind) -> bool {
   matches!(
@@ -105,6 +146,7 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
+      | Kind::Spread
       | Kind::RBracket
       | Kind::RBrace
       | Kind::RParen
@@ -182,10 +224,53 @@ lossless_production! {
     Ok(())
   }
 
+  /// Nothing that could start one of `expected` is here. **Report, and consume nothing.**
+  ///
+  /// # When to reach for this rather than [`unexpected`]
+  ///
+  /// Whenever the offending token is worth more to the *next* production than it would be
+  /// inside an `Error` node. Three shapes in this suite are in that class, and each one is a
+  /// bug if it consumes:
+  ///
+  /// - **A required keyword is absent**, as with a type condition's `on`. The name that *is*
+  ///   there is still the condition's type, so eating it would trade one diagnostic for a lost
+  ///   subtree.
+  /// - **A delimited shape is empty** where the grammar says `+` — `{}`, `()`. The report
+  ///   points at the closer, which the enclosing loop is about to eat as its own.
+  /// - **A prefix has no tail**, as with a `...` at the end of a selection set. The `}` after
+  ///   it belongs to the enclosing set; [`unexpected`] would swallow it (a closer *is* a sync
+  ///   point) and the set would then run to end of input looking for a closer it had already
+  ///   consumed.
+  ///
+  /// **Consuming nothing makes this unsafe inside a loop that continues.** Every caller here
+  /// either `return`s afterwards or has already made progress on its own — the same
+  /// distinction [`unclosed_list`] documents, and the reason [`unexpected`] exists at all.
+  fn report_unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field is
+    // already a reference, so the method form resolves to `<&Token as Clone>::clone` and hands
+    // back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and fails the
+    // `From` bound a long way from here.
+    match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
+      Some(found) => {
+        let span = found.span;
+        let err = UnexpectedToken::<_, _, _, GraphQL>::expected_one_of(span, expected)
+          .with_found(found.data);
+        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
+      }
+      None => {
+        let end = inp.span().end();
+        let span = SimpleSpan::new(end, end);
+        let err = UnexpectedEot::<usize, GraphQL>::eot_of(end);
+        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
+      }
+    }
+    Ok(())
+  }
+
   /// Nothing that could start one of `expected` is here, and there is still input.
   ///
-  /// Reports once, then makes progress — in that order, because the diagnostic names the
-  /// token that is about to be skipped.
+  /// Reports once through [`report_unexpected`], then makes progress — in that order, because
+  /// the diagnostic names the token that is about to be skipped.
   ///
   /// # Why this cannot be `sync_balanced` alone
   ///
@@ -210,24 +295,7 @@ lossless_production! {
   /// through the `node` combinator, so a caller that reaches this at genuine end of input gets
   /// no node at all rather than an empty zero-width `Error` one.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field is
-    // already a reference, so the method form resolves to `<&Token as Clone>::clone` and hands
-    // back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and fails the
-    // `From` bound a long way from here.
-    match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
-      Some(found) => {
-        let span = found.span;
-        let err = UnexpectedToken::<_, _, _, GraphQL>::expected_one_of(span, expected)
-          .with_found(found.data);
-        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
-      }
-      None => {
-        let end = inp.span().end();
-        let span = SimpleSpan::new(end, end);
-        let err = UnexpectedEot::<usize, GraphQL>::eot_of(end);
-        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
-      }
-    }
+    report_unexpected::<Src, Ctx>(inp, expected)?;
 
     let hole = inp.sync_balanced(delimiters, |t| is_sync_point(kind_of(t.data)))?;
     if hole.is_some_and(|h| h.skipped() > 0) {

@@ -66,6 +66,7 @@ use tokora::{
   lexer::FromLogos,
   span::Spanned,
   try_parse_input::ParseAttempt,
+  utils::DowncastRef,
 };
 
 use crate::graphql::GraphQL;
@@ -118,6 +119,43 @@ where
 {
   inp.skip_while(|t| t.is_trivia())?;
   inp.peek_kind()
+}
+
+/// Commit any leading trivia, then project the next token to `Projection` without consuming
+/// it. `None` at end of input, and `None` for a token that carries no `Projection`.
+///
+/// # Why the two `None`s are not told apart
+///
+/// Every caller asks the same question — *is the head this particular keyword?* — and both a
+/// head that spells something else and an absent head answer it the same way. Distinguishing
+/// them would put a second `Option` at every call site to carry a difference none of them
+/// branches on; the kind-level [`peek_kind`] is already the atom that reports end of input.
+///
+/// # The projection is a type parameter, and must be
+///
+/// GraphQL's `true`, `false`, `null`, `on`, `query`, `fragment` and the rest are **contextual
+/// keywords**: the lexer hands them back as ordinary `Identifier` tokens, so a production that
+/// needs one has to read the *spelling*, which [`peek_kind`] cannot see.
+/// [`DowncastRef`](tokora::utils::DowncastRef) is that door — and naming its target here would
+/// make this module name a concrete dialect type, which the Lego rule forbids. One atom over
+/// the type parameter serves every projection a dialect defines; the call site names the one
+/// it wants.
+pub(crate) fn peek_as<'inp, Src, Ctx, Projection>(
+  inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
+) -> Result<Option<Projection>, GraphqlLosslessError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp> + DowncastRef<Projection>,
+  GraphqlLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
+  GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
+{
+  inp.skip_while(|t| t.is_trivia())?;
+  // The projection is owned and `Copy`, so nothing borrowed escapes the closure — the `&&Token`
+  // receiver that costs `kind_of` its own helper is harmless here. The outer `Option` is the
+  // peek and the inner one is the downcast; see above for why they are flattened into one.
+  Ok(inp.peek_head_map(|t| t.data.downcast_ref())?.flatten())
 }
 
 /// Commit any leading trivia, then require `kind`.

@@ -421,9 +421,11 @@ macro_rules! lossless_drivers {
 // shadowed by the textual binding and warns as unused.
 pub mod directive;
 pub mod document;
+pub mod executable;
 pub mod kind_map;
 pub mod recover;
 pub mod runner;
+pub mod selection;
 pub mod trivia;
 pub mod ty;
 pub mod value;

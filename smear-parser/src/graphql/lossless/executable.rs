@@ -1,0 +1,237 @@
+//! Executable-definition productions: `VariableDefinition`, `VariablesDefinition`,
+//! `OperationDefinition`, `FragmentDefinition`, `ExecutableDocument`.
+//!
+//! The conventions are `value.rs`'s and are not repeated here — the two kind spaces, the
+//! `::<Src, Ctx>` on every generic call, and the fully spelled `node(…)` closure parameter.
+//!
+//! # Every keyword here is contextual
+//!
+//! `query`, `mutation`, `subscription` and `fragment` are `Identifier` tokens to the lexer,
+//! exactly as `true`/`false`/`null` are in `value.rs`. The spelling is read **once**, by
+//! `executable_definition`, through `trivia::peek_as` on the peeked token;
+//! each definition production then consumes its keyword with a plain `expect(Identifier)` and
+//! states the spelling as a precondition. Re-checking inside the arm would read the same token
+//! twice to reach the same answer — the ruling Task 5 recorded for the three reserved value
+//! spellings, applied to the four definition heads.
+//!
+//! # An undelimited repetition ends with its trailing trivia inside it
+//!
+//! `ExecutableDocument` is a repetition with no closing delimiter, so Task 6's law applies: the
+//! loop's terminating peek must cross the trailing trivia to learn that no further definition
+//! follows, and it crosses it while the node is still open. Here that is not even a
+//! compromise — a document *is* the whole file, leading and trailing trivia included, so the
+//! node covering every byte is the right answer rather than a tolerated one. The definitions
+//! inside it are each delimited by their own `}` and are unaffected, which
+//! `an_executable_document_holds_every_definition` asserts by node text.
+//!
+//! # Divergences, decided rather than inherited
+//!
+//! - **There is no `OperationType` node.** `OperationType` is Task 8's kind — it is also what a
+//!   `RootOperationTypeDefinition` needs — so the keyword is a bare `Name` token inside
+//!   `OperationDefinition` here, where `apollo-parser` wraps it in an `OPERATION_TYPE` node.
+//!   Task 8 should unify the two positions on one production; nothing in this file blocks that,
+//!   and the token is already where the wrap would go.
+//! - **A description before an executable definition is not accepted.** `syntactic/`'s
+//!   `executable_definition` takes an optional leading string as a frozen-parser compatibility
+//!   extension, which is not in the GraphQL grammar. `Description` is Task 8's kind; until then
+//!   a leading string is an unrecognised head, and the acceptance-parity gate will see it.
+//! - **A malformed definition is an `Err`, not a resync.** `document` — Task 8's — is where
+//!   catch-resync-continue belongs, and it is the only caller that can be tested at its own
+//!   call site.
+
+use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
+use tokora::{ParseInput as _, parser::node};
+
+use crate::graphql::kinds::SyntaxKind as K;
+
+use super::{
+  GraphqlLosslessInput,
+  directive::directives,
+  recover,
+  recover::{EXECUTABLE_DEFINITION_HEADS, VARIABLE_DEFINITION_HEADS, opener_span},
+  selection::{selection_set, type_condition},
+  trivia::{eat_if, expect, peek_as, peek_kind},
+  ty::type_ref,
+  value::{default_value, variable},
+};
+
+lossless_production! {
+  /// `Variable : Type DefaultValue? Directives?`
+  ///
+  /// **Precondition: the head is `$`.** [`variables_definition`] decides that.
+  fn variable_definition<'inp, Src, Ctx>(inp) {
+    node(
+      K::VariableDefinition.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        // The `$name` is a `Variable` node, the same one a value position builds: a variable is
+        // a variable wherever it appears, and a typed accessor that had to match two node kinds
+        // for it would be paying for a distinction the grammar does not make.
+        variable::<Src, Ctx>(inp)?;
+        expect::<Src, Ctx>(inp, Kind::Colon)?;
+        type_ref::<Src, Ctx>(inp)?;
+        // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
+        // `DefaultValue` node and an absent default opens nothing.
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
+          default_value::<Src, Ctx>(inp)?;
+        }
+        directives::<Src, Ctx>(inp)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `( VariableDefinition+ )`
+  ///
+  /// `arguments`' loop with a different head and a different emptiness ruling: `syntactic/`
+  /// rejects the empty `()` here ("one-or-more, so an empty `()` errors") where it accepts it
+  /// for `Arguments`. Gate 1 compares the two suites' verdicts input by input, so the two
+  /// rulings are followed one production at a time rather than unified into a house rule.
+  fn variables_definition<'inp, Src, Ctx>(inp) {
+    node(
+      K::VariablesDefinition.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LParen)?;
+        let open = opener_span(inp.span().end());
+        // The report consumes nothing, so the `)` is still the loop's to eat; checked here
+        // rather than after the loop, where the diagnostic would point past the closer it is
+        // about.
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RParen) {
+          recover::report_unexpected::<Src, Ctx>(inp, VARIABLE_DEFINITION_HEADS)?;
+        }
+        loop {
+          if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
+            return Ok(());
+          }
+          match peek_kind::<Src, Ctx>(inp)? {
+            None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::Dollar) => variable_definition::<Src, Ctx>(inp)?,
+            // The head is checked here rather than left to `variable_definition`'s own
+            // `expect`, because that `expect` would return `Err` and abort the whole list — the
+            // ruling `arguments` and `object_value` both record.
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, VARIABLE_DEFINITION_HEADS)?,
+          }
+        }
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `SelectionSet` (the shorthand) or
+  /// `OperationType Name? VariablesDefinition? Directives? SelectionSet`
+  ///
+  /// **Precondition: the head is `{`, or an `Identifier` spelled `query`, `mutation` or
+  /// `subscription`.** [`executable_definition`] decides that on the spelling; see the module
+  /// docs for why the keyword is not re-read here, and for why it gets no node of its own.
+  fn operation_definition<'inp, Src, Ctx>(inp) {
+    node(
+      K::OperationDefinition.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
+          return selection_set::<Src, Ctx>(inp);
+        }
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        // The operation name is optional, and any name will do — an operation may be called
+        // `query` or `on`; nothing in the grammar reserves a spelling in this position.
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
+          expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        }
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+          variables_definition::<Src, Ctx>(inp)?;
+        }
+        directives::<Src, Ctx>(inp)?;
+        // Required, and an `Err` when it is absent — the same call `argument` makes for its
+        // missing `:`. There is no shape left to recover into, and Task 8's `document` is where
+        // a failed definition is caught and resynchronised past.
+        selection_set::<Src, Ctx>(inp)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `fragment FragmentName TypeCondition Directives? SelectionSet`
+  ///
+  /// **Precondition: the head is an `Identifier` spelled `fragment`.**
+  /// [`executable_definition`] decides that on the spelling.
+  ///
+  /// The type condition is [`type_condition`], which recovers rather than requiring: a
+  /// definition whose `on` is missing keeps its name, its type and its selection set, and costs
+  /// one diagnostic.
+  fn fragment_definition<'inp, Src, Ctx>(inp) {
+    node(
+      K::FragmentDefinition.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        // The fragment name. The spec forbids the spelling `on` here; that is a validation rule
+        // over the tree, exactly as `Argument`'s constness is — the name's token is right
+        // there for the layer above to read, and rejecting it at the parse would cost the node
+        // the diagnostic wants to point at.
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        type_condition::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp)?;
+        selection_set::<Src, Ctx>(inp)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// Dispatch on the definition head. Opens **no** node of its own; the chosen production opens
+  /// its own — and this is the one place the four contextual keywords are read.
+  fn executable_definition<'inp, Src, Ctx>(inp) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      // The shorthand operation, which has no keyword at all.
+      Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp),
+      Some(Kind::Identifier) => match peek_as::<Src, Ctx, ContextualKeyword>(inp)? {
+        Some(
+          ContextualKeyword::Query | ContextualKeyword::Mutation | ContextualKeyword::Subscription,
+        ) => operation_definition::<Src, Ctx>(inp),
+        Some(ContextualKeyword::Fragment) => fragment_definition::<Src, Ctx>(inp),
+        // A name that is not one of the four. Reported and skipped — `unexpected` consumes at
+        // least one token whenever input remains, which is the document loop's only termination
+        // argument.
+        _ => recover::unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS),
+      },
+      _ => recover::unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS),
+    }
+  }
+
+  /// `ExecutableDefinition+`
+  ///
+  /// The empty form is reported: `syntactic/` rejects an empty input ("one-or-more, so an empty
+  /// input errors"), and gate 1 compares verdicts. The node is opened either way, so a caller
+  /// always finds a document to walk.
+  fn executable_document<'inp, Src, Ctx>(inp) {
+    node(
+      K::ExecutableDocument.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        if peek_kind::<Src, Ctx>(inp)?.is_none() {
+          return recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS);
+        }
+        // This peek is also what crosses the trailing trivia — see the module docs.
+        while peek_kind::<Src, Ctx>(inp)?.is_some() {
+          executable_definition::<Src, Ctx>(inp)?;
+        }
+        Ok(())
+      },
+    )
+    .parse_input(inp)
+  }
+}
+
+lossless_drivers! {
+  /// Drivers that run one executable-definition production over a `&str` and hand back the tree
+  /// it built, for `tests/lossless_selection.rs`.
+  mod test_support;
+
+  /// `super::variables_definition` over `src` — the only door to `variable_definition`.
+  fn parse_variables_definition => variables_definition;
+
+  /// `super::operation_definition` over `src`.
+  fn parse_operation_definition => operation_definition;
+
+  /// `super::fragment_definition` over `src`.
+  fn parse_fragment_definition => fragment_definition;
+
+  /// `super::executable_document` over `src` — the entry every executable parse uses, and the
+  /// only door to `executable_definition`.
+  fn parse_executable_document => executable_document;
+}
