@@ -23,6 +23,8 @@ bstr = ["smear-lexer/bstr", "tokora/bstr_1"]
 hipstr = ["smear-lexer/hipstr", "tokora/hipstr_0_8"]
 smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 
+rowan = ["dep:rowan", "tokora/rowan", "std"]
+
 [dependencies]
 derive_more.workspace = true
 tokora.workspace = true
@@ -31,6 +33,7 @@ paste = "1"
 
 bytes = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+rowan = { version = "0.16", optional = true }
 
 [dev-dependencies]
 criterion = "0.8"
