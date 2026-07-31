@@ -38,7 +38,7 @@ use smear_lexer::graphql::lossless::LosslessTokenKind as Kind;
 use tokora::{
   Emitter as _, SimpleSpan,
   emitter::{CstEmitter as _, FromUnclosed},
-  error::{UnclosedBrace, UnclosedBracket, UnexpectedEot, token::UnexpectedToken},
+  error::{UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot, token::UnexpectedToken},
   input::Balance,
   span::Spanned,
 };
@@ -64,6 +64,27 @@ pub(crate) const VALUE_HEADS: &[Kind] = &[
 
 /// The token kinds an `ObjectField` may begin with.
 pub(crate) const OBJECT_FIELD_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds a `Type` may begin with: a name, or the `[` of a list type.
+///
+/// The `!` of a `NonNullType` is not among them — it is a *suffix*, so no type reference ever
+/// starts with one, and a `!` in head position is exactly the mistake this set names.
+pub(crate) const TYPE_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBracket];
+
+/// The token kinds an `Argument` may begin with.
+pub(crate) const ARGUMENT_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The span of the single-byte delimiter an [`expect`](super::trivia::expect) has just
+/// committed, given the input's committed extent.
+///
+/// `expect` reports only whether it matched, so the opener's own span has to be recovered from
+/// the input: its end is the delimiter's end, and every delimiter this suite opens (`[`, `{`,
+/// `(`) is exactly one byte. That span is what an unclosed-delimiter diagnostic points at — the
+/// opener that was never closed, not the end of input where the absence was noticed.
+#[inline]
+pub(crate) fn opener_span(end: usize) -> SimpleSpan {
+  SimpleSpan::new(end.saturating_sub(1), end)
+}
 
 /// Where a value-position recovery is willing to stop: a token that could start a value, or a
 /// closer the enclosing shape knows how to consume.
@@ -143,6 +164,20 @@ lossless_production! {
       GraphqlLosslessLexer<'inp, Src>,
       GraphQL,
     >>::from_unclosed(UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open));
+    inp.emitter().emit_error(Spanned::new(open, err))?;
+    Ok(())
+  }
+
+  /// An argument list ran to end of input before its `)` arrived — the third of the same twin,
+  /// and the reason [`FromUnclosed`] is generic over the delimiter marker: one impl in
+  /// `lossless/mod.rs` covers `[]`, `{}` and `()`, so a new pair costs a constructor call and
+  /// no new bound.
+  fn unclosed_parens<'inp, Src, Ctx>(inp, open: SimpleSpan) {
+    let err = <GraphqlLosslessError<'inp, Src, Ctx> as FromUnclosed<
+      'inp,
+      GraphqlLosslessLexer<'inp, Src>,
+      GraphQL,
+    >>::from_unclosed(UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open));
     inp.emitter().emit_error(Spanned::new(open, err))?;
     Ok(())
   }

@@ -51,7 +51,7 @@
 //! machinery to forbid it in this one position.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, SimpleSpan, parser::node, utils::DowncastRef as _};
+use tokora::{ParseInput as _, parser::node, utils::DowncastRef as _};
 
 /// What `DowncastRef` answers for a peeked token: the outer `Option` is the peek (`None` at
 /// end of input), the inner one is the downcast (`None` for a name that is not a reserved
@@ -63,21 +63,9 @@ use crate::graphql::kinds::SyntaxKind as K;
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{OBJECT_FIELD_HEADS, VALUE_HEADS},
+  recover::{OBJECT_FIELD_HEADS, VALUE_HEADS, opener_span},
   trivia::{eat_if, expect, peek_kind},
 };
-
-/// The span of the single-byte delimiter `expect` has just committed.
-///
-/// `expect` reports only whether it matched, so the opener's own span has to be recovered from
-/// the input's committed extent: its end is the delimiter's end, and every delimiter this file
-/// opens (`[`, `{`) is exactly one byte. That span is what the unclosed-delimiter diagnostic
-/// points at — the opener that was never closed, not the end of input where the absence was
-/// noticed.
-#[inline]
-fn just_committed_delimiter(end: usize) -> SimpleSpan {
-  SimpleSpan::new(end.saturating_sub(1), end)
-}
 
 lossless_production! {
   /// `$ Name`
@@ -180,7 +168,7 @@ lossless_production! {
       K::ListValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
-        let open = just_committed_delimiter(inp.span().end());
+        let open = opener_span(inp.span().end());
         while !eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
           if peek_kind::<Src, Ctx>(inp)?.is_none() {
             // Unterminated at end of input: report and return `Ok`, so the enclosing `node`
@@ -205,7 +193,7 @@ lossless_production! {
       K::ObjectValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBrace)?;
-        let open = just_committed_delimiter(inp.span().end());
+        let open = opener_span(inp.span().end());
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
             return Ok(());
@@ -295,84 +283,14 @@ lossless_production! {
   }
 }
 
-/// Drivers that run one value production over a `&str` and hand back the tree it built.
-///
-/// Test-only scaffolding, exported so the integration test at `tests/lossless_value.rs` can
-/// reach it; nothing in the crate calls it.
-///
-/// **Why the tests do not go through `parse_str`.** `document` is Task 3's drain-everything
-/// stub until Task 8, so no value production is reachable from the crate's public entry point
-/// yet. Asserting through `parse_str` today would not fail — it would compare two empty trees
-/// and pass, which is worse. These drivers make the assertions real now, and the `parse_str`
-/// forms are kept `#[ignore]`d in the test file for Task 8 to switch on.
-///
-/// **This module is where the productions stop being generic.** They name only the
-/// projections; a driver must choose a concrete source, emitter and context to build a `Sink`
-/// at all, exactly as `super::runner::parse_str` does.
-#[doc(hidden)]
-pub mod test_support {
-  use tokora::{InputRef, Parse as _, cache::DefaultCache, cst::Sink};
-
-  use crate::graphql::GraphQL;
-
-  use super::super::{
-    GraphqlLosslessLexer, Parse,
-    runner::{LosslessEmitter, LosslessSink, finish_root, profile},
-  };
-
-  /// The context pair and the input the driver's closure receives.
-  ///
-  /// Spelled out because a closure's parameter type is **not** inferred through a `ParseInput`
-  /// bound — only through an `Fn` bound — so `|inp: &mut _|` leaves `L` and `Ctx` unresolved
-  /// and the body's first method call is the error site. `runner::parse_str` never hits this:
-  /// it applies a named function whose own signature pins both.
-  type TestCtx<'inp, 'sink> = (
-    &'sink mut LosslessSink<'inp>,
-    DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
-  );
-  type TestInput<'inp, 'input, 'sink> =
-    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
-
-  /// Runs one production over `src`, drains whatever it left, and materializes.
-  ///
-  /// The drain is not optional. `Sink::finish` refuses any source byte that no committed token
-  /// covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`), and a
-  /// single-value production stops at the end of its value by design. It also runs on the
-  /// error path: a production that returns `Err` has committed a prefix and left the rest, and
-  /// without the drain that would be a panic in the driver instead of a reportable parse.
-  macro_rules! drive {
-    ($lt:lifetime, $src:expr, $production:ident) => {{
-      let src: &$lt str = $src;
-      let mut sink: LosslessSink<$lt> =
-        Sink::new(src, LosslessEmitter::default(), profile::<str>());
-
-      let _out = tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
-        &mut sink,
-        DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
-      ))
-      .apply::<_, GraphQL>(|inp: &mut TestInput<$lt, '_, '_>| {
-        // `::<str, _>` for the reason the module docs give: `Src` is not inferable from the
-        // input type, and `str` is the parameter that matches `L::Source`.
-        let out = super::$production::<str, _>(inp);
-        inp.skip_while(|_| true)?;
-        out
-      })
-      .parse_str(src);
-
-      finish_root(sink)
-    }};
-  }
+lossless_drivers! {
+  /// Drivers that run one value production over a `&str` and hand back the tree it built, for
+  /// `tests/lossless_value.rs`.
+  mod test_support;
 
   /// `super::value` over `src`.
-  ///
-  /// The `'inp` is **named**, threaded from `src`, for the reason `trivia::test_support`
-  /// records: elided, it varies independently of the error type and the closure `E0521`s.
-  pub fn parse_value<'inp>(src: &'inp str) -> Parse {
-    drive!('inp, src, value)
-  }
+  fn parse_value => value;
 
   /// `super::default_value` over `src` — the one value production `value` cannot reach.
-  pub fn parse_default_value<'inp>(src: &'inp str) -> Parse {
-    drive!('inp, src, default_value)
-  }
+  fn parse_default_value => default_value;
 }

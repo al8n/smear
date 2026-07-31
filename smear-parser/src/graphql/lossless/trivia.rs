@@ -65,6 +65,7 @@ use tokora::{
   error::{UnexpectedEot, token::UnexpectedToken},
   lexer::FromLogos,
   span::Spanned,
+  try_parse_input::ParseAttempt,
 };
 
 use crate::graphql::GraphQL;
@@ -194,6 +195,47 @@ where
   // One `try_expect`, not a peek then an expect: a declining `try_expect` consumes nothing, so
   // this is already the conditional consume. Peeking first would read the same token twice.
   Ok(inp.try_expect(|t| kind_of(t.data) == kind)?.is_some())
+}
+
+/// [`eat_if`]'s declining form: commit any leading trivia, then consume the next token only if
+/// it is `kind`, answering in [`ParseAttempt`] rather than `bool`.
+///
+/// # Why a second spelling of the same conditional consume
+///
+/// A [`ParseAttempt`] is what [`node_at`](tokora::parser::node_at) requires of its inner
+/// parser: `NodeAt` implements [`TryParseInput`](tokora::TryParseInput) over a declining
+/// parser, and spends the caller's mark **only** on `Accept`. That is the whole retro-wrap
+/// mechanism — the mark is spent by the same call that finds the token justifying it, so no
+/// statement (and no `?`) can come between the two and strand a spent-or-unspent mark. An
+/// `eat_if` + unconditional wrap cannot express that: the token would be committed *outside*
+/// the wrap's parser.
+///
+/// # The kind is a parameter, not a token this module names
+///
+/// The retro-wrap shapes each want a different token — `!` for `NonNullType`, `:` for an
+/// `Alias` — and this module may not name a concrete dialect kind (the Lego rule). One atom
+/// over the projection serves both; the call site closes over the kind it wants.
+///
+/// A decline still commits the trivia it crossed — once, exactly as [`eat_if`]'s does. That is
+/// not a leak: the trivia was read, it belongs to the tree, and the branch that wins next will
+/// not re-read it. It lands in whichever node is open at the decision point, which for a
+/// declined retro-wrap is the enclosing node rather than the one that was never opened.
+pub(crate) fn try_eat<'inp, Src, Ctx>(
+  inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
+  kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
+) -> Result<ParseAttempt<()>, GraphqlLosslessError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp>,
+  GraphqlLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
+{
+  inp.skip_while(|t| t.is_trivia())?;
+  Ok(match inp.try_expect(|t| kind_of(t.data) == kind)? {
+    Some(_) => ParseAttempt::Accept(()),
+    None => ParseAttempt::Decline,
+  })
 }
 
 /// Drivers that run one atom over a `&str` and report what it committed.

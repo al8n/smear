@@ -315,16 +315,117 @@ macro_rules! lossless_production {
   )*};
 }
 
-// `lossless_production!` reaches `value.rs` and `recover.rs` through **textual** macro scope,
-// which is why its definition sits immediately above these `mod` declarations and must stay
-// there: a `macro_rules!` is in scope for a child module only if it is declared before that
-// module's `mod` item in this file. A `pub(crate) use lossless_production;` re-export beside it
-// is dead — the import would be shadowed by the textual binding and warns as unused.
+/// Declares a production module's `test_support` drivers: `fn(&str) -> Parse`, one per named
+/// production, each building a [`Sink`](tokora::cst::Sink), running that one production,
+/// draining whatever it left, and materializing.
+///
+/// # Why every production file needs drivers at all
+///
+/// [`document`] is Task 3's drain-everything stub until Task 8, so no production below the
+/// document level is reachable from [`parse_str`]. Asserting through `parse_str` today would
+/// not fail — it would compare two empty trees and pass, which is worse. These drivers make the
+/// assertions real now.
+///
+/// # Why a macro rather than a generic function
+///
+/// **This is where the productions stop being generic.** A driver must choose a concrete
+/// source, emitter and context to build a `Sink` at all, exactly as [`runner::parse_str`] does,
+/// and the closure it hands to `apply` must spell its parameter type in full — a closure's
+/// parameter is **not** inferred through a `ParseInput` bound, only through an `Fn` bound, so
+/// `|inp: &mut _|` leaves `L` and `Ctx` unresolved and the body's first method call becomes the
+/// error site. A generic `fn(P) -> Parse` taking the production as a value would have to spell
+/// that higher-ranked bound at every call; a macro spells the whole driver once.
+///
+/// # The drain is not optional
+///
+/// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
+/// covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`), and a
+/// single-production driver stops at the end of its production by design. The drain also runs
+/// on the error path: a production that returns `Err` has committed a prefix and left the rest,
+/// and without the drain that would be a panic in the driver instead of a reportable parse.
+///
+/// ```text
+/// lossless_drivers! {
+///   /// Module docs.
+///   mod test_support;
+///
+///   /// Driver docs.
+///   fn parse_value => value;
+/// }
+/// ```
+macro_rules! lossless_drivers {
+  (
+    $(#[$modmeta:meta])*
+    mod $modname:ident;
+    $(
+      $(#[$meta:meta])*
+      fn $name:ident => $production:ident;
+    )*
+  ) => {
+    $(#[$modmeta])*
+    #[doc(hidden)]
+    pub mod $modname {
+      use ::tokora::{InputRef, Parse as _, cache::DefaultCache, cst::Sink};
+
+      use $crate::graphql::{
+        GraphQL,
+        lossless::{
+          GraphqlLosslessLexer, Parse,
+          runner::{LosslessEmitter, LosslessSink, finish_root, profile},
+        },
+      };
+
+      /// The context pair and the input each driver's closure receives.
+      type TestCtx<'inp, 'sink> = (
+        &'sink mut LosslessSink<'inp>,
+        DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
+      );
+      type TestInput<'inp, 'input, 'sink> =
+        InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
+
+      $(
+        $(#[$meta])*
+        ///
+        /// Test-only scaffolding; nothing in the crate calls it.
+        pub fn $name<'inp>(src: &'inp str) -> Parse {
+          // The `'inp` is **named**, threaded from `src`, for the reason `trivia`'s driver
+          // records: elided, it varies independently of the error type and the closure `E0521`s.
+          let mut sink: LosslessSink<'inp> =
+            Sink::new(src, LosslessEmitter::default(), profile::<str>());
+
+          let _out = ::tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
+            &mut sink,
+            DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
+          ))
+          .apply::<_, GraphQL>(|inp: &mut TestInput<'inp, '_, '_>| {
+            // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
+            // parameter that matches `L::Source`.
+            let out = super::$production::<str, _>(inp);
+            inp.skip_while(|_| true)?;
+            out
+          })
+          .parse_str(src);
+
+          finish_root(sink)
+        }
+      )*
+    }
+  };
+}
+
+// `lossless_production!` and `lossless_drivers!` reach `value.rs`, `recover.rs`, `ty.rs` and
+// `directive.rs` through **textual** macro scope, which is why their definitions sit immediately
+// above these `mod` declarations and must stay there: a `macro_rules!` is in scope for a child
+// module only if it is declared before that module's `mod` item in this file. A
+// `pub(crate) use lossless_production;` re-export beside it is dead — the import would be
+// shadowed by the textual binding and warns as unused.
+pub mod directive;
 pub mod document;
 pub mod kind_map;
 pub mod recover;
 pub mod runner;
 pub mod trivia;
+pub mod ty;
 pub mod value;
 
 pub use runner::{Parse, parse_str, profile};
