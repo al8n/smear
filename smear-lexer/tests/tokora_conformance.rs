@@ -79,7 +79,9 @@ mod graphql {
   /// The lossless stream tiles the source with no gaps, so the strict knob applies.
   #[test]
   fn lossless_conformance() {
-    Harness::<LosslessLexer<'_>>::over(corpus()).lossless().run();
+    Harness::<LosslessLexer<'_>>::over(corpus())
+      .lossless()
+      .run();
   }
 
   #[test]
@@ -107,7 +109,9 @@ mod graphqlx {
 
   #[test]
   fn lossless_conformance() {
-    Harness::<LosslessLexer<'_>>::over(corpus()).lossless().run();
+    Harness::<LosslessLexer<'_>>::over(corpus())
+      .lossless()
+      .run();
   }
 
   #[test]
