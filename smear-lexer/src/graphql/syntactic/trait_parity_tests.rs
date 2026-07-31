@@ -15,7 +15,9 @@
 //! the same, and a stale span there would make its own post-EOF `bump` grow
 //! from the wrong base (see the panic check in each test below).
 
+#[cfg(feature = "std")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::{format, string::String};
 
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
@@ -23,6 +25,13 @@ use crate::graphql::syntactic::SyntacticLexer;
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
+///
+/// `std`-only. Observing a panic needs `catch_unwind` and the panic hook, and
+/// both live in `std` because both need an unwinding runtime — `core`/`alloc`
+/// have no equivalent. Only the post-EOF-`bump` probe in each test below is
+/// gated on `std`; the full-drive render assertion — the bulk of what these
+/// tests check — runs in both configurations.
+#[cfg(feature = "std")]
 fn panics<F: FnOnce()>(f: F) -> bool {
   let prev = std::panic::take_hook();
   std::panic::set_hook(Box::new(|_| {}));
@@ -231,13 +240,16 @@ fn full_trait_parity_str() {
     // above), so its end equals the source length and a post-EOF `bump(1)`
     // always lands past the last byte — logos always panicked on this
     // boundary check, for every input, when this ran against a live
-    // comparator.
-    let simd_panicked = panics(|| {
-      let mut simd = SyntacticLexer::<str>::new(src);
-      while simd.lex().is_some() {}
-      simd.bump(&1usize);
-    });
-    assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+    // comparator. `std`-only — see `panics`.
+    #[cfg(feature = "std")]
+    {
+      let simd_panicked = panics(|| {
+        let mut simd = SyntacticLexer::<str>::new(src);
+        while simd.lex().is_some() {}
+        simd.bump(&1usize);
+      });
+      assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+    }
   }
 }
 
@@ -253,12 +265,16 @@ fn full_trait_parity_bytes() {
       "mismatch for {src:?}"
     );
 
-    let simd_panicked = panics(|| {
-      let mut simd = SyntacticLexer::<[u8]>::new(src.as_bytes());
-      while simd.lex().is_some() {}
-      simd.bump(&1usize);
-    });
-    assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+    // `std`-only — see `panics`.
+    #[cfg(feature = "std")]
+    {
+      let simd_panicked = panics(|| {
+        let mut simd = SyntacticLexer::<[u8]>::new(src.as_bytes());
+        while simd.lex().is_some() {}
+        simd.bump(&1usize);
+      });
+      assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+    }
   }
 }
 
@@ -298,10 +314,15 @@ fn full_trait_parity_low_recursion_limit() {
     expected
   );
 
-  let simd_panicked = panics(|| {
-    let mut simd = SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
-    while simd.lex().is_some() {}
-    simd.bump(&1usize);
-  });
-  assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+  // `std`-only — see `panics`.
+  #[cfg(feature = "std")]
+  {
+    let simd_panicked = panics(|| {
+      let mut simd =
+        SyntacticLexer::<str>::with_state(src, RecursionLimiter::with_limitation(limit));
+      while simd.lex().is_some() {}
+      simd.bump(&1usize);
+    });
+    assert!(simd_panicked, "post-EOF bump(1) must panic for {src:?}");
+  }
 }

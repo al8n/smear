@@ -193,6 +193,8 @@ where
 
 #[cfg(test)]
 mod tests {
+  use std::string::String;
+
   use tokora::{span::AsSpan, types::Ident, utils::IntoComponents};
 
   use super::Name;

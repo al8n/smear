@@ -9,6 +9,8 @@
 //! against its frozen reference: `span()`, `slice()`, the next `lex()`, and
 //! panic-vs-not.
 
+use std::format;
+#[cfg(feature = "std")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tokora::{Lexer, SimpleSpan};
@@ -18,6 +20,13 @@ use crate::graphqlx::syntactic::{SyntacticLexer, SyntacticToken};
 /// Run `f`, returning `true` if it panicked. The panic message is suppressed
 /// for the duration so an *expected* panic doesn't clutter test output;
 /// `catch_unwind` reports the outcome independently of the hook.
+///
+/// `std`-only. Observing a panic needs `catch_unwind` and the panic hook, and
+/// both live in `std` because both need an unwinding runtime — `core`/`alloc`
+/// have no equivalent. The two bump-panics-like-logos tests below are therefore
+/// gated on `std` rather than made vacuous under `no_std`; every other test in
+/// this module runs in both configurations.
+#[cfg(feature = "std")]
 fn panics<F: FnOnce()>(f: F) -> bool {
   let prev = std::panic::take_hook();
   std::panic::set_hook(Box::new(|_| {}));
@@ -97,6 +106,7 @@ fn bump_after_error_token_matches_logos() {
   assert_eq!(simd.slice(), "..x", "slice after bump past error");
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn bump_past_end_panics_like_logos() {
   // Whole source consumed, then a one-byte bump lands past the end.
@@ -115,6 +125,7 @@ fn bump_past_end_panics_like_logos() {
   );
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn bump_into_multibyte_char_panics_like_logos() {
   // `aé`: `a` at byte 0, `é` at bytes 1..3 (0xC3 0xA9). After lexing `a` the

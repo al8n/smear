@@ -1,3 +1,5 @@
+use std::{string::String, vec};
+
 use smear_lexer::LitStr;
 use tokora::{
   span::{AsSpan, IntoSpan},

@@ -1,5 +1,7 @@
 //! Focused GraphQLx generic-production tests.
 
+use std::{format, string::String};
+
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
 

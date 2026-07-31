@@ -1,3 +1,5 @@
+use std::vec::Vec;
+
 use tokora::lexer::Lexer;
 
 use crate::{

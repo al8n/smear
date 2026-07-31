@@ -11,6 +11,8 @@
 //! three methods, at every token (error or not), against the frozen render,
 //! giving per-token, post-error coverage.
 
+use std::string::String;
+
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphql::syntactic::SyntacticLexer;

@@ -1,3 +1,5 @@
+use std::vec;
+
 use crate::path::Path;
 use tokora::{
   span::{AsSpan, IntoSpan},

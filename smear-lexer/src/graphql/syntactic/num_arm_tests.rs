@@ -1,3 +1,5 @@
+use std::vec::Vec;
+
 use tokora::{Lexer as _, SimpleSpan};
 
 use crate::graphql::{

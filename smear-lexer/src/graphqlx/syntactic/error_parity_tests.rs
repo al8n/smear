@@ -8,6 +8,8 @@
 //! token (error or not) against the frozen render, giving per-token, post-error
 //! coverage.
 
+use std::string::String;
+
 use tokora::{Lexer, state::recursion_tracker::RecursionLimiter};
 
 use crate::graphqlx::syntactic::SyntacticLexer;

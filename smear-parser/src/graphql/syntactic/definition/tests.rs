@@ -5,6 +5,8 @@
 //! rejected token for the caller; and optional delimiter productions decline
 //! without consuming their absent opener.
 
+use std::vec::Vec;
+
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
   FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,

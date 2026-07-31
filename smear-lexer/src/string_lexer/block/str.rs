@@ -277,6 +277,8 @@ mod tests {
   //! parses as `\` + `\"""` (the backslash is content; the next four
   //! bytes form an escape).
 
+  use std::format;
+
   use super::*;
 
   /// Reference impl: byte-for-byte equivalent to the `BlockStringToken`

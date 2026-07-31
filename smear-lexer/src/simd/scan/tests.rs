@@ -1,3 +1,5 @@
+use std::format;
+
 use super::*;
 
 fn scan(src: &[u8]) -> Option<(NumberKind, usize)> {
