@@ -74,6 +74,7 @@ use super::{
   recover::{SELECTION_HEADS, SPREAD_TAIL_HEADS, TYPE_CONDITION_HEADS, opener_span},
   trivia::{eat_if, expect, peek_as, peek_kind, try_eat},
   ty::named_type,
+  value::Constness,
 };
 
 lossless_production! {
@@ -137,9 +138,9 @@ lossless_production! {
         // Each optional tail is dispatched on a peek rather than attempted, so its opener is
         // consumed *inside* the node it belongs to and an absent one opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          arguments::<Src, Ctx>(inp)?;
+          arguments::<Src, Ctx>(inp, Constness::NonConst)?;
         }
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::NonConst)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           selection_set::<Src, Ctx>(inp)?;
         }
@@ -172,7 +173,7 @@ lossless_production! {
             K::InlineFragment.raw(),
             |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
               type_condition::<Src, Ctx>(inp)?;
-              directives::<Src, Ctx>(inp)?;
+              directives::<Src, Ctx>(inp, Constness::NonConst)?;
               selection_set::<Src, Ctx>(inp)
             },
           )
@@ -183,7 +184,7 @@ lossless_production! {
             K::FragmentSpread.raw(),
             |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
               expect::<Src, Ctx>(inp, Kind::Identifier)?;
-              directives::<Src, Ctx>(inp)
+              directives::<Src, Ctx>(inp, Constness::NonConst)
             },
           )
           .parse_input(inp)
@@ -195,7 +196,7 @@ lossless_production! {
         mark,
         K::InlineFragment.raw(),
         |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
-          directives::<Src, Ctx>(inp)?;
+          directives::<Src, Ctx>(inp, Constness::NonConst)?;
           selection_set::<Src, Ctx>(inp)
         },
       )

@@ -359,13 +359,26 @@ macro_rules! lossless_production {
 /// The difference only appears when the *caller* commits something between the two, which is
 /// the whole reason the parameter exists.
 ///
+/// # A const-parameterised production takes its flavour in the declaration
+///
+/// Every production that can reach a value carries a
+/// [`Constness`](value::Constness) argument (see `value.rs`'s module docs for why it is threaded
+/// rather than duplicated), and a driver is a `fn(&str) -> Parse` with no such parameter — so the
+/// flavour is *baked into the driver*, in a `[…]` suffix listing the extra arguments to append
+/// after `inp`. Two drivers over one production is how both flavours get an entry point, which
+/// is what a test asserting the const rejection needs below the document level.
+///
+/// `Constness` is imported into the generated module unconditionally and the import is
+/// `allow(unused_imports)`, so a call site writes the short spelling and a driver set that names
+/// no flavour still compiles clean.
+///
 /// ```text
 /// lossless_drivers! {
 ///   /// Module docs.
 ///   mod test_support;
 ///
 ///   /// Driver docs.
-///   fn parse_value => value;
+///   fn parse_value => value [Constness::NonConst];
 ///
 ///   /// A retro-wrapping production's driver.
 ///   fn parse_operation_definition => operation_definition (mark);
@@ -377,13 +390,16 @@ macro_rules! lossless_drivers {
     mod $modname:ident;
     $(
       $(#[$meta:meta])*
-      fn $name:ident => $production:ident $(($mark:ident))?;
+      fn $name:ident => $production:ident $(($mark:ident))? $([$($extra:expr),+ $(,)?])?;
     )*
   ) => {
     $(#[$modmeta])*
     #[doc(hidden)]
     pub mod $modname {
       use ::tokora::{InputRef, Parse as _, cache::DefaultCache, cst::Sink};
+
+      #[allow(unused_imports)]
+      use $crate::graphql::lossless::value::Constness;
 
       use $crate::graphql::{
         GraphQL,
@@ -424,7 +440,7 @@ macro_rules! lossless_drivers {
             );)?
             // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
             // parameter that matches `L::Source`.
-            let out = super::$production::<str, _>(inp $(, $mark)?);
+            let out = super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?);
             inp.skip_while(|_| true)?;
             out
           })

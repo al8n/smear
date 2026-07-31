@@ -63,6 +63,22 @@ pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::Identifier,
 ];
 
+/// The token kinds a `Value[Const]` may begin with — [`VALUE_HEADS`] without the `$`.
+///
+/// `Variable` is not a production of `Value[Const]` at all, so a const position expects
+/// everything a value position does *except* a variable. The two sets are written out rather
+/// than filtered because both are consumed as `&'static [Kind]`, and a `const fn` filter over a
+/// slice cannot produce one.
+pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
+  Kind::Int,
+  Kind::Float,
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBracket,
+  Kind::LBrace,
+  Kind::Identifier,
+];
+
 /// The token kinds an `ObjectField` may begin with.
 pub(crate) const OBJECT_FIELD_HEADS: &[Kind] = &[Kind::Identifier];
 
@@ -116,9 +132,17 @@ pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
 pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
   &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
 
-/// The token kinds a `NamedType` may begin with — one, and it stands for four positions: an
-/// interface in an `implements` clause, a member of a union, a root operation type's target,
-/// and a directive location.
+/// The token kinds a `NamedType` may begin with — one, and it stands for five positions: an
+/// interface in an `implements` clause, a member of a union, a root operation type's target, a
+/// directive location, and a `FragmentName`.
+///
+/// The last two are *spelling* rules — `DirectiveLocation` admits nineteen names and
+/// `FragmentName` is `Name but not "on"` — which this kind-level set cannot express and does not
+/// try to: `lossless/mod.rs`'s `expectation_of` collapses every token-kind expectation onto
+/// [`Expectation::Name`](crate::graphql::error::Expectation::Name) anyway, so a finer set here
+/// would report the same sentence. The precise wording needs the dialect error rather than
+/// tokora's token-kind one, and no production here carries the bound that would reach it — the
+/// ruling [`TYPE_CONDITION_HEADS`] already records for the keyword `on`.
 pub(crate) const NAME_HEADS: &[Kind] = &[Kind::Identifier];
 
 /// The token kinds a `RootOperationTypeDefinition` may begin with: the `query`, `mutation` or

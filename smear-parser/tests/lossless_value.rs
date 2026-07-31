@@ -15,7 +15,7 @@
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::value::test_support::{parse_default_value, parse_value},
+  lossless::value::test_support::{parse_const_value, parse_default_value, parse_value},
 };
 
 /// The tree's node kinds in pre-order, ignoring tokens and trivia.
@@ -130,6 +130,129 @@ fn a_default_value_wraps_its_equals_and_value() {
   assert_eq!(
     parse_default_value(" = [1] ").syntax().text().to_string(),
     " = [1] "
+  );
+}
+
+// ---- `Value[Const]`: the flavour threaded through every value production -------------------
+
+/// A `$` in a const position is reported **and still built**.
+///
+/// **The load-bearing assertion is the third one, not the first.** `has_errors()` alone would be
+/// satisfied by a const flavour that *bailed out* on a variable — which is the shape that costs a
+/// lossless consumer the very node the diagnostic points at, and which the suite's stated reason
+/// for deferring the rule was meant to avoid. So the const parse's node sequence and its text are
+/// asserted against the **non-const parse of the same source**: the two trees must be identical,
+/// and the verdict must be the only difference between them.
+#[test]
+fn a_variable_in_a_const_position_is_reported_and_still_built() {
+  for (src, want) in [
+    ("$v", vec![K::Root, K::Variable]),
+    ("[$v]", vec![K::Root, K::ListValue, K::Variable]),
+    (
+      "{k: $v}",
+      vec![K::Root, K::ObjectValue, K::ObjectField, K::Variable],
+    ),
+    // Padded and mixed, so "the text survived" is a claim that can be wrong: over a
+    // whitespace-free witness, comparing against `src` is indistinguishable from comparing
+    // against the concatenated token texts.
+    (
+      " [ 1 , $v ] ",
+      vec![K::Root, K::ListValue, K::IntValue, K::Variable],
+    ),
+    // Nesting: the parameter has to ride all the way down, not just be read at the top.
+    (
+      "{a: [{b: $v}]}",
+      vec![
+        K::Root,
+        K::ObjectValue,
+        K::ObjectField,
+        K::ListValue,
+        K::ObjectValue,
+        K::ObjectField,
+        K::Variable,
+      ],
+    ),
+  ] {
+    let konst = parse_const_value(src);
+    let plain = parse_value(src);
+
+    assert!(
+      konst.has_errors(),
+      "{src:?}: a variable is not a production of `Value[Const]`"
+    );
+    assert!(
+      !plain.has_errors(),
+      "{src:?}: a variable is exactly what an ordinary value position is for"
+    );
+
+    let konst_kinds: Vec<K> = konst.syntax().descendants().map(|n| n.kind()).collect();
+    let plain_kinds: Vec<K> = plain.syntax().descendants().map(|n| n.kind()).collect();
+    assert_eq!(konst_kinds, want, "{src:?}: the const tree lost a node");
+    assert_eq!(
+      konst_kinds, plain_kinds,
+      "{src:?}: constness moved the tree, and it must move only the verdict"
+    );
+    assert_eq!(
+      konst.syntax().text().to_string(),
+      src,
+      "{src:?}: a rejected const value still keeps every byte"
+    );
+  }
+}
+
+/// A const position accepts everything a value position does, minus the variable.
+///
+/// The control for the test above: without it, a const flavour that rejected *every* value would
+/// satisfy every `has_errors()` assertion there.
+#[test]
+fn a_const_position_accepts_every_value_that_is_not_a_variable() {
+  for src in [
+    "1",
+    "1.5",
+    "\"s\"",
+    "\"\"\"b\"\"\"",
+    "true",
+    "false",
+    "null",
+    "EV",
+    "[1, 2]",
+    "{k: 1}",
+    "[]",
+    "{}",
+    "[{k: [1]}]",
+  ] {
+    let parse = parse_const_value(src);
+    assert!(
+      !parse.has_errors(),
+      "{src:?}: a const position rejected a perfectly good const value"
+    );
+    assert_eq!(parse.syntax().text().to_string(), src, "{src:?}");
+  }
+}
+
+/// `DefaultValue` is const in **both** the positions the grammar puts it in, so its production
+/// takes no flavour argument and this is the only test that can say so.
+#[test]
+fn a_default_value_is_const_wherever_it_appears() {
+  let rejected = parse_default_value(" = $v ");
+  assert!(
+    rejected.has_errors(),
+    "`DefaultValue` takes a `Value[Const]`"
+  );
+  assert_eq!(
+    rejected
+      .syntax()
+      .descendants()
+      .map(|n| n.kind())
+      .collect::<Vec<_>>(),
+    vec![K::Root, K::DefaultValue, K::Variable],
+    "the `Variable` node is built anyway"
+  );
+  assert_eq!(rejected.syntax().text().to_string(), " = $v ");
+
+  assert!(
+    !parse_default_value(" = 1 ").has_errors(),
+    "a const default value is fine"
   );
 }
 

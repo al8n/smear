@@ -60,25 +60,23 @@ use super::{
   GraphqlLosslessInput, recover,
   recover::{ARGUMENT_HEADS, opener_span},
   trivia::{eat_if, expect, peek_kind},
-  value::value,
+  value::{Constness, value},
 };
 
 lossless_production! {
-  /// `Name : Value`
+  /// `Name : Value` — `Name : Value[Const]` when `konst` says so.
   ///
-  /// One production for both the executable and the constant spelling. The spec's
-  /// `Argument[Const]` forbids a `Variable` in a const position, and that constness is a
-  /// *validation* rule over the tree rather than a parse rule — rejecting `$x` here would leave
-  /// the variable's tokens unattributed and cost a lossless consumer the very nodes it needs to
-  /// report the mistake. The same call `value.rs` makes for `DefaultValue`, for the same reason;
-  /// `syntactic/` keeps the distinction in its types (`argument` vs `const_argument`).
-  fn argument<'inp, Src, Ctx>(inp) {
+  /// One production for both the executable and the constant spelling, the flavour riding in as
+  /// an argument rather than forking the body; `value.rs`'s module docs give the reasoning, and
+  /// note there that `syntactic/` forks (`argument` vs `const_argument`) because its two
+  /// productions return different *types*, which is not a difference this suite has.
+  fn argument<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::Argument.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        value::<Src, Ctx>(inp)
+        value::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -90,7 +88,7 @@ lossless_production! {
   /// the same reason: routing a non-`Identifier` head into `argument`'s own `expect` would
   /// return `Err` and abort the whole list, so `(a: 1, !, b: 2)` would cost the rest of the
   /// parse instead of one token.
-  fn arguments<'inp, Src, Ctx>(inp) {
+  fn arguments<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::Arguments.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -102,7 +100,7 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
-            Some(Kind::Identifier) => argument::<Src, Ctx>(inp)?,
+            Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }
         }
@@ -115,14 +113,14 @@ lossless_production! {
   ///
   /// The argument list is dispatched on a peek rather than attempted, so its `(` is consumed
   /// *inside* the `Arguments` node and an absent list opens nothing.
-  fn directive<'inp, Src, Ctx>(inp) {
+  fn directive<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::Directive.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::At)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          arguments::<Src, Ctx>(inp)?;
+          arguments::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
       },
@@ -136,7 +134,16 @@ lossless_production! {
   /// consumes that `@` before it can fail; a `directive` that cannot complete returns `Err`
   /// rather than looping, since a malformed directive is not something to resynchronise past
   /// here — the caller decides that.
-  fn directives<'inp, Src, Ctx>(inp) {
+  ///
+  /// # `konst` is the caller's, and the two flavours are not interchangeable
+  ///
+  /// The spec parameterises `Directives[Const]`, and the split is **not** "SDL versus
+  /// executable": a `VariableDefinition`'s directives are const too, in the middle of an
+  /// executable document. Each call site names its own flavour and `syntactic/` is the
+  /// reference for every one of them (`optional_const_directives` throughout `definition/`
+  /// and `extension.rs`, `const_directives` in `variable_definition`, plain `directives` in
+  /// `operation_definition`, `fragment_definition` and all four selection positions).
+  fn directives<'inp, Src, Ctx>(inp, konst: Constness) {
     // The head peek happens OUTSIDE the node, so the trivia it crosses lands in the enclosing
     // node and a source with no directive at all opens nothing.
     if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
@@ -146,7 +153,7 @@ lossless_production! {
       K::Directives.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directive::<Src, Ctx>(inp)?;
+          directive::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
       },
@@ -160,15 +167,19 @@ lossless_drivers! {
   /// it built, for `tests/lossless_ty_directive.rs`.
   mod test_support;
 
-  /// `super::argument` over `src`.
-  fn parse_argument => argument;
+  /// `super::argument` over `src`, in an ordinary (non-const) position.
+  fn parse_argument => argument [Constness::NonConst];
 
-  /// `super::arguments` over `src`.
-  fn parse_arguments => arguments;
+  /// `super::arguments` over `src`, in an ordinary (non-const) position.
+  fn parse_arguments => arguments [Constness::NonConst];
 
-  /// `super::directive` over `src`.
-  fn parse_directive => directive;
+  /// `super::directive` over `src`, in an ordinary (non-const) position.
+  fn parse_directive => directive [Constness::NonConst];
 
-  /// `super::directives` over `src` — the entry every directive position uses.
-  fn parse_directives => directives;
+  /// `super::directives` over `src` — the entry every executable directive position uses.
+  fn parse_directives => directives [Constness::NonConst];
+
+  /// `super::directives` over `src` in a **const** position — the entry every SDL directive
+  /// position uses, and a `VariableDefinition`'s.
+  fn parse_const_directives => directives [Constness::Const];
 }

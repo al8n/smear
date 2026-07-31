@@ -86,6 +86,7 @@ use super::{
     UNION_EXTENSION_TAIL_HEADS,
   },
   trivia::{expect, peek_as, peek_kind},
+  value::Constness,
 };
 
 lossless_production! {
@@ -103,7 +104,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect_two_names::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp)
+          directives::<Src, Ctx>(inp, Constness::Const)
         } else {
           // Reported, and nothing is consumed: whatever is here starts the next definition.
           recover::report_unexpected::<Src, Ctx>(inp, SCALAR_EXTENSION_TAIL_HEADS)
@@ -151,7 +152,7 @@ lossless_production! {
       present = true;
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-      directives::<Src, Ctx>(inp)?;
+      directives::<Src, Ctx>(inp, Constness::Const)?;
       present = true;
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -174,7 +175,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp)?;
+          directives::<Src, Ctx>(inp, Constness::Const)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
@@ -199,7 +200,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp)?;
+          directives::<Src, Ctx>(inp, Constness::Const)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -224,7 +225,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp)?;
+          directives::<Src, Ctx>(inp, Constness::Const)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -251,7 +252,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp)?;
+          directives::<Src, Ctx>(inp, Constness::Const)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {

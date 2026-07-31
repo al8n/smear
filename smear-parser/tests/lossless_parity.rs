@@ -20,14 +20,33 @@
 //! corpus alone cannot rule that out, so the defences are tests rather than comments:
 //!
 //! 1. [`both_verdicts_answer_in_both_directions`] — neither verdict function is a constant.
-//! 2. [`the_two_suites_do_not_accept_the_same_language`] — eleven real constructs the two suites
-//!    answer *differently*, held deliberately outside the corpus. This is what proves the
-//!    equality assertion is not vacuous: without a witness, "they always agree" is
-//!    indistinguishable from "the comparison is broken".
+//! 2. [`the_corpus_can_tell_the_two_suites_apart`] — the corpus entries are *discriminating
+//!    material*: twenty-eight of them separate a lossless production from a syntactic one. This
+//!    is what proves the equality assertion is not vacuous, and it replaces the eleven divergence
+//!    witnesses that used to carry that burden — see below.
 //! 3. The `checked_valid` / `checked_invalid` counters inside the parity test itself, which fail
 //!    an all-valid or an all-invalid corpus.
 //! 4. [`every_corpus_entry_declares_its_expected_verdict`] — a misspelled prefix cannot smuggle
 //!    an entry into the wrong class.
+//!
+//! # The eleven divergence witnesses are gone, and where the proof of life went
+//!
+//! Task 11 measured eleven constructs the lossless suite accepted and `syntactic/` rejected — a
+//! `Variable` in ten `Value[Const]` positions, and `on` as a `FragmentName` — and pinned them in
+//! a test *because they were also the only evidence this gate's comparison could ever fail*.
+//! Both rules are grammar rules rather than validation rules, so the lossless suite learned them:
+//! `value.rs`'s `Constness` parameter and `executable.rs`'s fragment-name check, each reporting
+//! the error **and still building the node**, which is the ruling Task 8 had already made twice.
+//! All eleven now live in `tests/corpus/` as ordinary `invalid_*` entries that this gate holds.
+//!
+//! That left the gate with nothing separating the two suites — over 1,518 probed sources, none
+//! remains — so the proof of life had to stop being a *language* divergence. It is now a
+//! **production** divergence, which is permanent by construction: the lossless suite's SDL-only
+//! root rejects every executable definition, while `syntactic/`'s mixed root accepts them, so the
+//! corpus's twenty-eight executable entries split the two suites on demand. The gate is green
+//! because `parse_str`'s root and `document` describe the same language — not because the corpus
+//! is inert. Closing *that* divergence would be a bug, so unlike the eleven it cannot quietly go
+//! away.
 //!
 //! # What this gate cannot see
 //!
@@ -43,7 +62,7 @@ use smear_parser::graphql::{
   ast::Document,
   error::GraphqlErrors,
   kinds::SyntaxKind as K,
-  lossless::parse_str,
+  lossless::{document::test_support::parse_type_system_document, parse_str},
   syntactic::{GraphqlLexer, document},
 };
 use tokora::{Parse as _, Parser};
@@ -204,78 +223,149 @@ fn both_verdicts_answer_in_both_directions() {
   );
 }
 
-/// Constructs the lossless suite accepts and `syntactic/` rejects.
+/// The corpus is discriminating material, and the syntactic verdict is a parse of its own.
 ///
-/// **This is the test that makes [`both_suites_agree_on_every_corpus_entry`] mean something.** A
-/// parity gate over a corpus both suites happen to agree on is indistinguishable from a parity
-/// gate whose comparison never runs; the difference is whether an entry *could* have separated
-/// them. Each source below is such an entry, verified to divide the two suites, and deliberately
-/// kept out of `tests/corpus/` so the gate stays green while the divergence stays recorded.
+/// **This is the test that makes [`both_suites_agree_on_every_corpus_entry`] mean something**, and
+/// it is the replacement for the eleven divergence witnesses Task 11 pinned — see the module docs
+/// for why they are gone. A parity gate over a corpus both suites happen to agree on is
+/// indistinguishable from a parity gate whose comparison never runs; the difference is whether an
+/// entry *could* separate them. Two independent halves establish that it could.
 ///
-/// # The two rules involved, and why the divergence exists
+/// # Half one: the entries themselves split the two suites
 ///
-/// Both are cases where `syntactic/` enforces a spec rule *at parse time* and the lossless suite
-/// defers it to a validation pass over the finished tree:
+/// The lossless suite has two roots. `parse_str` drives the **mixed** one, which is the language
+/// `syntactic/`'s `document` also describes — that agreement is what the gate measures. Its
+/// sibling `type_system_document` is the **SDL-only** root, and it rejects every executable
+/// definition. So each corpus entry that carries one is an input on which a lossless production
+/// and a syntactic production answer *differently*: the material discriminates, and the gate is
+/// green because the two roots under comparison describe the same language rather than because
+/// the corpus is inert.
 ///
-/// - **Const positions** (ten witnesses). `DefaultValue` and every SDL `Directives` context
-///   require a `Value[Const]`, in which a `Variable` is not a production at all. `syntactic/`
-///   has a const flavour and rejects; the lossless `value` production has one shape for both
-///   positions and accepts, on the recorded ground that "constness is a validation rule over the
-///   tree" (`lossless/directive.rs`, `lossless/value.rs`).
-/// - **`on` as a fragment name** (one witness). `FragmentName: Name but not "on"`. `syntactic/`
-///   spends a whole production on the exclusion (`fragment_name`); `lossless/executable.rs`
-///   consumes a plain `Identifier` and records the same deferral in a comment.
+/// **This divergence is permanent, which the eleven were not.** Closing it would mean an SDL-only
+/// root that accepts `query Q { f }`, which is a bug rather than a fix — so unlike a grammar gap
+/// waiting to be filled, this proof of life cannot be closed out from under the gate.
 ///
-/// # This is a defect against gate 1's contract, not a settled ruling
+/// The floor is asserted against the corpus's own executable content rather than fixed at
+/// twenty-eight, so adding an SDL entry cannot red this test and deleting every executable one
+/// must.
 ///
-/// Task 8 met the identical question twice and answered it the other way: `enum_value_definition`
-/// and `directive_location` both **report** a reserved spelling *and* still build the node,
-/// explicitly "because gate 1 compares verdicts". Reporting never prevented building — so the
-/// stated rationale for deferring (keeping a node for the diagnostic to point at) does not
-/// actually justify staying silent. Task 7's productions predate that ruling and never got it.
+/// # Half two: the syntactic verdict is not the lossless one wearing a hat
 ///
-/// **If a later task closes the gap, this test goes red.** That is the intended failure: move
-/// each witness into `tests/corpus/` as an `invalid_*.graphql` entry, where the parity gate will
-/// then hold it, and shrink this test to whatever still diverges — but do not simply delete it
-/// without leaving the comparison another witness, or gate 1 loses its only proof of life.
+/// The most complete way for this gate to die is for [`syntactic_has_errors`] to stop consulting
+/// the syntactic suite at all — after which every assertion in the file still passes, half one
+/// included, because half one never calls it on a source it does not also parse losslessly. So
+/// the syntactic side is exercised through its **output** rather than its `is_err()` bit: a
+/// `Document` whose definitions can be counted cannot be produced by a `rowan` parse, and an
+/// alias would fail to typecheck long before it failed an assertion.
 #[test]
-fn the_two_suites_do_not_accept_the_same_language() {
-  /// A `Variable` in each position the spec marks const. Ten distinct call sites, because the
-  /// const contexts are reached through six different productions and a single witness would
-  /// only pin one of them.
-  const CONST_POSITION: &[&str] = &[
-    "type T { f(a: Int = $v): Int }",
-    "directive @d(a: Int = $v) on FIELD",
-    "input I { a: Int = $v }",
-    "type T @d(a: $v) { f: Int }",
-    "enum E { A @d(a: $v) }",
-    "schema @d(a: $v) { query: Q }",
-    "scalar S @d(a: $v)",
-    "type T { f: Int @d(a: $v) }",
-    "query Q($v: Int = $w) { f }",
-    "extend type T @d(a: $v)",
+fn the_corpus_can_tell_the_two_suites_apart() {
+  // Half one. `parse_type_system_document` is the SDL-only root's driver — the same production
+  // set, entered one level up from `document`.
+  let mut split = 0usize;
+  for entry in corpus_files() {
+    let src = std::fs::read_to_string(&entry).unwrap();
+    let sdl_rejects = parse_type_system_document(&src).has_errors();
+    let syntactic_accepts = !syntactic_has_errors(&src);
+    if sdl_rejects && syntactic_accepts {
+      // The two suites answer differently about this very byte string.
+      split += 1;
+      // …and the mixed lossless root agrees with `syntactic/` about it, which is the whole
+      // point: the disagreement is between the *roots*, not between the suites.
+      assert!(
+        !lossless_has_errors(&src),
+        "{}: the SDL root rejects it and syntactic accepts it, but so does the mixed lossless \
+         root — this entry is not the clean discriminator it is being counted as",
+        entry.display()
+      );
+    }
+  }
+  assert!(
+    split >= 20,
+    "only {split} corpus entries separate the SDL-only lossless root from the syntactic one; \
+     the corpus has lost its executable half and this gate can no longer show its comparison is \
+     live"
+  );
+
+  // Half two. Not `is_err()`: the value on the `Ok` side is what a lossless parse cannot forge.
+  const TWO_DEFINITIONS: &str = "query Q { f } fragment F on T { g }";
+  let parsed = Parser::with_parser::<
+    '_,
+    GraphqlLexer<'_, str>,
+    Document<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(document)
+  .parse_str(TWO_DEFINITIONS)
+  .expect("the syntactic suite must accept two ordinary executable definitions");
+
+  // The count is checked against the **lossless** tree's own, not against a literal. Both sides
+  // are then live values drawn from different suites, so the assertion cannot be neutered into
+  // a self-comparison the way a literal one can — the mutation the parity loop above records as
+  // its own structural blind spot. The literal anchor follows, so an agreement at zero on both
+  // sides is still a failure.
+  let lossless_definitions = parse_str(TWO_DEFINITIONS)
+    .syntax()
+    .descendants()
+    .filter(|n| matches!(n.kind(), K::OperationDefinition | K::FragmentDefinition))
+    .count();
+  assert_eq!(
+    parsed.definitions().len(),
+    lossless_definitions,
+    "the syntactic verdict must come from a real syntactic parse of the same bytes"
+  );
+  assert_eq!(
+    lossless_definitions, 2,
+    "both suites must have found the two definitions that are there"
+  );
+}
+
+/// The eleven constructs Task 11 measured as divergences, now agreed **and still whole**.
+///
+/// Each is a corpus entry, so [`both_suites_agree_on_every_corpus_entry`] already holds the
+/// verdict. What a corpus entry cannot hold is the other half of the ruling: the rejection is a
+/// *diagnostic*, and the tree is built anyway. Asserting the verdict alone would pass just as
+/// well if the lossless suite had learned to reject these by bailing out — which would cost the
+/// nodes and the bytes a lossless consumer exists for. So the text is asserted too, byte for
+/// byte, against the file the corpus keeps.
+#[test]
+fn the_eleven_former_divergences_are_rejected_without_losing_their_text() {
+  const WITNESSES: &[&str] = &[
+    "invalid_const_default_in_arguments_definition.graphql",
+    "invalid_const_default_in_directive_definition.graphql",
+    "invalid_const_default_in_input_object.graphql",
+    "invalid_const_default_in_variable_definition.graphql",
+    "invalid_const_directive_on_object_type.graphql",
+    "invalid_const_directive_on_enum_value.graphql",
+    "invalid_const_directive_on_schema.graphql",
+    "invalid_const_directive_on_scalar.graphql",
+    "invalid_const_directive_on_field_definition.graphql",
+    "invalid_const_directive_on_extension.graphql",
+    "invalid_fragment_named_on.graphql",
   ];
 
-  /// `FragmentName: Name but not "on"` — `fragment on on T { f }` names the fragment `on`.
-  const RESERVED_FRAGMENT_NAME: &str = "fragment on on T { f }";
+  let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("tests")
+    .join("corpus");
+  for name in WITNESSES {
+    let path = dir.join(name);
+    let src = std::fs::read_to_string(&path)
+      .unwrap_or_else(|e| panic!("{name} must exist in the shared corpus: {e}"));
 
-  let mut witnesses = 0usize;
-  for src in CONST_POSITION
-    .iter()
-    .copied()
-    .chain([RESERVED_FRAGMENT_NAME])
-  {
-    let lossless_errs = lossless_has_errors(src);
-    let syntactic_errs = syntactic_has_errors(src);
     assert!(
-      !lossless_errs && syntactic_errs,
-      "{src:?}: expected lossless to accept and syntactic to reject, got \
-       lossless errors={lossless_errs}, syntactic errors={syntactic_errs}. If the lossless suite \
-       has since learned this rule, move this source into tests/corpus/ as an invalid_* entry."
+      lossless_has_errors(&src),
+      "{name}: the lossless suite accepted it — the const or fragment-name rule has regressed"
     );
-    witnesses += 1;
+    assert!(
+      syntactic_has_errors(&src),
+      "{name}: the syntactic suite accepted it — this was never a divergence"
+    );
+    assert_eq!(
+      parse_str(&src).syntax().text().to_string(),
+      src,
+      "{name}: a rejected parse still keeps every byte"
+    );
   }
-  assert_eq!(witnesses, 11, "a witness went missing from the loop");
 }
 
 /// The compatibility extension both suites share, pinned as a *non*-divergence.

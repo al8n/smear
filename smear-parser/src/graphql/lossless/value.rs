@@ -49,6 +49,34 @@
 //! — a variable with trivia between the `$` and the name — is **accepted**. Ignored tokens may
 //! appear between any two lexical tokens, and neither implementation carries the adjacency
 //! machinery to forbid it in this one position.
+//!
+//! # `Value[Const]` is threaded, not duplicated
+//!
+//! The spec parameterises eight productions on `[Const]` — `Value`, `ListValue`, `ObjectValue`,
+//! `ObjectField`, `Argument`, `Arguments`, `Directive`, `Directives` — and in a const position
+//! `Variable` is not a production at all. `Constness` carries that parameter through all eight:
+//! `value`,
+//! `list_value`, `object_value`, `object_field` and — in `directive.rs` — `argument`,
+//! `arguments`, `directive` and `directives`. `default_value` takes no argument: `DefaultValue`
+//! is const in both positions the grammar puts it in.
+//!
+//! **`syntactic/` duplicates instead, and its reason does not carry over.** There, `value` and
+//! `const_value` return *different types* (`InputValue` versus `ConstInputValue`), so the
+//! constness lives in the type system and two productions are what a caller consumes. Here every
+//! production returns `()` and writes into one kind space: a `Variable` in a const position
+//! builds the same `K::Variable` node it builds anywhere else, so a second set of productions
+//! would differ from the first only in which recursive callee it names — eight bodies duplicated
+//! for one `if`. Threading is also the idiom this suite already uses for a per-call-site
+//! parameter: every retro-wrapping production takes an `EventMark` the same way.
+//!
+//! # A `Variable` in a const position is reported **and still built**
+//!
+//! The rejection is a diagnostic, not a refusal to parse: `Constness::Const` makes `value`
+//! report before it dispatches, and the `Variable` node is opened regardless. Every byte is
+//! kept, `tree.text() == source` still holds, and the node a diagnostic wants to point at is
+//! there. That is the ruling Task 8 made twice — `enum_value_definition` and
+//! `directive_location` both report a reserved spelling and still build their node — applied to
+//! the productions that predate it.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{ParseInput as _, parser::node, utils::DowncastRef as _};
@@ -63,9 +91,56 @@ use crate::graphql::kinds::SyntaxKind as K;
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{OBJECT_FIELD_HEADS, VALUE_HEADS, opener_span},
+  recover::{CONST_VALUE_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, opener_span},
   trivia::{eat_if, expect, peek_kind},
 };
+
+/// The spec's `[Const]` grammar parameter, as an argument.
+///
+/// Threaded through every production that can reach a value, so one set of productions serves
+/// both flavours; see the module docs for why this suite threads where `syntactic/` duplicates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Constness {
+  /// A `Value[Const]` position: `DefaultValue`, and every `Directives[Const]` context — which is
+  /// every SDL directive position plus a `VariableDefinition`'s own directives. A `Variable`
+  /// here is reported.
+  Const,
+  /// An ordinary `Value` position: an executable `Directives` context, and a field's
+  /// `Arguments`. A `Variable` here is exactly what the grammar is for.
+  NonConst,
+}
+
+impl Constness {
+  /// Whether a `Variable` in this position is a grammar error.
+  #[inline]
+  pub(crate) const fn forbids_variable(self) -> bool {
+    matches!(self, Self::Const)
+  }
+
+  /// The head set a diagnostic raised in this position names — `VALUE_HEADS` without the `$`
+  /// when a variable is not a production here.
+  ///
+  /// **Measured, not assumed: this distinction is currently unobservable.** Collapsing both arms
+  /// to `VALUE_HEADS` reds nothing (mutation, in-space silent pass), because the set reaches an
+  /// error only as `UnexpectedToken::expected_one_of`, and `lossless/mod.rs`'s `expectation_of`
+  /// folds every multi-kind expectation onto `Expectation::Name` — after which [`Parse`] drops
+  /// the payload entirely and exposes span, severity and skipped-token count alone. There is no
+  /// door through which a test could read it.
+  ///
+  /// It is kept because the *answer* is right and the alternative is a diagnostic that names `$`
+  /// as an acceptable head in the one position where it is not. The day the payload survives to
+  /// [`Parse`], this becomes observable and gains its test; until then the honest record is that
+  /// it has none.
+  ///
+  /// [`Parse`]: super::Parse
+  #[inline]
+  pub(crate) const fn value_heads(self) -> &'static [Kind] {
+    match self {
+      Self::Const => CONST_VALUE_HEADS,
+      Self::NonConst => VALUE_HEADS,
+    }
+  }
+}
 
 lossless_production! {
   /// `$ Name`
@@ -162,8 +237,9 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `[ Value* ]`
-  fn list_value<'inp, Src, Ctx>(inp) {
+  /// `[ Value* ]` — `[ Value[Const]* ]` when `konst` says so, the parameter riding down to
+  /// every element.
+  fn list_value<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::ListValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -179,7 +255,7 @@ lossless_production! {
           }
           // `value` recovers on a head that starts no value, and that recovery is guaranteed
           // to consume — which is this loop's only termination argument.
-          value::<Src, Ctx>(inp)?;
+          value::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
       },
@@ -187,8 +263,8 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `{ ObjectField* }`
-  fn object_value<'inp, Src, Ctx>(inp) {
+  /// `{ ObjectField* }` — const-parameterised exactly as [`list_value`] is.
+  fn object_value<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::ObjectValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
@@ -200,7 +276,7 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-            Some(Kind::Identifier) => object_field::<Src, Ctx>(inp)?,
+            Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
             // The head is checked here rather than left to `object_field`'s own `expect`,
             // because that `expect` would return `Err` and abort the whole value — the list's
             // recovery would then have no counterpart inside an object, and `{a: 1, !, b: 2}`
@@ -214,31 +290,30 @@ lossless_production! {
   }
 
   /// `Name : Value`
-  fn object_field<'inp, Src, Ctx>(inp) {
+  fn object_field<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::ObjectField.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        value::<Src, Ctx>(inp)
+        value::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
   }
 
-  /// `= Value`
+  /// `= Value[Const]`
   ///
-  /// The spec's `DefaultValue` takes a **const** value, which forbids a `Variable`. That
-  /// constness is a *validation* rule over the tree, not a parse rule: rejecting `$x` here
-  /// would leave the variable's tokens unattributed and cost a lossless consumer the very
-  /// nodes it needs to report the mistake. `syntactic/` keeps the distinction in its types;
-  /// this suite keeps it out of the shape and leaves it to the layer above.
+  /// **Takes no [`Constness`] argument, and must not.** `DefaultValue` is const in both
+  /// positions the grammar puts it in — an `InputValueDefinition`'s and a
+  /// `VariableDefinition`'s — so the flavour is a property of this production rather than of its
+  /// call site, and a parameter would be an invitation to pass the wrong one.
   fn default_value<'inp, Src, Ctx>(inp) {
     node(
       K::DefaultValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Equal)?;
-        value::<Src, Ctx>(inp)
+        value::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -251,14 +326,28 @@ lossless_production! {
   /// and `null` are `Identifier` tokens like any other name, and the three reserved spellings
   /// are what separate `BooleanValue`/`NullValue` from `EnumValue`. `DowncastRef` reads the
   /// spelling off the peeked token without consuming it, exactly as `syntactic/value` does.
-  fn value<'inp, Src, Ctx>(inp) {
+  ///
+  /// # The one place `konst` is read
+  ///
+  /// A `$` in a const position is **reported and then parsed anyway**. The report consumes
+  /// nothing, so `variable` still opens its `K::Variable` node over the same two tokens and the
+  /// tree is byte-for-byte what a non-const position would have built — the verdict is the only
+  /// thing that changes. See the module docs for why that is the right shape for a lossless
+  /// suite, and `recover::report_unexpected` for why a report that consumes nothing is safe
+  /// here (the `variable` call after it makes the progress every enclosing loop needs).
+  fn value<'inp, Src, Ctx>(inp, konst: Constness) {
     match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::Dollar) => variable::<Src, Ctx>(inp),
+      Some(Kind::Dollar) => {
+        if konst.forbids_variable() {
+          recover::report_unexpected::<Src, Ctx>(inp, CONST_VALUE_HEADS)?;
+        }
+        variable::<Src, Ctx>(inp)
+      }
       Some(Kind::Int) => int_value::<Src, Ctx>(inp),
       Some(Kind::Float) => float_value::<Src, Ctx>(inp),
       Some(Kind::InlineString | Kind::BlockString) => string_value::<Src, Ctx>(inp),
-      Some(Kind::LBracket) => list_value::<Src, Ctx>(inp),
-      Some(Kind::LBrace) => object_value::<Src, Ctx>(inp),
+      Some(Kind::LBracket) => list_value::<Src, Ctx>(inp, konst),
+      Some(Kind::LBrace) => object_value::<Src, Ctx>(inp, konst),
       Some(Kind::Identifier) => {
         // The downcast returns an owned, `Copy` keyword, so nothing borrowed escapes the
         // closure — the `&&Token` receiver that costs `kind_of` its own helper is harmless
@@ -275,10 +364,10 @@ lossless_production! {
           // Unreachable: `peek_kind` just answered `Some`, so the head is there to be read.
           // Reported rather than `unreachable!`d, because a panic in a parser is never the
           // better failure.
-          None => recover::unexpected::<Src, Ctx>(inp, VALUE_HEADS),
+          None => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
         }
       }
-      _ => recover::unexpected::<Src, Ctx>(inp, VALUE_HEADS),
+      _ => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
     }
   }
 }
@@ -288,8 +377,13 @@ lossless_drivers! {
   /// `tests/lossless_value.rs`.
   mod test_support;
 
-  /// `super::value` over `src`.
-  fn parse_value => value;
+  /// `super::value` over `src`, in an ordinary (non-const) position.
+  fn parse_value => value [Constness::NonConst];
+
+  /// `super::value` over `src`, in a **const** position — the flavour `DefaultValue` and every
+  /// SDL directive argument reach, and the only door to the `$` rejection below the document
+  /// level.
+  fn parse_const_value => value [Constness::Const];
 
   /// `super::default_value` over `src` — the one value production `value` cannot reach.
   fn parse_default_value => default_value;

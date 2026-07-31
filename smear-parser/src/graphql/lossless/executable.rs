@@ -55,17 +55,23 @@ use super::{
   definition::{description, operation_type, starts_description},
   directive::directives,
   recover,
-  recover::{EXECUTABLE_DEFINITION_HEADS, VARIABLE_DEFINITION_HEADS, opener_span},
+  recover::{EXECUTABLE_DEFINITION_HEADS, NAME_HEADS, VARIABLE_DEFINITION_HEADS, opener_span},
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::type_ref,
-  value::{default_value, variable},
+  value::{Constness, default_value, variable},
 };
 
 lossless_production! {
-  /// `Variable : Type DefaultValue? Directives?`
+  /// `Variable : Type DefaultValue? Directives[Const]?`
   ///
   /// **Precondition: the head is `$`.** [`variables_definition`] decides that.
+  ///
+  /// **The directives here are const**, and that is the one place in an executable document
+  /// where they are: the spec writes `VariableDefinition: Variable : Type DefaultValue?
+  /// Directives[Const]?`, and `syntactic/`'s `variable_definition` calls `const_directives`
+  /// where its `operation_definition` and `fragment_definition` call plain `directives`. Reading
+  /// the split as "SDL is const, executable is not" gets this production wrong.
   fn variable_definition<'inp, Src, Ctx>(inp) {
     node(
       K::VariableDefinition.raw(),
@@ -81,7 +87,7 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
           default_value::<Src, Ctx>(inp)?;
         }
-        directives::<Src, Ctx>(inp)
+        directives::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -146,7 +152,7 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           variables_definition::<Src, Ctx>(inp)?;
         }
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::NonConst)?;
         // Required, and an `Err` when it is absent — the same call `argument` makes for its
         // missing `:`. There is no shape left to recover into, and Task 8's `document` is where
         // a failed definition is caught and resynchronised past.
@@ -164,19 +170,30 @@ lossless_production! {
   /// The type condition is [`type_condition`], which recovers rather than requiring: a
   /// definition whose `on` is missing keeps its name, its type and its selection set, and costs
   /// one diagnostic.
+  ///
+  /// # `FragmentName: Name but not "on"` is a **grammar** rule, and is enforced here
+  ///
+  /// `on` is contextual, so the exclusion is a spelling test rather than a kind test — and it is
+  /// the parser's, not a validation pass's: the spec spends a production on it and `syntactic/`
+  /// spends one too (`fragment_name`). The name is **reported and still consumed**, so
+  /// `fragment on on T { f }` keeps its `FragmentDefinition`, its name token and its type
+  /// condition, and differs from the accepted spelling only in the verdict. Task 8's
+  /// `enum_value_definition` and `directive_location` are the same shape.
   fn fragment_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
       K::FragmentDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        // The fragment name. The spec forbids the spelling `on` here; that is a validation rule
-        // over the tree, exactly as `Argument`'s constness is — the name's token is right
-        // there for the layer above to read, and rejecting it at the parse would cost the node
-        // the diagnostic wants to point at.
+        // The fragment name, whose one excluded spelling is checked before it is taken. The
+        // report consumes nothing — the `expect` below is what makes the progress the document
+        // loop needs — so the name reaches the tree either way.
+        if peek_as::<Src, Ctx, ContextualKeyword>(inp)? == Some(ContextualKeyword::On) {
+          recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
+        }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         type_condition::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::NonConst)?;
         selection_set::<Src, Ctx>(inp)
       },
     )

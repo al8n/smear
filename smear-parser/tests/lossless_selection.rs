@@ -552,6 +552,88 @@ fn a_missing_on_is_reported_and_the_fragment_definition_survives() {
 }
 
 #[test]
+fn a_fragment_named_on_is_reported_and_the_definition_survives() {
+  // `FragmentName: Name but not "on"` is a grammar rule, not a validation one — the spec spends
+  // a production on the exclusion and so does `syntactic/`'s `fragment_name`. It is reported
+  // here and the name is **still consumed**, so `fragment on on T { f }` differs from the
+  // accepted spelling in the verdict and in nothing else.
+  //
+  // The comparison against the accepted spelling is the load-bearing assertion: `has_errors()`
+  // alone would be satisfied by a check that bailed out and cost the definition its
+  // `NamedType`, its `SelectionSet` and its `Field`.
+  let rejected = "fragment on on T { f }";
+  let accepted = "fragment Fr on T { f }";
+  let want = vec![
+    K::Root,
+    K::FragmentDefinition,
+    K::NamedType,
+    K::SelectionSet,
+    K::Field,
+  ];
+
+  assert_eq!(kinds(&parse_fragment_definition(rejected)), want);
+  assert_eq!(kinds(&parse_fragment_definition(accepted)), want);
+  assert_eq!(text(&parse_fragment_definition(rejected)), rejected);
+  assert!(
+    parse_fragment_definition(rejected).has_errors(),
+    "`on` is the one spelling a fragment may not be called"
+  );
+  assert!(
+    !parse_fragment_definition(accepted).has_errors(),
+    "every other spelling is fine"
+  );
+  // The definition keeps the excluded name, so a diagnostic has something to point at.
+  assert_eq!(
+    texts_of(&parse_fragment_definition(rejected), K::FragmentDefinition),
+    [rejected]
+  );
+
+  // The exclusion is `on` exactly — neither a prefix of it nor a different case.
+  for name in ["onn", "On", "ON", "one", "o"] {
+    let src = format!("fragment {name} on T {{ f }}");
+    assert!(
+      !parse_fragment_definition(&src).has_errors(),
+      "{src:?}: only the exact spelling `on` is excluded"
+    );
+  }
+}
+
+#[test]
+fn a_variable_definitions_directives_and_default_value_are_const() {
+  // The one const position inside an executable document: the spec writes
+  // `VariableDefinition: Variable : Type DefaultValue? Directives[Const]?`, and `syntactic/`'s
+  // `variable_definition` calls `const_directives` where its `operation_definition` calls plain
+  // `directives`. Reading the split as "SDL is const, executable is not" gets this wrong, so
+  // both halves are pinned here rather than left to the SDL tests.
+  for src in ["($a: Int = $b)", "($a: Int @d(x: $b))"] {
+    let parse = parse_variables_definition(src);
+    assert!(
+      parse.has_errors(),
+      "{src:?}: a variable definition's default value and directives are both const"
+    );
+    assert_eq!(
+      text(&parse),
+      src,
+      "{src:?}: every byte survives a rejection"
+    );
+    // The `$b` still became a `Variable` node — two of them in each source, the definition's
+    // own and the rejected one.
+    assert_eq!(
+      kinds(&parse).iter().filter(|k| **k == K::Variable).count(),
+      2,
+      "{src:?}: the rejected variable is still a node"
+    );
+  }
+
+  // The control, in the same shape: an operation's own directives are **not** const.
+  let executable = "query Q @d(x: $a) { f }";
+  assert!(
+    !parse_operation_definition(executable).has_errors(),
+    "{executable:?}: an operation's directives take variables"
+  );
+}
+
+#[test]
 fn an_unrecognised_definition_head_is_attributed_and_the_document_continues() {
   // The document-level loop's termination argument: `unexpected` consumes at least one token
   // whenever input remains, so an unrecognised head costs one `Error` node and no more.

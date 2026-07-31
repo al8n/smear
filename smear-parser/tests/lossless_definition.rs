@@ -273,7 +273,7 @@ fn a_directive_definition_carries_its_arguments_and_locations() {
 
 #[test]
 fn a_location_that_names_no_directive_location_is_reported() {
-  // `syntactic/`'s `location` admits only the eighteen spelled locations and errors otherwise,
+  // `syntactic/`'s `location` admits only the nineteen spelled locations and errors otherwise,
   // and gate 1 compares verdicts. The name is still consumed, so the tree keeps its shape.
   let parse = parse_str("directive @d on NOPE");
   assert_eq!(

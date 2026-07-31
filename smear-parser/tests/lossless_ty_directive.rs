@@ -17,7 +17,9 @@ use smear_parser::graphql::{
   kinds::SyntaxKind as K,
   lossless::{
     Parse,
-    directive::test_support::{parse_argument, parse_arguments, parse_directive, parse_directives},
+    directive::test_support::{
+      parse_argument, parse_arguments, parse_const_directives, parse_directive, parse_directives,
+    },
     ty::test_support::parse_type_ref,
   },
 };
@@ -272,6 +274,96 @@ fn every_directive_form_round_trips_verbatim() {
       src,
       "{src:?} must round-trip verbatim"
     );
+  }
+}
+
+// ---- `Directives[Const]`: the same node shape, a different verdict -------------------------
+
+/// A `Variable` in a **const** directive's arguments is reported and the tree is untouched.
+///
+/// `Directives[Const]` is reached from every SDL position and from a `VariableDefinition`, and
+/// the flavour rides in as an argument rather than forking the production — so the only thing
+/// that can distinguish the two entry points is the verdict. That is what is asserted: the const
+/// parse and the ordinary parse of the same bytes must produce the **same node sequence and the
+/// same text**, and disagree on `has_errors()` alone.
+///
+/// Asserting the boolean by itself would be satisfied by a const flavour that bailed out on the
+/// `$` and dropped the `Directive`, `Arguments` and `Argument` nodes with it.
+#[test]
+fn a_variable_in_a_const_directive_argument_is_reported_and_still_built() {
+  for (src, want) in [
+    (
+      "@d(a: $v)",
+      vec![
+        K::Root,
+        K::Directives,
+        K::Directive,
+        K::Arguments,
+        K::Argument,
+        K::Variable,
+      ],
+    ),
+    // Nested inside a list inside an object, and padded — the parameter has to reach the leaf,
+    // and "the text survived" has to be a claim that could be wrong.
+    (
+      "  @d(a: {k: [$v]}) @e  ",
+      vec![
+        K::Root,
+        K::Directives,
+        K::Directive,
+        K::Arguments,
+        K::Argument,
+        K::ObjectValue,
+        K::ObjectField,
+        K::ListValue,
+        K::Variable,
+        K::Directive,
+      ],
+    ),
+  ] {
+    let konst = parse_const_directives(src);
+    let plain = parse_directives(src);
+
+    assert!(
+      konst.has_errors(),
+      "{src:?}: a variable is not a production of `Value[Const]`"
+    );
+    assert!(
+      !plain.has_errors(),
+      "{src:?}: an executable directive position takes variables"
+    );
+    assert_eq!(kinds(&konst), want, "{src:?}: the const tree lost a node");
+    assert_eq!(
+      kinds(&konst),
+      kinds(&plain),
+      "{src:?}: constness moved the tree, and it must move only the verdict"
+    );
+    assert_eq!(
+      text(&konst),
+      src,
+      "{src:?}: every byte survives a rejection"
+    );
+  }
+}
+
+/// The control: a const directive position accepts everything that is not a variable.
+///
+/// Without it, a `const_directives` that rejected every argument would satisfy every
+/// `has_errors()` assertion above.
+#[test]
+fn a_const_directive_position_accepts_every_argument_that_is_not_a_variable() {
+  for src in [
+    "@d",
+    "@d()",
+    "@d(a: 1)",
+    "@d(a: [1], b: {k: \"s\"}, c: null) @e(x: EV)",
+  ] {
+    let parse = parse_const_directives(src);
+    assert!(
+      !parse.has_errors(),
+      "{src:?}: a const directive position rejected a perfectly good const argument"
+    );
+    assert_eq!(text(&parse), src, "{src:?}");
   }
 }
 

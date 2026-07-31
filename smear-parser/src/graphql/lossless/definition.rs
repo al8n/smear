@@ -46,7 +46,7 @@
 //!   only content is the token the outer node already covers.
 //! - **A location that names no directive location is reported and still consumed.** apollo
 //!   reports and pops it too; the load-bearing reason here is that `syntactic/`'s `location`
-//!   admits only the eighteen spellings, and gate 1 compares verdicts. Consuming it keeps the
+//!   admits only the nineteen spellings, and gate 1 compares verdicts. Consuming it keeps the
 //!   token in the `DirectiveLocations` node a diagnostic wants to point at.
 //! - **`true`, `false` and `null` are reported as enum values**, matching `syntactic/`'s
 //!   `take_enum_value`; the `EnumValue` node is still built, for the same reason.
@@ -73,7 +73,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{named_type, type_ref},
-  value::{default_value, enum_value},
+  value::{Constness, default_value, enum_value},
 };
 
 /// Whether `head` opens a [`description`] — the one two-kind test this file makes repeatedly,
@@ -83,7 +83,14 @@ pub(crate) fn starts_description(head: Option<Kind>) -> bool {
   matches!(head, Some(Kind::InlineString | Kind::BlockString))
 }
 
-/// Whether `keyword` is one of the eighteen spellings `DirectiveLocation` admits.
+/// Whether `keyword` is one of the **nineteen** spellings `DirectiveLocation` admits: the eight
+/// of `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`.
+///
+/// The count is spelled out because it was wrong in prose — "eighteen" — from Task 8 until Task
+/// 11's gate report; the *membership* has always been right and identical to `syntactic/`'s
+/// `is_location_keyword`, so it was a miscount rather than a behaviour bug. The arms below are
+/// the authority, and `valid_sdl_directive_locations_every_spelling.graphql` exercises all
+/// nineteen.
 ///
 /// The lexer already tells `QUERY` from `query` — they are different `ContextualKeyword`
 /// variants — so this is a membership test over the projection and never a string comparison.
@@ -150,7 +157,7 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
           default_value::<Src, Ctx>(inp)?;
         }
-        directives::<Src, Ctx>(inp)
+        directives::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -206,7 +213,7 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Colon)?;
         type_ref::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp)
+        directives::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -400,7 +407,7 @@ lossless_production! {
         // wherever it appears, and a typed accessor matching two node kinds for it would be
         // paying for a distinction the grammar does not make.
         enum_value::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp)
+        directives::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -517,7 +524,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp)
+        directives::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
@@ -565,7 +572,7 @@ lossless_production! {
     if peek_as::<Src, Ctx, ContextualKeyword>(inp)? == Some(ContextualKeyword::Implements) {
       implements_interfaces::<Src, Ctx>(inp)?;
     }
-    directives::<Src, Ctx>(inp)?;
+    directives::<Src, Ctx>(inp, Constness::Const)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
       fields_definition::<Src, Ctx>(inp)?;
     }
@@ -580,7 +587,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
           union_member_types::<Src, Ctx>(inp)?;
         }
@@ -598,7 +605,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           enum_values_definition::<Src, Ctx>(inp)?;
         }
@@ -616,7 +623,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           input_fields_definition::<Src, Ctx>(inp)?;
         }
@@ -675,7 +682,7 @@ lossless_production! {
       K::SchemaDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           root_operation_type_definitions::<Src, Ctx>(inp)
         } else {
