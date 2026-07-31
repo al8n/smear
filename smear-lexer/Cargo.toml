@@ -11,7 +11,7 @@ description = "Blazing fast lexer for GraphQL and GraphQL-like DSLs"
 [features]
 default = ["std", "graphql", "graphqlx", "smallvec"]
 alloc = []
-std = ["thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
+std = ["tokora/std", "thiserror/default", "bytes?/default", "bstr?/default", "hipstr?/default"]
 
 unstable = []
 
@@ -40,6 +40,9 @@ smallvec = { version = "1", default-features = false, features = ["const_new"], 
 
 [dev-dependencies]
 criterion = "0.8"
+# `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
+# feature is pulled in here rather than in the normal dependency.
+tokora = { workspace = true, features = ["conformance"] }
 
 # Disable the default libtest bench harness; all benches go through criterion.
 [lib]
@@ -49,6 +52,19 @@ bench = false
 path = "benches/lex_baseline.rs"
 name = "lex_baseline"
 harness = false
+required-features = ["std", "graphql", "graphqlx"]
+
+# Both examples read files from argv and print to stdout, and they drive the
+# GraphQL lossless lexer, so they need `std` and `graphql`.
+[[example]]
+name = "trivia_spans"
+path = "examples/trivia_spans.rs"
+required-features = ["std", "graphql"]
+
+[[example]]
+name = "token_mix"
+path = "examples/token_mix.rs"
+required-features = ["std", "graphql"]
 
 [lints]
 workspace = true
