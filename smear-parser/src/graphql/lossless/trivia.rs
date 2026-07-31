@@ -82,8 +82,12 @@ use super::{
 /// Going through `t.data` (a `&Token`) instead reaches the *inherent* `kind`, whose return type
 /// is the concrete `LosslessTokenKind` rather than the projection the atoms are generic over.
 /// This helper is the one spelling that is both: the trait method, on the token itself.
+///
+/// `pub(crate)` because every predicate handed to `skip_while`, `try_expect` or
+/// `sync_balanced` meets the same `&&Token` receiver — `recover.rs`'s sync predicate is the
+/// second caller. One spelling, so the E0521 cannot be rediscovered per module.
 #[inline]
-fn kind_of<'a, T: Token<'a>>(token: &T) -> T::Kind {
+pub(crate) fn kind_of<'a, T: Token<'a>>(token: &T) -> T::Kind {
   token.kind()
 }
 

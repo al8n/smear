@@ -41,6 +41,49 @@ where
   )
 }
 
+/// The recording emitter every lossless driver pins.
+///
+/// `Verbose<Error, S = SimpleSpan, Lang = ()>` — the **third** parameter is the grammar brand,
+/// and `Emitter<'inp, L, Lang>` is implemented only where it matches. A bare
+/// `Verbose::default()` leaves it at `()` and the context then fails to be a
+/// `ParseContext<…, GraphQL>`, so a branded grammar has to spell all three.
+pub(crate) type LosslessEmitter<'inp> = tokora::emitter::Verbose<
+  super::GraphqlLosslessErrors<&'inp str>,
+  tokora::SimpleSpan,
+  crate::graphql::GraphQL,
+>;
+
+/// The `Sink` every lossless driver records into.
+pub(crate) type LosslessSink<'inp> =
+  Sink<'inp, GraphqlLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
+
+/// Materialize `sink` at the root kind and collect its diagnostics.
+///
+/// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
+/// root kind, the fallible-materialization contract and the diagnostic projection are stated
+/// once. `finish` names the root kind — it is NOT profile data — and hands back the inner
+/// emitter, which is where the diagnostics live.
+pub(crate) fn finish_root(sink: LosslessSink<'_>) -> Parse {
+  let (green, emitter) = sink.finish(K::Root.raw());
+  let green = green.expect("the GraphQL lossless sink emitted a malformed event stream");
+
+  // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
+  // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
+  let diagnostics = emitter
+    .diagnostics()
+    .map(|d| Diagnostic {
+      span: d.span().start()..d.span().end(),
+      severity: d.severity(),
+      skipped_tokens: match d.kind() {
+        tokora::emitter::DiagnosticKind::SkippedRegion(n) => Some(n),
+        _ => None,
+      },
+    })
+    .collect();
+
+  Parse { green, diagnostics }
+}
+
 /// One diagnostic a lossless parse recorded, owned and source-independent.
 ///
 /// **Why not the typed payload.** `Verbose::diagnostics()` hands back `Diagnostic<'_, S, Error>`
@@ -115,19 +158,7 @@ pub fn parse_str(src: &str) -> Parse {
   // Sink::new takes the source at construction rather than at finish, which removes the one
   // way a caller could hand materialization a different buffer than the spans were measured
   // against. Argument order is (source, inner emitter, profile) — the emitter is SECOND.
-  let mut sink: Sink<'_, GraphqlLosslessLexer<'_, str>, _> = Sink::new(
-    src,
-    // `Verbose<Error, S = SimpleSpan, Lang = ()>` — the **third** parameter is the grammar
-    // brand, and `Emitter<'inp, L, Lang>` is implemented only where it matches. A bare
-    // `Verbose::default()` leaves it at `()` and the context then fails to be a
-    // `ParseContext<…, GraphQL>`, so a branded grammar has to spell all three.
-    tokora::emitter::Verbose::<
-      super::GraphqlLosslessErrors<&str>,
-      tokora::SimpleSpan,
-      crate::graphql::GraphQL,
-    >::default(),
-    profile::<str>(),
-  );
+  let mut sink: LosslessSink<'_> = Sink::new(src, LosslessEmitter::default(), profile::<str>());
 
   // Productions take `&mut InputRef`, never `&mut Sink`. The sink reaches them as the emitter
   // half of the parse context: `(&mut sink, cache)` is a `ParseContext`, and `Parser` drives it.
@@ -147,24 +178,5 @@ pub fn parse_str(src: &str) -> Parse {
   .apply::<_, crate::graphql::GraphQL>(super::document::document::<str, _>)
   .parse_str(src);
 
-  // `finish` names the root kind — it is NOT profile data — and materialization is FALLIBLE.
-  // It hands back the inner emitter, which is where the diagnostics live.
-  let (green, emitter) = sink.finish(K::Root.raw());
-  let green = green.expect("the GraphQL lossless sink emitted a malformed event stream");
-
-  // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
-  // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
-  let diagnostics = emitter
-    .diagnostics()
-    .map(|d| Diagnostic {
-      span: d.span().start()..d.span().end(),
-      severity: d.severity(),
-      skipped_tokens: match d.kind() {
-        tokora::emitter::DiagnosticKind::SkippedRegion(n) => Some(n),
-        _ => None,
-      },
-    })
-    .collect();
-
-  Parse { green, diagnostics }
+  finish_root(sink)
 }

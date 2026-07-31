@@ -6,7 +6,10 @@ use smear_lexer::graphql::{
 };
 use tokora::{
   InputRef, Lexer, SimpleSpan, Source,
-  error::{UnexpectedEot, token::UnexpectedToken as TokUnexpectedToken},
+  emitter::FromUnclosed,
+  error::{
+    Unclosed as TokoraUnclosed, UnexpectedEot, token::UnexpectedToken as TokUnexpectedToken,
+  },
   state::tracker::LimitExceeded,
   utils::Expected,
 };
@@ -139,6 +142,38 @@ impl<'a, S, Lang: ?Sized>
   }
 }
 
+/// The unclosed-delimiter conversion, mirroring `error.rs:872`.
+///
+/// **One impl absorbs every delimiter pair.** The dialect's `Unclosed` carries the pair's
+/// name as *data*, so the pair is discriminated at run time on `name_ref` rather than by a
+/// `From` impl per pair — and `Delimiter` stays generic, which is what makes the single bound
+/// `GraphqlLosslessError<…>: FromUnclosed<…>` cover `[]`, `{}` and `()` at once. GraphQL's
+/// grammar opens no other pair, so the catch-all arm is unreachable in practice; it still has
+/// to produce an error rather than panic.
+///
+/// This is a *trait* conversion rather than a `From` impl because `from_unclosed` is generic
+/// over the delimiter marker type. A `From` impl would have to be written per marker, and
+/// every production naming one would then carry one bound per delimiter it can fail to close.
+impl<'inp, S, L, Lang: ?Sized> FromUnclosed<'inp, L, Lang> for GraphqlLosslessErrors<S>
+where
+  L: Lexer<'inp, Span = SimpleSpan>,
+{
+  #[inline]
+  fn from_unclosed<Delimiter>(err: TokoraUnclosed<Delimiter, SimpleSpan, Lang>) -> Self {
+    let span = err.span();
+    match err.name_ref() {
+      "[]" => GraphqlLosslessErrorValue::unclosed_list(span).into(),
+      "()" => GraphqlLosslessErrorValue::unclosed_parentheses(span).into(),
+      "{}" => GraphqlLosslessErrorValue::unclosed_object(span).into(),
+      _ => GraphqlLosslessErrorValue::new(
+        span,
+        ErrorData::Other(std::borrow::Cow::Borrowed("unclosed delimiter")),
+      )
+      .into(),
+    }
+  }
+}
+
 /// The lossless twin of `error.rs`'s `expectation_from_token_kind`.
 ///
 /// `ErrorData::UnexpectedToken` has one expectation slot, so a multi-kind or absent expectation
@@ -174,9 +209,122 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
   }
 }
 
+/// Declares a lossless production: `fn(&mut GraphqlLosslessInput, …) -> Result<(),
+/// GraphqlLosslessError>`, with the one where-clause every production in this suite carries.
+///
+/// # Why a macro, and why the bundle is one block
+///
+/// The bundle is nine clauses long and **not one of them is optional** once a production both
+/// opens a node and goes through the atom set — which is every production here. Written out
+/// per function it would be ~150 lines of boilerplate across `value.rs` alone, and the
+/// failure mode of drifting copies is a compile error a hundred lines from its cause. The
+/// house precedent is `syntactic/`'s `value_parser!` and `trivia.rs`'s `drive!`.
+///
+/// # The clauses, and what each one buys
+///
+/// - **`Token<'inp, Kind = LosslessTokenKind>`** — the correction Task 4 surfaced and this
+///   task confirmed. `LosslessToken<S>`'s `Token` impl is macro-generated **once per concrete
+///   slice type** (`smear-lexer` `lossless/token.rs`), unlike `SyntacticToken<S>`'s generic
+///   impl, so over a generic `Src` the projection `<GraphqlLosslessToken<…>>::Kind` has
+///   nothing to normalize against. `Token<'inp>` alone makes the projection *nameable*; only
+///   the `Kind =` equality makes a `LosslessTokenKind` **literal** — which is what every
+///   `expect(inp, Kind::LBracket)` passes — typecheck against it.
+/// - **`FromLogos<'inp>`** — `LogosLexer<'inp, T>` carries it on its struct definition, so
+///   without it the lexer alias is ill-formed rather than merely unbounded (`document.rs`).
+/// - **`Clone`** — `UnexpectedToken::with_found` takes the token by value, and a declined
+///   token is only ever borrowed (it stays unconsumed, on purpose).
+/// - **`DowncastRef<ContextualKeyword>`** — `true`/`false`/`null` are `Identifier` tokens; the
+///   value dispatcher tells them apart on their spelling, exactly as `syntactic/mod.rs:110`
+///   does.
+/// - **the `Lexer` associated-type pins** — without `Span`/`Offset` the two error `From`
+///   bounds cannot be spelled at all.
+/// - **`L::State: Clone`** — `InputRef::sync_balanced` lives in an impl block that requires
+///   it. Nothing else in this suite does.
+/// - **`Ctx::Emitter: CstEmitter`** — the structural gate on the whole `node` family.
+/// - **the three error conversions** — `UnexpectedEot` for every peek, `UnexpectedToken` for
+///   every declined `expect`, and `FromUnclosed` for the two unterminated-delimiter reports.
+///
+/// # Every generic parameter is threaded in from the call site
+///
+/// `'inp`, `Src` and `Ctx` are macro arguments rather than names minted inside the expansion,
+/// so a body may name them: `macro_rules!` lifetimes are hygienic, and a `'inp` declared here
+/// would be a *different* `'inp` than one written in the caller's body. Passing them makes the
+/// call site read as the ordinary signature it stands for, and `recover.rs`'s
+/// `<GraphqlLosslessError<'inp, Src, Ctx> as FromUnclosed<…>>` turbofish resolve. The same
+/// choice, for the same reason, as `trivia.rs`'s `drive!`.
+macro_rules! lossless_production {
+  ($(
+    $(#[$meta:meta])*
+    fn $name:ident<$lt:lifetime, $src:ident, $ctx:ident>(
+      $inp:ident $(, $arg:ident : $argty:ty)* $(,)?
+    ) $body:block
+  )*) => {$(
+    $(#[$meta])*
+    pub(crate) fn $name<$lt, $src, $ctx>(
+      $inp: &mut $crate::graphql::lossless::GraphqlLosslessInput<$lt, '_, $src, $ctx>,
+      $($arg: $argty,)*
+    ) -> ::core::result::Result<
+      (),
+      $crate::graphql::lossless::GraphqlLosslessError<$lt, $src, $ctx>,
+    >
+    where
+      $src: ::tokora::Source<usize> + ?Sized,
+      $crate::graphql::lossless::GraphqlLosslessToken<$lt, $src>: ::tokora::Token<
+          $lt,
+          Kind = ::smear_lexer::graphql::lossless::LosslessTokenKind,
+        > + ::tokora::lexer::FromLogos<$lt>
+        + ::core::clone::Clone
+        + ::tokora::utils::DowncastRef<::smear_lexer::graphql::ContextualKeyword>,
+      $crate::graphql::lossless::GraphqlLosslessLexer<$lt, $src>: ::tokora::Lexer<
+          $lt,
+          Token = $crate::graphql::lossless::GraphqlLosslessToken<$lt, $src>,
+          Span = ::tokora::SimpleSpan,
+          Offset = usize,
+        >,
+      <$crate::graphql::lossless::GraphqlLosslessLexer<$lt, $src> as ::tokora::Lexer<$lt>>::State:
+        ::core::clone::Clone,
+      $ctx: ::tokora::ParseContext<
+        $lt,
+        $crate::graphql::lossless::GraphqlLosslessLexer<$lt, $src>,
+        $crate::graphql::GraphQL,
+      >,
+      $ctx::Emitter: ::tokora::emitter::CstEmitter<
+        $lt,
+        $crate::graphql::lossless::GraphqlLosslessLexer<$lt, $src>,
+        $crate::graphql::GraphQL,
+      >,
+      $crate::graphql::lossless::GraphqlLosslessError<$lt, $src, $ctx>:
+        ::core::convert::From<
+            ::tokora::error::UnexpectedEot<usize, $crate::graphql::GraphQL>,
+          >
+          + ::core::convert::From<
+            ::tokora::error::token::UnexpectedToken<
+              $lt,
+              $crate::graphql::lossless::GraphqlLosslessToken<$lt, $src>,
+              ::smear_lexer::graphql::lossless::LosslessTokenKind,
+              ::tokora::SimpleSpan,
+              $crate::graphql::GraphQL,
+            >,
+          >
+          + ::tokora::emitter::FromUnclosed<
+            $lt,
+            $crate::graphql::lossless::GraphqlLosslessLexer<$lt, $src>,
+            $crate::graphql::GraphQL,
+          >,
+    $body
+  )*};
+}
+
+// `lossless_production!` reaches `value.rs` and `recover.rs` through **textual** macro scope,
+// which is why its definition sits immediately above these `mod` declarations and must stay
+// there: a `macro_rules!` is in scope for a child module only if it is declared before that
+// module's `mod` item in this file. A `pub(crate) use lossless_production;` re-export beside it
+// is dead — the import would be shadowed by the textual binding and warns as unused.
 pub mod document;
 pub mod kind_map;
+pub mod recover;
 pub mod runner;
 pub mod trivia;
+pub mod value;
 
 pub use runner::{Parse, parse_str, profile};
