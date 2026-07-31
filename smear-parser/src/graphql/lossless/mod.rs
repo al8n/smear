@@ -5,8 +5,10 @@ use smear_lexer::graphql::{
   lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
 };
 use tokora::{
-  InputRef, Lexer, SimpleSpan, Source, error::token::UnexpectedToken as TokUnexpectedToken,
-  state::tracker::LimitExceeded, utils::Expected,
+  InputRef, Lexer, SimpleSpan, Source,
+  error::{UnexpectedEot, token::UnexpectedToken as TokUnexpectedToken},
+  state::tracker::LimitExceeded,
+  utils::Expected,
 };
 
 use crate::{
@@ -97,6 +99,27 @@ impl<S> From<LexerErrors<char, LimitExceeded>> for GraphqlLosslessErrors<S> {
   }
 }
 
+/// The end-of-input conversion, `Set`-generic exactly as the syntactic twin
+/// (`error.rs:857`) is, so the one impl covers both members tokora's `FromTokenErrors` bundle
+/// names: the default `&'static str` set the `_or_stop` family raises, and the
+/// `&'static [Kind]` classification table a committed dispatch driver feeds in.
+///
+/// Task 3 did not need this — `document`'s stub only calls `skip_while`, which raises no
+/// end-of-input error — but every peek does: `InputRef::peek_kind` carries
+/// `Error: From<UnexpectedEot<L::Offset, Lang>>` as a where-clause, so the trivia atom set
+/// (Task 4) cannot be written without it. The container's own error has an
+/// `unexpected_end_of_input` constructor and the offset is the whole payload, so the
+/// conversion is total.
+impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>>
+  for GraphqlLosslessErrors<S>
+{
+  #[inline]
+  fn from(err: UnexpectedEot<usize, Lang, Set>) -> Self {
+    let off = err.offset();
+    GraphqlLosslessErrorValue::unexpected_end_of_input(SimpleSpan::new(off, off)).into()
+  }
+}
+
 impl<'a, S, Lang: ?Sized>
   From<TokUnexpectedToken<'a, LosslessToken<S>, LosslessTokenKind, SimpleSpan, Lang>>
   for GraphqlLosslessErrors<S>
@@ -151,10 +174,9 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
   }
 }
 
-// `trivia` arrives with Task 4; declaring it ahead of its file would leave the crate unable to
-// compile.
 pub mod document;
 pub mod kind_map;
 pub mod runner;
+pub mod trivia;
 
 pub use runner::{Parse, parse_str, profile};
