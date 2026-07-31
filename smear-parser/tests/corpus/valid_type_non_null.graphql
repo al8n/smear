@@ -1,0 +1,5 @@
+type T {
+  a: Int!
+  b: [Int!]!
+  c: [[Int!]!]!
+}

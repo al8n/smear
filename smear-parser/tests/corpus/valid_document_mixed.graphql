@@ -1,0 +1,13 @@
+query Q($v: Int) {
+  f(a: $v)
+}
+
+fragment F on T {
+  g
+}
+
+type T {
+  g: Int
+}
+
+extend type T @d

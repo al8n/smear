@@ -1,0 +1,4 @@
+"a description before an executable definition: the syntactic/ compatibility extension"
+query Q {
+  f
+}

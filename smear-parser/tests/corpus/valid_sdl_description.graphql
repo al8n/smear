@@ -1,0 +1,6 @@
+"""
+A described type.
+"""
+type T {
+  "a described field" f: Int
+}

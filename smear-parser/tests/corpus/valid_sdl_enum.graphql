@@ -1,0 +1,4 @@
+enum E @d {
+  "a value description" A
+  B @deprecated
+}

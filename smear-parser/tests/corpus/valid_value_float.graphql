@@ -1,0 +1,3 @@
+{
+  f(plain: 1.5, negative: -1.5e3, lower: 1e-3, upper: 1.0E+3)
+}

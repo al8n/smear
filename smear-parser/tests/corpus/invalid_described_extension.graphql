@@ -1,0 +1,4 @@
+"a description before an extension"
+extend type T {
+  f: Int
+}

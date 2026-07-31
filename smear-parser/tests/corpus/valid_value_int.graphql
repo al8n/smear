@@ -1,0 +1,3 @@
+{
+  f(zero: 0, positive: 42, negative: -7)
+}

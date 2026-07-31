@@ -1,0 +1,3 @@
+query ($v: Int) {
+  f(a: $v)
+}
