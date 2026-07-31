@@ -24,6 +24,8 @@ pub mod ast;
 pub mod error;
 pub mod keyword;
 pub mod kinds;
+#[cfg(feature = "rowan")]
+pub mod lossless;
 pub mod syntactic;
 
 /// The GraphQL dialect marker.

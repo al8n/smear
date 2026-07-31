@@ -225,117 +225,161 @@ impl SyntaxKind {
   pub const fn raw(self) -> u16 {
     self as u16
   }
+
+  /// Every kind, in declaration order. [`from_raw`](Self::from_raw) indexes this by raw
+  /// value, so its order must match the enum's — the `kind_decl_index_is_stable` property
+  /// in this file's `mod tests` is what pins that.
+  pub const ALL: &'static [SyntaxKind] = &[
+    // Token images.
+    Self::Name,
+    Self::Int,
+    Self::Float,
+    Self::String,
+    Self::BlockString,
+    Self::Dollar,
+    Self::LParen,
+    Self::RParen,
+    Self::Spread,
+    Self::Colon,
+    Self::Equal,
+    Self::At,
+    Self::LBracket,
+    Self::RBracket,
+    Self::LBrace,
+    Self::RBrace,
+    Self::Pipe,
+    Self::Bang,
+    Self::Ampersand,
+    // Trivia.
+    Self::Space,
+    Self::Tab,
+    Self::Newline,
+    Self::Comma,
+    Self::Comment,
+    Self::Bom,
+    // Value nodes.
+    Self::Variable,
+    Self::IntValue,
+    Self::FloatValue,
+    Self::StringValue,
+    Self::BooleanValue,
+    Self::NullValue,
+    Self::EnumValue,
+    Self::ListValue,
+    Self::ObjectValue,
+    Self::ObjectField,
+    Self::DefaultValue,
+    // Type / argument / directive nodes.
+    Self::NamedType,
+    Self::ListType,
+    Self::NonNullType,
+    Self::Argument,
+    Self::Arguments,
+    Self::Directive,
+    Self::Directives,
+    // Selection / executable nodes.
+    Self::Alias,
+    Self::Field,
+    Self::SelectionSet,
+    Self::FragmentSpread,
+    Self::InlineFragment,
+    Self::VariableDefinition,
+    Self::VariablesDefinition,
+    Self::OperationDefinition,
+    Self::FragmentDefinition,
+    Self::ExecutableDocument,
+    // SDL definition nodes.
+    Self::Description,
+    Self::InputValueDefinition,
+    Self::ArgumentsDefinition,
+    Self::FieldDefinition,
+    Self::FieldsDefinition,
+    Self::InputFieldsDefinition,
+    Self::ImplementsInterfaces,
+    Self::UnionMemberTypes,
+    Self::DirectiveLocations,
+    Self::EnumValueDefinition,
+    Self::EnumValuesDefinition,
+    Self::OperationType,
+    Self::RootOperationTypeDefinition,
+    Self::RootOperationTypeDefinitions,
+    Self::ScalarTypeDefinition,
+    Self::ObjectTypeDefinition,
+    Self::InterfaceTypeDefinition,
+    Self::UnionTypeDefinition,
+    Self::EnumTypeDefinition,
+    Self::InputObjectTypeDefinition,
+    Self::DirectiveDefinition,
+    Self::SchemaDefinition,
+    // SDL extension / document nodes.
+    Self::ScalarTypeExtension,
+    Self::ObjectTypeExtension,
+    Self::InterfaceTypeExtension,
+    Self::UnionTypeExtension,
+    Self::EnumTypeExtension,
+    Self::InputObjectTypeExtension,
+    Self::SchemaExtension,
+    Self::Document,
+    Self::TypeSystemDocument,
+    // Bookkeeping.
+    Self::Error,
+    Self::Gap,
+    Self::Root,
+  ];
+
+  /// The fallible inverse of [`raw`](Self::raw).
+  ///
+  /// `rowan::Language::kind_from_raw` has no fallible form — it can only panic at query
+  /// time — which is why tokora carries the kind validator as profile data. This is the door
+  /// that validator uses.
+  #[inline]
+  pub fn from_raw(raw: u16) -> Option<SyntaxKind> {
+    Self::ALL.get(raw as usize).copied()
+  }
+}
+
+/// The `rowan::Language` brand for the GraphQL lossless CST.
+///
+/// Separate from [`GraphQL`](crate::graphql::GraphQL), which is tokora's *grammar brand*
+/// (`Dialect::Lang`, a marker keeping two grammars' vocabularies apart). A `rowan::Language`
+/// is a kind authority; the two roles are deliberately not the same type.
+#[cfg(feature = "rowan")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GraphQLLang;
+
+#[cfg(feature = "rowan")]
+impl rowan::Language for GraphQLLang {
+  type Kind = SyntaxKind;
+
+  fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
+    // Infallible by contract: every raw value reaching a rowan query came from a kind this
+    // crate emitted, and the sink's validator refuses out-of-space kinds at the emit door.
+    //
+    // The lookup is a safe, total conversion rather than a bounds-checked `transmute` into
+    // the discriminant space: an upper-bound assert cannot catch a hole in the middle of
+    // that space, and `ALL` needs no sentinel variant kept in sync by hand.
+    SyntaxKind::from_raw(raw.0).unwrap_or_else(|| {
+      panic!(
+        "raw kind {} is outside the GraphQL syntax-kind space",
+        raw.0
+      )
+    })
+  }
+
+  fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
+    rowan::SyntaxKind(kind.raw())
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use super::SyntaxKind as K;
 
-  /// Every kind, in declaration order. `kind_from_raw` (added in the lossless
-  /// wave) indexes this array by raw value, so its order must match the enum's.
-  const KINDS: &[K] = &[
-    // Token images.
-    K::Name,
-    K::Int,
-    K::Float,
-    K::String,
-    K::BlockString,
-    K::Dollar,
-    K::LParen,
-    K::RParen,
-    K::Spread,
-    K::Colon,
-    K::Equal,
-    K::At,
-    K::LBracket,
-    K::RBracket,
-    K::LBrace,
-    K::RBrace,
-    K::Pipe,
-    K::Bang,
-    K::Ampersand,
-    // Trivia.
-    K::Space,
-    K::Tab,
-    K::Newline,
-    K::Comma,
-    K::Comment,
-    K::Bom,
-    // Value nodes.
-    K::Variable,
-    K::IntValue,
-    K::FloatValue,
-    K::StringValue,
-    K::BooleanValue,
-    K::NullValue,
-    K::EnumValue,
-    K::ListValue,
-    K::ObjectValue,
-    K::ObjectField,
-    K::DefaultValue,
-    // Type / argument / directive nodes.
-    K::NamedType,
-    K::ListType,
-    K::NonNullType,
-    K::Argument,
-    K::Arguments,
-    K::Directive,
-    K::Directives,
-    // Selection / executable nodes.
-    K::Alias,
-    K::Field,
-    K::SelectionSet,
-    K::FragmentSpread,
-    K::InlineFragment,
-    K::VariableDefinition,
-    K::VariablesDefinition,
-    K::OperationDefinition,
-    K::FragmentDefinition,
-    K::ExecutableDocument,
-    // SDL definition nodes.
-    K::Description,
-    K::InputValueDefinition,
-    K::ArgumentsDefinition,
-    K::FieldDefinition,
-    K::FieldsDefinition,
-    K::InputFieldsDefinition,
-    K::ImplementsInterfaces,
-    K::UnionMemberTypes,
-    K::DirectiveLocations,
-    K::EnumValueDefinition,
-    K::EnumValuesDefinition,
-    K::OperationType,
-    K::RootOperationTypeDefinition,
-    K::RootOperationTypeDefinitions,
-    K::ScalarTypeDefinition,
-    K::ObjectTypeDefinition,
-    K::InterfaceTypeDefinition,
-    K::UnionTypeDefinition,
-    K::EnumTypeDefinition,
-    K::InputObjectTypeDefinition,
-    K::DirectiveDefinition,
-    K::SchemaDefinition,
-    // SDL extension / document nodes.
-    K::ScalarTypeExtension,
-    K::ObjectTypeExtension,
-    K::InterfaceTypeExtension,
-    K::UnionTypeExtension,
-    K::EnumTypeExtension,
-    K::InputObjectTypeExtension,
-    K::SchemaExtension,
-    K::Document,
-    K::TypeSystemDocument,
-    // Bookkeeping.
-    K::Error,
-    K::Gap,
-    K::Root,
-  ];
-
   #[test]
   fn kind_decl_index_is_stable() {
     // The raw value of each kind is exactly its declaration index, so the
     // lossless `kind_from_raw` array (this same order) round-trips every kind.
-    for (index, kind) in KINDS.iter().enumerate() {
+    for (index, kind) in K::ALL.iter().enumerate() {
       assert_eq!(
         kind.raw(),
         index as u16,
@@ -347,7 +391,7 @@ mod tests {
   #[test]
   fn tombstone_value_is_unused() {
     // `u16::MAX` is tokora's reserved tombstone; no kind may occupy it.
-    for kind in KINDS {
+    for kind in K::ALL {
       assert_ne!(kind.raw(), u16::MAX, "{kind:?} collides with the tombstone");
     }
   }
@@ -356,7 +400,7 @@ mod tests {
   fn bookkeeping_kinds_are_last_and_distinct() {
     // `Root`/`Error`/`Gap` exist and sit past every content kind, so appending a
     // content kind before them is caught by `kind_decl_index_is_stable`.
-    let content = KINDS.len() as u16 - 3;
+    let content = K::ALL.len() as u16 - 3;
     assert_eq!(K::Error.raw(), content);
     assert_eq!(K::Gap.raw(), content + 1);
     assert_eq!(K::Root.raw(), content + 2);
