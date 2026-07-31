@@ -443,6 +443,7 @@ macro_rules! lossless_drivers {
 // module only if it is declared before that module's `mod` item in this file. A
 // `pub(crate) use lossless_production;` re-export beside it is dead — the import would be
 // shadowed by the textual binding and warns as unused.
+pub mod ast;
 pub mod definition;
 pub mod directive;
 pub mod document;
