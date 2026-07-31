@@ -1,6 +1,6 @@
-use core::{fmt::Display, marker::PhantomData};
-use tokora::{
-  SimpleSpan,
+use core::fmt::Display;
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -10,35 +10,33 @@ use tokora::{
 
 /// A boolean value literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BooleanValue<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()> {
+pub struct BooleanValue {
   span: Span,
   value: bool,
-  _slice: PhantomData<S>,
-  _lang: PhantomData<Lang>,
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> Display for BooleanValue<S, Span, Lang> {
+impl Display for BooleanValue {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     write!(f, "{}", self.value())
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for BooleanValue<S, Span, Lang> {
+impl AsSpan<Span> for BooleanValue {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> IntoSpan<Span> for BooleanValue<S, Span, Lang> {
+impl IntoSpan<Span> for BooleanValue {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> IntoComponents for BooleanValue<S, Span, Lang> {
+impl IntoComponents for BooleanValue {
   type Components = (Span, bool);
 
   #[inline]
@@ -47,14 +45,14 @@ impl<S: ?Sized, Span, Lang: ?Sized> IntoComponents for BooleanValue<S, Span, Lan
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> AsRef<bool> for BooleanValue<S, Span, Lang> {
+impl AsRef<bool> for BooleanValue {
   #[inline]
   fn as_ref(&self) -> &bool {
     &self.value
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> core::ops::Deref for BooleanValue<S, Span, Lang> {
+impl core::ops::Deref for BooleanValue {
   type Target = bool;
 
   #[inline]
@@ -63,16 +61,11 @@ impl<S: ?Sized, Span, Lang: ?Sized> core::ops::Deref for BooleanValue<S, Span, L
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> BooleanValue<S, Span, Lang> {
+impl BooleanValue {
   /// Creates a new boolean value.
   #[inline]
   pub(crate) const fn new(span: Span, value: bool) -> Self {
-    Self {
-      span,
-      value,
-      _slice: PhantomData,
-      _lang: PhantomData,
-    }
+    Self { span, value }
   }
 
   /// Returns the span of the boolean value.
@@ -88,7 +81,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> BooleanValue<S, Span, Lang> {
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> DisplayCompact for BooleanValue<S, Span, Lang> {
+impl DisplayCompact for BooleanValue {
   type Options = ();
 
   #[inline]
@@ -97,7 +90,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> DisplayCompact for BooleanValue<S, Span, Lan
   }
 }
 
-impl<S: ?Sized, Span, Lang: ?Sized> DisplayPretty for BooleanValue<S, Span, Lang> {
+impl DisplayPretty for BooleanValue {
   type Options = ();
 
   #[inline]

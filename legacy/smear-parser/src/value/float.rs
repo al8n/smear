@@ -1,8 +1,6 @@
-use core::{fmt::Display, marker::PhantomData};
-
-use tokora::{
-  SimpleSpan,
-  span::{AsSpan, IntoSpan, Span as SpanTrait},
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -11,29 +9,30 @@ use tokora::{
   },
 };
 
+use core::fmt::Display;
 /// A floating-point value literal.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FloatValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
+pub struct FloatValue<S> {
   span: Span,
   value: S,
-  _lang: PhantomData<Lang>,
 }
 
-impl<S, Span, Lang: ?Sized> AsSpan<Span> for FloatValue<S, Span, Lang> {
+impl<S> AsSpan<Span> for FloatValue<S> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FloatValue<S, Span, Lang> {
+impl<S> IntoSpan<Span> for FloatValue<S> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoComponents for FloatValue<S, Span, Lang> {
+impl<S> IntoComponents for FloatValue<S> {
   type Components = (Span, S);
 
   #[inline]
@@ -42,57 +41,62 @@ impl<S, Span, Lang: ?Sized> IntoComponents for FloatValue<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> Display for FloatValue<S, Span, Lang>
+impl<S> Display for FloatValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
-impl<S, Span, Lang: ?Sized> AsRef<S> for FloatValue<S, Span, Lang> {
+impl<S> AsRef<S> for FloatValue<S> {
   #[inline]
   fn as_ref(&self) -> &S {
     self
   }
 }
 
-impl<S, Span, Lang: ?Sized> core::ops::Deref for FloatValue<S, Span, Lang> {
+impl<S> core::ops::Deref for FloatValue<S> {
   type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.source_ref()
   }
 }
 
-impl<S, Span, Lang: ?Sized> FloatValue<S, Span, Lang> {
-  /// Creates a new float value.
+impl<S> FloatValue<S> {
+  /// Creates a new name.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self {
-      span,
-      value,
-      _lang: PhantomData,
-    }
+    Self { span, value }
   }
 
-  /// Returns the span covering the floating-point literal.
+  /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the floating-point literal's source spelling.
+  /// Returns the source of the float.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.value
+  }
+
+  /// Returns the source of the float.
+  #[inline]
+  pub const fn source_ref(&self) -> &S {
     &self.value
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayCompact for FloatValue<S, Span, Lang>
+impl<S> DisplayCompact for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -104,7 +108,7 @@ where
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayPretty for FloatValue<S, Span, Lang>
+impl<S> DisplayPretty for FloatValue<S>
 where
   S: DisplayHuman,
 {
@@ -116,11 +120,9 @@ where
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplaySyntaxTree for FloatValue<S, Span, Lang>
+impl<S> DisplaySyntaxTree for FloatValue<S>
 where
   S: DisplayHuman,
-  Span: SpanTrait,
-  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(
@@ -136,7 +138,7 @@ where
       "- FLOAT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source().display(),
+      self.source_ref().display(),
     )
   }
 }

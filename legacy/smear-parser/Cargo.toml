@@ -1,17 +1,17 @@
 [package]
-name = "smear-parser-next"
+name = "smear-parser"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 readme = "README.md"
-description = "Atomic parser-combinators for GraphQL and GraphQL-like DSLs"
+description = "High-performance parser for GraphQL and GraphQL-like DSLs"
 
 [features]
 default = ["std", "graphql", "graphqlx"]
-alloc = ["smear-lexer/alloc"]
-std = ["smear-lexer/std"]
+alloc = ["smear-scaffold/alloc", "smear-lexer/alloc"]
+std = ["smear-scaffold/std", "smear-lexer/std"]
 
 unstable = ["smear-lexer/unstable"]
 
@@ -26,33 +26,9 @@ smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 [dependencies]
 derive_more.workspace = true
 tokora.workspace = true
+smear-scaffold.workspace = true
 smear-lexer.workspace = true
 paste = "1"
 
 bytes = { workspace = true, optional = true }
 smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
-
-[dev-dependencies]
-criterion = "0.8"
-apollo-parser = "0.8.6"
-graphql-parser = "0.4.1"
-async-graphql-parser = "7.2.1"
-cynic-parser = "=0.11.2"
-
-[[bench]]
-name = "executables"
-path = "benches/executables.rs"
-harness = false
-required-features = ["graphql"]
-
-[[bench]]
-name = "type_system"
-path = "benches/type_system.rs"
-harness = false
-required-features = ["graphql"]
-
-[[bench]]
-name = "graphqlx"
-path = "benches/graphqlx.rs"
-harness = false
-required-features = ["graphqlx"]

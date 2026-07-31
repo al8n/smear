@@ -1,12 +1,11 @@
-use std::{boxed::Box, rc::Rc, sync::Arc};
-
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use tokora::{
+use smear_lexer::tokora::{
   SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
 };
+use smear_scaffold::ast::{ListType, NamedType};
 
-pub use crate::ty::{ListType, NamedType};
+use std::{boxed::Box, rc::Rc, sync::Arc};
 
 macro_rules! ty {
   ($(
@@ -50,17 +49,6 @@ macro_rules! ty {
             match self {
               Self::Name(ty) => ty.into_span(),
               Self::List(ty) => *ty.span(),
-            }
-          }
-        }
-
-        impl<Name> $name<Name> {
-          /// Returns whether this type reference is non-null.
-          #[inline]
-          pub fn required(&self) -> bool {
-            match self {
-              Self::Name(ty) => ty.required(),
-              Self::List(ty) => ty.required(),
             }
           }
         }

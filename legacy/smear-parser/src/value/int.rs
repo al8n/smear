@@ -1,8 +1,6 @@
-use core::{fmt::Display, marker::PhantomData};
-
-use tokora::{
-  SimpleSpan,
-  span::{AsSpan, IntoSpan, Span as SpanTrait},
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
+  span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
     human_display::DisplayHuman,
@@ -11,39 +9,40 @@ use tokora::{
   },
 };
 
+use core::fmt::Display;
 /// An integer value literal.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IntValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
+pub struct IntValue<S> {
   span: Span,
   value: S,
-  _lang: PhantomData<Lang>,
 }
 
-impl<S, Span, Lang: ?Sized> Display for IntValue<S, Span, Lang>
+impl<S> Display for IntValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
-impl<S, Span, Lang: ?Sized> AsSpan<Span> for IntValue<S, Span, Lang> {
+impl<S> AsSpan<Span> for IntValue<S> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoSpan<Span> for IntValue<S, Span, Lang> {
+impl<S> IntoSpan<Span> for IntValue<S> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoComponents for IntValue<S, Span, Lang> {
+impl<S> IntoComponents for IntValue<S> {
   type Components = (Span, S);
 
   #[inline]
@@ -52,7 +51,7 @@ impl<S, Span, Lang: ?Sized> IntoComponents for IntValue<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> core::ops::Deref for IntValue<S, Span, Lang> {
+impl<S> core::ops::Deref for IntValue<S> {
   type Target = S;
 
   #[inline]
@@ -61,31 +60,35 @@ impl<S, Span, Lang: ?Sized> core::ops::Deref for IntValue<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntValue<S, Span, Lang> {
-  /// Creates a new int value.
+impl<S> IntValue<S> {
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
-    Self {
-      span,
-      value,
-      _lang: PhantomData,
-    }
+    Self { span, value }
   }
 
-  /// Returns the span covering the integer literal.
+  /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the integer literal's source spelling.
+  /// Returns the source of the int.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.value
+  }
+
+  /// Returns the source of the int.
+  #[inline]
+  pub const fn source_ref(&self) -> &S {
     &self.value
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayCompact for IntValue<S, Span, Lang>
+impl<S> DisplayCompact for IntValue<S>
 where
   S: DisplayHuman,
 {
@@ -97,7 +100,7 @@ where
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayPretty for IntValue<S, Span, Lang>
+impl<S> DisplayPretty for IntValue<S>
 where
   S: DisplayHuman,
 {
@@ -109,11 +112,9 @@ where
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplaySyntaxTree for IntValue<S, Span, Lang>
+impl<S> DisplaySyntaxTree for IntValue<S>
 where
   S: DisplayHuman,
-  Span: SpanTrait,
-  <Span as SpanTrait>::Offset: Display,
 {
   #[inline]
   fn fmt(
@@ -129,7 +130,7 @@ where
       "- INT@{}..{} \"{}\"",
       self.span.start(),
       self.span.end(),
-      self.source().display()
+      self.source_ref().display()
     )
   }
 }

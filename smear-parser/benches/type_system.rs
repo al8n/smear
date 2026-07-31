@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use smear_parser_next::graphql::{
+use smear_parser::graphql::{
   GraphQL, ast::TypeSystemDocument, error::GraphqlErrors, syntactic::GraphqlLexer,
 };
 use tokora::{Parse, Parser};
@@ -36,7 +36,7 @@ const FIXTURES: &[Fixture] = &[
   },
 ];
 
-fn parse_smear_parser_next<'inp>(
+fn parse_smear_parser<'inp>(
   source: &'inp str,
 ) -> Result<TypeSystemDocument<&'inp str>, GraphqlErrors<&'inp str>> {
   Parser::with_parser::<
@@ -51,10 +51,10 @@ fn parse_smear_parser_next<'inp>(
 }
 
 fn preflight(fixture: &Fixture) {
-  let smear_document = parse_smear_parser_next(fixture.source);
+  let smear_document = parse_smear_parser(fixture.source);
   assert!(
     smear_document.is_ok(),
-    "smear-parser-next rejected {}: {smear_document:?}",
+    "smear-parser rejected {}: {smear_document:?}",
     fixture.name,
   );
 
@@ -90,10 +90,10 @@ fn bench_type_system(c: &mut Criterion) {
     let mut group = c.benchmark_group(fixture.name);
     group.throughput(Throughput::Bytes(fixture.source.len() as u64));
 
-    group.bench_function("smear-parser-next", |b| {
+    group.bench_function("smear-parser", |b| {
       b.iter(|| {
-        let document = parse_smear_parser_next(black_box(fixture.source))
-          .expect("fixture passed parser preflight");
+        let document =
+          parse_smear_parser(black_box(fixture.source)).expect("fixture passed parser preflight");
         drop(black_box(document));
       });
     });

@@ -1,7 +1,5 @@
-use core::{fmt::Display, marker::PhantomData};
-
-use tokora::{
-  SimpleSpan,
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -10,39 +8,40 @@ use tokora::{
   },
 };
 
+use core::fmt::Display;
+
 /// An enum value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
+pub struct EnumValue<S> {
   source: S,
   span: Span,
-  _lang: PhantomData<Lang>,
 }
 
-impl<S, Span, Lang: ?Sized> Display for EnumValue<S, Span, Lang>
+impl<S> Display for EnumValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
-impl<S, Span, Lang: ?Sized> AsSpan<Span> for EnumValue<S, Span, Lang> {
+impl<S> AsSpan<Span> for EnumValue<S> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoSpan<Span> for EnumValue<S, Span, Lang> {
+impl<S> IntoSpan<Span> for EnumValue<S> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoComponents for EnumValue<S, Span, Lang> {
+impl<S> IntoComponents for EnumValue<S> {
   type Components = (Span, S);
 
   #[inline]
@@ -51,52 +50,48 @@ impl<S, Span, Lang: ?Sized> IntoComponents for EnumValue<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> core::ops::Deref for EnumValue<S, Span, Lang> {
+impl<S> core::ops::Deref for EnumValue<S> {
   type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.source_ref()
   }
 }
 
-impl<S, Span, Lang: ?Sized> EnumValue<S, Span, Lang> {
-  /// Creates a new enum value.
+impl<S> EnumValue<S> {
+  /// Creates a new null value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
     Self {
       source: value,
       span,
-      _lang: PhantomData,
     }
   }
 
-  /// Returns the span covering the enum literal.
+  /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the enum literal's source spelling.
+  /// Returns the source of the enum value.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn source_ref(&self) -> &S {
     &self.source
   }
-}
 
-impl<S, Span, Lang: ?Sized> DisplayCompact for EnumValue<S, Span, Lang>
-where
-  S: DisplayHuman,
-{
-  type Options = ();
-
+  /// Returns the source of the enum value.
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.source().fmt(f)
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.source
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayPretty for EnumValue<S, Span, Lang>
+impl<S> DisplayCompact for EnumValue<S>
 where
   S: DisplayHuman,
 {
@@ -104,6 +99,18 @@ where
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.source().fmt(f)
+    self.source_ref().fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for EnumValue<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    self.source_ref().fmt(f)
   }
 }

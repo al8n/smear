@@ -2,13 +2,13 @@
 //!
 //! These fixtures intentionally exercise imports, generic headers, qualified
 //! paths, `where` clauses, and extensions. They are benchmarked only against
-//! smear-parser-next because standard GraphQL parsers do not accept the same
+//! smear-parser because standard GraphQL parsers do not accept the same
 //! GraphQLx language surface.
 
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use smear_parser_next::graphqlx::{
+use smear_parser::graphqlx::{
   GraphQLx, ast::Document, error::GraphqlxErrors, syntactic::GraphqlxLexer,
 };
 use tokora::{Parse, Parser};
@@ -45,7 +45,7 @@ const FIXTURES: &[Fixture] = &[
   },
 ];
 
-fn parse_smear_parser_next<'inp>(
+fn parse_smear_parser<'inp>(
   source: &'inp str,
 ) -> Result<Document<&'inp str>, GraphqlxErrors<&'inp str>> {
   Parser::with_parser::<
@@ -61,19 +61,19 @@ fn parse_smear_parser_next<'inp>(
 
 fn bench_graphqlx(c: &mut Criterion) {
   for fixture in FIXTURES {
-    let preflight = parse_smear_parser_next(fixture.source);
+    let preflight = parse_smear_parser(fixture.source);
     assert!(
       preflight.is_ok(),
-      "smear-parser-next rejected {}: {preflight:?}",
+      "smear-parser rejected {}: {preflight:?}",
       fixture.name,
     );
 
     let mut group = c.benchmark_group(fixture.name);
     group.throughput(Throughput::Bytes(fixture.source.len() as u64));
-    group.bench_function("smear-parser-next", |b| {
+    group.bench_function("smear-parser", |b| {
       b.iter(|| {
-        let document = parse_smear_parser_next(black_box(fixture.source))
-          .expect("fixture passed parser preflight");
+        let document =
+          parse_smear_parser(black_box(fixture.source)).expect("fixture passed parser preflight");
         drop(black_box(document));
       });
     });

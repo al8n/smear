@@ -1,7 +1,5 @@
-use core::{fmt::Display, marker::PhantomData};
-
-use tokora::{
-  SimpleSpan,
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -10,39 +8,41 @@ use tokora::{
   },
 };
 
+use core::fmt::Display;
+
 /// A null value literal.
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NullValue<S, Span = SimpleSpan, Lang: ?Sized = ()> {
+pub struct NullValue<S> {
   source: S,
   span: Span,
-  _lang: PhantomData<Lang>,
 }
 
-impl<S, Span, Lang: ?Sized> Display for NullValue<S, Span, Lang>
+impl<S> Display for NullValue<S>
 where
   S: DisplayHuman,
 {
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }
 
-impl<S, Span, Lang: ?Sized> AsSpan<Span> for NullValue<S, Span, Lang> {
+impl<S> AsSpan<Span> for NullValue<S> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoSpan<Span> for NullValue<S, Span, Lang> {
+impl<S> IntoSpan<Span> for NullValue<S> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<S, Span, Lang: ?Sized> IntoComponents for NullValue<S, Span, Lang> {
+impl<S> IntoComponents for NullValue<S> {
   type Components = (Span, S);
 
   #[inline]
@@ -51,52 +51,48 @@ impl<S, Span, Lang: ?Sized> IntoComponents for NullValue<S, Span, Lang> {
   }
 }
 
-impl<S, Span, Lang: ?Sized> core::ops::Deref for NullValue<S, Span, Lang> {
+impl<S> core::ops::Deref for NullValue<S> {
   type Target = S;
 
   #[inline]
   fn deref(&self) -> &Self::Target {
-    self.source()
+    self.source_ref()
   }
 }
 
-impl<S, Span, Lang: ?Sized> NullValue<S, Span, Lang> {
+impl<S> NullValue<S> {
   /// Creates a new null value.
   #[inline]
   pub(crate) const fn new(span: Span, value: S) -> Self {
     Self {
       source: value,
       span,
-      _lang: PhantomData,
     }
   }
 
-  /// Returns the span covering the null literal.
+  /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the null literal's source spelling.
+  /// Returns the source of the null value.
   #[inline]
-  pub const fn source(&self) -> &S {
+  pub const fn source_ref(&self) -> &S {
     &self.source
   }
-}
 
-impl<S, Span, Lang: ?Sized> DisplayCompact for NullValue<S, Span, Lang>
-where
-  S: DisplayHuman,
-{
-  type Options = ();
-
+  /// Returns the source of the null value.
   #[inline]
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    self.source().fmt(f)
+  pub const fn source(&self) -> S
+  where
+    S: Copy,
+  {
+    self.source
   }
 }
 
-impl<S, Span, Lang: ?Sized> DisplayPretty for NullValue<S, Span, Lang>
+impl<S> DisplayCompact for NullValue<S>
 where
   S: DisplayHuman,
 {
@@ -104,6 +100,18 @@ where
 
   #[inline]
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
-    DisplayHuman::fmt(self.source(), f)
+    self.source_ref().fmt(f)
+  }
+}
+
+impl<S> DisplayPretty for NullValue<S>
+where
+  S: DisplayHuman,
+{
+  type Options = ();
+
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>, _: &Self::Options) -> core::fmt::Result {
+    DisplayHuman::fmt(self.source_ref(), f)
   }
 }

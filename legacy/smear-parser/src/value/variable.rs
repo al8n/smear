@@ -1,7 +1,7 @@
 use core::fmt::Display;
 
-use tokora::{
-  SimpleSpan,
+use smear_lexer::tokora::{
+  SimpleSpan as Span,
   span::{AsSpan, IntoSpan},
   utils::{
     IntoComponents,
@@ -10,28 +10,30 @@ use tokora::{
   },
 };
 
+use crate::{error::ParseVariableValueError, hints::VariableValueHint};
+
 /// A variable value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VariableValue<Name, Span = SimpleSpan> {
+pub struct VariableValue<Name> {
   span: Span,
   name: Name,
 }
 
-impl<Name, Span> AsSpan<Span> for VariableValue<Name, Span> {
+impl<Name> AsSpan<Span> for VariableValue<Name> {
   #[inline]
   fn as_span(&self) -> &Span {
     self.span()
   }
 }
 
-impl<Name, Span> IntoSpan<Span> for VariableValue<Name, Span> {
+impl<Name> IntoSpan<Span> for VariableValue<Name> {
   #[inline]
   fn into_span(self) -> Span {
     self.span
   }
 }
 
-impl<Name, Span> IntoComponents for VariableValue<Name, Span> {
+impl<Name> IntoComponents for VariableValue<Name> {
   type Components = (Span, Name);
 
   #[inline]
@@ -40,7 +42,7 @@ impl<Name, Span> IntoComponents for VariableValue<Name, Span> {
   }
 }
 
-impl<Name, Span> core::ops::Deref for VariableValue<Name, Span> {
+impl<Name> core::ops::Deref for VariableValue<Name> {
   type Target = Name;
 
   #[inline]
@@ -49,7 +51,7 @@ impl<Name, Span> core::ops::Deref for VariableValue<Name, Span> {
   }
 }
 
-impl<Name, Span> Display for VariableValue<Name, Span>
+impl<Name> Display for VariableValue<Name>
 where
   Name: DisplayHuman,
 {
@@ -59,27 +61,27 @@ where
   }
 }
 
-impl<Name, Span> VariableValue<Name, Span> {
+impl<Name> VariableValue<Name> {
   /// Creates a new variable from the given span and name.
-  #[inline]
+  #[inline(always)]
   pub(crate) const fn new(span: Span, name: Name) -> Self {
     Self { span, name }
   }
 
-  /// Returns the span covering the variable.
+  /// Returns the span of the name.
   #[inline]
   pub const fn span(&self) -> &Span {
     &self.span
   }
 
-  /// Returns the variable name.
+  /// Returns the name as a string slice.
   #[inline]
   pub const fn name(&self) -> &Name {
     &self.name
   }
 }
 
-impl<Name, Span> DisplayCompact for VariableValue<Name, Span>
+impl<Name> DisplayCompact for VariableValue<Name>
 where
   Name: DisplayHuman,
 {
@@ -91,7 +93,7 @@ where
   }
 }
 
-impl<Name, Span> DisplayPretty for VariableValue<Name, Span>
+impl<Name> DisplayPretty for VariableValue<Name>
 where
   Name: DisplayHuman,
 {
