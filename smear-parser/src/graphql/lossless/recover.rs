@@ -34,13 +34,14 @@
 //! `Error` node that consumes nothing, which is the rule above violated in the one place it
 //! looks like recovery.
 
-use smear_lexer::graphql::lossless::LosslessTokenKind as Kind;
+use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{
   Emitter as _, SimpleSpan,
   emitter::{CstEmitter as _, FromUnclosed},
   error::{UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot, token::UnexpectedToken},
   input::Balance,
   span::Spanned,
+  utils::DowncastRef,
 };
 
 use crate::graphql::{GraphQL, kinds::SyntaxKind as K};
@@ -95,12 +96,74 @@ pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier];
 /// The token kinds a `VariableDefinition` may begin with.
 pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] = &[Kind::Dollar];
 
-/// The token kinds an executable definition may begin with: the `{` of a shorthand operation,
-/// or the `query`/`mutation`/`subscription`/`fragment` keyword — an `Identifier` to the lexer,
-/// which is why the set cannot be finer than this.
-pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[Kind::LBrace, Kind::Identifier];
+/// The token kinds an executable definition may begin with: the leading string of a
+/// description, the `{` of a shorthand operation, or the
+/// `query`/`mutation`/`subscription`/`fragment` keyword — an `Identifier` to the lexer, which
+/// is why the set cannot be finer than this.
+pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBrace,
+  Kind::Identifier,
+];
 
-/// The span of the single-byte delimiter an [`expect`](super::trivia::expect) has just
+/// The token kinds a described SDL member may begin with: its own name, or the leading string
+/// of a description.
+///
+/// One set for `FieldDefinition`, `InputValueDefinition` and `EnumValueDefinition` — all three
+/// are `Description? Name …`, so they open on exactly the same three kinds and a set per
+/// production would name the same three kinds three times.
+pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
+
+/// The token kinds a `NamedType` may begin with — one, and it stands for four positions: an
+/// interface in an `implements` clause, a member of a union, a root operation type's target,
+/// and a directive location.
+pub(crate) const NAME_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds a `RootOperationTypeDefinition` may begin with: the `query`, `mutation` or
+/// `subscription` keyword, all `Identifier`s to the lexer.
+pub(crate) const OPERATION_TYPE_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds any definition may begin with — the top-level dispatch's set, and the widest
+/// in this file: a description's string, the `{` of a shorthand operation, or a keyword.
+pub(crate) const DEFINITION_HEADS: &[Kind] = &[
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBrace,
+  Kind::Identifier,
+];
+
+/// The token kinds a type-system definition or extension may begin with — [`DEFINITION_HEADS`]
+/// without the shorthand operation's `{`, since no type-system definition is anonymous.
+pub(crate) const TYPE_SYSTEM_DEFINITION_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
+
+/// The token kinds that may follow an `extend`: the shape keyword, an `Identifier` to the
+/// lexer.
+pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds that may open a `ScalarTypeExtension`'s tail. The grammar gives it exactly
+/// one shape — `extend scalar Name Directives` — so its directives are mandatory where every
+/// other definition's are optional.
+pub(crate) const SCALAR_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At];
+
+/// The token kinds that may open an `ObjectTypeExtension`'s or `InterfaceTypeExtension`'s tail:
+/// `implements` (an `Identifier`), a directive's `@`, or a fields definition's `{`.
+pub(crate) const OBJECT_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::Identifier, Kind::At, Kind::LBrace];
+
+/// The token kinds that may open a `UnionTypeExtension`'s tail: a directive's `@` or the `=` of
+/// a union member list.
+pub(crate) const UNION_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::Equal];
+
+/// The token kinds that may open an `EnumTypeExtension`'s, `InputObjectTypeExtension`'s or
+/// `SchemaExtension`'s tail: a directive's `@` or the `{` of the block that follows.
+pub(crate) const BLOCK_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::LBrace];
+
+/// The token kinds a `SchemaDefinition`'s root-operation block may begin with.
+pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
+
+/// The span of the single-byte delimiter an [`expect`] has just
 /// committed, given the input's committed extent.
 ///
 /// `expect` reports only whether it matched, so the opener's own span has to be recovered from
@@ -151,6 +214,65 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::RBrace
       | Kind::RParen
   )
+}
+
+/// Whether `token` begins a top-level definition — the predicate the **catch** arm of
+/// [`document`](super::document::document) resynchronises to, and a strictly narrower set than
+/// [`is_sync_point`].
+///
+/// # Why not `is_sync_point`
+///
+/// The two arms recover from different situations and want different answers. An *unrecognised
+/// head* means the parser has not started anything yet, so the widest set that can restart
+/// anything at all is right — that is [`unexpected`]'s. A *production `Err`* means a definition
+/// was half-parsed and its remaining body is wreckage; stopping at the first name inside that
+/// body would hand the document loop a `type`-less field to re-fail on, one token at a time.
+/// Skipping to the next keyword costs one `Error` node for the whole wreck.
+///
+/// # The shorthand `{` is deliberately absent
+///
+/// `{` opens a shorthand operation and so *is* a definition head — but including it here would
+/// make the scan stop on the very brace that usually opens the wreckage (`type { … }`),
+/// returning a zero-skip hole and degrading this helper to a consume-one loop. A shorthand
+/// operation after junk is still found, by the other arm: [`is_sync_point`] carries `LBrace`.
+///
+/// A description's string is present, because a string is where a described definition starts
+/// and the next loop turn can parse one.
+#[inline]
+fn is_definition_start(kind: Kind, keyword: Option<ContextualKeyword>) -> bool {
+  match kind {
+    Kind::InlineString | Kind::BlockString => true,
+    Kind::Identifier => matches!(
+      keyword,
+      Some(
+        ContextualKeyword::Query
+          | ContextualKeyword::Mutation
+          | ContextualKeyword::Subscription
+          | ContextualKeyword::Fragment
+          | ContextualKeyword::Schema
+          | ContextualKeyword::Directive
+          | ContextualKeyword::Scalar
+          | ContextualKeyword::Type
+          | ContextualKeyword::Interface
+          | ContextualKeyword::Union
+          | ContextualKeyword::Enum
+          | ContextualKeyword::Input
+          | ContextualKeyword::Extend
+      )
+    ),
+    _ => false,
+  }
+}
+
+/// [`kind_of`](super::trivia::kind_of)'s twin for the spelling: `DowncastRef`, reached without
+/// letting method resolution pick the wrong `Self`.
+///
+/// `sync_balanced` hands its predicate a `Spanned<&Token, &Span>`, so the same `&&Token`
+/// receiver that costs `kind_of` its own helper applies here. The projection is owned and
+/// `Copy`, so nothing borrowed escapes.
+#[inline]
+fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<ContextualKeyword> {
+  token.downcast_ref()
 }
 
 /// GraphQL's three delimiter pairs, for `sync_balanced`'s depth counting.
@@ -300,6 +422,68 @@ lossless_production! {
     let hole = inp.sync_balanced(delimiters, |t| is_sync_point(kind_of(t.data)))?;
     if hole.is_some_and(|h| h.skipped() > 0) {
       // The sink wrapped the skipped region in the profile's `error_kind` on its own.
+      return Ok(());
+    }
+
+    let mark = inp.emitter().cst_mark();
+    if inp.try_expect(|_| true)?.is_some() {
+      inp.emitter().cst_start_at(mark, K::Error.raw());
+      inp.emitter().cst_finish(K::Error.raw());
+    }
+    Ok(())
+  }
+
+  /// A definition returned `Err`: skip its wreckage and stop before the next definition head.
+  ///
+  /// # This helper reports nothing, and that is the point
+  ///
+  /// Its only callers are the two document loops, and they reach it *because* a production
+  /// failed — which means [`expect`] already emitted at the position the
+  /// failure happened. A second diagnostic here would point at whatever the resync happens to
+  /// start on, which is not where anything went wrong.
+  ///
+  /// # The fallback is **not** [`unexpected`]'s, and copying it there was a defect
+  ///
+  /// [`unexpected`] consumes one token whenever its balanced skip made no progress, because its
+  /// caller has already ruled the token at hand junk. Here the opposite is true: a scan that
+  /// stops having skipped **zero** tokens has stopped *on a definition head* — the exact token
+  /// this helper went looking for — and eating it costs the whole definition. `type T { a scalar
+  /// S }` loses its `ScalarTypeDefinition` that way, which is what
+  /// `a_resync_that_lands_on_a_definition_head_does_not_eat_it` pins.
+  ///
+  /// So the outcomes are told apart rather than lumped together:
+  ///
+  /// - **`Some(hole)`** — a definition head is at hand, whether the scan crossed anything to
+  ///   reach it or not. Whatever it crossed is already wrapped in `error_kind` by the sink;
+  ///   return, and the caller's next turn parses the head.
+  /// - **`None`** — the scan ran to end of input without finding one, rewound, and committed
+  ///   nothing. Everything left is junk, so consuming one token into an `Error` node can eat no
+  ///   definition, and it is the branch that keeps this helper self-sufficient.
+  ///
+  /// # Termination does not rest on that fallback
+  ///
+  /// The document loops' dispatchers consume at least one token before they can fail — a
+  /// description commits its string, every keyword arm commits its keyword, and the fall-through
+  /// is [`unexpected`], which guarantees progress on its own — so a resync that consumes nothing
+  /// cannot starve the loop. Deleting the `None` branch is therefore **not** observable as a
+  /// hang; it is kept because a helper whose safety depends on a caller's internals is one
+  /// refactor away from being wrong, and because a token nobody attributes is a token that
+  /// reaches the tree as a loose child of `Document`.
+  ///
+  /// The leading peek is not decoration either. `sync_balanced` counts *every* token into its
+  /// hole, trivia included, so trivia the failed production left uncrossed would otherwise land
+  /// inside the `Error` node instead of beside it.
+  fn resync_to_definition<'inp, Src, Ctx>(inp) {
+    if super::trivia::peek_kind::<Src, Ctx>(inp)?.is_none() {
+      return Ok(());
+    }
+
+    if inp
+      .sync_balanced(delimiters, |t| {
+        is_definition_start(kind_of(t.data), keyword_of(t.data))
+      })?
+      .is_some()
+    {
       return Ok(());
     }
 

@@ -344,6 +344,21 @@ macro_rules! lossless_production {
 /// on the error path: a production that returns `Err` has committed a prefix and left the rest,
 /// and without the drain that would be a panic in the driver instead of a reportable parse.
 ///
+/// # A retro-wrapping production takes a mark, and the driver mints it
+///
+/// A production whose node is discovered *after* its first child — every definition that may
+/// carry a leading [`Description`](crate::graphql::kinds::SyntaxKind::Description), and every
+/// type-system extension, whose shape keyword follows the `extend` its node must contain —
+/// takes an [`EventMark`](tokora::cst::event::EventMark) and opens with
+/// [`node_at`](tokora::parser::node_at) rather than [`node`](tokora::parser::node). The
+/// `(mark)` suffix on a driver declares that second argument.
+///
+/// **The two are equivalent at position zero**, which is what makes such a driver honest:
+/// [`node`](tokora::parser::node) mints its own mark at entry and wraps on success, so a mark
+/// minted immediately before the call and spent by `node_at` covers exactly the same region.
+/// The difference only appears when the *caller* commits something between the two, which is
+/// the whole reason the parameter exists.
+///
 /// ```text
 /// lossless_drivers! {
 ///   /// Module docs.
@@ -351,6 +366,9 @@ macro_rules! lossless_production {
 ///
 ///   /// Driver docs.
 ///   fn parse_value => value;
+///
+///   /// A retro-wrapping production's driver.
+///   fn parse_operation_definition => operation_definition (mark);
 /// }
 /// ```
 macro_rules! lossless_drivers {
@@ -359,7 +377,7 @@ macro_rules! lossless_drivers {
     mod $modname:ident;
     $(
       $(#[$meta:meta])*
-      fn $name:ident => $production:ident;
+      fn $name:ident => $production:ident $(($mark:ident))?;
     )*
   ) => {
     $(#[$modmeta])*
@@ -398,9 +416,15 @@ macro_rules! lossless_drivers {
             DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
           ))
           .apply::<_, GraphQL>(|inp: &mut TestInput<'inp, '_, '_>| {
+            // Minted before the call, not inside the argument list: `inp` is already borrowed
+            // mutably as the first argument, so `inp.emitter()` in the second would be a second
+            // mutable borrow of the same value.
+            $(let $mark = ::tokora::emitter::CstEmitter::cst_mark(
+              ::tokora::InputRef::emitter(inp),
+            );)?
             // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
             // parameter that matches `L::Source`.
-            let out = super::$production::<str, _>(inp);
+            let out = super::$production::<str, _>(inp $(, $mark)?);
             inp.skip_while(|_| true)?;
             out
           })
@@ -419,6 +443,7 @@ macro_rules! lossless_drivers {
 // module only if it is declared before that module's `mod` item in this file. A
 // `pub(crate) use lossless_production;` re-export beside it is dead — the import would be
 // shadowed by the textual binding and warns as unused.
+pub mod definition;
 pub mod directive;
 pub mod document;
 pub mod executable;

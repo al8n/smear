@@ -324,11 +324,17 @@ fn a_shorthand_operation_is_just_a_selection_set() {
 
 #[test]
 fn a_named_operation_carries_its_name_variables_and_directives() {
+  // `K::OperationType` arrived in Task 8, which unified this position with
+  // `RootOperationTypeDefinition`'s on one production. Task 7 consumed the keyword as a bare
+  // `Name` because the kind was not yet its to spend; two positions parsing one construct
+  // differently is the seam bugs live in, so the vectors below gained the node rather than the
+  // production keeping the divergence.
   assert_eq!(
     kinds(&parse_operation_definition("query Q($a: Int) @d { b }")),
     vec![
       K::Root,
       K::OperationDefinition,
+      K::OperationType,
       K::VariablesDefinition,
       K::VariableDefinition,
       K::Variable,
@@ -343,10 +349,19 @@ fn a_named_operation_carries_its_name_variables_and_directives() {
   for src in ["query { a }", "mutation { a }", "subscription { a }"] {
     assert_eq!(
       kinds(&parse_operation_definition(src)),
-      vec![K::Root, K::OperationDefinition, K::SelectionSet, K::Field],
+      vec![
+        K::Root,
+        K::OperationDefinition,
+        K::OperationType,
+        K::SelectionSet,
+        K::Field
+      ],
       "{src:?}"
     );
   }
+  // The shorthand has no keyword, so it has no `OperationType` node — the retro-wrap must not
+  // fire where there is nothing to wrap.
+  assert!(!kinds(&parse_operation_definition("{ a }")).contains(&K::OperationType));
 }
 
 #[test]
@@ -381,6 +396,7 @@ fn an_executable_document_holds_every_definition() {
       K::Root,
       K::ExecutableDocument,
       K::OperationDefinition,
+      K::OperationType,
       K::SelectionSet,
       K::Field,
       K::FragmentDefinition,

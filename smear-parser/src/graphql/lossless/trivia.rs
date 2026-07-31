@@ -61,7 +61,7 @@
 //! discipline, for a placement this suite does not want.
 
 use tokora::{
-  Lexer, SimpleSpan, Source, Token,
+  Emitter as _, Lexer, SimpleSpan, Source, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
   lexer::FromLogos,
   span::Spanned,
@@ -158,6 +158,62 @@ where
   Ok(inp.peek_head_map(|t| t.data.downcast_ref())?.flatten())
 }
 
+/// The diagnostic a failed [`expect`] carries: an unexpected-token error naming `kind`, or the
+/// end-of-input error when there is no token to name.
+///
+/// Split out because `expect` needs the *same* value twice — once to emit and once to return —
+/// and the parse context's error type is not `Clone` without a tenth clause in every
+/// production's where-bundle. Building it twice costs a second peek, which is served straight
+/// out of the cache and consumes nothing.
+fn expectation_failure<'inp, Src, Ctx>(
+  inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
+  kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
+) -> Result<
+  Spanned<GraphqlLosslessError<'inp, Src, Ctx>, SimpleSpan>,
+  GraphqlLosslessError<'inp, Src, Ctx>,
+>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp> + Clone,
+  GraphqlLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
+  GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
+    + From<
+      UnexpectedToken<
+        'inp,
+        GraphqlLosslessToken<'inp, Src>,
+        <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
+        SimpleSpan,
+        GraphQL,
+      >,
+    >,
+{
+  // The declined token is still at the cache front, so peeking it costs no re-lex and — the
+  // point — does not consume it. `try_expect` also declines at genuine end of input, where the
+  // peek is `None` and the right diagnostic is the end-of-input one, not "unexpected token:
+  // <nothing>".
+  //
+  // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field is
+  // already a reference, so the method form resolves to `<&Token as Clone>::clone` and hands
+  // back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and fails the
+  // `From` bound a long way from here.
+  Ok(
+    match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
+      Some(found) => Spanned::new(
+        found.span,
+        UnexpectedToken::<_, _, _, GraphQL>::expected_one(found.span, kind)
+          .with_found(found.data)
+          .into(),
+      ),
+      None => {
+        let end = inp.span().end();
+        Spanned::new(SimpleSpan::new(end, end), UnexpectedEot::eot_of(end).into())
+      }
+    },
+  )
+}
+
 /// Commit any leading trivia, then require `kind`.
 ///
 /// On a mismatch the offending token is **left unconsumed**, at the cache front where
@@ -166,6 +222,16 @@ where
 /// reaches the tree. Consuming it here — which is what `tokora::parser::expect` does, since it
 /// reads through `next_or_stop` — would commit it to whatever node happens to be open, and the
 /// recovery could only wrap the tokens after it.
+///
+/// # A mismatch is **emitted** as well as returned, and that is load-bearing
+///
+/// The `Err` this returns is not a diagnostic: it unwinds to
+/// [`document`](super::document::document), which catches it, resynchronises and continues —
+/// deliberately *without* reporting, since the failure's own position is here and not there.
+/// Emitting at the point of failure is therefore the only report the failure ever gets, and
+/// [`Parse::has_errors`](super::Parse::has_errors) is the verdict the acceptance-parity gate
+/// compares against `syntactic/`. Returning `Err` alone left a failed parse reading as a clean
+/// one — the defect Task 5 found and Task 8 owns.
 pub(crate) fn expect<'inp, Src, Ctx>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
   kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
@@ -195,22 +261,13 @@ where
   // `None` otherwise, so the "or error" half is this function's job.
   match inp.try_expect(|t| kind_of(t.data) == kind)? {
     Some(_) => Ok(()),
-    // The declined token is still at the cache front, so peeking it costs no re-lex and — the
-    // point — does not consume it. `try_expect` also declines at genuine end of input, where
-    // the peek is `None` and the right diagnostic is the end-of-input one, not "unexpected
-    // token: <nothing>".
-    None => Err(
-      // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field
-      // is already a reference, so the method form resolves to `<&Token as Clone>::clone` and
-      // hands back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and
-      // fails the `From` bound a long way from here.
-      match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
-        Some(found) => UnexpectedToken::<_, _, _, GraphQL>::expected_one(found.span, kind)
-          .with_found(found.data)
-          .into(),
-        None => UnexpectedEot::eot_of(inp.span().end()).into(),
-      },
-    ),
+    None => {
+      // Emit first, then return the same diagnostic as the `Err`. Built twice rather than
+      // cloned: see [`expectation_failure`].
+      let reported = expectation_failure::<Src, Ctx>(inp, kind)?;
+      inp.emitter().emit_error(reported)?;
+      Err(expectation_failure::<Src, Ctx>(inp, kind)?.data)
+    }
   }
 }
 

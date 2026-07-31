@@ -24,28 +24,35 @@
 //! inside it are each delimited by their own `}` and are unaffected, which
 //! `an_executable_document_holds_every_definition` asserts by node text.
 //!
+//! # Every definition here is a retro-wrap, because of the description
+//!
+//! `syntactic/`'s `executable_definition` takes an optional leading string as a frozen-parser
+//! compatibility extension, which is not in the GraphQL grammar but which the acceptance-parity
+//! gate compares. A leading string says only that *some* definition follows, and the atom set
+//! has no two-token peek, so the dispatcher mints a mark, commits the description, reads the
+//! keyword, and hands the mark to the production it chose — which spends it, putting the
+//! `Description` inside the definition it describes. `definition.rs`'s module docs give the full
+//! reasoning; this file follows it.
+//!
 //! # Divergences, decided rather than inherited
 //!
-//! - **There is no `OperationType` node.** `OperationType` is Task 8's kind — it is also what a
-//!   `RootOperationTypeDefinition` needs — so the keyword is a bare `Name` token inside
-//!   `OperationDefinition` here, where `apollo-parser` wraps it in an `OPERATION_TYPE` node.
-//!   Task 8 should unify the two positions on one production; nothing in this file blocks that,
-//!   and the token is already where the wrap would go.
-//! - **A description before an executable definition is not accepted.** `syntactic/`'s
-//!   `executable_definition` takes an optional leading string as a frozen-parser compatibility
-//!   extension, which is not in the GraphQL grammar. `Description` is Task 8's kind; until then
-//!   a leading string is an unrecognised head, and the acceptance-parity gate will see it.
-//! - **A malformed definition is an `Err`, not a resync.** `document` — Task 8's — is where
+//! - **A malformed definition is an `Err`, not a resync.** `document` is where
 //!   catch-resync-continue belongs, and it is the only caller that can be tested at its own
 //!   call site.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, parser::node};
+use tokora::{
+  ParseInput as _,
+  cst::event::EventMark,
+  emitter::CstEmitter as _,
+  parser::{node, node_at},
+};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
 use super::{
   GraphqlLosslessInput,
+  definition::{description, operation_type, starts_description},
   directive::directives,
   recover,
   recover::{EXECUTABLE_DEFINITION_HEADS, VARIABLE_DEFINITION_HEADS, opener_span},
@@ -116,20 +123,21 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `SelectionSet` (the shorthand) or
-  /// `OperationType Name? VariablesDefinition? Directives? SelectionSet`
+  /// `Description? SelectionSet` (the shorthand) or
+  /// `Description? OperationType Name? VariablesDefinition? Directives? SelectionSet`
   ///
-  /// **Precondition: the head is `{`, or an `Identifier` spelled `query`, `mutation` or
-  /// `subscription`.** [`executable_definition`] decides that on the spelling; see the module
-  /// docs for why the keyword is not re-read here, and for why it gets no node of its own.
-  fn operation_definition<'inp, Src, Ctx>(inp) {
-    node(
+  /// **Precondition: `mark` was minted before any description, which is already committed, and
+  /// the head is `{` or an `Identifier` spelled `query`, `mutation` or `subscription`.** Both
+  /// dispatchers establish that; see the module docs for why the keyword is not re-read here.
+  fn operation_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+    node_at(
+      mark,
       K::OperationDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           return selection_set::<Src, Ctx>(inp);
         }
-        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        operation_type::<Src, Ctx>(inp)?;
         // The operation name is optional, and any name will do — an operation may be called
         // `query` or `on`; nothing in the grammar reserves a spelling in this position.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
@@ -148,16 +156,17 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `fragment FragmentName TypeCondition Directives? SelectionSet`
+  /// `Description? fragment FragmentName TypeCondition Directives? SelectionSet`
   ///
-  /// **Precondition: the head is an `Identifier` spelled `fragment`.**
-  /// [`executable_definition`] decides that on the spelling.
+  /// **Precondition: `mark` was minted before any description, which is already committed, and
+  /// the head is an `Identifier` spelled `fragment`.**
   ///
   /// The type condition is [`type_condition`], which recovers rather than requiring: a
   /// definition whose `on` is missing keeps its name, its type and its selection set, and costs
   /// one diagnostic.
-  fn fragment_definition<'inp, Src, Ctx>(inp) {
-    node(
+  fn fragment_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+    node_at(
+      mark,
       K::FragmentDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
@@ -174,20 +183,28 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// Dispatch on the definition head. Opens **no** node of its own; the chosen production opens
-  /// its own — and this is the one place the four contextual keywords are read.
+  /// Dispatch on the definition head, reading an optional leading description first. Opens
+  /// **no** node of its own; the chosen production spends the mark on its own — and this is one
+  /// of the two places the contextual keywords are read.
   fn executable_definition<'inp, Src, Ctx>(inp) {
+    // The head peek first — see `document::definition` for the ruling and for the measurement
+    // that shows the ordering is currently redundant, every caller being a loop that peeks.
+    let head = peek_kind::<Src, Ctx>(inp)?;
+    let mark = inp.emitter().cst_mark();
+    if starts_description(head) {
+      description::<Src, Ctx>(inp)?;
+    }
     match peek_kind::<Src, Ctx>(inp)? {
       // The shorthand operation, which has no keyword at all.
-      Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp),
+      Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp, mark),
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, ContextualKeyword>(inp)? {
         Some(
           ContextualKeyword::Query | ContextualKeyword::Mutation | ContextualKeyword::Subscription,
-        ) => operation_definition::<Src, Ctx>(inp),
-        Some(ContextualKeyword::Fragment) => fragment_definition::<Src, Ctx>(inp),
+        ) => operation_definition::<Src, Ctx>(inp, mark),
+        Some(ContextualKeyword::Fragment) => fragment_definition::<Src, Ctx>(inp, mark),
         // A name that is not one of the four. Reported and skipped — `unexpected` consumes at
         // least one token whenever input remains, which is the document loop's only termination
-        // argument.
+        // argument. The mark is left unspent, and an unspent mark materializes into nothing.
         _ => recover::unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS),
       },
       _ => recover::unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS),
@@ -226,10 +243,10 @@ lossless_drivers! {
   fn parse_variables_definition => variables_definition;
 
   /// `super::operation_definition` over `src`.
-  fn parse_operation_definition => operation_definition;
+  fn parse_operation_definition => operation_definition (mark);
 
   /// `super::fragment_definition` over `src`.
-  fn parse_fragment_definition => fragment_definition;
+  fn parse_fragment_definition => fragment_definition (mark);
 
   /// `super::executable_document` over `src` — the entry every executable parse uses, and the
   /// only door to `executable_definition`.

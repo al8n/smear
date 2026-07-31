@@ -3,11 +3,16 @@
 use smear_parser::graphql::{kinds::SyntaxKind as K, lossless::parse_str};
 
 #[test]
-fn an_empty_source_yields_a_root_and_no_errors() {
+fn an_empty_source_yields_a_root_and_an_empty_document() {
+  // **This test asserted `!has_errors()` until Task 8**, when `document` stopped being a stub
+  // that could not report anything. `syntactic/`'s `document` is `.at_least(1)` — "nonempty" —
+  // and gate 1 compares the two suites' verdicts input by input, so the empty source is
+  // reported here too; Task 7 took the same ruling for `ExecutableDocument`. The tree is
+  // unchanged, which is what the two surviving assertions pin.
   let p = parse_str("");
   assert_eq!(p.syntax().kind(), K::Root);
-  assert!(!p.has_errors());
   assert_eq!(p.syntax().text().to_string(), "");
+  assert!(p.has_errors(), "an empty document must report");
 }
 
 #[test]

@@ -175,7 +175,11 @@ pub fn parse_str(src: &str) -> Parse {
     &mut sink,
     tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
   ))
-  .apply::<_, crate::graphql::GraphQL>(super::document::document::<str, _>)
+  // `document_entry`, not `document`: the driver's result is discarded below, so an `Err` that
+  // escaped the document production would leave the rest of the source uncommitted and
+  // `finish` would refuse it as an `UncoveredGap`. The entry drains what an escape left behind,
+  // which turns the one failure mode `parse_str` cannot report into a reportable parse.
+  .apply::<_, crate::graphql::GraphQL>(super::document::document_entry::<str, _>)
   .parse_str(src);
 
   finish_root(sink)

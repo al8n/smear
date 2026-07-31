@@ -256,12 +256,17 @@ fn nested_garbage_is_skipped_as_one_region() {
   assert_eq!(tree_text(src), src);
 }
 
-// ---- The plan's own Task 5 Step 1 tests, deferred to Task 8 ------------------------------
+// ---- The plan's own Task 5 Step 1 tests, switched on in Task 8 ---------------------------
 //
-// These are the plan's four tests verbatim in intent. They cannot pass — or, worse, cannot
-// *fail* — until Task 8 gives `document` a body, because `parse_str` currently drives only
-// the drain-everything stub. Switch them on at the end of Task 8 and record both results, as
-// Task 5 Step 5 asks.
+// These are the plan's four tests verbatim in intent. They were `#[ignore]`d through Tasks 5
+// to 7, because `parse_str` drove only the drain-everything `document` stub and every
+// `node_kinds` answered `[Root]` — which would have failed two of them and, worse, passed the
+// other two *vacuously*, both sides of the trivia comparison being the same empty tree.
+//
+// Task 8 gives `document` a body, so they are live. **Their node vectors needed no change**:
+// the plan predicted `[Root, Document, OperationDefinition, SelectionSet, Field, …]` and that
+// is what the shipped productions build — a shorthand operation carries no `OperationType`
+// node, so the kind this task added does not appear here.
 
 #[cfg(test)]
 mod through_parse_str {
@@ -277,7 +282,6 @@ mod through_parse_str {
   }
 
   #[test]
-  #[ignore = "document is Task 3's stub until Task 8"]
   fn a_list_value_nests_its_elements() {
     assert_eq!(
       node_kinds("{ f(a: [1, 2]) }"),
@@ -297,7 +301,6 @@ mod through_parse_str {
   }
 
   #[test]
-  #[ignore = "document is Task 3's stub until Task 8"]
   fn an_object_value_wraps_each_field() {
     assert_eq!(
       node_kinds("{ f(a: {x: 1}) }"),
@@ -317,7 +320,6 @@ mod through_parse_str {
   }
 
   #[test]
-  #[ignore = "document is Task 3's stub until Task 8"]
   fn trivia_inside_a_list_does_not_change_its_shape() {
     assert_eq!(
       node_kinds("{ f(a: [1, 2]) }"),
@@ -326,7 +328,6 @@ mod through_parse_str {
   }
 
   #[test]
-  #[ignore = "document is Task 3's stub until Task 8"]
   fn every_value_kind_is_reachable() {
     let src = r#"{ f(a: $v, b: 1, c: 1.5, d: "s", e: true, g: null, h: EN, i: [1], j: {k: 1}) }"#;
     let got = node_kinds(src);
