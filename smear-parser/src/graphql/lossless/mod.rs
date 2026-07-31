@@ -151,10 +151,10 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
   }
 }
 
-// Only the modules this task creates are declared here. `kind_map` arrives with Task 3b and
-// `trivia` with Task 4; declaring them ahead of their files would leave the crate unable to
-// compile at the end of this task.
+// `trivia` arrives with Task 4; declaring it ahead of its file would leave the crate unable to
+// compile.
 pub mod document;
+pub mod kind_map;
 pub mod runner;
 
 pub use runner::{Parse, parse_str, profile};

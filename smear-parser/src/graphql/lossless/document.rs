@@ -18,8 +18,9 @@ use crate::graphql::GraphQL;
 ///
 /// Committing the whole source instead makes the round-trip hold through the **token** channel,
 /// which is the stronger of the two guarantees: every byte reaches the tree as a real token
-/// rather than as filler. What the tokens do not yet carry is a meaningful *kind* — see
-/// `runner::provisional_token_kind`, which Task 3b replaces.
+/// rather than as filler — and, since Task 3b, as a real *kind* too: every token committed here
+/// is classified by [`super::kind_map::token_kind`]. What the tree still lacks is structure,
+/// which Task 8 adds.
 pub(crate) fn document<'inp, Src, Ctx>(
   inp: &mut super::GraphqlLosslessInput<'inp, '_, Src, Ctx>,
 ) -> Result<(), super::GraphqlLosslessError<'inp, Src, Ctx>>

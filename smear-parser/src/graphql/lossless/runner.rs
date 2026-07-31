@@ -13,37 +13,14 @@ use tokora::Parse as _;
 use super::{GraphqlLosslessLexer, GraphqlLosslessSlice, GraphqlLosslessToken, SyntaxNode};
 use crate::graphql::kinds::SyntaxKind as K;
 
-/// The token mapper this task hands the profile, until Task 3b writes the real one.
-///
-/// `CstProfile::new`'s first argument is `fn(&T) -> u16`, so a profile cannot be constructed
-/// without *some* mapper — and the real mapping (27 lexer variants onto 25 token images) is
-/// Task 3b's whole deliverable, in `kind_map.rs`. A placeholder is unavoidable here; the only
-/// question is which one.
-///
-/// **`Gap` is the honest answer, not a filler.** `gap_kind` is defined as the kind covering
-/// "source bytes no committed token covers" — and with no productions written, no byte has been
-/// claimed by any grammar rule yet. Every token really is unclassified filler at this point in
-/// the build, so mapping them all to `Gap` states the truth rather than asserting 25 kinds this
-/// crate cannot yet distinguish.
-///
-/// It deliberately does **not** panic. The sink calls the mapper for every *committed* token
-/// (`cst/sink.rs:691`, `record_token`), and this task's `document` stub must commit the whole
-/// source — see [`super::document::document`] for why `finish` refuses anything less — so a
-/// panicking placeholder would take every non-empty parse down with it.
-///
-/// Task 3b replaces this wholesale, and its own test is what pins the real mapping. Nothing in
-/// Phase A may rely on a token's kind until it does.
-fn provisional_token_kind<S>(_token: &smear_lexer::graphql::lossless::LosslessToken<S>) -> u16 {
-  K::Gap.raw()
-}
-
 /// The profile every GraphQL lossless parse uses.
 ///
 /// **Four facts, none defaulted** (`tokora/src/cst/profile.rs:140`), and note what is *not*
 /// among them: there is **no root kind**. The root is named once, at `finish(root_kind)`.
 ///
 /// - **arg 1, the mapper** — `fn(&T) -> u16`, which makes `CstProfile` generic over the token
-///   type. Task 3b writes it; see [`provisional_token_kind`] for what stands there meanwhile.
+///   type. It is [`super::kind_map::token_kind`], the one place the lexer's vocabulary and this
+///   crate's kind space are put in correspondence.
 /// - **arg 2, the validator** — `KindValidator::new(fn(u16) -> bool)`, a plain **non-capturing**
 ///   fn pointer. There is no `with_validator` builder method; the validator is not optional. It
 ///   rides as data rather than on a type parameter because `rowan::Language::kind_from_raw` has
@@ -57,7 +34,7 @@ where
   Src: Source<usize> + ?Sized,
 {
   CstProfile::new(
-    provisional_token_kind::<GraphqlLosslessSlice<'inp, Src>>,
+    super::kind_map::token_kind::<GraphqlLosslessSlice<'inp, Src>>,
     KindValidator::new(|raw| K::from_raw(raw).is_some()),
     K::Error.raw(),
     K::Gap.raw(),
