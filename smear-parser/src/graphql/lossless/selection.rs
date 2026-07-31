@@ -9,8 +9,9 @@
 //! neither needs a second peek to settle:
 //!
 //! - **`Alias` versus a bare field name.** Both start with an `Identifier` and only the
-//!   following `:` tells them apart. That is exactly the shape [`node_at`] exists for: mint a
-//!   mark, commit the name, and hand the mark to a *declining* probe that spends it only if the
+//!   following `:` tells them apart. That is exactly the shape
+//!   [`tokora::parser::node_at`] exists for: mint a mark, commit the name, and hand the mark to
+//!   a *declining* probe that spends it only if the
 //!   `:` is there. On a decline the mark is left unspent and no `Alias` node exists. An
 //!   `eat_if` plus an unconditional wrap cannot express this — the `:` would be committed
 //!   outside the wrap's parser, and a `?` between the two would strand a half-decided mark.
@@ -59,13 +60,16 @@
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{
-  ParseInput as _, TryParseInput as _,
-  emitter::CstEmitter as _,
-  parser::{node, node_at},
-  try_parse_input::ParseAttempt,
+  ParseInput as _, TryParseInput as _, emitter::CstEmitter as _, try_parse_input::ParseAttempt,
 };
 
 use crate::graphql::kinds::SyntaxKind as K;
+
+// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
+// counter gate 2 measures its reach with, so a production cannot open a node without being
+// counted; without the feature they are tokora's own, re-exported unchanged.
+use super::coverage::{node, node_at};
 
 use super::{
   GraphqlLosslessInput,

@@ -25,6 +25,12 @@ smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 
 rowan = ["dep:rowan", "tokora/rowan", "std"]
 
+# Instruments the GraphQL lossless productions with a per-node-kind hit counter, so the
+# trivia-injection gate can prove its corpus reached every production instead of asserting
+# success over whichever handful of shapes it happens to exercise. Test-only: it changes no
+# behaviour, and without it the instrumentation is not compiled at all.
+lossless-coverage = ["rowan"]
+
 [dependencies]
 derive_more.workspace = true
 tokora.workspace = true

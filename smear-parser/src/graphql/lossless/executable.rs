@@ -41,14 +41,15 @@
 //!   call site.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{
-  ParseInput as _,
-  cst::event::EventMark,
-  emitter::CstEmitter as _,
-  parser::{node, node_at},
-};
+use tokora::{ParseInput as _, cst::event::EventMark, emitter::CstEmitter as _};
 
 use crate::graphql::kinds::SyntaxKind as K;
+
+// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
+// counter gate 2 measures its reach with, so a production cannot open a node without being
+// counted; without the feature they are tokora's own, re-exported unchanged.
+use super::coverage::{node, node_at};
 
 use super::{
   GraphqlLosslessInput,

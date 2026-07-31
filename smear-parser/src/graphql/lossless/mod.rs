@@ -460,6 +460,7 @@ macro_rules! lossless_drivers {
 // `pub(crate) use lossless_production;` re-export beside it is dead — the import would be
 // shadowed by the textual binding and warns as unused.
 pub mod ast;
+pub mod coverage;
 pub mod definition;
 pub mod directive;
 pub mod document;
