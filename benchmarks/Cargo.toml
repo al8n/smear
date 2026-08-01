@@ -1,0 +1,40 @@
+[package]
+name = "smear-apollo-bench"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Like-for-like benchmark: smear's GraphQL lossless CST parser vs apollo-parser"
+publish = false
+
+# A workspace member rather than a dev-dependency of `smear-parser`: a dev-dependency would
+# compile apollo into every `cargo test -p smear-parser`, and a workspace-*excluded* crate would
+# not inherit the root `[patch.crates-io]` that resolves the unpublished `tokora = "0.8.0"`.
+#
+# `apollo-parser` comes from the registry, not from the local `apollo-rs` checkout, so the
+# numbers describe what a real consumer gets and reproduce on any machine. 0.8.6 is both the
+# local checkout's version and crates.io's current max.
+
+[dependencies]
+# `graphqlx` is deliberately off: the benchmark only exercises the GraphQL dialect, and
+# `graphqlx` drags in `unstable`.
+smear-parser = { path = "../smear-parser", version = "0.0.0", default-features = false, features = [
+  "std",
+  "graphql",
+  "rowan",
+] }
+tokora.workspace = true
+apollo-parser = "0.8.6"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "apollo_comparison"
+path = "benches/apollo_comparison.rs"
+harness = false
