@@ -28,6 +28,34 @@
 //!    an all-valid or an all-invalid corpus.
 //! 4. [`every_corpus_entry_declares_its_expected_verdict`] — a misspelled prefix cannot smuggle
 //!    an entry into the wrong class.
+//! 5. [`both_suites_agree_across_the_lexer_grammar_error_boundary`] — the two suites reject the
+//!    `invalid_lex_*` class through *different machinery*, and the class is checked against the
+//!    channel each one used rather than against the agreeing bit alone.
+//!
+//! # The lexer-versus-grammar boundary, and why it needed its own corpus class
+//!
+//! Every other `invalid_*` entry is a **grammar** rejection: the lexer hands over tokens and the
+//! grammar refuses them. That leaves the other half of the acceptance surface untested — a source
+//! the lexer itself refuses, where the two suites reach their verdict through machinery that has
+//! nothing in common. `syntactic/` fails the whole parse out of the lexer
+//! (`ErrorData::Other("lexer error")`, one error, span `0..0`); the lossless suite has no such
+//! exit — it records the lexer error as a diagnostic, keeps parsing, and tiles the refused bytes
+//! into the tree as a `Gap`. Whether those two answers *agree* is the claim, and until this class
+//! existed nothing measured it.
+//!
+//! **The class could not be written before tokora `2bbca21`.** `Sink::finish`'s zero-token wall
+//! (`FinishError::StructureWithoutTokens`) refused any parse that opened a node and committed no
+//! token, and a source with no lexable byte at all is exactly that: `document` opens `Document`,
+//! every byte lexes as one recorded error, and not a single `Event::Token` is ever pushed. The
+//! wall now additionally requires an *uncovered gap*, so a fully explained source passes. One
+//! lexable byte anywhere avoided the wall, which is why the fixtures for this class carry **no
+//! trailing newline** and **no explanatory comment** — a comment lexes, and a fixture that lexes
+//! is not in this class. See [`LEXER_ERROR_ENTRIES`].
+//!
+//! The class is *not* "entries with a lexer error in them".
+//! `invalid_unterminated_string.graphql` has had one since Task 11 and rejects through the lexer
+//! channel too — but it lexes nine tokens first, so it never reached the wall and it does not
+//! exercise the shape the fix unblocked. That contrast is asserted, not narrated.
 //!
 //! # The eleven divergence witnesses are gone, and where the proof of life went
 //!
@@ -68,11 +96,11 @@
 
 use std::path::PathBuf;
 
-use smear_lexer::graphql::lossless::LosslessLexer;
+use smear_lexer::graphql::{error::LexerErrors, lossless::LosslessLexer};
 use smear_parser::graphql::{
   GraphQL,
   ast::Document,
-  error::GraphqlErrors,
+  error::{ErrorData, GraphqlErrors},
   kinds::SyntaxKind as K,
   lossless::{document::test_support::parse_type_system_document, parse_str},
   syntactic::{GraphqlLexer, document},
@@ -108,6 +136,94 @@ fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
   >(document)
   .parse_str(src)
   .is_err()
+}
+
+/// Which of the two machineries produced the syntactic suite's rejection.
+///
+/// The distinction the `invalid_lex_*` class exists to test. Both values are rejections, so a
+/// verdict comparison cannot tell them apart — which is the point: parity across this boundary is
+/// a claim about two *different* failure paths landing on the same bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Channel {
+  /// The lexer refused a byte, and the grammar never saw a token for it.
+  Lexer,
+  /// The lexer produced tokens and the grammar refused them.
+  Grammar,
+}
+
+/// The `Other` payload of an error, when it has one.
+fn other_text<S, T, C, E, SE>(data: &ErrorData<S, T, C, E, SE>) -> Option<&str> {
+  match data {
+    ErrorData::Other(text) => Some(text.as_ref()),
+    _ => None,
+  }
+}
+
+/// The marker this crate itself stamps on a lexer failure, **derived rather than spelled**.
+///
+/// `error.rs`'s `impl From<LexerErrors<…>> for GraphqlErrors<S>` discards the lexer's typed error
+/// and produces one `ErrorData::Other` with a fixed message — the frozen parser's behaviour, kept
+/// deliberately. Reproducing that message as a literal here would give this file a second copy of
+/// a string that lives in production, and a rename would leave the classifier silently answering
+/// [`Channel::Grammar`] for everything. Running the conversion instead means the classifier is
+/// keyed to the impl, so a rename moves both halves together and a *removal* of the impl fails to
+/// compile.
+fn lexer_error_marker() -> GraphqlErrors<&'static str> {
+  LexerErrors::<char, ()>::default().into()
+}
+
+/// Which channel the syntactic suite rejected `src` through; `None` when it accepted.
+fn syntactic_channel(src: &str) -> Option<Channel> {
+  let errors = Parser::with_parser::<
+    '_,
+    GraphqlLexer<'_, str>,
+    Document<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(document)
+  .parse_str(src)
+  .err()?;
+
+  let marker = lexer_error_marker();
+  let marker = other_text(
+    marker
+      .first()
+      .expect("the lexer-error conversion must produce an error")
+      .data(),
+  )
+  .expect("the lexer-error conversion must produce an `Other` payload");
+
+  Some(
+    if errors.iter().any(|e| other_text(e.data()) == Some(marker)) {
+      Channel::Lexer
+    } else {
+      Channel::Grammar
+    },
+  )
+}
+
+/// How many of a lossless tree's tokens the grammar committed, as opposed to the sink tiling them.
+///
+/// Zero is the defining property of [`LEXER_ERROR_ENTRIES`] and the exact state the upstream
+/// zero-token wall used to refuse.
+fn committed_tokens(src: &str) -> usize {
+  parse_str(src)
+    .syntax()
+    .descendants_with_tokens()
+    .filter_map(|element| element.into_token())
+    .filter(|token| token.kind() != K::Gap)
+    .count()
+}
+
+/// How many `Gap` tiles the sink laid down over `src`.
+fn gap_tokens(src: &str) -> usize {
+  parse_str(src)
+    .syntax()
+    .descendants_with_tokens()
+    .filter_map(|element| element.into_token())
+    .filter(|token| token.kind() == K::Gap)
+    .count()
 }
 
 /// Every `.graphql` file in the shared corpus, in a deterministic order.
@@ -214,15 +330,50 @@ const ALPHABET: &[(&str, &str)] = &[
 /// The corpus entries that cannot be padded, because they cannot be lexed.
 ///
 /// Injection is defined at *token* boundaries, so a source the lexer refuses byte for byte has no
-/// boundaries to inject at. Exactly one entry is in that state, and it is the standing witness for
-/// the upstream block recorded in Task 11b: an unterminated string swallows the remainder of the
-/// file, the whole source lexes as one recorded lexer error, and `parse_str` would meet tokora's
-/// `StructureWithoutTokens` wall.
+/// boundaries to inject at. Four entries are in that state: the three of
+/// [`LEXER_ERROR_ENTRIES`], whose whole source is one lexer error, and
+/// `invalid_unterminated_string.graphql`, whose unterminated string swallows the remainder of the
+/// file after nine tokens have already been lexed. `token_boundaries` answers `None` on any source
+/// with a lexer error anywhere, so partial lexability does not rescue the last one.
 ///
 /// Pinned as a set rather than skipped silently. A **new** unlexable entry is a corpus decision
-/// somebody should have to make on purpose, and the day the upstream fix lands this list is the
-/// thing that tells whoever is holding it that this gate can now widen.
-const UNPADDABLE: &[&str] = &["invalid_unterminated_string.graphql"];
+/// somebody should have to make on purpose. Note the count that did *not* move: the corpus went
+/// from 84 entries to 87 and this list from 1 to 4, so the padded sweep still runs exactly
+/// `83 × 8 = 664` variants — the new class is unpaddable by construction and buys the padded run
+/// nothing, which is why it is gated by [`both_suites_agree_across_the_lexer_grammar_error_boundary`]
+/// instead.
+const UNPADDABLE: &[&str] = &[
+  "invalid_lex_illegal_character.graphql",
+  "invalid_lex_unterminated_block_string.graphql",
+  "invalid_lex_unterminated_string.graphql",
+  "invalid_unterminated_string.graphql",
+];
+
+/// The corpus entries with **no lexable byte at all** — the class this gate's lexer-versus-grammar
+/// boundary check is built on.
+///
+/// Each is a single lexeme the GraphQL lexer refuses outright, written with no trailing newline
+/// and no comment, because either would lex and the entry would stop being in the class. Task 11b
+/// named the three shapes: an unterminated string, an unterminated block string, and an illegal
+/// character.
+///
+/// Pinned as an ordered set and compared against a scan of the `invalid_lex_` prefix, so neither
+/// half can drift alone: deleting a fixture reds, and adding one under the prefix without adding
+/// it here reds too.
+const LEXER_ERROR_ENTRIES: &[&str] = &[
+  "invalid_lex_illegal_character.graphql",
+  "invalid_lex_unterminated_block_string.graphql",
+  "invalid_lex_unterminated_string.graphql",
+];
+
+/// The corpus entry that rejects through the **lexer** channel while still lexing tokens.
+///
+/// The contrast that keeps [`LEXER_ERROR_ENTRIES`] honest. This one has carried a lexer error
+/// since Task 11 and is classified [`Channel::Lexer`] exactly like the three above — but nine
+/// tokens lex before the unterminated string swallows the rest, so `saw_token` was always true and
+/// it never met the zero-token wall. "Has a lexer error" and "has no lexable byte" are different
+/// claims, and this is the entry that separates them.
+const LEXES_THEN_FAILS: &str = "invalid_unterminated_string.graphql";
 
 /// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.
 ///
@@ -400,6 +551,191 @@ fn the_padded_variants_are_the_ones_gate_2_derives() {
   // ordinary input — without both directions the skip above could be swallowing the corpus.
   assert!(token_boundaries("\"unterminated").is_none());
   assert!(token_boundaries("{ a }").is_some());
+}
+
+/// Gate 1 across the lexer-versus-grammar boundary: the two suites agree about a source the lexer
+/// refuses outright, and they get there through different machinery.
+///
+/// # What the agreeing bit does not say
+///
+/// [`both_suites_agree_on_every_corpus_entry`] now covers these three entries too, and it would be
+/// green over them even if the class had quietly stopped being what it claims — a fixture that
+/// grew a trailing newline still rejects in both suites, and so does one replaced by ordinary
+/// broken GraphQL. The verdict is one bit and this class is defined by a *shape*, so the shape is
+/// asserted directly:
+///
+/// - **no lexable byte at all** — `token_boundaries` answers `None` and the lossless tree has zero
+///   committed tokens. This is precisely the state tokora's zero-token wall used to refuse, and
+///   the reason the class could not exist before `2bbca21`;
+/// - **the bytes survive anyway**, carried by one `Gap` tile rather than by the grammar. The
+///   round-trip law holds over a tree with no grammar tokens in it at all, which is the strongest
+///   form of the lossless claim this suite makes;
+/// - **the syntactic rejection is a lexer one**, classified through the crate's own conversion
+///   rather than by reading a message.
+///
+/// # The other side of the boundary is asserted too
+///
+/// A class where every entry rejects proves nothing on its own. Two contrasts run in the same
+/// test. The corpus's remaining invalid entries reject through [`Channel::Grammar`] — so the
+/// corpus genuinely holds both channels and this class is new material rather than more of the
+/// same. And [`LEXES_THEN_FAILS`] is a [`Channel::Lexer`] rejection that **does** lex tokens
+/// first: without it, "rejects through the lexer channel" and "has no lexable byte" would be
+/// indistinguishable, and a fixture that quietly regained a lexable byte would still pass.
+#[test]
+fn both_suites_agree_across_the_lexer_grammar_error_boundary() {
+  let mut lexer_class: Vec<String> = Vec::new();
+  let mut grammar_channel = 0usize;
+  let mut lexer_channel = 0usize;
+
+  for entry in corpus_files() {
+    let name = entry.file_name().unwrap().to_string_lossy().to_string();
+    let src = std::fs::read_to_string(&entry).unwrap();
+
+    match syntactic_channel(&src) {
+      None => continue,
+      Some(Channel::Lexer) => lexer_channel += 1,
+      Some(Channel::Grammar) => grammar_channel += 1,
+    }
+
+    if !name.starts_with("invalid_lex_") {
+      continue;
+    }
+
+    // The shape. `None` from `token_boundaries` is "the lexer refused something"; zero committed
+    // tokens is the stronger claim that it refused *everything*, which is the one the wall was
+    // about — `LEXES_THEN_FAILS` satisfies the first and not the second.
+    assert!(
+      !src.is_empty(),
+      "{name}: an empty file has no lexeme to refuse and never met the wall"
+    );
+    assert_eq!(
+      token_boundaries(&src),
+      None,
+      "{name}: the lexer accepted this source, so it is not in the lexer-error class at all"
+    );
+    assert_eq!(
+      committed_tokens(&src),
+      0,
+      "{name}: the grammar committed a token, so this fixture has a lexable byte in it and no \
+       longer exercises the zero-token shape the upstream fix unblocked — a trailing newline is \
+       enough to do this"
+    );
+
+    // The bytes survive with no grammar token carrying them.
+    let parse = parse_str(&src);
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "{name}: a fully gap-tiled tree did not round-trip"
+    );
+    assert_eq!(
+      gap_tokens(&src),
+      1,
+      "{name}: the whole source should be one gap tile"
+    );
+
+    // The parity claim, and the channel each suite reached it through.
+    assert!(
+      parse.has_errors(),
+      "{name}: the lossless suite accepted a source the lexer refuses byte for byte"
+    );
+    assert_eq!(
+      syntactic_channel(&src),
+      Some(Channel::Lexer),
+      "{name}: the syntactic suite rejected this through the grammar, so the two suites are not \
+       being compared across the boundary this class exists for"
+    );
+    assert_eq!(
+      lossless_has_errors(&src),
+      syntactic_channel(&src).is_some(),
+      "{name}: lossless and syntactic disagree about a lexer error"
+    );
+
+    lexer_class.push(name);
+  }
+
+  assert_eq!(
+    lexer_class, LEXER_ERROR_ENTRIES,
+    "the set of corpus entries with no lexable byte has changed"
+  );
+
+  // Contrast one: the corpus holds both channels, so this class is not the whole invalid half
+  // wearing a new prefix.
+  assert!(
+    grammar_channel >= 20,
+    "only {grammar_channel} corpus entries reject through the grammar; without them the two \
+     channels are not being compared, only the lexer one is being measured twice"
+  );
+  assert_eq!(
+    lexer_channel,
+    LEXER_ERROR_ENTRIES.len() + 1,
+    "the lexer channel should hold this class plus {LEXES_THEN_FAILS}"
+  );
+
+  // Contrast two: a lexer-channel rejection that lexes tokens first. Same channel, different
+  // shape — which is what stops the shape assertions above from being satisfiable by "has a lexer
+  // error somewhere".
+  let partial = std::fs::read_to_string(
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests")
+      .join("corpus")
+      .join(LEXES_THEN_FAILS),
+  )
+  .expect("the partially-lexing witness must exist in the shared corpus");
+  assert_eq!(
+    syntactic_channel(&partial),
+    Some(Channel::Lexer),
+    "{LEXES_THEN_FAILS} was supposed to be the same channel as the class"
+  );
+  assert!(
+    committed_tokens(&partial) > 0,
+    "{LEXES_THEN_FAILS} was supposed to lex tokens before failing — if it no longer does, it has \
+     become a fourth member of the class and the contrast is gone"
+  );
+}
+
+/// The channel classifier answers in both directions, and its marker comes from production code.
+///
+/// [`both_suites_agree_across_the_lexer_grammar_error_boundary`] rests entirely on
+/// [`syntactic_channel`], and a classifier that answered [`Channel::Lexer`] for everything would
+/// satisfy every assertion it makes about the class while the grammar floor still passed on
+/// nothing. So the classifier is driven over sources that are not corpus entries, in both
+/// directions, and its marker is checked to be the one the crate actually produces.
+#[test]
+fn the_error_channel_classifier_separates_a_lexer_error_from_a_grammar_one() {
+  // The marker is a live conversion, not a literal: exactly one error, carrying an `Other`
+  // payload. If `error.rs` ever routes lexer failures to a typed variant instead, this reds here
+  // rather than silently reclassifying the whole corpus as grammar rejections.
+  let marker = lexer_error_marker();
+  assert_eq!(
+    marker.len(),
+    1,
+    "the lexer-error conversion should collapse to a single error"
+  );
+  assert!(
+    other_text(marker[0].data()).is_some(),
+    "the lexer-error conversion no longer produces an `Other` payload, so the classifier cannot \
+     key on it: {:?}",
+    marker[0].data()
+  );
+
+  // `%` is not a GraphQL lexeme; `!` is one, and the grammar has nowhere to put it.
+  assert_eq!(syntactic_channel("%"), Some(Channel::Lexer));
+  assert_eq!(syntactic_channel("!"), Some(Channel::Grammar));
+  assert_eq!(syntactic_channel("type T { f: Int }"), None);
+  assert_ne!(
+    syntactic_channel("%"),
+    syntactic_channel("!"),
+    "the classifier gave the same answer for an unlexable byte and a lexable one the grammar \
+     rejects, so it is not classifying anything"
+  );
+
+  // And the two channels really are one verdict: both of the rejections above are rejections in
+  // *both* suites, which is why only the channel — not the bit — separates them.
+  for src in ["%", "!"] {
+    assert!(lossless_has_errors(src), "lossless accepted {src:?}");
+    assert!(syntactic_has_errors(src), "syntactic accepted {src:?}");
+  }
 }
 
 /// Every corpus entry names the class it belongs to.

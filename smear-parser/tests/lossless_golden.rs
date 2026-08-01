@@ -61,7 +61,7 @@
 //!
 //! # What reading the goldens found
 //!
-//! Every one of the 91 trees was read against its source before being committed, because a golden
+//! Every one of the 94 trees was read against its source before being committed, because a golden
 //! blessed unread records whatever the parser did, bug included, and turns it into an expectation.
 //! The sweep found one thing, and it is the class this gate was built for:
 //! **`root_operation_type_definition` opens its `NamedType` before the trivia in front of it**, so
@@ -81,10 +81,21 @@
 //!
 //! A trailing region that no token covers currently lands **outside** `Document`, as a `Gap` token
 //! child of `Root`, while the same garbage lands *inside* `Document` when anything lexable follows
-//! it. That asymmetry is a known tokora issue with a chosen fix, and one corpus entry is sensitive
-//! to it: see [`PENDING_OPTION_B`] and
-//! [`only_one_golden_is_sensitive_to_trailing_gap_placement`], which is the census that keeps the
-//! blast radius of that fix to the single file named there.
+//! it. That asymmetry is a known tokora issue with a chosen fix, and four corpus entries are
+//! sensitive to it — the three `invalid_lex_*` ones, whose entire source is the trailing gap, and
+//! the partially-lexing `invalid_unterminated_string.graphql`. See [`PENDING_OPTION_B`] and
+//! [`only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement`], which is the census that
+//! keeps the blast radius of that fix to the files named there.
+//!
+//! # The three smallest trees here have no grammar in them at all
+//!
+//! `invalid_lex_illegal_character`, `invalid_lex_unterminated_block_string` and
+//! `invalid_lex_unterminated_string` are sources the lexer refuses byte for byte, so their trees
+//! are `Root` over an empty `Document@0..0` and one `Gap` — three lines each, and not one
+//! committed token. They are the corpus's only trees whose shape is *entirely* the sink's, and
+//! before tokora `2bbca21` they could not be produced at all: `Sink::finish`'s zero-token wall
+//! refused a parse that opened a node and committed nothing. Their goldens are what would notice
+//! if that ever changed shape again.
 
 use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 
@@ -97,21 +108,32 @@ use smear_parser::graphql::{
 /// The environment variable that turns a comparison run into a blessing run.
 const UPDATE_VAR: &str = "UPDATE_GOLDEN";
 
-/// The one golden whose expected content will change when tokora's trailing-gap placement is
-/// fixed, and the only one that may be re-blessed as part of that fix.
+/// The goldens whose expected content will change when tokora's trailing-gap placement is fixed,
+/// and the only ones that may be re-blessed as part of that fix.
 ///
-/// `invalid_unterminated_string.graphql` ends in a lexer error, so its last 17 bytes are carried
-/// by the sink's gap tiling rather than by any committed token — and because nothing lexable
-/// follows, that `Gap` attaches to `Root` instead of to `Document`. The same bytes in the middle
-/// of a document attach inside it. The chosen fix (option B) makes a trailing gap join the last
-/// child when the stream is balanced, which makes `Document.text() == source` unconditional and
-/// moves exactly this one line of exactly this one golden one level deeper.
+/// Each of these ends in a lexer error, so its tail is carried by the sink's gap tiling rather
+/// than by any committed token — and because nothing lexable follows, that `Gap` attaches to
+/// `Root` instead of to `Document`. The same bytes in the middle of a document attach inside it.
+/// The chosen fix (option B) makes a trailing gap join the last child when the stream is balanced,
+/// which makes `Document.text() == source` unconditional and moves exactly one line of each of
+/// these goldens one level deeper.
 ///
-/// It is recorded here rather than omitted from the golden set because omitting it would drop the
-/// corpus's only gap-tiled tree — the single entry whose shape is not the grammar's — from the
-/// one gate that looks at shape. Naming it costs one expected re-bless; dropping it costs the
-/// coverage permanently.
-const PENDING_OPTION_B: &[&str] = &["invalid_unterminated_string.graphql"];
+/// **This list grew from one to four when the `invalid_lex_*` class was added, and that is the
+/// census reporting rather than a regression.** The three new entries have no lexable byte at all,
+/// so their whole source is the trailing gap: `Root@0..n` over an empty `Document@0..0` and one
+/// `Gap@0..n`. Under option B the `Gap` moves inside `Document`, which is one line and one range
+/// per file. The alternative — keeping the class out of the golden set — would drop the only trees
+/// in the suite whose shape is entirely the sink's from the one gate that looks at shape, and gate
+/// 5 is where an accidental change to gap placement would otherwise be invisible.
+///
+/// The blast radius is therefore stated as four expected re-blesses, all of the same one-line
+/// form, rather than hidden by omission.
+const PENDING_OPTION_B: &[&str] = &[
+  "invalid_lex_illegal_character.graphql",
+  "invalid_lex_unterminated_block_string.graphql",
+  "invalid_lex_unterminated_string.graphql",
+  "invalid_unterminated_string.graphql",
+];
 
 /// The token images the lossless lexer surfaces as trivia, as they enter the tree.
 ///
@@ -122,7 +144,7 @@ const TRIVIA_IMAGES: &[K] = &[K::Space, K::Tab, K::Newline, K::Comma, K::Comment
 /// Every `parent > node` pairing where a node currently opens *before* the trivia in front of it,
 /// so that the trivia lands inside the node's range instead of beside it.
 ///
-/// **Found by reading the goldens, and the second entry is a defect.** Reviewing all 91 trees by
+/// **Found by reading the goldens, and the second entry is a defect.** Reviewing all 94 trees by
 /// eye surfaced one shape that disagrees with the other 75 of its kind:
 /// `root_operation_type_definition` (`definition.rs`) calls `named_type` directly, and
 /// `named_type` opens `K::NamedType` and only then calls `expect`, whose trivia skip therefore
@@ -697,19 +719,19 @@ fn the_render_shows_a_lost_definition_node() {
   );
 }
 
-/// Exactly one golden is sensitive to where a trailing gap attaches, and it is the one named.
+/// Only the recorded goldens are sensitive to where a trailing gap attaches.
 ///
 /// A region no token covers attaches *inside* `Document` when anything lexable follows it and
 /// *outside* — as a `Gap` child of `Root` — when nothing does. tokora's fix makes the trailing case
 /// join the last child too. This census is what bounds the blast radius of that fix: it fails if a
-/// second case becomes sensitive, and it fails if the fix lands, at which point exactly the
+/// fifth case becomes sensitive, and it fails if the fix lands, at which point exactly the
 /// goldens listed in [`PENDING_OPTION_B`] may be re-blessed and this test updated to say the
 /// asymmetry is gone.
 ///
-/// The test is over both golden sets, not over the one entry, because "only this file is affected"
-/// is a claim about all 91 of them.
+/// The test is over both golden sets, not over the four entries, because "only these files are
+/// affected" is a claim about all 94 of them.
 #[test]
-fn only_one_golden_is_sensitive_to_trailing_gap_placement() {
+fn only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement() {
   fn trailing_gap(src: &str) -> bool {
     parse_str(src)
       .syntax()
@@ -749,32 +771,36 @@ fn only_one_golden_is_sensitive_to_trailing_gap_placement() {
      landed and PENDING_OPTION_B is discharged"
   );
 
-  // And the shape of the sensitive entry, stated where the reader is, so the expected re-bless is
-  // one identified line rather than a file to squint at.
-  let gap_owner = parse_str(
-    &std::fs::read_to_string(
-      PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("corpus")
-        .join(PENDING_OPTION_B[0]),
+  // And the shape of each sensitive entry, stated where the reader is, so the expected re-bless is
+  // four identified lines rather than four files to squint at. One direct token child of `Root`,
+  // and it is the gap: that single line is what option B moves one level deeper.
+  for name in PENDING_OPTION_B {
+    let gap_owner = parse_str(
+      &std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+          .join("tests")
+          .join("corpus")
+          .join(name),
+      )
+      .unwrap_or_else(|e| panic!("the pending corpus entry {name} is unreadable: {e}")),
     )
-    .expect("the pending corpus entry is unreadable"),
-  )
-  .syntax()
-  .children_with_tokens()
-  .filter_map(|element| element.into_token())
-  .map(|token| token.kind())
-  .collect::<Vec<K>>();
-  assert_eq!(
-    gap_owner,
-    vec![K::Gap],
-    "the pending entry's `Root` should carry exactly one direct token child, the trailing gap"
-  );
+    .syntax()
+    .children_with_tokens()
+    .filter_map(|element| element.into_token())
+    .map(|token| token.kind())
+    .collect::<Vec<K>>();
+    assert_eq!(
+      gap_owner,
+      vec![K::Gap],
+      "{name}: a pending entry's `Root` should carry exactly one direct token child, the trailing \
+       gap"
+    );
+  }
 }
 
 /// Which nodes open on the wrong side of their leading trivia — a standing check, not a comment.
 ///
-/// Reading 91 goldens by eye is what Step 2 asks for and it is not repeatable; this is that
+/// Reading 94 goldens by eye is what Step 2 asks for and it is not repeatable; this is that
 /// reading turned into an assertion. It sweeps every tree in both golden sets for a node whose
 /// first child is a trivia token and compares the `parent > node` pairings against
 /// [`OPENS_ON_LEADING_TRIVIA`], which records the two that exist today and says which of them is a

@@ -72,11 +72,14 @@
 //! would say nothing about multi-byte text or about the forms a real editor produces, so
 //! [`bytes_the_corpus_does_not_contain_still_round_trip`] carries them as its own fixtures.
 //!
-//! **Each of those fixtures deliberately contains at least one lexable token.** A source the lexer
-//! refuses byte for byte — `"unterminated` on its own, `%`, a lone `.` — leaves the sink holding a
-//! `Document` node over no tokens at all, which `finish` reports as `StructureWithoutTokens` and
-//! the runner turns into a panic. It is an upstream defect, recorded under Task 11b; one lexable
-//! byte anywhere avoids it, so `{ a } "unterminated` is in the set and `"unterminated` is not.
+//! Those fixtures each contain at least one lexable token, and the sources that contain **none**
+//! are now corpus entries instead: `"unterminated`, `"""unterminated` and `%` are the
+//! `invalid_lex_*` class, added once tokora `2bbca21` landed. Before it, such a source left the
+//! sink holding a `Document` node over no tokens at all, which `finish` reported as
+//! `StructureWithoutTokens` and the runner turned into a panic; the wall now also requires an
+//! uncovered gap, and a fully explained source passes. They are the entries this gate's
+//! [`GAP_TILED_ENTRIES`] census exists for, and the only ones whose round-trip is carried by
+//! tiling alone.
 
 use std::path::PathBuf;
 
@@ -88,13 +91,25 @@ use smear_parser::graphql::{
   },
 };
 
-/// The one corpus entry whose bytes are kept by the sink's gap tiling rather than by the grammar.
+/// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
 ///
-/// Its unterminated string is a **lexer** error, so no token is produced for the region at all and
+/// Each carries a **lexer** error, so no token is produced for the refused region at all and
 /// `Sink::finish` covers it with the profile's `gap_kind`. Named rather than tolerated by a
-/// blanket allowance: a second entry showing up here means a second region nothing in the grammar
-/// accounts for, and whoever adds it should have to say so.
-const GAP_TILED_ENTRIES: &[&str] = &["invalid_unterminated_string.graphql"];
+/// blanket allowance: an entry showing up here means a region nothing in the grammar accounts for,
+/// and whoever adds it should have to say so.
+///
+/// The three `invalid_lex_*` entries are the strongest form of the claim this gate makes. Their
+/// whole source is refused, so the tree carries **no committed token at all** and the round-trip
+/// rests entirely on the tiling — the state tokora's zero-token wall refused outright until
+/// `2bbca21`. `invalid_unterminated_string.graphql` is the mixed case: nine tokens, then a tiled
+/// tail. Gate 1's `both_suites_agree_across_the_lexer_grammar_error_boundary` is where that
+/// distinction is asserted; here they are simply four regions the grammar did not cover.
+const GAP_TILED_ENTRIES: &[&str] = &[
+  "invalid_lex_illegal_character.graphql",
+  "invalid_lex_unterminated_block_string.graphql",
+  "invalid_lex_unterminated_string.graphql",
+  "invalid_unterminated_string.graphql",
+];
 
 /// Every `.graphql` file in the shared corpus, in a deterministic order.
 ///
@@ -410,13 +425,16 @@ fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
 /// Byte forms the corpus does not contain, round-tripped here instead.
 ///
 /// Gate 2 measured that no corpus entry carries a carriage return, a tab or a BOM; none carries a
-/// non-ASCII byte either, and 83 of the 84 end in a newline. So the corpus on its own would leave
+/// non-ASCII byte either, and 83 of the 87 end in a newline — the three `invalid_lex_*` entries
+/// must not, and the empty one has nothing to end with. So the corpus on its own would leave
 /// a whole set of real-editor and real-document byte shapes untested by the one gate that is about
 /// bytes. Every case below is a source the parser must reproduce exactly, including the ones it
 /// rejects.
 ///
-/// **Every case contains at least one lexable token**, which is not a stylistic choice: see the
-/// module docs for the upstream panic a wholly unlexable source still trips.
+/// **Every case contains at least one lexable token.** That is now a division of labour rather
+/// than a workaround: wholly unlexable sources are the corpus's `invalid_lex_*` class and are
+/// round-tripped by the sweep above, so what is left for this set is byte *forms* — encodings,
+/// line endings, escapes — over sources the grammar can actually reach.
 #[test]
 fn bytes_the_corpus_does_not_contain_still_round_trip() {
   const CASES: &[(&str, &str)] = &[

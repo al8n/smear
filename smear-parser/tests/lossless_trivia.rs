@@ -164,11 +164,11 @@ fn corpus_files() -> Vec<PathBuf> {
 
 /// The corpus entries this gate pads: the ones both suites accept.
 ///
-/// Invalid entries are out of scope, and one of them is out of *reach*: a source the lexer
-/// refuses byte for byte leaves the sink with a `Document` node over no tokens at all, which
-/// `finish` reports as `StructureWithoutTokens` and the runner turns into a panic. The valid
-/// corpus cannot meet it — every entry lexes — but an injection sweep widened to the invalid half
-/// would.
+/// Invalid entries are out of scope, and four of them are out of *reach*: injection is defined at
+/// token boundaries, and a source with a lexer error in it has none to inject at. Those four are
+/// the three `invalid_lex_*` entries and `invalid_unterminated_string.graphql`. The valid corpus
+/// meets neither problem — every entry lexes — and gate 1's padded sweep, which is the one widened
+/// to the invalid half, pins them as its own `UNPADDABLE` set.
 fn valid_corpus() -> Vec<(String, String)> {
   corpus_files()
     .into_iter()
