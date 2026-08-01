@@ -61,7 +61,7 @@
 //!
 //! # What reading the goldens found
 //!
-//! Every one of the 94 trees was read against its source before being committed, because a golden
+//! Every one of the 95 trees was read against its source before being committed, because a golden
 //! blessed unread records whatever the parser did, bug included, and turns it into an expectation.
 //! The sweep found one thing, and it is the class this gate was built for:
 //! **`root_operation_type_definition` opens its `NamedType` before the trivia in front of it**, so
@@ -77,15 +77,27 @@
 //! the enclosing list after its last element. Both are recovery and attachment policy rather than
 //! loss, and both are now on the page where a change to either shows up as a diff.
 //!
-//! # What is deliberately not frozen here
+//! # Where a gap lands — no longer pending, and now frozen here
 //!
-//! A trailing region that no token covers currently lands **outside** `Document`, as a `Gap` token
-//! child of `Root`, while the same garbage lands *inside* `Document` when anything lexable follows
-//! it. That asymmetry is a known tokora issue with a chosen fix, and four corpus entries are
-//! sensitive to it — the three `invalid_lex_*` ones, whose entire source is the trailing gap, and
-//! the partially-lexing `invalid_unterminated_string.graphql`. See [`PENDING_OPTION_B`] and
-//! [`only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement`], which is the census that
-//! keeps the blast radius of that fix to the files named there.
+//! A region no committed token covers is tiled by the sink as a `Gap` token, and **it is tiled
+//! where it opens**: immediately after the token it trails, in whatever node was open at that
+//! moment. tokora `60f27a3` is what made that true; before it, a run with nothing lexable after it
+//! landed **outside** `Document` as a `Gap` child of `Root`, while the identical run mid-document
+//! landed inside. Four goldens were pinned against that asymmetry as pending re-blesses. Exactly
+//! one of them moved when the fix landed — `invalid_unterminated_string`, whose `Gap@9..26` is now
+//! six levels deeper, inside the `Argument` its last committed token sits in — and the other three
+//! did not, because the rule's fallback clause governs them rather than an exemption.
+//!
+//! What replaces that pending note is the rule itself, pinned in two directions:
+//!
+//! - [`only_a_source_with_no_committed_token_tiles_its_gap_at_the_root`] is the census, and it now
+//!   asserts a **law** rather than an inventory: among the trees that carry a `Gap` at all, the gap
+//!   hangs off `Root` exactly when the parse committed no token. [`GAP_TILES_AT_ROOT`] names the
+//!   three that satisfy it today.
+//! - `shape_top_level_recovery` and `shape_top_level_recovery_at_eof` are the same source, one
+//!   truncated at the run. Their gaps must land in the same node, which is the property the fix
+//!   exists to establish and the one the corpus could not see before: it carried the mid-document
+//!   half of the pair and not the trailing half.
 //!
 //! # The three smallest trees here have no grammar in them at all
 //!
@@ -108,31 +120,31 @@ use smear_parser::graphql::{
 /// The environment variable that turns a comparison run into a blessing run.
 const UPDATE_VAR: &str = "UPDATE_GOLDEN";
 
-/// The goldens whose expected content will change when tokora's trailing-gap placement is fixed,
-/// and the only ones that may be re-blessed as part of that fix.
+/// The corpus entries whose `Gap` hangs off `Root` rather than off a node inside the tree.
 ///
-/// Each of these ends in a lexer error, so its tail is carried by the sink's gap tiling rather
-/// than by any committed token — and because nothing lexable follows, that `Gap` attaches to
-/// `Root` instead of to `Document`. The same bytes in the middle of a document attach inside it.
-/// The chosen fix (option B) makes a trailing gap join the last child when the stream is balanced,
-/// which makes `Document.text() == source` unconditional and moves exactly one line of each of
-/// these goldens one level deeper.
+/// **This is a settled shape, not a pending one.** It used to be the reverse: this constant was
+/// `PENDING_OPTION_B`, a ledger of four goldens waiting on tokora's trailing-gap fix, and it
+/// existed to bound that fix's blast radius. The fix landed as tokora `60f27a3`, exactly one of the
+/// four moved, and what is left is not a remainder of the ledger — it is the rule's own fallback
+/// clause, which the fix states in as many words and which nothing further is going to change.
 ///
-/// **This list grew from one to four when the `invalid_lex_*` class was added, and that is the
-/// census reporting rather than a regression.** The three new entries have no lexable byte at all,
-/// so their whole source is the trailing gap: `Root@0..n` over an empty `Document@0..0` and one
-/// `Gap@0..n`. Under option B the `Gap` moves inside `Document`, which is one line and one range
-/// per file. The alternative — keeping the class out of the golden set — would drop the only trees
-/// in the suite whose shape is entirely the sink's from the one gate that looks at shape, and gate
-/// 5 is where an accidental change to gap placement would otherwise be invisible.
+/// The rule is that a run is tiled **where it opens**, immediately after the token it trails, in
+/// the node open at that moment. Each of these three sources is refused by the lexer byte for byte,
+/// so the parse commits no token at all and there is no such moment: the fallback tiles the run
+/// where the walk ends, which for the balanced stream `Sink::finish` demands is `Root`. Hence
+/// `Root@0..n` over an empty `Document@0..0` and one `Gap@0..n` — three lines each.
 ///
-/// The blast radius is therefore stated as four expected re-blesses, all of the same one-line
-/// form, rather than hidden by omission.
-const PENDING_OPTION_B: &[&str] = &[
+/// That is forced rather than carved out. It is the same clause that governs a *leading* run, and
+/// the identical parse with one lexable byte appended tiles its run at the root too, so any other
+/// answer would re-open the asymmetry the fix closed instead of closing it.
+///
+/// The consequence worth stating for a consumer: `Document.text() == source` is now unconditional
+/// for every source with a committed token in it, and false only for these three, where `Document`
+/// is empty because the grammar never got a token to put in it.
+const GAP_TILES_AT_ROOT: &[&str] = &[
   "invalid_lex_illegal_character.graphql",
   "invalid_lex_unterminated_block_string.graphql",
   "invalid_lex_unterminated_string.graphql",
-  "invalid_unterminated_string.graphql",
 ];
 
 /// The token images the lossless lexer surfaces as trivia, as they enter the tree.
@@ -144,7 +156,7 @@ const TRIVIA_IMAGES: &[K] = &[K::Space, K::Tab, K::Newline, K::Comma, K::Comment
 /// Every `parent > node` pairing where a node currently opens *before* the trivia in front of it,
 /// so that the trivia lands inside the node's range instead of beside it.
 ///
-/// **Found by reading the goldens, and the second entry is a defect.** Reviewing all 94 trees by
+/// **Found by reading the goldens, and the second entry is a defect.** Reviewing all 95 trees by
 /// eye surfaced one shape that disagrees with the other 75 of its kind:
 /// `root_operation_type_definition` (`definition.rs`) calls `named_type` directly, and
 /// `named_type` opens `K::NamedType` and only then calls `expect`, whose trivia skip therefore
@@ -207,6 +219,16 @@ const SHAPE_CASES: &[(&str, &str)] = &[
     "top_level_recovery",
     "type A { f: Int } ??? type B { g: Int }",
   ),
+  // The line above, truncated at the run — and the pair is the point. An unlexable run *after*
+  // real committed input is the one class tokora `60f27a3` moves, and a sweep of the 94 trees that
+  // predate this one found the corpus carried exactly one member of it,
+  // `invalid_unterminated_string`, with every other gap mid-document. So the property the fix
+  // exists to establish had no witness here: two streams that share a prefix through the token a
+  // run trails must place that run in the **same** node, including when one of them simply stops
+  // there. Before the fix these two disagreed — `Document > Gap` against `Root > Gap` — and every
+  // gate in this suite stayed green, because gates 1 and 3 see a verdict and a string. Their
+  // goldens now agree line for line up to the truncation, and a regression separates them again.
+  ("top_level_recovery_at_eof", "type A { f: Int } ???"),
   // Trivia in front of a *retro-wrap* probe, in both of the positions that have one: the `!` that
   // turns a type into a `NonNullType`, and the `:` that turns a name into an `Alias`. Added
   // because a mutation found the gap rather than because the shape looked interesting — deleting
@@ -719,62 +741,141 @@ fn the_render_shows_a_lost_definition_node() {
   );
 }
 
-/// Only the recorded goldens are sensitive to where a trailing gap attaches.
+/// A gap hangs off `Root` exactly when the parse committed no token — a law, over both golden sets.
 ///
-/// A region no token covers attaches *inside* `Document` when anything lexable follows it and
-/// *outside* — as a `Gap` child of `Root` — when nothing does. tokora's fix makes the trailing case
-/// join the last child too. This census is what bounds the blast radius of that fix: it fails if a
-/// fifth case becomes sensitive, and it fails if the fix lands, at which point exactly the
-/// goldens listed in [`PENDING_OPTION_B`] may be re-blessed and this test updated to say the
-/// asymmetry is gone.
+/// This used to be a pending-fix ledger. A region no token covers attached *inside* `Document` when
+/// anything lexable followed it and *outside*, as a `Gap` child of `Root`, when nothing did; the
+/// census bounded the blast radius of the fix that would remove the difference, and it was written
+/// to red the day that fix landed. It landed as tokora `60f27a3` and this is the rewrite it asked
+/// for.
 ///
-/// The test is over both golden sets, not over the four entries, because "only these files are
-/// affected" is a claim about all 94 of them.
+/// What it asserts now is the surviving half of the rule rather than a list of files. A run is
+/// tiled where it opens, in the node open at the token it trails — so a run reaches `Root` only
+/// when there is no such token anywhere, which is to say only when the parse committed nothing at
+/// all. [`GAP_TILES_AT_ROOT`] names the three sources that satisfy that today, and the biconditional
+/// below is what makes the list a consequence instead of an assertion: a fourth entry can only join
+/// it by being tokenless, and one of the three can only leave it by gaining a token.
+///
+/// The test is over both golden sets, not over the three entries, because "only these" is a claim
+/// about all 95 of them.
 #[test]
-fn only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement() {
-  fn trailing_gap(src: &str) -> bool {
+fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
+  /// Does `src` put a token directly under `Root`? Only the gap can be there — every grammar token
+  /// is committed inside `Document` — so this is "the gap escaped the tree".
+  fn gap_at_root(src: &str) -> bool {
     parse_str(src)
       .syntax()
       .children_with_tokens()
       .any(|element| element.as_token().is_some())
   }
 
-  let sensitive: Vec<String> = corpus()
+  /// The kind of the node each `Gap` in `src` is a child of, in source order.
+  fn gap_parents(src: &str) -> Vec<K> {
+    parse_str(src)
+      .syntax()
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| token.kind() == K::Gap)
+      .filter_map(|token| Some(token.parent()?.kind()))
+      .collect()
+  }
+
+  /// How many tokens the grammar committed, as opposed to the sink tiling them.
+  fn committed_tokens(src: &str) -> usize {
+    parse_str(src)
+      .syntax()
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| token.kind() != K::Gap)
+      .count()
+  }
+
+  let cases: Vec<(String, String)> = corpus()
     .into_iter()
-    .filter(|(_, src)| trailing_gap(src))
-    .map(|(name, _)| name)
     .chain(
       SHAPE_CASES
         .iter()
-        .filter(|(_, src)| trailing_gap(src))
-        .map(|(name, _)| (*name).to_string()),
+        .map(|(name, src)| ((*name).to_string(), (*src).to_string())),
     )
     .collect();
 
+  let at_root: Vec<&str> = cases
+    .iter()
+    .filter(|(_, src)| gap_at_root(src))
+    .map(|(name, _)| name.as_str())
+    .collect();
+
   assert_eq!(
-    sensitive, PENDING_OPTION_B,
-    "the set of cases whose trailing region hangs off `Root` instead of off `Document` has \
-     changed. If tokora's trailing-gap fix has landed, this set should now be empty and only the \
-     goldens named in PENDING_OPTION_B may be re-blessed; if it has grown, a new case just became \
-     sensitive and its golden should not be committed against the shape that is about to change."
+    at_root, GAP_TILES_AT_ROOT,
+    "the set of cases whose gap hangs off `Root` instead of off a node inside the tree has \
+     changed. A case that appeared committed no token where it used to commit one, or the sink \
+     stopped tiling a run at the token it trails; a case that vanished gained a token, and its \
+     golden moves that `Gap` line one or more levels deeper in the same diff."
   );
 
-  // The positive control: the asymmetry itself, so this census cannot pass because nothing
-  // anywhere produces a gap. One garbage byte, twice, differing only in what follows it.
-  assert!(
-    !trailing_gap("% {"),
-    "a gap with something lexable after it belongs inside `Document`"
+  // The law the list is a consequence of. Scoped to the cases that actually carry a gap, because a
+  // source with neither a gap nor a token — the empty document — satisfies neither side and says
+  // nothing either way.
+  for (name, src) in &cases {
+    let is_at_root = gap_at_root(src);
+    if gap_parents(src).is_empty() && !is_at_root {
+      continue;
+    }
+    let committed = committed_tokens(src);
+    let where_it_is = if is_at_root { "under" } else { "not under" };
+    assert_eq!(
+      is_at_root,
+      committed == 0,
+      "{name}: a gap reaches `Root` only when no committed token precedes it anywhere. This case \
+       has {committed} committed token(s) and its gap is {where_it_is} `Root`."
+    );
+  }
+
+  // The positive controls, so this census cannot pass because nothing anywhere produces a gap.
+  //
+  // First, the asymmetry that is gone: one garbage byte, twice, differing only in what follows it.
+  // Both are now inside the tree. The second of these was the old test's witness that the fix had
+  // *not* landed, and its inversion is the single clearest signal that it has.
+  assert_eq!(
+    gap_parents("% {"),
+    vec![K::Document],
+    "a leading run tiles at the node its first committed token lands in"
   );
   assert!(
-    trailing_gap("{ %"),
-    "a gap with nothing after it currently hangs off `Root`; if this now fails, option B has \
-     landed and PENDING_OPTION_B is discharged"
+    !gap_at_root("{ %"),
+    "a run with nothing lexable after it must no longer escape to `Root`; if this fails, the \
+     trailing-gap fix has been reverted upstream"
   );
 
-  // And the shape of each sensitive entry, stated where the reader is, so the expected re-bless is
-  // four identified lines rather than four files to squint at. One direct token child of `Root`,
-  // and it is the gap: that single line is what option B moves one level deeper.
-  for name in PENDING_OPTION_B {
+  // Second, the property the fix exists to establish, as the pair the shape set now carries: two
+  // streams sharing a prefix through the token a run trails place that run in the same node, and
+  // one of them simply stops there. This is the assertion that would red on a partial revert that
+  // kept `{ %` inside the tree but re-read placement off the end of the event log.
+  const MID: &str = "type A { f: Int } ??? type B { g: Int }";
+  const EOF: &str = "type A { f: Int } ???";
+  assert_eq!(
+    gap_parents(MID),
+    gap_parents(EOF),
+    "the same run, once with a definition after it and once at end of input, landed in two \
+     different nodes — which is the asymmetry tokora `60f27a3` removed"
+  );
+  assert_eq!(
+    gap_parents(EOF),
+    vec![K::Document],
+    "this run trails a `Space` that `Document` owns, so `Document` is where it belongs"
+  );
+
+  // Third, the fallback clause itself, on the smallest source that reaches it, so the entries in
+  // `GAP_TILES_AT_ROOT` are explained by a rule the reader can see rather than by a list.
+  assert!(
+    gap_at_root("%"),
+    "a source with no committed token has no moment at which its run opens, so the run tiles \
+     where the walk ends, which is `Root`"
+  );
+
+  // And the shape of each root-level entry, stated where the reader is. One direct token child of
+  // `Root`, and it is the gap.
+  for name in GAP_TILES_AT_ROOT {
     let gap_owner = parse_str(
       &std::fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -782,7 +883,7 @@ fn only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement() {
           .join("corpus")
           .join(name),
       )
-      .unwrap_or_else(|e| panic!("the pending corpus entry {name} is unreadable: {e}")),
+      .unwrap_or_else(|e| panic!("the corpus entry {name} is unreadable: {e}")),
     )
     .syntax()
     .children_with_tokens()
@@ -792,15 +893,15 @@ fn only_the_recorded_goldens_are_sensitive_to_trailing_gap_placement() {
     assert_eq!(
       gap_owner,
       vec![K::Gap],
-      "{name}: a pending entry's `Root` should carry exactly one direct token child, the trailing \
-       gap"
+      "{name}: a root-level entry's `Root` should carry exactly one direct token child, the gap \
+       that is its whole source"
     );
   }
 }
 
 /// Which nodes open on the wrong side of their leading trivia — a standing check, not a comment.
 ///
-/// Reading 94 goldens by eye is what Step 2 asks for and it is not repeatable; this is that
+/// Reading 95 goldens by eye is what Step 2 asks for and it is not repeatable; this is that
 /// reading turned into an assertion. It sweeps every tree in both golden sets for a node whose
 /// first child is a trivia token and compares the `parent > node` pairings against
 /// [`OPENS_ON_LEADING_TRIVIA`], which records the two that exist today and says which of them is a

@@ -1,17 +1,17 @@
 Root@0..26
-  Document@0..9
-    OperationDefinition@0..9
-      SelectionSet@0..9
+  Document@0..26
+    OperationDefinition@0..26
+      SelectionSet@0..26
         LBrace@0..1 "{"
         Newline@1..2 "\n"
         Space@2..3 " "
         Space@3..4 " "
-        Field@4..9
+        Field@4..26
           Name@4..5 "f"
-          Arguments@5..9
+          Arguments@5..26
             LParen@5..6 "("
-            Argument@6..9
+            Argument@6..26
               Name@6..7 "a"
               Colon@7..8 ":"
               Space@8..9 " "
-  Gap@9..26 "\"unterminated)\n}\n"
+              Gap@9..26 "\"unterminated)\n}\n"
