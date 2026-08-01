@@ -48,6 +48,17 @@
 //! is inert. Closing *that* divergence would be a bug, so unlike the eleven it cannot quietly go
 //! away.
 //!
+//! # The corpus is run twice: compact, and padded with gate 2's trivia
+//!
+//! [`both_suites_agree_on_every_corpus_entry`] reads the corpus as written. Every entry is also
+//! run through gate 2's injection — the same eight ignorable forms at every token boundary — by
+//! [`both_suites_agree_on_every_padded_corpus_entry`], because the compact half cannot see the
+//! asymmetry that makes this pairing worth gating at all: **the lossless suite is the only one of
+//! the two that sees trivia**. `syntactic/`'s lexer skips it before the grammar exists; the
+//! lossless lexer surfaces every byte and each atom has to cross it deliberately. An atom that
+//! stops crossing turns valid formatted GraphQL into a rejection *in one suite only*, which is a
+//! parity failure by construction — and no compact fixture can produce it.
+//!
 //! # What this gate cannot see
 //!
 //! A verdict is one bit. [`a_verdict_gate_is_blind_to_a_lost_definition_node`] exhibits an input
@@ -57,6 +68,7 @@
 
 use std::path::PathBuf;
 
+use smear_lexer::graphql::lossless::LosslessLexer;
 use smear_parser::graphql::{
   GraphQL,
   ast::Document,
@@ -65,7 +77,7 @@ use smear_parser::graphql::{
   lossless::{document::test_support::parse_type_system_document, parse_str},
   syntactic::{GraphqlLexer, document},
 };
-use tokora::{Parse as _, Parser};
+use tokora::{Lexer as _, Parse as _, Parser};
 
 /// The lossless verdict: did the parse report a grammar **error**?
 ///
@@ -174,6 +186,220 @@ fn both_suites_agree_on_every_corpus_entry() {
     checked_invalid >= 5,
     "only {checked_invalid} invalid entries; no negative control"
   );
+}
+
+/// The eight ignorable forms, one variant of each corpus entry per form.
+///
+/// **Reproduced from `lossless_trivia.rs`, deliberately and identically.** Every gate in this
+/// suite is a self-contained integration binary — `corpus_files` is already written out in three
+/// of them — so gate 1 cannot import gate 2's derivation and has to restate it. Restating it
+/// exactly is what makes [`both_suites_agree_on_every_padded_corpus_entry`] a run of *gate 2's
+/// variants* rather than of some similar-looking set of its own: same alphabet, same boundary
+/// tiling, same insertion. `the_padded_variants_are_the_ones_gate_2_derives` pins the two
+/// halves a drift could hide in.
+///
+/// The comment carries its own line terminator: a comment runs to the end of the line, so `"# c"`
+/// alone would swallow the token after it and the variant would stop being an injection.
+const ALPHABET: &[(&str, &str)] = &[
+  ("space", " "),
+  ("tab", "\t"),
+  ("newline", "\n"),
+  ("carriage-return", "\r"),
+  ("crlf", "\r\n"),
+  ("comment", "# c\n"),
+  ("comma", ","),
+  ("bom", "\u{FEFF}"),
+];
+
+/// The corpus entries that cannot be padded, because they cannot be lexed.
+///
+/// Injection is defined at *token* boundaries, so a source the lexer refuses byte for byte has no
+/// boundaries to inject at. Exactly one entry is in that state, and it is the standing witness for
+/// the upstream block recorded in Task 11b: an unterminated string swallows the remainder of the
+/// file, the whole source lexes as one recorded lexer error, and `parse_str` would meet tokora's
+/// `StructureWithoutTokens` wall.
+///
+/// Pinned as a set rather than skipped silently. A **new** unlexable entry is a corpus decision
+/// somebody should have to make on purpose, and the day the upstream fix lands this list is the
+/// thing that tells whoever is holding it that this gate can now widen.
+const UNPADDABLE: &[&str] = &["invalid_unterminated_string.graphql"];
+
+/// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.
+///
+/// `None` when the source does not lex — see [`UNPADDABLE`]. Measured with the **lexer**, not with
+/// the tree under test: reading the boundaries off a parse would make the padding a function of
+/// the artifact being asserted about, so a parser that lost a token would quietly stop being
+/// padded there.
+fn token_boundaries(src: &str) -> Option<Vec<usize>> {
+  let mut lexer = LosslessLexer::<'_, &str>::new(src);
+  let mut boundaries = vec![0usize];
+  while let Some(result) = lexer.lex() {
+    result.ok()?;
+    boundaries.push(lexer.span().end());
+  }
+  boundaries.dedup();
+  Some(boundaries)
+}
+
+/// `src` with `pad` inserted at every boundary in `boundaries`.
+fn inject(src: &str, boundaries: &[usize], pad: &str) -> String {
+  let mut out = String::with_capacity(src.len() + boundaries.len() * pad.len());
+  let mut cursor = 0usize;
+  for &boundary in boundaries {
+    out.push_str(&src[cursor..boundary]);
+    out.push_str(pad);
+    cursor = boundary;
+  }
+  out.push_str(&src[cursor..]);
+  out
+}
+
+/// Gate 1 over gate 2's padded variants: the two suites agree about trivia-laden input too.
+///
+/// # Why the compact corpus is not enough
+///
+/// The corpus is hand-written GraphQL, and hand-written GraphQL never puts trivia at the junctions
+/// where a lossless atom's answer decides something — `$ x`, `@ d`, `... F`, `alias : f`, `Int !`,
+/// `f (a: 1)`. Gate 2 measures that absence directly
+/// (`lossless_trivia.rs::the_compact_corpus_cannot_discriminate_the_retro_wrap_probes`). So over
+/// the corpus as written, an atom that has stopped crossing leading trivia is indistinguishable
+/// from one that still does — in *both* suites, and therefore in their agreement as well.
+///
+/// Padding closes that, and it closes it in the direction this gate owns. Gate 2 already asserts
+/// the lossless verdict and shape survive injection; what it cannot say is whether the **other**
+/// suite came along, because it never calls `syntactic_has_errors`. `syntactic/`'s lexer skips
+/// trivia before the grammar sees it, so its verdict is invariant under injection by construction
+/// — which makes it a fixed reference the lossless verdict is measured against here, one padded
+/// variant at a time.
+///
+/// # Invalid entries are padded too, which gate 2 does not do
+///
+/// Gate 2 pads only the valid half, because its shape comparison is meaningless over a recovered
+/// parse — where the holes fell is a function of the recovery, and trivia may legitimately move
+/// them. A **verdict** has no such problem: an invalid document stays invalid however it is
+/// spaced. So this gate runs the whole corpus, and gate 2's set is a strict subset of it. The one
+/// entry that cannot be reached at all is named in [`UNPADDABLE`] rather than skipped in silence.
+#[test]
+fn both_suites_agree_on_every_padded_corpus_entry() {
+  let mut skipped: Vec<String> = Vec::new();
+  let mut padded_valid = 0usize;
+  let mut padded_invalid = 0usize;
+
+  for entry in corpus_files() {
+    let name = entry.file_name().unwrap().to_string_lossy().to_string();
+    let src = std::fs::read_to_string(&entry).unwrap();
+
+    let Some(boundaries) = token_boundaries(&src) else {
+      skipped.push(name);
+      continue;
+    };
+
+    // The compact verdict is the anchor: padding must move neither suite off it. Asserting only
+    // `lossless == syntactic` on the padded bytes would be satisfied by both suites flipping
+    // together, which is precisely what a shared corpus-reading bug would do.
+    let compact_lossless = lossless_has_errors(&src);
+    let compact_syntactic = syntactic_has_errors(&src);
+    assert_eq!(
+      compact_lossless, compact_syntactic,
+      "{name}: the two suites disagree before any padding — this is the compact gate's failure, \
+       reported here because the padded run rests on it"
+    );
+
+    for (form, pad) in ALPHABET {
+      let padded_src = inject(&src, &boundaries, pad);
+      // The injection is real. Without this the whole loop degenerates into a second, slower
+      // copy of the compact gate the moment `inject` starts returning its input.
+      assert!(
+        padded_src.len() > src.len(),
+        "{name} padded with {form}: injection added nothing"
+      );
+
+      let lossless_errs = lossless_has_errors(&padded_src);
+      let syntactic_errs = syntactic_has_errors(&padded_src);
+      assert_eq!(
+        lossless_errs, syntactic_errs,
+        "{name} padded with {form}: lossless says errors={lossless_errs}, syntactic says \
+         errors={syntactic_errs} — the two suites disagree about trivia-laden input they agree \
+         about compact"
+      );
+      assert_eq!(
+        lossless_errs, compact_lossless,
+        "{name} padded with {form}: the lossless verdict moved under injection, so some decision \
+         point looked at the head without committing the trivia in front of it"
+      );
+      assert_eq!(
+        syntactic_errs, compact_syntactic,
+        "{name} padded with {form}: the syntactic verdict moved under injection — its lexer skips \
+         trivia, so this is not a parity finding but a lexer one"
+      );
+
+      if name.starts_with("invalid_") {
+        padded_invalid += 1;
+      } else {
+        padded_valid += 1;
+      }
+    }
+  }
+
+  // The exclusion is a pinned set, not a silent `continue`.
+  assert_eq!(
+    skipped, UNPADDABLE,
+    "the set of corpus entries this gate cannot pad has changed"
+  );
+
+  // The positive controls, one per class: an all-valid or an all-invalid padded run would satisfy
+  // every assertion above while measuring half of what the gate claims.
+  assert!(
+    padded_valid >= 160,
+    "only {padded_valid} padded valid variants; the sweep is too thin"
+  );
+  assert!(
+    padded_invalid >= 40,
+    "only {padded_invalid} padded invalid variants; no negative control under injection"
+  );
+  assert_eq!(
+    padded_valid + padded_invalid,
+    (corpus_files().len() - UNPADDABLE.len()) * ALPHABET.len(),
+    "the sweep did not run every form over every paddable entry"
+  );
+}
+
+/// The two halves of the derivation that a drift from gate 2 could hide in.
+///
+/// [`both_suites_agree_on_every_padded_corpus_entry`] claims to run *gate 2's* variants, and that
+/// claim rests on two reproduced pieces of code — [`ALPHABET`] and [`token_boundaries`] —
+/// which nothing in the compiler holds to their originals. Both are therefore asserted against
+/// fixed values that `lossless_trivia.rs` asserts against too: the boundary tiling of `type
+/// T{a:Int}` is the same literal vector its
+/// `the_injection_and_the_shape_projection_are_both_live` pins, and the alphabet is its eight
+/// forms. A copy that has drifted fails here rather than quietly padding something else.
+#[test]
+fn the_padded_variants_are_the_ones_gate_2_derives() {
+  assert_eq!(
+    token_boundaries("type T{a:Int}"),
+    Some(vec![0, 4, 5, 6, 7, 8, 9, 12, 13]),
+    "the boundary tiling has drifted from the one gate 2 derives"
+  );
+  assert_eq!(ALPHABET.len(), 8, "gate 2 injects eight ignorable forms");
+  assert_eq!(
+    ALPHABET.iter().map(|(form, _)| *form).collect::<Vec<_>>(),
+    [
+      "space",
+      "tab",
+      "newline",
+      "carriage-return",
+      "crlf",
+      "comment",
+      "comma",
+      "bom"
+    ],
+    "the alphabet has drifted from gate 2's"
+  );
+
+  // `token_boundaries` answers `None` on exactly the class `UNPADDABLE` names, and `Some` on
+  // ordinary input — without both directions the skip above could be swallowing the corpus.
+  assert!(token_boundaries("\"unterminated").is_none());
+  assert!(token_boundaries("{ a }").is_some());
 }
 
 /// Every corpus entry names the class it belongs to.
