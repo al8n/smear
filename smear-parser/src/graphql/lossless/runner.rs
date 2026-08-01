@@ -184,3 +184,72 @@ pub fn parse_str(src: &str) -> Parse {
 
   finish_root(sink)
 }
+
+/// Test-only scaffolding for probing the sink's own kind-validator door.
+///
+/// Every driver elsewhere in this suite (`lossless_drivers!`, `trivia.rs`'s `drive!`) runs a
+/// *production* — a function that only ever names a kind from
+/// [`K::ALL`](crate::graphql::kinds::SyntaxKind::ALL)'s own space, because that space is all a
+/// production can spell. There is therefore no production-shaped way to observe [`profile`]'s
+/// validator refuse a kind: the refusal only has something to refuse when the caller hands the
+/// sink a kind no production would ever construct. This module is that caller — a direct spend
+/// of the sink's own retro-wrap door, through the crate's real, shipped `profile()`, so the
+/// validator under test is the one every parse actually runs.
+#[doc(hidden)]
+pub mod test_support {
+  use tokora::{InputRef, Parse as _, cache::DefaultCache, emitter::CstEmitter as _};
+
+  use super::{
+    GraphqlLosslessLexer, LosslessEmitter, LosslessSink, Parse, Sink, finish_root, profile,
+  };
+  use crate::graphql::GraphQL;
+
+  type TestCtx<'inp, 'sink> = (
+    &'sink mut LosslessSink<'inp>,
+    DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
+  );
+  type TestInput<'inp, 'input, 'sink> =
+    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
+
+  /// Opens a node at `kind` over `src` and materializes.
+  ///
+  /// The body is the exact retro-wrap sequence every `node`/`node_at` production spends to
+  /// open its own node — [`cst_mark`] then [`cst_start_at`] then [`cst_finish`]
+  /// (`tokora/src/parser/node.rs`'s own `wrap`) — with `kind` standing in for a production's.
+  /// `'inp` is named and threaded from `src`, not elided, for the reason `trivia.rs`'s driver
+  /// and `lossless_drivers!` both record: a closure's parameter type is spelled out explicitly
+  /// (see [`TestInput`]), and an elided lifetime there is free to be inferred shorter than
+  /// `sink`'s, which the borrow checker then refuses. Nothing else in the crate calls this; it
+  /// exists for `tests/lossless_runner.rs`'s validator-discrimination test, which always passes
+  /// `""` — the node this probes wraps zero tokens either way.
+  ///
+  /// # Panics
+  ///
+  /// Whatever the sink's own [`cst_start_at`] panics on. Under the shipped [`profile`], any
+  /// `kind` at or past `K::ALL.len()` (`K` is
+  /// [`crate::graphql::kinds::SyntaxKind`]) — the reserved tombstone (`u16::MAX`) panics too,
+  /// but is refused by every validator, including
+  /// [`KindValidator::accept_all`](tokora::cst::KindValidator::accept_all), so it would not
+  /// discriminate the real validator from a permissive one.
+  ///
+  /// [`cst_mark`]: tokora::emitter::CstEmitter::cst_mark
+  /// [`cst_start_at`]: tokora::emitter::CstEmitter::cst_start_at
+  /// [`cst_finish`]: tokora::emitter::CstEmitter::cst_finish
+  pub fn open_raw_kind<'inp>(src: &'inp str, kind: u16) -> Parse {
+    let mut sink: LosslessSink<'inp> = Sink::new(src, LosslessEmitter::default(), profile::<str>());
+
+    let _out = tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
+      &mut sink,
+      DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
+    ))
+    .apply::<_, GraphQL>(|inp: &mut TestInput<'inp, '_, '_>| {
+      let mark = inp.emitter().cst_mark();
+      inp.emitter().cst_start_at(mark, kind);
+      inp.emitter().cst_finish(kind);
+      inp.skip_while(|_| true)
+    })
+    .parse_str(src);
+
+    finish_root(sink)
+  }
+}

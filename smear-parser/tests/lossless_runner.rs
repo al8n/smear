@@ -1,6 +1,9 @@
 #![cfg(feature = "rowan")]
 
-use smear_parser::graphql::{kinds::SyntaxKind as K, lossless::parse_str};
+use smear_parser::graphql::{
+  kinds::SyntaxKind as K,
+  lossless::{parse_str, runner::test_support::open_raw_kind},
+};
 
 #[test]
 fn an_empty_source_yields_a_root_and_an_empty_document() {
@@ -57,4 +60,54 @@ fn constructing_the_profile_does_not_panic() {
   // `gap_kind` (`cst/profile.rs:140`) — a profile cannot describe a sink that would refuse its
   // own output. Calling it is therefore itself an assertion about K::Error and K::Gap.
   let _ = smear_parser::graphql::lossless::profile::<str>();
+}
+
+#[test]
+fn the_profile_validator_refuses_an_out_of_space_kind_at_the_emit_door() {
+  // The gap this closes, measured: `KindValidator::admits` is `pub(crate)`
+  // (`cst/profile.rs:77`), so nothing outside tokora can evaluate a profile's predicate
+  // directly. `the_kind_predicate_the_validator_wraps_rejects_out_of_space_raws`, above, is the
+  // test that limitation produced — it checks `K::from_raw` on its own and never touches the
+  // sink `profile()` actually arms. A prior measurement swapped `runner::profile`'s validator
+  // for `KindValidator::new(|_| true)` and found every shipped test blind to it: `--test
+  // lossless_runner` stayed at 4 passed and the whole crate at 540 passed, exit 0. This test
+  // exists to go red the moment that swap happens again.
+  //
+  // `K::ALL.len()` is one past the dialect's own kind space — every real kind is
+  // `0..K::ALL.len()` — so no production in this crate ever produces it; it stands in here for
+  // a kind that, by construction, no production could ever pass.
+  let out_of_space_kind = K::ALL.len() as u16;
+
+  // `open_raw_kind` spends `CstEmitter::cst_start_at` — the exact retro-wrap door every
+  // `node`/`node_at` production in this suite spends to open its own node — through the
+  // crate's real, shipped `runner::profile()`. Under the real validator this panics before
+  // `Sink::finish` is ever reached (`tokora/src/cst/sink.rs:1209`); under a validator that
+  // admits everything it instead materializes a tree containing the out-of-space kind. The
+  // panic hook is silenced only for the duration of the call, so an unexpected panic elsewhere
+  // still prints normally.
+  let prev_hook = std::panic::take_hook();
+  std::panic::set_hook(Box::new(|_| {}));
+  let outcome = std::panic::catch_unwind(|| open_raw_kind("", out_of_space_kind));
+  std::panic::set_hook(prev_hook);
+
+  // `expect_err`/`unwrap_err` both require `T: Debug` to format the `Ok` arm they didn't take,
+  // and `Parse` (this crate's, not tokora's) derives no `Debug` — so the match is spelled out
+  // instead.
+  let payload = match outcome {
+    Err(payload) => payload,
+    Ok(_) => panic!(
+      "opening a node one past the dialect's kind space must panic at the sink's emit door — if \
+       this returned Ok instead, `profile()`'s validator has stopped rejecting out-of-space kinds"
+    ),
+  };
+
+  let message = payload
+    .downcast_ref::<&str>()
+    .copied()
+    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+    .expect("the sink's kind-validator assert! panics with a &str or String payload");
+  assert!(
+    message.contains("outside the dialect's own kind space"),
+    "expected the sink's own kind-validator refusal message, got a different panic: {message:?}"
+  );
 }
