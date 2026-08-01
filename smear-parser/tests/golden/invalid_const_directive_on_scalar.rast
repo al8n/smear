@@ -1,0 +1,22 @@
+Root@0..19
+  Document@0..19
+    ScalarTypeDefinition@0..19
+      Name@0..6 "scalar"
+      Space@6..7 " "
+      Name@7..8 "S"
+      Space@8..9 " "
+      Directives@9..19
+        Directive@9..18
+          At@9..10 "@"
+          Name@10..11 "d"
+          Arguments@11..18
+            LParen@11..12 "("
+            Argument@12..17
+              Name@12..13 "a"
+              Colon@13..14 ":"
+              Space@14..15 " "
+              Variable@15..17
+                Dollar@15..16 "$"
+                Name@16..17 "v"
+            RParen@17..18 ")"
+        Newline@18..19 "\n"

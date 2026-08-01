@@ -1,0 +1,37 @@
+Root@0..56
+  Document@0..56
+    EnumTypeDefinition@0..55
+      Name@0..4 "enum"
+      Space@4..5 " "
+      Name@5..6 "E"
+      Space@6..7 " "
+      Directives@7..10
+        Directive@7..10
+          At@7..8 "@"
+          Name@8..9 "d"
+          Space@9..10 " "
+      EnumValuesDefinition@10..55
+        LBrace@10..11 "{"
+        Newline@11..12 "\n"
+        Space@12..13 " "
+        Space@13..14 " "
+        EnumValueDefinition@14..40
+          Description@14..35
+            String@14..35 "\"a value description\""
+          Space@35..36 " "
+          EnumValue@36..37
+            Name@36..37 "A"
+          Newline@37..38 "\n"
+          Space@38..39 " "
+          Space@39..40 " "
+        EnumValueDefinition@40..54
+          EnumValue@40..41
+            Name@40..41 "B"
+          Space@41..42 " "
+          Directives@42..54
+            Directive@42..54
+              At@42..43 "@"
+              Name@43..53 "deprecated"
+              Newline@53..54 "\n"
+        RBrace@54..55 "}"
+    Newline@55..56 "\n"

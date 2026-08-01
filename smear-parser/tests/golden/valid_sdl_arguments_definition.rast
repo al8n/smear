@@ -1,0 +1,54 @@
+Root@0..73
+  Document@0..73
+    ObjectTypeDefinition@0..72
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "T"
+      Space@6..7 " "
+      FieldsDefinition@7..72
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        FieldDefinition@11..71
+          Name@11..12 "f"
+          ArgumentsDefinition@12..65
+            LParen@12..13 "("
+            InputValueDefinition@13..51
+              Description@13..38
+                String@13..38 "\"an argument description\""
+              Space@38..39 " "
+              Name@39..40 "a"
+              Colon@40..41 ":"
+              Space@41..42 " "
+              NamedType@42..45
+                Name@42..45 "Int"
+              Space@45..46 " "
+              DefaultValue@46..49
+                Equal@46..47 "="
+                Space@47..48 " "
+                IntValue@48..49
+                  Int@48..49 "1"
+              Comma@49..50 ","
+              Space@50..51 " "
+            InputValueDefinition@51..64
+              Name@51..52 "b"
+              Colon@52..53 ":"
+              Space@53..54 " "
+              NonNullType@54..61
+                NamedType@54..60
+                  Name@54..60 "String"
+                Bang@60..61 "!"
+              Space@61..62 " "
+              Directives@62..64
+                Directive@62..64
+                  At@62..63 "@"
+                  Name@63..64 "d"
+            RParen@64..65 ")"
+          Colon@65..66 ":"
+          Space@66..67 " "
+          NamedType@67..70
+            Name@67..70 "Int"
+          Newline@70..71 "\n"
+        RBrace@71..72 "}"
+    Newline@72..73 "\n"

@@ -1,0 +1,56 @@
+Root@0..61
+  Document@0..61
+    OperationDefinition@0..15
+      OperationType@0..5
+        Name@0..5 "query"
+      Space@5..6 " "
+      Name@6..7 "A"
+      Space@7..8 " "
+      SelectionSet@8..15
+        LBrace@8..9 "{"
+        Newline@9..10 "\n"
+        Space@10..11 " "
+        Space@11..12 " "
+        Field@12..14
+          Name@12..13 "a"
+          Newline@13..14 "\n"
+        RBrace@14..15 "}"
+    Newline@15..16 "\n"
+    Newline@16..17 "\n"
+    OperationDefinition@17..35
+      OperationType@17..25
+        Name@17..25 "mutation"
+      Space@25..26 " "
+      Name@26..27 "B"
+      Space@27..28 " "
+      SelectionSet@28..35
+        LBrace@28..29 "{"
+        Newline@29..30 "\n"
+        Space@30..31 " "
+        Space@31..32 " "
+        Field@32..34
+          Name@32..33 "b"
+          Newline@33..34 "\n"
+        RBrace@34..35 "}"
+    Newline@35..36 "\n"
+    Newline@36..37 "\n"
+    FragmentDefinition@37..60
+      Name@37..45 "fragment"
+      Space@45..46 " "
+      Name@46..47 "F"
+      Space@47..48 " "
+      Name@48..50 "on"
+      Space@50..51 " "
+      NamedType@51..52
+        Name@51..52 "T"
+      Space@52..53 " "
+      SelectionSet@53..60
+        LBrace@53..54 "{"
+        Newline@54..55 "\n"
+        Space@55..56 " "
+        Space@56..57 " "
+        Field@57..59
+          Name@57..58 "f"
+          Newline@58..59 "\n"
+        RBrace@59..60 "}"
+    Newline@60..61 "\n"

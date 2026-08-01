@@ -1,0 +1,174 @@
+Root@0..253
+  Document@0..253
+    SchemaDefinition@0..25
+      Name@0..6 "schema"
+      Space@6..7 " "
+      RootOperationTypeDefinitions@7..25
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        RootOperationTypeDefinition@11..23
+          OperationType@11..16
+            Name@11..16 "query"
+          Colon@16..17 ":"
+          NamedType@17..23
+            Space@17..18 " "
+            Name@18..23 "Query"
+        Newline@23..24 "\n"
+        RBrace@24..25 "}"
+    Newline@25..26 "\n"
+    Newline@26..27 "\n"
+    ScalarTypeDefinition@27..44
+      Name@27..33 "scalar"
+      Space@33..34 " "
+      Name@34..42 "DateTime"
+      Newline@42..43 "\n"
+      Newline@43..44 "\n"
+    InterfaceTypeDefinition@44..72
+      Name@44..53 "interface"
+      Space@53..54 " "
+      Name@54..58 "Node"
+      Space@58..59 " "
+      FieldsDefinition@59..72
+        LBrace@59..60 "{"
+        Newline@60..61 "\n"
+        Space@61..62 " "
+        Space@62..63 " "
+        FieldDefinition@63..71
+          Name@63..65 "id"
+          Colon@65..66 ":"
+          Space@66..67 " "
+          NonNullType@67..70
+            NamedType@67..69
+              Name@67..69 "ID"
+            Bang@69..70 "!"
+          Newline@70..71 "\n"
+        RBrace@71..72 "}"
+    Newline@72..73 "\n"
+    Newline@73..74 "\n"
+    ObjectTypeDefinition@74..136
+      Name@74..78 "type"
+      Space@78..79 " "
+      Name@79..84 "Query"
+      Space@84..85 " "
+      ImplementsInterfaces@85..101
+        Name@85..95 "implements"
+        Space@95..96 " "
+        NamedType@96..100
+          Name@96..100 "Node"
+        Space@100..101 " "
+      FieldsDefinition@101..136
+        LBrace@101..102 "{"
+        Newline@102..103 "\n"
+        Space@103..104 " "
+        Space@104..105 " "
+        FieldDefinition@105..115
+          Name@105..107 "id"
+          Colon@107..108 ":"
+          Space@108..109 " "
+          NonNullType@109..112
+            NamedType@109..111
+              Name@109..111 "ID"
+            Bang@111..112 "!"
+          Newline@112..113 "\n"
+          Space@113..114 " "
+          Space@114..115 " "
+        FieldDefinition@115..135
+          Name@115..119 "node"
+          ArgumentsDefinition@119..128
+            LParen@119..120 "("
+            InputValueDefinition@120..127
+              Name@120..122 "id"
+              Colon@122..123 ":"
+              Space@123..124 " "
+              NonNullType@124..127
+                NamedType@124..126
+                  Name@124..126 "ID"
+                Bang@126..127 "!"
+            RParen@127..128 ")"
+          Colon@128..129 ":"
+          Space@129..130 " "
+          NamedType@130..134
+            Name@130..134 "Node"
+          Newline@134..135 "\n"
+        RBrace@135..136 "}"
+    Newline@136..137 "\n"
+    Newline@137..138 "\n"
+    UnionTypeDefinition@138..164
+      Name@138..143 "union"
+      Space@143..144 " "
+      Name@144..147 "Any"
+      Space@147..148 " "
+      UnionMemberTypes@148..164
+        Equal@148..149 "="
+        Space@149..150 " "
+        NamedType@150..155
+          Name@150..155 "Query"
+        Space@155..156 " "
+        Pipe@156..157 "|"
+        Space@157..158 " "
+        NamedType@158..162
+          Name@158..162 "Node"
+        Newline@162..163 "\n"
+        Newline@163..164 "\n"
+    EnumTypeDefinition@164..193
+      Name@164..168 "enum"
+      Space@168..169 " "
+      Name@169..175 "Colour"
+      Space@175..176 " "
+      EnumValuesDefinition@176..193
+        LBrace@176..177 "{"
+        Newline@177..178 "\n"
+        Space@178..179 " "
+        Space@179..180 " "
+        EnumValueDefinition@180..186
+          EnumValue@180..183
+            Name@180..183 "RED"
+          Newline@183..184 "\n"
+          Space@184..185 " "
+          Space@185..186 " "
+        EnumValueDefinition@186..192
+          EnumValue@186..191
+            Name@186..191 "GREEN"
+          Newline@191..192 "\n"
+        RBrace@192..193 "}"
+    Newline@193..194 "\n"
+    Newline@194..195 "\n"
+    InputObjectTypeDefinition@195..229
+      Name@195..200 "input"
+      Space@200..201 " "
+      Name@201..207 "Filter"
+      Space@207..208 " "
+      InputFieldsDefinition@208..229
+        LBrace@208..209 "{"
+        Newline@209..210 "\n"
+        Space@210..211 " "
+        Space@211..212 " "
+        InputValueDefinition@212..228
+          Name@212..217 "limit"
+          Colon@217..218 ":"
+          Space@218..219 " "
+          NamedType@219..222
+            Name@219..222 "Int"
+          Space@222..223 " "
+          DefaultValue@223..227
+            Equal@223..224 "="
+            Space@224..225 " "
+            IntValue@225..227
+              Int@225..227 "10"
+          Newline@227..228 "\n"
+        RBrace@228..229 "}"
+    Newline@229..230 "\n"
+    Newline@230..231 "\n"
+    DirectiveDefinition@231..253
+      Name@231..240 "directive"
+      Space@240..241 " "
+      At@241..242 "@"
+      Name@242..243 "d"
+      Space@243..244 " "
+      Name@244..246 "on"
+      Space@246..247 " "
+      DirectiveLocations@247..253
+        Name@247..252 "FIELD"
+        Newline@252..253 "\n"

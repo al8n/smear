@@ -1,0 +1,19 @@
+Root@0..57
+  Document@0..57
+    DirectiveDefinition@0..57
+      Name@0..9 "directive"
+      Space@9..10 " "
+      At@10..11 "@"
+      Name@11..12 "d"
+      Space@12..13 " "
+      Name@13..15 "on"
+      Space@15..16 " "
+      DirectiveLocations@16..57
+        Pipe@16..17 "|"
+        Space@17..18 " "
+        Name@18..34 "FIELD_DEFINITION"
+        Space@34..35 " "
+        Pipe@35..36 "|"
+        Space@36..37 " "
+        Name@37..56 "ARGUMENT_DEFINITION"
+        Newline@56..57 "\n"

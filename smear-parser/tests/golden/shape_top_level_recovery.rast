@@ -1,0 +1,37 @@
+Root@0..39
+  Document@0..39
+    ObjectTypeDefinition@0..17
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "A"
+      Space@6..7 " "
+      FieldsDefinition@7..17
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..16
+          Name@9..10 "f"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          NamedType@12..15
+            Name@12..15 "Int"
+          Space@15..16 " "
+        RBrace@16..17 "}"
+    Space@17..18 " "
+    Gap@18..21 "???"
+    Space@21..22 " "
+    ObjectTypeDefinition@22..39
+      Name@22..26 "type"
+      Space@26..27 " "
+      Name@27..28 "B"
+      Space@28..29 " "
+      FieldsDefinition@29..39
+        LBrace@29..30 "{"
+        Space@30..31 " "
+        FieldDefinition@31..38
+          Name@31..32 "g"
+          Colon@32..33 ":"
+          Space@33..34 " "
+          NamedType@34..37
+            Name@34..37 "Int"
+          Space@37..38 " "
+        RBrace@38..39 "}"

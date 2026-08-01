@@ -1,0 +1,30 @@
+Root@0..22
+  Document@0..22
+    ObjectTypeDefinition@0..22
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "T"
+      Space@6..7 " "
+      FieldsDefinition@7..22
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..21
+          Name@9..10 "f"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          NonNullType@12..20
+            ListType@12..19
+              LBracket@12..13 "["
+              NonNullType@13..18
+                ListType@13..17
+                  LBracket@13..14 "["
+                  NonNullType@14..16
+                    NamedType@14..15
+                      Name@14..15 "A"
+                    Bang@15..16 "!"
+                  RBracket@16..17 "]"
+                Bang@17..18 "!"
+              RBracket@18..19 "]"
+            Bang@19..20 "!"
+          Space@20..21 " "
+        RBrace@21..22 "}"

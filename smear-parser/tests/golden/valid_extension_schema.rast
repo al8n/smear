@@ -1,0 +1,27 @@
+Root@0..32
+  Document@0..32
+    SchemaExtension@0..31
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..13 "schema"
+      Space@13..14 " "
+      Directives@14..17
+        Directive@14..17
+          At@14..15 "@"
+          Name@15..16 "d"
+          Space@16..17 " "
+      RootOperationTypeDefinitions@17..31
+        LBrace@17..18 "{"
+        Newline@18..19 "\n"
+        Space@19..20 " "
+        Space@20..21 " "
+        RootOperationTypeDefinition@21..29
+          OperationType@21..26
+            Name@21..26 "query"
+          Colon@26..27 ":"
+          NamedType@27..29
+            Space@27..28 " "
+            Name@28..29 "Q"
+        Newline@29..30 "\n"
+        RBrace@30..31 "}"
+    Newline@31..32 "\n"

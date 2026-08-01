@@ -1,0 +1,19 @@
+Root@0..18
+  Document@0..18
+    ObjectTypeDefinition@0..18
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "T"
+      Space@6..7 " "
+      FieldsDefinition@7..18
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        FieldDefinition@11..18
+          Name@11..12 "x"
+          Colon@12..13 ":"
+          Space@13..14 " "
+          NamedType@14..17
+            Name@14..17 "Int"
+          Newline@17..18 "\n"

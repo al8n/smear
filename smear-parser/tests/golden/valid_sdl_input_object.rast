@@ -1,0 +1,46 @@
+Root@0..63
+  Document@0..63
+    InputObjectTypeDefinition@0..62
+      Name@0..5 "input"
+      Space@5..6 " "
+      Name@6..7 "I"
+      Space@7..8 " "
+      Directives@8..11
+        Directive@8..11
+          At@8..9 "@"
+          Name@9..10 "d"
+          Space@10..11 " "
+      InputFieldsDefinition@11..62
+        LBrace@11..12 "{"
+        Newline@12..13 "\n"
+        Space@13..14 " "
+        Space@14..15 " "
+        InputValueDefinition@15..50
+          Description@15..36
+            String@15..36 "\"a field description\""
+          Space@36..37 " "
+          Name@37..38 "a"
+          Colon@38..39 ":"
+          Space@39..40 " "
+          NamedType@40..43
+            Name@40..43 "Int"
+          Space@43..44 " "
+          DefaultValue@44..47
+            Equal@44..45 "="
+            Space@45..46 " "
+            IntValue@46..47
+              Int@46..47 "1"
+          Newline@47..48 "\n"
+          Space@48..49 " "
+          Space@49..50 " "
+        InputValueDefinition@50..61
+          Name@50..51 "b"
+          Colon@51..52 ":"
+          Space@52..53 " "
+          NonNullType@53..60
+            NamedType@53..59
+              Name@53..59 "String"
+            Bang@59..60 "!"
+          Newline@60..61 "\n"
+        RBrace@61..62 "}"
+    Newline@62..63 "\n"

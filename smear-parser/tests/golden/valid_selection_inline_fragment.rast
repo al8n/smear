@@ -1,0 +1,65 @@
+Root@0..61
+  Document@0..61
+    OperationDefinition@0..60
+      SelectionSet@0..60
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        InlineFragment@4..24
+          Spread@4..7 "..."
+          Space@7..8 " "
+          Name@8..10 "on"
+          Space@10..11 " "
+          NamedType@11..12
+            Name@11..12 "T"
+          Space@12..13 " "
+          SelectionSet@13..24
+            LBrace@13..14 "{"
+            Newline@14..15 "\n"
+            Space@15..16 " "
+            Space@16..17 " "
+            Space@17..18 " "
+            Space@18..19 " "
+            Field@19..23
+              Name@19..20 "f"
+              Newline@20..21 "\n"
+              Space@21..22 " "
+              Space@22..23 " "
+            RBrace@23..24 "}"
+        Newline@24..25 "\n"
+        Space@25..26 " "
+        Space@26..27 " "
+        InlineFragment@27..58
+          Spread@27..30 "..."
+          Space@30..31 " "
+          Directives@31..47
+            Directive@31..46
+              At@31..32 "@"
+              Name@32..36 "skip"
+              Arguments@36..46
+                LParen@36..37 "("
+                Argument@37..45
+                  Name@37..39 "if"
+                  Colon@39..40 ":"
+                  Space@40..41 " "
+                  BooleanValue@41..45
+                    Name@41..45 "true"
+                RParen@45..46 ")"
+            Space@46..47 " "
+          SelectionSet@47..58
+            LBrace@47..48 "{"
+            Newline@48..49 "\n"
+            Space@49..50 " "
+            Space@50..51 " "
+            Space@51..52 " "
+            Space@52..53 " "
+            Field@53..57
+              Name@53..54 "g"
+              Newline@54..55 "\n"
+              Space@55..56 " "
+              Space@56..57 " "
+            RBrace@57..58 "}"
+        Newline@58..59 "\n"
+        RBrace@59..60 "}"
+    Newline@60..61 "\n"

@@ -1,0 +1,33 @@
+Root@0..30
+  Document@0..30
+    SchemaDefinition@0..29
+      Name@0..6 "schema"
+      Space@6..7 " "
+      Directives@7..17
+        Directive@7..16
+          At@7..8 "@"
+          Name@8..9 "d"
+          Arguments@9..16
+            LParen@9..10 "("
+            Argument@10..15
+              Name@10..11 "a"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              Variable@13..15
+                Dollar@13..14 "$"
+                Name@14..15 "v"
+            RParen@15..16 ")"
+        Space@16..17 " "
+      RootOperationTypeDefinitions@17..29
+        LBrace@17..18 "{"
+        Space@18..19 " "
+        RootOperationTypeDefinition@19..27
+          OperationType@19..24
+            Name@19..24 "query"
+          Colon@24..25 ":"
+          NamedType@25..27
+            Space@25..26 " "
+            Name@26..27 "Q"
+        Space@27..28 " "
+        RBrace@28..29 "}"
+    Newline@29..30 "\n"

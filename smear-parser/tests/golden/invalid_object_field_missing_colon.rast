@@ -1,0 +1,26 @@
+Root@0..20
+  Document@0..20
+    LBrace@0..1 "{"
+    Newline@1..2 "\n"
+    Space@2..3 " "
+    Space@3..4 " "
+    Name@4..5 "f"
+    LParen@5..6 "("
+    Name@6..7 "a"
+    Colon@7..8 ":"
+    Space@8..9 " "
+    LBrace@9..10 "{"
+    Space@10..11 " "
+    Name@11..12 "b"
+    Space@12..13 " "
+    Error@13..14
+      Int@13..14 "1"
+    Space@14..15 " "
+    Error@15..16
+      RBrace@15..16 "}"
+    Error@16..17
+      RParen@16..17 ")"
+    Newline@17..18 "\n"
+    Error@18..19
+      RBrace@18..19 "}"
+    Newline@19..20 "\n"

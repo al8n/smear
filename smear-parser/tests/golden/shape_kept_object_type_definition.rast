@@ -1,0 +1,16 @@
+Root@0..13
+  Document@0..13
+    ObjectTypeDefinition@0..13
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "T"
+      Space@6..7 " "
+      FieldsDefinition@7..13
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..13
+          Name@9..10 "x"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          Error@12..13
+            RBrace@12..13 "}"

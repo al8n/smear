@@ -1,0 +1,27 @@
+Root@0..66
+  Document@0..66
+    ObjectTypeDefinition@0..65
+      Description@0..25
+        BlockString@0..25 "\"\"\"\nA described type.\n\"\"\""
+      Newline@25..26 "\n"
+      Name@26..30 "type"
+      Space@30..31 " "
+      Name@31..32 "T"
+      Space@32..33 " "
+      FieldsDefinition@33..65
+        LBrace@33..34 "{"
+        Newline@34..35 "\n"
+        Space@35..36 " "
+        Space@36..37 " "
+        FieldDefinition@37..64
+          Description@37..56
+            String@37..56 "\"a described field\""
+          Space@56..57 " "
+          Name@57..58 "f"
+          Colon@58..59 ":"
+          Space@59..60 " "
+          NamedType@60..63
+            Name@60..63 "Int"
+          Newline@63..64 "\n"
+        RBrace@64..65 "}"
+    Newline@65..66 "\n"

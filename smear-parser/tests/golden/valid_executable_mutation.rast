@@ -1,0 +1,18 @@
+Root@0..19
+  Document@0..19
+    OperationDefinition@0..18
+      OperationType@0..8
+        Name@0..8 "mutation"
+      Space@8..9 " "
+      Name@9..10 "M"
+      Space@10..11 " "
+      SelectionSet@11..18
+        LBrace@11..12 "{"
+        Newline@12..13 "\n"
+        Space@13..14 " "
+        Space@14..15 " "
+        Field@15..17
+          Name@15..16 "f"
+          Newline@16..17 "\n"
+        RBrace@17..18 "}"
+    Newline@18..19 "\n"

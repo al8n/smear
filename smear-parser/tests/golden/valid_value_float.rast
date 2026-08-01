@@ -1,0 +1,46 @@
+Root@0..66
+  Document@0..66
+    OperationDefinition@0..65
+      SelectionSet@0..65
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..64
+          Name@4..5 "f"
+          Arguments@5..63
+            LParen@5..6 "("
+            Argument@6..16
+              Name@6..11 "plain"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              FloatValue@13..16
+                Float@13..16 "1.5"
+            Comma@16..17 ","
+            Space@17..18 " "
+            Argument@18..34
+              Name@18..26 "negative"
+              Colon@26..27 ":"
+              Space@27..28 " "
+              FloatValue@28..34
+                Float@28..34 "-1.5e3"
+            Comma@34..35 ","
+            Space@35..36 " "
+            Argument@36..47
+              Name@36..41 "lower"
+              Colon@41..42 ":"
+              Space@42..43 " "
+              FloatValue@43..47
+                Float@43..47 "1e-3"
+            Comma@47..48 ","
+            Space@48..49 " "
+            Argument@49..62
+              Name@49..54 "upper"
+              Colon@54..55 ":"
+              Space@55..56 " "
+              FloatValue@56..62
+                Float@56..62 "1.0E+3"
+            RParen@62..63 ")"
+          Newline@63..64 "\n"
+        RBrace@64..65 "}"
+    Newline@65..66 "\n"

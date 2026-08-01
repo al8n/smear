@@ -1,0 +1,26 @@
+Root@0..24
+  Document@0..24
+    InputObjectTypeDefinition@0..23
+      Name@0..5 "input"
+      Space@5..6 " "
+      Name@6..7 "I"
+      Space@7..8 " "
+      InputFieldsDefinition@8..23
+        LBrace@8..9 "{"
+        Space@9..10 " "
+        InputValueDefinition@10..22
+          Name@10..11 "a"
+          Colon@11..12 ":"
+          Space@12..13 " "
+          NamedType@13..16
+            Name@13..16 "Int"
+          Space@16..17 " "
+          DefaultValue@17..21
+            Equal@17..18 "="
+            Space@18..19 " "
+            Variable@19..21
+              Dollar@19..20 "$"
+              Name@20..21 "v"
+          Space@21..22 " "
+        RBrace@22..23 "}"
+    Newline@23..24 "\n"

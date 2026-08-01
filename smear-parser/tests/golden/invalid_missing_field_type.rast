@@ -1,0 +1,19 @@
+Root@0..16
+  Document@0..16
+    ObjectTypeDefinition@0..16
+      Name@0..4 "type"
+      Space@4..5 " "
+      Name@5..6 "T"
+      Space@6..7 " "
+      FieldsDefinition@7..16
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        FieldDefinition@11..16
+          Name@11..12 "f"
+          Colon@12..13 ":"
+          Newline@13..14 "\n"
+          Error@14..15
+            RBrace@14..15 "}"
+          Newline@15..16 "\n"

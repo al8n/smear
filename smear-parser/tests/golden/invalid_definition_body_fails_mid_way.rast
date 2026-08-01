@@ -1,0 +1,19 @@
+Root@0..25
+  Document@0..25
+    Name@0..4 "type"
+    Space@4..5 " "
+    Name@5..6 "T"
+    Space@6..7 " "
+    LBrace@7..8 "{"
+    Newline@8..9 "\n"
+    Space@9..10 " "
+    Space@10..11 " "
+    Description@11..18
+      BlockString@11..18 "\"\"\"b\"\"\""
+    Space@18..19 " "
+    Description@19..22
+      String@19..22 "\"a\""
+    Newline@22..23 "\n"
+    Error@23..24
+      RBrace@23..24 "}"
+    Newline@24..25 "\n"

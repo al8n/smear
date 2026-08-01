@@ -1,0 +1,49 @@
+Root@0..58
+  Document@0..58
+    OperationDefinition@0..29
+      SelectionSet@0..29
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        FragmentSpread@4..28
+          Spread@4..7 "..."
+          Name@7..11 "Frag"
+          Space@11..12 " "
+          Directives@12..28
+            Directive@12..27
+              At@12..13 "@"
+              Name@13..17 "skip"
+              Arguments@17..27
+                LParen@17..18 "("
+                Argument@18..26
+                  Name@18..20 "if"
+                  Colon@20..21 ":"
+                  Space@21..22 " "
+                  BooleanValue@22..26
+                    Name@22..26 "true"
+                RParen@26..27 ")"
+            Newline@27..28 "\n"
+        RBrace@28..29 "}"
+    Newline@29..30 "\n"
+    Newline@30..31 "\n"
+    FragmentDefinition@31..57
+      Name@31..39 "fragment"
+      Space@39..40 " "
+      Name@40..44 "Frag"
+      Space@44..45 " "
+      Name@45..47 "on"
+      Space@47..48 " "
+      NamedType@48..49
+        Name@48..49 "T"
+      Space@49..50 " "
+      SelectionSet@50..57
+        LBrace@50..51 "{"
+        Newline@51..52 "\n"
+        Space@52..53 " "
+        Space@53..54 " "
+        Field@54..56
+          Name@54..55 "f"
+          Newline@55..56 "\n"
+        RBrace@56..57 "}"
+    Newline@57..58 "\n"

@@ -1,0 +1,25 @@
+Root@0..25
+  Document@0..25
+    EnumTypeExtension@0..24
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "enum"
+      Space@11..12 " "
+      Name@12..13 "E"
+      Space@13..14 " "
+      Directives@14..17
+        Directive@14..17
+          At@14..15 "@"
+          Name@15..16 "d"
+          Space@16..17 " "
+      EnumValuesDefinition@17..24
+        LBrace@17..18 "{"
+        Newline@18..19 "\n"
+        Space@19..20 " "
+        Space@20..21 " "
+        EnumValueDefinition@21..23
+          EnumValue@21..22
+            Name@21..22 "A"
+          Newline@22..23 "\n"
+        RBrace@23..24 "}"
+    Newline@24..25 "\n"

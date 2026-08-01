@@ -1,0 +1,36 @@
+Root@0..34
+  Document@0..34
+    OperationDefinition@0..13
+      SelectionSet@0..13
+        LBrace@0..1 "{"
+        Space@1..2 " "
+        Field@2..12
+          Alias@2..9
+            Name@2..7 "alias"
+            Space@7..8 " "
+            Colon@8..9 ":"
+          Space@9..10 " "
+          Name@10..11 "f"
+          Space@11..12 " "
+        RBrace@12..13 "}"
+    Newline@13..14 "\n"
+    ObjectTypeDefinition@14..33
+      Name@14..18 "type"
+      Space@18..19 " "
+      Name@19..20 "T"
+      Space@20..21 " "
+      FieldsDefinition@21..33
+        LBrace@21..22 "{"
+        Space@22..23 " "
+        FieldDefinition@23..32
+          Name@23..24 "g"
+          Colon@24..25 ":"
+          Space@25..26 " "
+          NonNullType@26..31
+            NamedType@26..29
+              Name@26..29 "Int"
+            Space@29..30 " "
+            Bang@30..31 "!"
+          Space@31..32 " "
+        RBrace@32..33 "}"
+    Newline@33..34 "\n"

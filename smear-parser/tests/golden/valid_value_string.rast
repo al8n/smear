@@ -1,0 +1,38 @@
+Root@0..83
+  Document@0..83
+    OperationDefinition@0..82
+      SelectionSet@0..82
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..81
+          Name@4..5 "f"
+          Arguments@5..80
+            LParen@5..6 "("
+            Argument@6..15
+              Name@6..11 "empty"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              StringValue@13..15
+                String@13..15 "\"\""
+            Comma@15..16 ","
+            Space@16..17 " "
+            Argument@17..30
+              Name@17..22 "plain"
+              Colon@22..23 ":"
+              Space@23..24 " "
+              StringValue@24..30
+                String@24..30 "\"text\""
+            Comma@30..31 ","
+            Space@31..32 " "
+            Argument@32..79
+              Name@32..39 "escaped"
+              Colon@39..40 ":"
+              Space@40..41 " "
+              StringValue@41..79
+                String@41..79 "\"quote \\\" backslash \\\\ unicode \\u0041\""
+            RParen@79..80 ")"
+          Newline@80..81 "\n"
+        RBrace@81..82 "}"
+    Newline@82..83 "\n"

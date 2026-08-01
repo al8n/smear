@@ -1,0 +1,21 @@
+Root@0..52
+  Document@0..52
+    ScalarTypeDefinition@0..52
+      Name@0..6 "scalar"
+      Space@6..7 " "
+      Name@7..8 "S"
+      Space@8..9 " "
+      Directives@9..52
+        Directive@9..51
+          At@9..10 "@"
+          Name@10..21 "specifiedBy"
+          Arguments@21..51
+            LParen@21..22 "("
+            Argument@22..50
+              Name@22..25 "url"
+              Colon@25..26 ":"
+              Space@26..27 " "
+              StringValue@27..50
+                String@27..50 "\"https://example.com/s\""
+            RParen@50..51 ")"
+        Newline@51..52 "\n"

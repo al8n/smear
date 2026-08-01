@@ -1,0 +1,20 @@
+Root@0..18
+  Document@0..18
+    UnionTypeDefinition@0..18
+      Name@0..5 "union"
+      Space@5..6 " "
+      Name@6..7 "U"
+      Space@7..8 " "
+      UnionMemberTypes@8..18
+        Equal@8..9 "="
+        Space@9..10 " "
+        Pipe@10..11 "|"
+        Space@11..12 " "
+        NamedType@12..13
+          Name@12..13 "A"
+        Space@13..14 " "
+        Pipe@14..15 "|"
+        Space@15..16 " "
+        NamedType@16..17
+          Name@16..17 "B"
+        Newline@17..18 "\n"

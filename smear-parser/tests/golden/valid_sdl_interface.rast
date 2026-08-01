@@ -1,0 +1,27 @@
+Root@0..38
+  Document@0..38
+    InterfaceTypeDefinition@0..37
+      Name@0..9 "interface"
+      Space@9..10 " "
+      Name@10..11 "I"
+      Space@11..12 " "
+      ImplementsInterfaces@12..25
+        Name@12..22 "implements"
+        Space@22..23 " "
+        NamedType@23..24
+          Name@23..24 "J"
+        Space@24..25 " "
+      FieldsDefinition@25..37
+        LBrace@25..26 "{"
+        Newline@26..27 "\n"
+        Space@27..28 " "
+        Space@28..29 " "
+        FieldDefinition@29..36
+          Name@29..30 "f"
+          Colon@30..31 ":"
+          Space@31..32 " "
+          NamedType@32..35
+            Name@32..35 "Int"
+          Newline@35..36 "\n"
+        RBrace@36..37 "}"
+    Newline@37..38 "\n"
