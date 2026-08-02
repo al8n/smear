@@ -13,7 +13,40 @@
 //! cargo run -p smear-apollo-bench --example treedump --release | shasum -a 256
 //! cargo run -p smear-apollo-bench --example treedump --release -- perturbed | shasum -a 256
 //! cargo run -p smear-apollo-bench --example treedump --release -- selfcheck
+//! cargo run -p smear-apollo-bench --example treedump --release -- malformed | shasum -a 256
 //! ```
+//!
+//! # Two more modes, because the clean corpus cannot exercise recovery at all
+//!
+//! The three entries in [`CORPUS`] are real, hand-picked-*clean* GraphQL documents: every one of
+//! them takes **zero** emitter checkpoints, so a clean run exercises no rewind, no recovery-hole
+//! wrap, no gap tile and no error-coverage decision — the entire recovery path stays dark. A
+//! byte-identity claim resting only on that corpus is not evidence about any of those; it is
+//! silent about them. These two modes are what makes the recovery path non-vacuous:
+//!
+//! * **`malformed`** — [`MALFORMED`], 24 hand-broken documents: unclosed braces, unterminated
+//!   strings and block strings, junk prefixes and suffixes, input with nothing lexable, empty
+//!   input, bad defaults, bad variables. Cheap; safe to run any time.
+//!
+//!   ```text
+//!   cargo run -p smear-apollo-bench --example treedump --release -- malformed | shasum -a 256
+//!   ```
+//!
+//! * **`prefixes`** — [`prefixes_dump`] over every [`CORPUS`] entry: every byte offset for the
+//!   two small entries, every 37th byte of `alias` (a prime stride, so the cut points never align
+//!   with a repeating structure in the document). Truncating at each offset is the cheapest way
+//!   to reach thousands of *independent* recovery sites, each ending mid-production somewhere
+//!   different. **This mode is not cheap**: roughly 9,300 documents, on the order of 45 million
+//!   lines of dump. It is gated behind the explicit `prefixes` argument exactly like every other
+//!   mode on this page, so it is never what the no-argument default, `perturbed`, `selfcheck` or
+//!   `malformed` run. Nothing in this repository invokes it from CI — `cargo build`/`cargo test`
+//!   only ever *compile* an example, never run its `main`, and no workflow passes this example
+//!   any argument at all. Do not add one that does; redirect to a file rather than a terminal.
+//!
+//!   ```text
+//!   cargo run -p smear-apollo-bench --example treedump --release -- prefixes > /tmp/prefixes.dump
+//!   shasum -a 256 /tmp/prefixes.dump
+//!   ```
 //!
 //! # Comparing two tokora checkouts
 //!
@@ -389,6 +422,58 @@ fn selfcheck() -> bool {
   all_ok
 }
 
+/// Hand-written broken documents — the corpus the clean entries cannot be.
+///
+/// A clean parse of this grammar takes **zero** emitter checkpoints, so it exercises no rewind,
+/// no recovery-hole wrap, no gap tile and no error-coverage decision. Every one of those lives
+/// on the recovery path, and the recovery path is only reachable from input that is wrong. A
+/// byte-identity claim about the sink that rests on clean input says nothing about them.
+const MALFORMED: &[(&str, &str)] = &[
+  ("unclosed_brace", "query Q { a { b "),
+  ("stray_colon", "query Q { : a }"),
+  ("bad_directive", "query Q @ @@ { a }"),
+  ("unterminated_string", "{ f(a: \"abc) }"),
+  ("junk_prefix", "%%% query Q { a }"),
+  ("empty_args", "{ f() }"),
+  ("bad_type", "query Q($v: ) { a }"),
+  ("dangling_spread", "{ ... }"),
+  ("bad_variable", "query Q($ $x: Int = ) { a }"),
+  ("mixed_garbage", "type T { f: Int } ### $$$ ### { a }"),
+  ("deep_nest_broken", "{ a { b { c { d { e ("),
+  ("bad_default", "query Q($x: Int = @) { a }"),
+  ("unterminated_block_string", "{ f(a: \"\"\"body ) }"),
+  ("lone_dollar", "$"),
+  ("nothing_lexable", "\u{7}\u{7}\u{7}"),
+  ("empty", ""),
+  ("only_trivia", "   \n\t # comment\n"),
+  ("trailing_garbage_after_doc", "{ a } %%%"),
+  ("leading_and_trailing_garbage", "%% { a } %%"),
+  ("bad_escape_in_string", "{ f(a: \"x\\q\") }"),
+  ("unclosed_paren_then_brace", "{ f(a: 1 }"),
+  ("repeated_colons", "{ a:::: b }"),
+  ("sdl_and_executable_mixed", "schema { query: } { a }"),
+  ("number_garbage", "{ f(a: 1.2.3e) }"),
+];
+
+/// Every prefix of a source — the editor-typing corpus.
+///
+/// Truncating a document at each byte in turn is the cheapest way to reach thousands of
+/// *independent* recovery sites: each prefix ends mid-production somewhere different, so
+/// between them they drive the recovery scanner, the hole wrap and the trailing-gap tile
+/// across the whole grammar rather than at the handful of points a hand-written broken
+/// document happens to hit.
+fn prefixes_dump(name: &str, src: &str, stride: usize) -> String {
+  let mut out = String::new();
+  let mut at = 0usize;
+  while at <= src.len() {
+    if src.is_char_boundary(at) {
+      out.push_str(&dump(&format!("{name} prefix {at}"), &src[..at]));
+    }
+    at += stride;
+  }
+  out
+}
+
 fn main() -> ExitCode {
   let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -398,6 +483,30 @@ fn main() -> ExitCode {
     } else {
       ExitCode::FAILURE
     };
+  }
+
+  if args.iter().any(|a| a == "malformed") {
+    let mut out = String::new();
+    for (name, src) in MALFORMED {
+      out.push_str(&dump(&format!("{name} : {} bytes", src.len()), src));
+    }
+    print!("{out}");
+    return ExitCode::SUCCESS;
+  }
+
+  // ~45 million lines of dump. Gated behind this explicit argument exactly like every other mode
+  // on this page (see the module doc); nothing in this repository's CI passes any argument to
+  // this example, so this can only run when a human types `-- prefixes` on purpose.
+  if args.iter().any(|a| a == "prefixes") {
+    let mut out = String::new();
+    for entry in CORPUS {
+      // Every byte of the small entries; every 37th of the big one (a prime stride, so the cut
+      // points do not align with any repeating structure in the document).
+      let stride = if entry.source.len() > 20_000 { 37 } else { 1 };
+      out.push_str(&prefixes_dump(entry.name, entry.source, stride));
+    }
+    print!("{out}");
+    return ExitCode::SUCCESS;
   }
 
   let perturbed = args.iter().any(|a| a == "perturbed");

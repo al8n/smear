@@ -258,12 +258,12 @@ pub fn apollo_traverse_sdl(tree: &apollo_parser::SyntaxTree) -> usize {
   let document = tree.document();
   let mut visited = 0usize;
   for definition in document.definitions() {
-    if let cst::Definition::ObjectTypeDefinition(object) = definition {
-      if let Some(fields) = object.fields_definition() {
-        for field in fields.field_definitions() {
-          black_box(field.ty());
-          visited += 1;
-        }
+    if let cst::Definition::ObjectTypeDefinition(object) = definition
+      && let Some(fields) = object.fields_definition()
+    {
+      for field in fields.field_definitions() {
+        black_box(field.ty());
+        visited += 1;
       }
     }
   }
@@ -419,15 +419,22 @@ pub fn run_gate() -> Vec<GateRow> {
     .collect()
 }
 
+/// One side's node-kind histogram: `(kind name, occurrence count)` pairs, sorted by descending
+/// count.
+///
+/// Named so the pair `kind_histograms` returns spells as two named types rather than the
+/// `clippy::type_complexity`-tripping tuple of nested generics written out in full.
+pub type KindHistogram = Vec<(String, usize)>;
+
 /// Node-kind histograms for one entry, both sides, sorted by descending count.
 ///
 /// Gate 3 requires that a node-count difference be *explained* rather than published bare. The
 /// two kind spaces have no common vocabulary — they are different `rowan::Language`s — so the
 /// histograms cannot be diffed automatically; what they do is show, per side, which kinds carry
 /// the difference, which is enough for a reader to name the cause.
-pub fn kind_histograms(entry: &Entry) -> (Vec<(String, usize)>, Vec<(String, usize)>) {
-  fn sorted(mut counts: std::collections::HashMap<String, usize>) -> Vec<(String, usize)> {
-    let mut out: Vec<(String, usize)> = counts.drain().collect();
+pub fn kind_histograms(entry: &Entry) -> (KindHistogram, KindHistogram) {
+  fn sorted(mut counts: std::collections::HashMap<String, usize>) -> KindHistogram {
+    let mut out: KindHistogram = counts.drain().collect();
     out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     out
   }
