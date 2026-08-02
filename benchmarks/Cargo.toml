@@ -27,6 +27,11 @@ smear-parser = { path = "../smear-parser", version = "0.0.0", default-features =
 ] }
 tokora.workspace = true
 apollo-parser = "0.8.6"
+# Named directly only so `examples/treedump.rs` can spell `WalkEvent` and `NodeOrToken`, the two
+# types `SyntaxNode::preorder_with_tokens` yields. Both other members of this build graph already
+# depend on `rowan = "0.16"` — `apollo-parser` directly, smear through tokora — so this adds a name
+# to the namespace and nothing to the build.
+rowan = "0.16"
 
 [dev-dependencies]
 criterion = "0.8"
