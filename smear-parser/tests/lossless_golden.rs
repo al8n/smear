@@ -64,11 +64,14 @@
 //! Every one of the 95 trees was read against its source before being committed, because a golden
 //! blessed unread records whatever the parser did, bug included, and turns it into an expectation.
 //! The sweep found one thing, and it is the class this gate was built for:
-//! **`root_operation_type_definition` opens its `NamedType` before the trivia in front of it**, so
-//! in `schema { query: Q }` that node spans `" Q"` and not `"Q"`. Six goldens carry it. See
-//! [`OPENS_ON_LEADING_TRIVIA`] for the mechanism, why it is left unfixed here, and
+//! **`root_operation_type_definition` opened its `NamedType` before the trivia in front of it**, so
+//! in `schema { query: Q }` that node spanned `" Q"` and not `"Q"`. Six sites across four goldens
+//! carried it. It is **fixed** — `named_type` now commits its leading trivia before it opens the
+//! node — and this gate is where the fix was read: those four goldens moved a `Space` line out of
+//! a `NamedType` and shifted the node's start by one byte, and nothing else in the 95 moved at
+//! all. See [`OPENS_ON_LEADING_TRIVIA`] for the mechanism and
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`], which is that eye-reading turned into
-//! a standing check so it cannot grow a seventh site unnoticed.
+//! a standing check, so neither this site nor a new one can open on its trivia unnoticed.
 //!
 //! Two further shapes were read, judged deliberate, and left unpinned: a `FieldDefinition` whose
 //! type is missing recovers by consuming the enclosing `}` into an `Error`, so the surrounding
@@ -153,31 +156,37 @@ const GAP_TILES_AT_ROOT: &[&str] = &[
 /// something the lexer produced.
 const TRIVIA_IMAGES: &[K] = &[K::Space, K::Tab, K::Newline, K::Comma, K::Comment, K::Bom];
 
-/// Every `parent > node` pairing where a node currently opens *before* the trivia in front of it,
-/// so that the trivia lands inside the node's range instead of beside it.
+/// Every `parent > node` pairing where a node opens *before* the trivia in front of it, so that
+/// the trivia lands inside the node's range instead of beside it.
 ///
-/// **Found by reading the goldens, and the second entry is a defect.** Reviewing all 95 trees by
-/// eye surfaced one shape that disagrees with the other 75 of its kind:
-/// `root_operation_type_definition` (`definition.rs`) calls `named_type` directly, and
-/// `named_type` opens `K::NamedType` and only then calls `expect`, whose trivia skip therefore
-/// runs *inside* the node. Every other call site reaches `named_type` through `type_ref`, which
-/// documents doing its head peek first precisely "so the leading trivia it crosses is committed
-/// BEFORE the mark". So in `schema { query: Q }` the `NamedType` spans `" Q"` rather than `"Q"`,
-/// and a consumer that highlights or renames through that range takes the space with it.
+/// **One entry, and it is the correct one.** `Root > Document` is not a defect: a file's leading
+/// comment has to live somewhere, and `Document` spans the whole source.
 ///
-/// It is a boundary on the wrong side of trivia — the exact class Step 3's mutation imitates —
-/// and it survives gates 1 through 4 untouched: the verdict is unchanged, the descendant kinds
-/// are unchanged, the bytes are unchanged, and `NamedType::name()` still finds its token.
+/// # The entry that used to be here, and what removing it cost
 ///
-/// **Left unfixed here on purpose.** The fix is a production change in `definition.rs` and belongs
-/// to a change that is reviewed as one, not to the commit that adds the gate that found it. What
-/// this pin buys in the meantime is that the six affected goldens are a *stated* expectation
-/// rather than a silent one, and that no seventh site can join them unnoticed.
+/// Reading all 95 trees by eye surfaced one shape that disagreed with the other 75 of its kind,
+/// and it was `RootOperationTypeDefinition > NamedType`. `named_type` opens `K::NamedType` and
+/// only then calls `expect`, whose trivia skip therefore ran *inside* a node that was already
+/// open; six of `named_type`'s seven call sites cross that trivia first at a dispatch peek of
+/// their own — `type_ref`, which documents doing its head peek first precisely "so the leading
+/// trivia it crosses is committed BEFORE the mark", plus `implements_interfaces`,
+/// `union_member_types` and `type_condition` — and `root_operation_type_definition` was the one
+/// that delegated with no peek in front of it. So in `schema { query: Q }` the `NamedType` spanned
+/// `" Q"` rather than `"Q"`, and a consumer that highlighted or renamed through that range took
+/// the space with it. Six sites, in four corpus entries, all in root-operation-type position.
 ///
-/// `Root > Document` is the other entry and is correct: a file's leading comment has to live
-/// somewhere, and `Document` spans the whole source.
-const OPENS_ON_LEADING_TRIVIA: &[&str] =
-  &["Root > Document", "RootOperationTypeDefinition > NamedType"];
+/// It was a boundary on the wrong side of trivia — the exact class Step 3's mutation imitates —
+/// and it survived gates 1 through 4 untouched: the verdict was unchanged, the descendant kinds
+/// were unchanged, the bytes were unchanged, and `NamedType::name()` still found its token. **This
+/// gate is the only one that could see it**, which is the clearest statement of what it is for.
+///
+/// The fix puts the trivia commit inside `named_type`, before the node opens, so the guarantee is
+/// the production's own rather than a precondition its seven callers have to remember — and it
+/// travels with the production when `graphqlx` copies it. Its price is recorded in gate 4, not
+/// here: `NamedType::name` was separable from a kind-blind "take the first token" rival **only**
+/// in the trees this defect malformed, so fixing it moved `("NamedType", "name")` into that gate's
+/// `UNDISCRIMINATED`, where the reason is written down beside the entry.
+const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 
 /// Fixtures the corpus does not carry, each one a tree whose *shape* is its whole content.
 ///
@@ -904,12 +913,13 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 /// Reading 95 goldens by eye is what Step 2 asks for and it is not repeatable; this is that
 /// reading turned into an assertion. It sweeps every tree in both golden sets for a node whose
 /// first child is a trivia token and compares the `parent > node` pairings against
-/// [`OPENS_ON_LEADING_TRIVIA`], which records the two that exist today and says which of them is a
+/// [`OPENS_ON_LEADING_TRIVIA`], which records the one that exists today and why it is not a
 /// defect.
 ///
-/// It fails in both useful directions. A new production that opens its node before skipping
-/// trivia adds a pairing; fixing `root_operation_type_definition` removes one, and should remove
-/// the six affected goldens' `Space` lines in the same diff.
+/// It fails in both useful directions, and it has now failed in each. A new production that opens
+/// its node before skipping trivia adds a pairing. Fixing `root_operation_type_definition` removed
+/// one — which is how this test red the day that landed, in the same diff as the four goldens
+/// whose `Space` lines moved out of a `NamedType`.
 #[test]
 fn only_the_recorded_nodes_open_on_their_leading_trivia() {
   fn pairings(src: &str) -> Vec<String> {
@@ -942,16 +952,26 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
      case the goldens it affected change in the same diff and both should be blessed together"
   );
 
-  // The positive control. Without it this can pass because no tree anywhere has leading trivia to
-  // be wrong about — and the corpus really does contain shapes with none.
+  // The positive control, and it is not optional: an empty expectation is also what a `pairings`
+  // that had stopped detecting anything would produce, so one source must still answer with a
+  // pairing. A document that opens on a comment is the recorded, correct one.
   assert!(
-    pairings("schema { query: Q }")
-      .contains(&"RootOperationTypeDefinition > NamedType".to_string()),
-    "the recorded defect no longer reproduces on the smallest source that shows it"
+    pairings("# lead\nscalar S").contains(&"Root > Document".to_string()),
+    "the sweep no longer detects a node opening on its leading trivia at all, so every empty \
+     answer below is worthless"
+  );
+  // The regression control: the smallest source that showed the fixed defect. This is the
+  // assertion that reds if `named_type` ever stops committing its leading trivia before it opens,
+  // and it is here rather than only in the corpus sweep because the corpus could lose its schema
+  // entries without anyone noticing this went with them.
+  assert!(
+    pairings("schema { query: Q }").is_empty(),
+    "the `RootOperationTypeDefinition > NamedType` defect is back: the `NamedType` after `query:` \
+     opened on the space in front of it again"
   );
   assert!(
     pairings("type T { f: Int }").is_empty(),
     "an ordinary definition must open none of its nodes on trivia, or the sweep above cannot tell \
-     the defect from the normal case"
+     a defect from the normal case"
   );
 }

@@ -12,8 +12,8 @@ Root@0..253
           OperationType@11..16
             Name@11..16 "query"
           Colon@16..17 ":"
-          NamedType@17..23
-            Space@17..18 " "
+          Space@17..18 " "
+          NamedType@18..23
             Name@18..23 "Query"
         Newline@23..24 "\n"
         RBrace@24..25 "}"

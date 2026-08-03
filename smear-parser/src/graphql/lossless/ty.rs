@@ -56,7 +56,33 @@ use super::{
 
 lossless_production! {
   /// `Name`
+  ///
+  /// # The trivia is committed before the node opens, and that is this production's own job
+  ///
+  /// `node(…)` opens the node and *then* runs the inner parser, so `expect`'s trivia skip would
+  /// run inside a node that is already open and the leading trivia would land in the node's
+  /// range — a `NamedType` spanning `" Q"` rather than `"Q"`. The leading [`peek_kind`] crosses
+  /// it first, at a point where the enclosing node is still the innermost one open, so the
+  /// trivia attaches beside the `NamedType` instead of inside it. It reads no answer, because
+  /// there is no dispatch to make here: the skip *is* the point, and [`peek_kind`] is the atom
+  /// set's only door to it.
+  ///
+  /// Six of `named_type`'s seven call sites already crossed that trivia at a dispatch peek of
+  /// their own — [`type_ref`] below, and `implements_interfaces`, `union_member_types` and
+  /// `type_condition`, each of which peeks for an `Identifier` before it delegates — so for them
+  /// the skip finds nothing and the peek is served straight out of the cache. The seventh,
+  /// `root_operation_type_definition`, delegates with no peek in front of it and is where the
+  /// boundary landed on the wrong side of the space; gate 5 found it by eye and pinned it, and
+  /// `a_root_operation_type_does_not_start_at_the_trivia_before_it` is the assertion that keeps
+  /// it fixed.
+  ///
+  /// **Stated here rather than as a precondition on the callers**, which is the divergence worth
+  /// naming: `field` and `implements_interfaces` document a head their caller must have peeked,
+  /// and that is right for a production with one dispatcher. `named_type` has seven call sites
+  /// across three files and is about to be copied wholesale into `graphqlx`, so the guarantee is
+  /// cheaper to hold once, here, than to re-establish at every site that will ever reach it.
   fn named_type<'inp, Src, Ctx>(inp) {
+    peek_kind::<Src, Ctx>(inp)?;
     node(
       K::NamedType.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {

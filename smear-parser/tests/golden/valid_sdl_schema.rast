@@ -17,8 +17,8 @@ Root@0..57
           OperationType@14..19
             Name@14..19 "query"
           Colon@19..20 ":"
-          NamedType@20..22
-            Space@20..21 " "
+          Space@20..21 " "
+          NamedType@21..22
             Name@21..22 "Q"
         Newline@22..23 "\n"
         Space@23..24 " "
@@ -27,8 +27,8 @@ Root@0..57
           OperationType@25..33
             Name@25..33 "mutation"
           Colon@33..34 ":"
-          NamedType@34..36
-            Space@34..35 " "
+          Space@34..35 " "
+          NamedType@35..36
             Name@35..36 "M"
         Newline@36..37 "\n"
         Space@37..38 " "
@@ -37,8 +37,8 @@ Root@0..57
           OperationType@39..51
             Name@39..51 "subscription"
           Colon@51..52 ":"
-          NamedType@52..54
-            Space@52..53 " "
+          Space@52..53 " "
+          NamedType@53..54
             Name@53..54 "S"
         Newline@54..55 "\n"
         RBrace@55..56 "}"

@@ -1814,19 +1814,20 @@ const RECOVERY_FIXTURES: &[(&str, &str)] = &[
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 23 of 204. Every other getter is **measured** to answer differently, at least once, from a
+/// 24 of 204. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — which is the property that makes the
 /// sweep's fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from
 /// "take the first child", and a suite built out of fixtures like that reports full coverage of a
 /// layer it never tested.
 ///
-/// The 23 fall into three shapes, and none of them is a weak fixture:
+/// The 24 fall into three shapes, and none of them is a weak fixture:
 ///
 /// - **The wanted element is always the node's first one.** An `Alias` is `name :`, an `Argument`
 ///   is `name : value`, a `VariableDefinition` opens on its `Variable`. "The first token" and
 ///   "the `Name` token" are the same token in every tree the grammar builds.
 /// - **The node holds exactly one token, and the getter wants it.** `IntValue`, `FloatValue`,
-///   `StringValue`, `Description`, `BooleanValue`, `NullValue`, `EnumValue`, `OperationType`.
+///   `StringValue`, `Description`, `BooleanValue`, `NullValue`, `EnumValue`, `OperationType`,
+///   `NamedType`.
 /// - **Every child the node can have is of the kind the getter projects.** The list wrappers, plus
 ///   `Directive::arguments`, `FragmentSpread::directives` and `ScalarTypeExtension::directives`,
 ///   whose parents admit exactly one child kind each. [`RECOVERY_FIXTURES`] closes three of these
@@ -1837,13 +1838,22 @@ const RECOVERY_FIXTURES: &[(&str, &str)] = &[
 /// that no `SyntaxNode` this crate can build makes observable — and it is recorded rather than
 /// asserted away.
 ///
-/// **One entry that is *not* here is worth more than the list.** `NamedType::name` is
-/// discriminated, and measurement says it is discriminated *only* by the defect gate 5 pinned:
-/// over `type T { f: Int }`, `query Q { a(x: 1) }` and `fragment F on T { b }` it is
-/// indistinguishable from "the first token", and it separates only in
-/// `schema { query: Q }`, where `root_operation_type_definition` opens its `NamedType` before the
-/// leading trivia so the node's first token is a `Space`. Fixing that defect — which is a
-/// reviewed change of its own, not this task's — will move `NamedType::name` into this list.
+/// **One entry is here because a defect that used to discriminate it was fixed, and that has to
+/// be on the page or it reads as an unexplained weakening.** `NamedType::name` was never
+/// separable on its own merits: over `type T { f: Int }`, `query Q { a(x: 1) }` and
+/// `fragment F on T { b }` it is indistinguishable from "take the first token". It separated in
+/// exactly one shape, `schema { query: Q }`, and only because `root_operation_type_definition`
+/// opened its `NamedType` on the wrong side of the leading trivia, so that node's first token was
+/// a `Space` rather than the `Name`. That is the defect gate 5 pinned in
+/// `OPENS_ON_LEADING_TRIVIA`, and `named_type` now forecloses it by committing the leading trivia
+/// before it opens its node — which makes `NamedType` the one-token node the second bullet
+/// describes, and turns a pass this census had been buying from a bug into an admission it can
+/// defend.
+///
+/// So this entry is a real, if small, loss of coverage, and it is meant to be visible as one.
+/// **It is not dead weight to delete on sight**: the only thing that earns its removal is a tree
+/// in which a `NamedType` legitimately holds something before its `Name`, which no production
+/// here builds today.
 const UNDISCRIMINATED: &[(&str, &str)] = &[
   ("Alias", "name"),
   ("Argument", "name"),
@@ -1859,6 +1869,9 @@ const UNDISCRIMINATED: &[(&str, &str)] = &[
   ("ImplementsInterfaces", "interfaces"),
   ("InputFieldsDefinition", "input_value_definitions"),
   ("IntValue", "int_token"),
+  // Here only because fixing the `root_operation_type_definition` trivia defect removed the one
+  // tree that separated it from "take the first token" — see the paragraph above.
+  ("NamedType", "name"),
   ("NullValue", "name"),
   ("ObjectField", "name"),
   ("OperationType", "name"),
@@ -1891,8 +1904,8 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    181,
-    "181 of the 204 getters are proved to beat a kind-blind rival"
+    180,
+    "180 of the 204 getters are proved to beat a kind-blind rival"
   );
 }
 

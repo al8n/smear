@@ -251,6 +251,41 @@ fn a_schema_definition_wraps_each_root_operation_type() {
 }
 
 #[test]
+fn a_root_operation_type_does_not_start_at_the_trivia_before_it() {
+  // `a_definition_does_not_start_at_the_trivia_before_its_description`'s law, one level down,
+  // and the one place the suite used to break it. `node(…)` opens the node before it runs the
+  // inner parser, so `expect`'s trivia skip ran *inside* a `K::NamedType` that was already open.
+  // Every other call site crosses that trivia first, at a dispatch peek of its own — `type_ref`
+  // for the type positions, `implements_interfaces`, `union_member_types` and `type_condition`
+  // for theirs — and `root_operation_type_definition` was the only one that delegated with no
+  // peek in front of it. So `schema { query: Q }` gave a `NamedType` spanning `" Q"`, and a
+  // consumer that highlighted or renamed through that range took the space with it. Six of the
+  // corpus's 77 `NamedType` nodes carried it, all in this position.
+  //
+  // `named_type` now commits the leading trivia before it opens, so the guarantee is the
+  // production's own rather than a precondition each caller has to remember.
+  assert_eq!(
+    texts_of(&parse_str("schema { query: Q }"), K::NamedType),
+    ["Q"]
+  );
+  // A wider run with a comment in it, so this is an assertion about trivia and not about one
+  // space.
+  assert_eq!(
+    texts_of(
+      &parse_str("schema {\n  query: # which\n    Q\n}"),
+      K::NamedType
+    ),
+    ["Q"]
+  );
+  // The control: the positions that always peeked answer the same before and after, so a green
+  // here cannot come from a fix that simply moved the boundary everywhere.
+  assert_eq!(
+    texts_of(&parse_str("type T implements  A { f:  Int }"), K::NamedType),
+    ["A", "Int"]
+  );
+}
+
+#[test]
 fn a_directive_definition_carries_its_arguments_and_locations() {
   let parse = parse_str("directive @d(a: Int) repeatable on | FIELD | QUERY");
   assert_eq!(

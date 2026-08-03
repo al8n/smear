@@ -25,8 +25,8 @@ Root@0..30
           OperationType@19..24
             Name@19..24 "query"
           Colon@24..25 ":"
-          NamedType@25..27
-            Space@25..26 " "
+          Space@25..26 " "
+          NamedType@26..27
             Name@26..27 "Q"
         Space@27..28 " "
         RBrace@28..29 "}"
