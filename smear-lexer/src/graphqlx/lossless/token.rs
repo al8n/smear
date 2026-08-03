@@ -69,6 +69,11 @@ macro_rules! token_impl {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
 
+        /// This lexer surfaces every byte, including whitespace, commas and comments, so tokora's
+        /// lossless `Sink` may wrap it. A trivia-skipping lexer cannot: a skipped-whitespace gap is
+        /// indistinguishable from a dropped committed token.
+        const SURFACES_TRIVIA: bool = true;
+
         #[inline(always)]
         fn kind(&self) -> Self::Kind {
           self.kind()
@@ -343,6 +348,11 @@ macro_rules! token_impl {
       impl tokora::Token<'_> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
+
+        /// This lexer surfaces every byte, including whitespace, commas and comments, so tokora's
+        /// lossless `Sink` may wrap it. A trivia-skipping lexer cannot: a skipped-whitespace gap is
+        /// indistinguishable from a dropped committed token.
+        const SURFACES_TRIVIA: bool = true;
 
         #[inline(always)]
         fn kind(&self) -> Self::Kind {

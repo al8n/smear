@@ -29,6 +29,24 @@ const _: () = assert!(
 #[test]
 fn the_lossless_token_surfaces_trivia() {}
 
+/// The GraphQLx twin of the guard above.
+///
+/// Phase B found this missing: `smear-lexer/src/graphqlx/lossless/token.rs`'s two `tokora::Token`
+/// impls define `Kind`, `Error`, `kind` and `is_trivia` and stop there, so the associated constant
+/// took tokora's default of `false` and a GraphQLx `Sink` would have failed to build — as an
+/// `E0080` from inside tokora, a long way from the declaration that caused it. This states the
+/// requirement where a reader of the parser can find it.
+#[cfg(feature = "graphqlx")]
+const _: () = assert!(
+  <smear_lexer::graphqlx::lossless::LosslessToken<&str> as Token<'_>>::SURFACES_TRIVIA,
+  "the GraphQLx lossless token must declare SURFACES_TRIVIA = true"
+);
+
+/// The guard above, named so `cargo test` reports it.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn the_graphqlx_lossless_token_surfaces_trivia() {}
+
 #[test]
 fn tokoras_cst_layer_is_in_scope() {
   // Proves the `rowan` feature actually reaches tokora, not just this crate.
