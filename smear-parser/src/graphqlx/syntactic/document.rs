@@ -9,7 +9,8 @@ use std::vec::Vec;
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source, Token,
+  Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
+  Token,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
   span::Spanned,
@@ -295,7 +296,7 @@ document_parser!(
 
 fn decide_document_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

@@ -13,8 +13,8 @@ use smear_lexer::{
   keywords::On,
 };
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
-  TryParseInput,
+  Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, ParseTokenChoice, SimpleSpan,
+  Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
   span::Spanned,
@@ -515,7 +515,7 @@ selection_parser!(
 /// delimited repetition probes `}` before consulting this decision.
 fn decide_selection_set_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -534,7 +534,7 @@ where
 /// present, leaving every other token for the caller.
 fn decide_selection_set_opener<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

@@ -132,7 +132,7 @@ where
 
 pub(super) fn decide_brace_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -150,7 +150,7 @@ where
 
 pub(super) fn decide_lbrace_opener<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -168,7 +168,7 @@ where
 /// Continues a union-member or directive-location tail only at an explicit `|`.
 pub(super) fn decide_pipe_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -186,7 +186,7 @@ where
 /// Continues an implemented-interface tail only at an explicit `&`.
 pub(super) fn decide_ampersand_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

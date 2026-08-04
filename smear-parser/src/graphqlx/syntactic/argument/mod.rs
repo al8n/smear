@@ -11,7 +11,7 @@
 use std::vec::Vec;
 
 use tokora::{
-  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
+  Accumulator, EmitterView, Lexer, ParseInput, SimpleSpan, Slice, Source, Token,
   cache::{Peeked, PeekedTokenExt},
   parser::{Action, try_parens},
   span::Spanned,
@@ -139,7 +139,7 @@ argument_parser!(
 
 fn decide_argument_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

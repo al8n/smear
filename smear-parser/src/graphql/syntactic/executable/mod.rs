@@ -15,7 +15,7 @@ use smear_lexer::{
   keywords::{Fragment, Mutation, Query, Subscription},
 };
 use tokora::{
-  Accumulator, Branch, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
+  Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
   cache::{Peeked, PeekedTokenExt},
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::{Action, parens},
@@ -441,7 +441,7 @@ where
 
 fn decide_variable_definition_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -742,7 +742,7 @@ executable_parser!(
 
 fn decide_executable_definition_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
