@@ -41,7 +41,7 @@
 //!   call site.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, cst::event::EventMark, emitter::CstEmitter as _};
+use tokora::{ParseInput as _, cst::event::EventMark};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
@@ -208,7 +208,7 @@ lossless_production! {
     // The head peek first — see `document::definition` for the ruling and for the measurement
     // that shows the ordering is currently redundant, every caller being a loop that peeks.
     let head = peek_kind::<Src, Ctx>(inp)?;
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     if starts_description(head) {
       description::<Src, Ctx>(inp)?;
     }

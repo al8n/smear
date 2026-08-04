@@ -38,7 +38,7 @@
 //!   malformed type should cost its own node, not the rest of the file.
 
 use smear_lexer::graphql::lossless::LosslessTokenKind as Kind;
-use tokora::{ParseInput as _, TryParseInput as _, emitter::CstEmitter as _};
+use tokora::{ParseInput as _, TryParseInput as _};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
@@ -133,10 +133,10 @@ lossless_production! {
     // The head peek first, so the leading trivia it crosses is committed BEFORE the mark and
     // therefore lands outside any wrap this call makes.
     let head = peek_kind::<Src, Ctx>(inp)?;
-    // `cst_mark` is on the EMITTER, not on the input, and is reached through `InputRef::emitter`.
-    // An inert mark: one buffer slot, promising nothing; an unspent one materializes into
-    // nothing.
-    let mark = inp.emitter().cst_mark();
+    // `cst_mark` is the emitter's operation, reached through the handle's own forwarder — the
+    // emitter itself is not handed out. An inert mark: one buffer slot, promising nothing; an
+    // unspent one materializes into nothing.
+    let mark = inp.cst_mark();
     match head {
       Some(Kind::LBracket) => list_type::<Src, Ctx>(inp)?,
       Some(Kind::Identifier) => named_type::<Src, Ctx>(inp)?,

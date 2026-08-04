@@ -59,9 +59,7 @@
 //!   list value, for the same reasons.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{
-  ParseInput as _, TryParseInput as _, emitter::CstEmitter as _, try_parse_input::ParseAttempt,
-};
+use tokora::{ParseInput as _, TryParseInput as _, try_parse_input::ParseAttempt};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
@@ -120,7 +118,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         // An inert mark — one buffer slot, promising nothing. Unspent, it materializes into
         // nothing, which is precisely what a field with no alias needs.
-        let mark = inp.emitter().cst_mark();
+        let mark = inp.cst_mark();
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         // `node_at(mark, kind, parser)` takes THREE args: it wraps a parser rather than being
         // a bare wrap instruction, and `try_eat` is the declining probe that decides whether
@@ -166,7 +164,7 @@ lossless_production! {
   /// enclosing selection set rather than being wrapped in a node that claims a tail it does not
   /// have.
   fn spread_selection<'inp, Src, Ctx>(inp) {
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     expect::<Src, Ctx>(inp, Kind::Spread)?;
     match peek_kind::<Src, Ctx>(inp)? {
       // A name — and only its spelling separates the two shapes.

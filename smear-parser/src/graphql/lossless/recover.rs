@@ -36,8 +36,8 @@
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{
-  Emitter as _, SimpleSpan,
-  emitter::{CstEmitter as _, FromUnclosed},
+  SimpleSpan,
+  emitter::FromUnclosed,
   error::{UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot, token::UnexpectedToken},
   input::Balance,
   span::Spanned,
@@ -340,7 +340,7 @@ lossless_production! {
       GraphqlLosslessLexer<'inp, Src>,
       GraphQL,
     >>::from_unclosed(UnclosedBracket::<SimpleSpan, GraphQL>::bracket_of(open));
-    inp.emitter().emit_error(Spanned::new(open, err))?;
+    inp.emit_error(Spanned::new(open, err))?;
     Ok(())
   }
 
@@ -352,7 +352,7 @@ lossless_production! {
       GraphqlLosslessLexer<'inp, Src>,
       GraphQL,
     >>::from_unclosed(UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open));
-    inp.emitter().emit_error(Spanned::new(open, err))?;
+    inp.emit_error(Spanned::new(open, err))?;
     Ok(())
   }
 
@@ -366,7 +366,7 @@ lossless_production! {
       GraphqlLosslessLexer<'inp, Src>,
       GraphQL,
     >>::from_unclosed(UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open));
-    inp.emitter().emit_error(Spanned::new(open, err))?;
+    inp.emit_error(Spanned::new(open, err))?;
     Ok(())
   }
 
@@ -401,13 +401,13 @@ lossless_production! {
         let span = found.span;
         let err = UnexpectedToken::<_, _, _, GraphQL>::expected_one_of(span, expected)
           .with_found(found.data);
-        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
+        inp.emit_error(Spanned::new(span, err.into()))?;
       }
       None => {
         let end = inp.span().end();
         let span = SimpleSpan::new(end, end);
         let err = UnexpectedEot::<usize, GraphQL>::eot_of(end);
-        inp.emitter().emit_error(Spanned::new(span, err.into()))?;
+        inp.emit_error(Spanned::new(span, err.into()))?;
       }
     }
     Ok(())
@@ -449,10 +449,10 @@ lossless_production! {
       return Ok(());
     }
 
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     if inp.try_expect(|_| true)?.is_some() {
-      inp.emitter().cst_start_at(mark, K::Error.raw());
-      inp.emitter().cst_finish(K::Error.raw());
+      inp.cst_start_at(mark, K::Error.raw());
+      inp.cst_finish(K::Error.raw());
     }
     Ok(())
   }
@@ -511,10 +511,10 @@ lossless_production! {
       return Ok(());
     }
 
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     if inp.try_expect(|_| true)?.is_some() {
-      inp.emitter().cst_start_at(mark, K::Error.raw());
-      inp.emitter().cst_finish(K::Error.raw());
+      inp.cst_start_at(mark, K::Error.raw());
+      inp.cst_finish(K::Error.raw());
     }
     Ok(())
   }

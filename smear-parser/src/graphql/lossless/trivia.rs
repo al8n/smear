@@ -61,7 +61,7 @@
 //! discipline, for a placement this suite does not want.
 
 use tokora::{
-  Emitter as _, Lexer, SimpleSpan, Source, Token,
+  Lexer, SimpleSpan, Source, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
   lexer::FromLogos,
   span::Spanned,
@@ -265,7 +265,7 @@ where
       // Emit first, then return the same diagnostic as the `Err`. Built twice rather than
       // cloned: see [`expectation_failure`].
       let reported = expectation_failure::<Src, Ctx>(inp, kind)?;
-      inp.emitter().emit_error(reported)?;
+      inp.emit_error(reported)?;
       Err(expectation_failure::<Src, Ctx>(inp, kind)?.data)
     }
   }
@@ -349,10 +349,10 @@ pub mod test_support {
   };
 
   use tokora::{
-    InputRef, Parse as _, SimpleSpan,
+    InputRef, SimpleSpan,
     cache::DefaultCache,
-    cst::Sink,
-    emitter::{CstEmitter as _, Verbose},
+    cst::{Sink, parse_lossless},
+    emitter::Verbose,
   };
 
   use crate::graphql::{GraphQL, kinds::SyntaxKind as K};
@@ -371,12 +371,12 @@ pub mod test_support {
   /// hits this: it applies a named function whose own signature pins both.
   type Emitter<'inp> = Verbose<GraphqlLosslessErrors<&'inp str>, SimpleSpan, GraphQL>;
   type TestSink<'inp> = Sink<'inp, GraphqlLosslessLexer<'inp, str>, Emitter<'inp>>;
-  type TestCtx<'inp, 'sink> = (
-    &'sink mut TestSink<'inp>,
+  type TestCtx<'inp> = (
+    TestSink<'inp>,
     DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
   );
-  type TestInput<'inp, 'input, 'sink> =
-    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
+  type TestInput<'inp, 'input> =
+    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp>, GraphQL>;
 
   /// Runs one atom over `src` inside a `Document` node, drains whatever the atom left, and
   /// materializes.
@@ -396,27 +396,27 @@ pub mod test_support {
       let src: &$lt str = $src;
       let out = Cell::new($init);
 
-      let mut sink: TestSink<$lt> = Sink::new(src, Emitter::default(), profile::<str>());
-
-      let _ = tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
-        &mut sink,
+      let (cst, _) = parse_lossless::<GraphqlLosslessLexer<$lt, str>, GraphQL, _, _, _, _>(
+        src,
+        Default::default(),
+        Emitter::default(),
+        profile::<str>(),
         DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
-      ))
-      .apply::<_, GraphQL>(|$inp: &mut TestInput<$lt, '_, '_>| {
-        // The `node` combinator's own `mark` / `start_at` / `finish`, spelled out. The
-        // combinator wants an inner parser whose error type is pinned, and a closure whose
-        // body is `Ok(())` pins nothing — so the wrap is driven directly instead of teaching
-        // the test scaffold's inference about a type it never names.
-        let mark = $inp.emitter().cst_mark();
-        out.set($atom);
-        $inp.emitter().cst_start_at(mark, K::Document.raw());
-        $inp.emitter().cst_finish(K::Document.raw());
-        // Whatever the atom left behind, so `finish` has full coverage.
-        $inp.skip_while(|_| true)
-      })
-      .parse_str(src);
+        |$inp: &mut TestInput<$lt, '_>| {
+          // The `node` combinator's own `mark` / `start_at` / `finish`, spelled out. The
+          // combinator wants an inner parser whose error type is pinned, and a closure whose
+          // body is `Ok(())` pins nothing — so the wrap is driven directly instead of teaching
+          // the test scaffold's inference about a type it never names.
+          let mark = $inp.cst_mark();
+          out.set($atom);
+          $inp.cst_start_at(mark, K::Document.raw());
+          $inp.cst_finish(K::Document.raw());
+          // Whatever the atom left behind, so `finish` has full coverage.
+          $inp.skip_while(|_| true)
+        },
+      );
 
-      let (green, _emitter) = sink.finish(K::Root.raw());
+      let (green, _emitter) = cst.finish(K::Root.raw());
       let root = SyntaxNode::new_root(
         green.expect("the trivia-atom driver emitted a malformed event stream"),
       );
