@@ -36,7 +36,6 @@ smear-parser = { path = "smear-parser", version = "0.0.0", default-features = fa
 rust_2018_idioms = "warn"
 single_use_lifetimes = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [
-  'cfg(all_tests)',
   'cfg(tarpaulin)',
   # Testing / coverage helpers. These are set via `RUSTFLAGS='--cfg ...'`
   # in CI to force the dispatcher down a specific path so lower‑tier

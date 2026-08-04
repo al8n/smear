@@ -231,7 +231,7 @@ jobs:
     
 
   miri-tb:
-    name: miri-tb-${{ matrix.target }}-${{ matrix.cfg }}
+    name: miri-tb-${{ matrix.target }}
     strategy:
       # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
       # a cross toolchain (installed below); don't let a failure there
@@ -247,8 +247,6 @@ jobs:
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        cfg:
-          - all_tests
         # Exclude invalid combinations
         exclude:
           - os: ubuntu-latest
@@ -294,10 +292,10 @@ jobs:
           esac
       - name: Miri
         run: |
-          bash ci/miri_tb.sh ${{ matrix.target }} ${{ matrix.cfg }}
+          bash ci/miri_tb.sh ${{ matrix.target }}
 
   miri-sb:
-    name: miri-sb-${{ matrix.target }}-${{ matrix.cfg }}
+    name: miri-sb-${{ matrix.target }}
     strategy:
       # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
       # a cross toolchain (installed below); don't let a failure there
@@ -313,8 +311,6 @@ jobs:
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        cfg:
-          - all_tests
         # Exclude invalid combinations
         exclude:
           - os: ubuntu-latest
@@ -360,7 +356,7 @@ jobs:
           esac
       - name: Miri
         run: |
-          bash ci/miri_sb.sh ${{ matrix.target }} ${{ matrix.cfg }}
+          bash ci/miri_sb.sh ${{ matrix.target }}
   coverage:
     name: coverage
     runs-on: ubuntu-latest
@@ -393,8 +389,6 @@ jobs:
           key: ${{ runner.os }}-coverage-cargo-build-target
       - name: Run tarpaulin
         uses: actions-rs/cargo@v1
-        env:
-          RUSTFLAGS: "--cfg all_tests"
         with:
           command: tarpaulin
           args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet
