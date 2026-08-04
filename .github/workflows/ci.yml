@@ -233,6 +233,10 @@ jobs:
   miri-tb:
     name: miri-tb-${{ matrix.target }}-${{ matrix.cfg }}
     strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -272,6 +276,22 @@ jobs:
             ${{ runner.os }}-miri-
       - name: Install cargo-hack
         run: cargo install cargo-hack
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
       - name: Miri
         run: |
           bash ci/miri_tb.sh ${{ matrix.target }} ${{ matrix.cfg }}
@@ -279,6 +299,10 @@ jobs:
   miri-sb:
     name: miri-sb-${{ matrix.target }}-${{ matrix.cfg }}
     strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -318,6 +342,22 @@ jobs:
             ${{ runner.os }}-miri-
       - name: Install cargo-hack
         run: cargo install cargo-hack
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
       - name: Miri
         run: |
           bash ci/miri_sb.sh ${{ matrix.target }} ${{ matrix.cfg }}
