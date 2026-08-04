@@ -6,7 +6,7 @@
 
 use std::vec::Vec;
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
+  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
@@ -215,7 +215,7 @@ import_parser!(
 
 fn decide_import_member<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -233,7 +233,7 @@ where
 
 fn decide_import_list_opener<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

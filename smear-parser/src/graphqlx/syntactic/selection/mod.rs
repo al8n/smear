@@ -8,7 +8,7 @@ use std::vec::Vec;
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
+  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
   TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
@@ -585,7 +585,7 @@ selection_parser!(
 /// repetition probes `}` before consulting this decision.
 fn decide_selection_set_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -604,7 +604,7 @@ where
 /// present, leaving every other token for the caller.
 fn decide_selection_set_opener<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

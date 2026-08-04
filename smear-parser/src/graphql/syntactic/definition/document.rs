@@ -274,7 +274,7 @@ definition_parser!(
 
 fn decide_type_system_definition_or_extension_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

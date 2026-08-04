@@ -157,6 +157,7 @@ where
 /// An unterminated body returns the bytes scanned plus the error; the SIMD
 /// lexer discards both and delegates the whole token to Logos rather than
 /// constructing a source-typed error on the fast path.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[inline]
 pub(crate) fn skip_block_str_from_bytes(
   src: &[u8],

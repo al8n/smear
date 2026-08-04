@@ -6,7 +6,7 @@ use tokora::Token;
 /// The wiring guard, stated where it is actually decided.
 ///
 /// tokora's `cst::Sink` is compile-time restricted to trivia-surfacing lexers. This declaration
-/// is what admits the lossless door; without it `Sink::new` will not compile.
+/// is what admits the lossless door; without it `cst::parse_lossless` will not compile.
 ///
 /// **Why a `const` item and not a runtime `assert!`.** `SURFACES_TRIVIA` is an associated
 /// *constant*, so a runtime assertion over it re-checks a question the compiler already settled

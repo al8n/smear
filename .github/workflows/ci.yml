@@ -228,11 +228,41 @@ jobs:
 
     - name: Run test
       run: cargo test --all-features -- --quiet
-    
+
+  # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
+  # a floor that silently drifts above the declared value is caught here
+  # instead of surfacing as a hard `cargo` failure for users pinned to it.
+  # Every other job runs `rustup update stable`, so without this job the
+  # declared MSRV is never actually exercised by anything.
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Read declared MSRV from Cargo.toml
+      id: msrv
+      run: |
+        version=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/^rust-version *= *"([^"]+)".*/\1/')
+        if [ -z "$version" ]; then
+          echo "Error: could not read rust-version from Cargo.toml"
+          exit 1
+        fi
+        echo "Declared MSRV: $version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - name: Install Rust ${{ steps.msrv.outputs.version }}
+      run: |
+        rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal --no-self-update
+        rustup default ${{ steps.msrv.outputs.version }}
+    - name: cargo build --workspace --all-features
+      run: cargo build --workspace --all-features
 
   miri-tb:
-    name: miri-tb-${{ matrix.target }}-${{ matrix.cfg }}
+    name: miri-tb-${{ matrix.target }}
     strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -243,8 +273,6 @@ jobs:
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        cfg:
-          - all_tests
         # Exclude invalid combinations
         exclude:
           - os: ubuntu-latest
@@ -272,13 +300,33 @@ jobs:
             ${{ runner.os }}-miri-
       - name: Install cargo-hack
         run: cargo install cargo-hack
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
       - name: Miri
         run: |
-          bash ci/miri_tb.sh ${{ matrix.target }} ${{ matrix.cfg }}
+          bash ci/miri_tb.sh ${{ matrix.target }}
 
   miri-sb:
-    name: miri-sb-${{ matrix.target }}-${{ matrix.cfg }}
+    name: miri-sb-${{ matrix.target }}
     strategy:
+      # i686-unknown-linux-gnu and powerpc64-unknown-linux-gnu currently need
+      # a cross toolchain (installed below); don't let a failure there
+      # cancel the other, unrelated cells in this matrix.
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
@@ -289,8 +337,6 @@ jobs:
           - powerpc64-unknown-linux-gnu
           - x86_64-apple-darwin
           - aarch64-apple-darwin
-        cfg:
-          - all_tests
         # Exclude invalid combinations
         exclude:
           - os: ubuntu-latest
@@ -318,9 +364,25 @@ jobs:
             ${{ runner.os }}-miri-
       - name: Install cargo-hack
         run: cargo install cargo-hack
+      - name: Install cross C toolchain for ${{ matrix.target }}
+        # x86_64-unknown-linux-gnu and the macOS targets build with the
+        # runner's native toolchain; only the two Linux cross targets need
+        # an extra package, so install exactly the one each needs.
+        if: runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          case "${{ matrix.target }}" in
+            i686-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-multilib
+              ;;
+            powerpc64-unknown-linux-gnu)
+              sudo apt-get update
+              sudo apt-get install -y gcc-powerpc64-linux-gnu
+              ;;
+          esac
       - name: Miri
         run: |
-          bash ci/miri_sb.sh ${{ matrix.target }} ${{ matrix.cfg }}
+          bash ci/miri_sb.sh ${{ matrix.target }}
   coverage:
     name: coverage
     runs-on: ubuntu-latest
@@ -353,8 +415,6 @@ jobs:
           key: ${{ runner.os }}-coverage-cargo-build-target
       - name: Run tarpaulin
         uses: actions-rs/cargo@v1
-        env:
-          RUSTFLAGS: "--cfg all_tests"
         with:
           command: tarpaulin
           args: --no-default-features --features graphql --run-types tests --run-types doctests --workspace --out xml -- --quiet

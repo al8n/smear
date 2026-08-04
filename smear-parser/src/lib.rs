@@ -20,8 +20,9 @@ pub mod combinator;
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod name;
 
-/// Namespaced-path carrier shared by GraphQL-family dialect ASTs.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+/// Namespaced-path carrier used by the GraphQLx dialect AST; vanilla GraphQL
+/// has no namespaced paths.
+#[cfg(feature = "graphqlx")]
 mod path;
 
 /// Generic-definition carriers shared by extended GraphQL-family dialect ASTs.

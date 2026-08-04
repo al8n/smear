@@ -9,7 +9,7 @@
 use std::vec::Vec;
 
 use tokora::{
-  Accumulator, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
+  Accumulator, EmitterView, Lexer, ParseInput, SimpleSpan, Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
   span::Spanned,
@@ -121,7 +121,7 @@ where
 
 fn decide_angle_member<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -139,7 +139,7 @@ where
 
 fn decide_langle_opener<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -156,7 +156,7 @@ where
 
 fn decide_ampersand_tail<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -455,7 +455,7 @@ where
 
 fn decide_where_predicate_tail<'inp, Src, Ctx>(
   peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U2>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

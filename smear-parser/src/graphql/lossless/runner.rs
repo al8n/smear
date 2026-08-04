@@ -3,12 +3,9 @@
 
 use tokora::{
   Source,
-  cst::{CstProfile, KindValidator, Sink},
+  cst::{Cst, CstProfile, KindValidator, Sink, parse_lossless},
   emitter::Severity,
 };
-// `parse_str` lives on tokora's `Parse` trait, whose name this module already uses for its own
-// result type — imported anonymously so the trait is in scope without shadowing it.
-use tokora::Parse as _;
 
 use super::{GraphqlLosslessLexer, GraphqlLosslessSlice, GraphqlLosslessToken, SyntaxNode};
 use crate::graphql::kinds::SyntaxKind as K;
@@ -54,17 +51,25 @@ pub(crate) type LosslessEmitter<'inp> = tokora::emitter::Verbose<
 >;
 
 /// The `Sink` every lossless driver records into.
+///
+/// Named only as the emitter half of a driver's **context pair** — `Sink::new` is tokora-private,
+/// so the one way to mint one is [`parse_lossless`], which takes the source once and uses that
+/// same argument for the sink and the input.
 pub(crate) type LosslessSink<'inp> =
   Sink<'inp, GraphqlLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
-/// Materialize `sink` at the root kind and collect its diagnostics.
+/// The spent sink [`parse_lossless`] hands back — the one door to materialization.
+pub(crate) type LosslessCst<'inp> =
+  Cst<'inp, GraphqlLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
+
+/// Materialize `cst` at the root kind and collect its diagnostics.
 ///
 /// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
 /// root kind, the fallible-materialization contract and the diagnostic projection are stated
 /// once. `finish` names the root kind — it is NOT profile data — and hands back the inner
 /// emitter, which is where the diagnostics live.
-pub(crate) fn finish_root(sink: LosslessSink<'_>) -> Parse {
-  let (green, emitter) = sink.finish(K::Root.raw());
+pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
+  let (green, emitter) = cst.finish(K::Root.raw());
   let green = green.expect("the GraphQL lossless sink emitted a malformed event stream");
 
   // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
@@ -155,34 +160,35 @@ impl Parse {
 
 /// Parse a `&str` as a GraphQL document, losslessly.
 pub fn parse_str(src: &str) -> Parse {
-  // Sink::new takes the source at construction rather than at finish, which removes the one
-  // way a caller could hand materialization a different buffer than the spans were measured
-  // against. Argument order is (source, inner emitter, profile) — the emitter is SECOND.
-  let mut sink: LosslessSink<'_> = Sink::new(src, LosslessEmitter::default(), profile::<str>());
-
-  // Productions take `&mut InputRef`, never `&mut Sink`. The sink reaches them as the emitter
-  // half of the parse context: `(&mut sink, cache)` is a `ParseContext`, and `Parser` drives it.
+  // `parse_lossless` is the only door that mints a `Sink`: it takes the source ONCE and uses
+  // that one argument for both the sink and the input, so the buffer the tree's text comes from
+  // and the buffer the parse reads cannot be two different buffers. Argument order is
+  // (source, lexer state, inner emitter, profile, cache, parser).
   //
-  // `Lang` needs the turbofish. `apply`'s signature uses it only in bounds — the returned
-  // `Parser<F, L, O, Ctx>` does not carry it, and `Ctx: ParseContext<'inp, L, Lang>` holds for
-  // every `Lang` — so nothing forces it to `GraphQL` and inference silently settles on `()`,
-  // which then fails to match this production's branded `InputRef`.
+  // `Lang` needs the turbofish. The driver's signature uses it only in bounds — nothing in the
+  // argument list carries it, and `Ctx: ParseContext<'inp, L, Lang>` holds for every `Lang` —
+  // so inference silently settles on `()`, which then fails to match this production's branded
+  // `InputRef`. The lexer is spelled alongside it because `Lang` is the SECOND parameter.
   //
   // `Src` needs its own turbofish for a second reason: `str` and `&str` both project
   // `Slice<'inp> = &'inp str`, so the lexer type alone leaves the production's source parameter
   // genuinely ambiguous. `str` is the one that matches `parse_str`'s `L::Source = str`.
-  let _out = tokora::Parser::with_context((
-    &mut sink,
-    tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
-  ))
+  //
   // `document_entry`, not `document`: the driver's result is discarded below, so an `Err` that
   // escaped the document production would leave the rest of the source uncommitted and
   // `finish` would refuse it as an `UncoveredGap`. The entry drains what an escape left behind,
   // which turns the one failure mode `parse_str` cannot report into a reportable parse.
-  .apply::<_, crate::graphql::GraphQL>(super::document::document_entry::<str, _>)
-  .parse_str(src);
+  let (cst, _out) =
+    parse_lossless::<GraphqlLosslessLexer<'_, str>, crate::graphql::GraphQL, _, _, _, _>(
+      src,
+      Default::default(),
+      LosslessEmitter::default(),
+      profile::<str>(),
+      tokora::cache::DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
+      super::document::document_entry::<str, _>,
+    );
 
-  finish_root(sink)
+  finish_root(cst)
 }
 
 /// Test-only scaffolding for probing the sink's own kind-validator door.
@@ -197,19 +203,20 @@ pub fn parse_str(src: &str) -> Parse {
 /// validator under test is the one every parse actually runs.
 #[doc(hidden)]
 pub mod test_support {
-  use tokora::{InputRef, Parse as _, cache::DefaultCache, emitter::CstEmitter as _};
+  use tokora::{InputRef, cache::DefaultCache};
 
   use super::{
-    GraphqlLosslessLexer, LosslessEmitter, LosslessSink, Parse, Sink, finish_root, profile,
+    GraphqlLosslessLexer, LosslessEmitter, LosslessSink, Parse, finish_root, parse_lossless,
+    profile,
   };
   use crate::graphql::GraphQL;
 
-  type TestCtx<'inp, 'sink> = (
-    &'sink mut LosslessSink<'inp>,
+  type TestCtx<'inp> = (
+    LosslessSink<'inp>,
     DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
   );
-  type TestInput<'inp, 'input, 'sink> =
-    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
+  type TestInput<'inp, 'input> =
+    InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp>, GraphQL>;
 
   /// Opens a node at `kind` over `src` and materializes.
   ///
@@ -218,8 +225,8 @@ pub mod test_support {
   /// (`tokora/src/parser/node.rs`'s own `wrap`) — with `kind` standing in for a production's.
   /// `'inp` is named and threaded from `src`, not elided, for the reason `trivia.rs`'s driver
   /// and `lossless_drivers!` both record: a closure's parameter type is spelled out explicitly
-  /// (see [`TestInput`]), and an elided lifetime there is free to be inferred shorter than
-  /// `sink`'s, which the borrow checker then refuses. Nothing else in the crate calls this; it
+  /// (see [`TestInput`]), and an elided lifetime there is free to be inferred shorter than the
+  /// source's, which the borrow checker then refuses. Nothing else in the crate calls this; it
   /// exists for `tests/lossless_runner.rs`'s validator-discrimination test, which always passes
   /// `""` — the node this probes wraps zero tokens either way.
   ///
@@ -232,24 +239,24 @@ pub mod test_support {
   /// [`KindValidator::accept_all`](tokora::cst::KindValidator::accept_all), so it would not
   /// discriminate the real validator from a permissive one.
   ///
-  /// [`cst_mark`]: tokora::emitter::CstEmitter::cst_mark
-  /// [`cst_start_at`]: tokora::emitter::CstEmitter::cst_start_at
-  /// [`cst_finish`]: tokora::emitter::CstEmitter::cst_finish
+  /// [`cst_mark`]: tokora::InputRef::cst_mark
+  /// [`cst_start_at`]: tokora::InputRef::cst_start_at
+  /// [`cst_finish`]: tokora::InputRef::cst_finish
   pub fn open_raw_kind<'inp>(src: &'inp str, kind: u16) -> Parse {
-    let mut sink: LosslessSink<'inp> = Sink::new(src, LosslessEmitter::default(), profile::<str>());
-
-    let _out = tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
-      &mut sink,
+    let (cst, _out) = parse_lossless::<GraphqlLosslessLexer<'inp, str>, GraphQL, _, _, _, _>(
+      src,
+      Default::default(),
+      LosslessEmitter::default(),
+      profile::<str>(),
       DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
-    ))
-    .apply::<_, GraphQL>(|inp: &mut TestInput<'inp, '_, '_>| {
-      let mark = inp.emitter().cst_mark();
-      inp.emitter().cst_start_at(mark, kind);
-      inp.emitter().cst_finish(kind);
-      inp.skip_while(|_| true)
-    })
-    .parse_str(src);
+      |inp: &mut TestInput<'inp, '_>| {
+        let mark = inp.cst_mark();
+        inp.cst_start_at(mark, kind);
+        inp.cst_finish(kind);
+        inp.skip_while(|_| true)
+      },
+    );
 
-    finish_root(sink)
+    finish_root(cst)
   }
 }

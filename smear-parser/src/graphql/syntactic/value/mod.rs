@@ -18,7 +18,8 @@
 
 use std::vec::Vec;
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
+  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
+  TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   error::{UnexpectedEot, token::UnexpectedToken},
   parser::Action,
@@ -579,7 +580,7 @@ where
 
 pub(crate) fn decide_value_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -597,7 +598,7 @@ where
 
 pub(crate) fn decide_object_field_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -1062,7 +1063,7 @@ value_parser!(
   {
     committed_default_value
       .peek_then_try::<_, U1>(
-        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _: &mut Ctx::Emitter| -> Result<
+        |mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>, _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>| -> Result<
           Action,
           GraphqlError<'inp, Src, Ctx>,
         > {

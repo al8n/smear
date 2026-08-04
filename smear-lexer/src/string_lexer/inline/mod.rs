@@ -7,12 +7,14 @@ use tokora::utils::{
 use super::LitPlainStr;
 use std::{borrow::Cow, string::String};
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) use self::simd::skip_inline_str_simd;
 pub(crate) use self::{
-  simd::skip_inline_str_simd,
   str::{StringToken, lex_inline_str_from_str},
   u8_slice::{StringToken as BytesStringToken, lex_inline_str_from_bytes},
 };
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod simd;
 mod str;
 mod u8_slice;

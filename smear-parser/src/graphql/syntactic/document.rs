@@ -14,7 +14,8 @@ use smear_lexer::{
   keywords::{Fragment, Mutation, Query, Subscription},
 };
 use tokora::{
-  Accumulator, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
+  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
+  TryParseInput,
   cache::{Peeked, PeekedTokenExt},
   parser::Action,
   span::{AsSpan, Spanned},
@@ -371,7 +372,7 @@ document_parser!(
 /// owns committed head diagnostics, while end of input closes the document.
 fn decide_definition_or_extension_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlLexer<'inp, Src>, U1>,
-  _: &mut Ctx::Emitter,
+  _: EmitterView<'_, 'inp, GraphqlLexer<'inp, Src>, Ctx::Emitter, GraphQL>,
 ) -> Result<Action, GraphqlError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,

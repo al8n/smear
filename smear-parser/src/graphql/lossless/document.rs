@@ -61,7 +61,7 @@
 //!   nesting-aware region and reports it once.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, cst::event::EventMark, emitter::CstEmitter as _};
+use tokora::{ParseInput as _, cst::event::EventMark};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
@@ -312,7 +312,7 @@ lossless_production! {
     // its answer — and because a production whose node placement depends on a caller's internals
     // is one refactor away from being wrong.
     let head = peek_kind::<Src, Ctx>(inp)?;
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     let described = starts_description(head);
     if described {
       description::<Src, Ctx>(inp)?;
@@ -348,7 +348,7 @@ lossless_production! {
   /// `TypeSystemDocument` and a `Document`.
   fn type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
-    let mark = inp.emitter().cst_mark();
+    let mark = inp.cst_mark();
     let described = starts_description(head);
     if described {
       description::<Src, Ctx>(inp)?;

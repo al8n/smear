@@ -21,9 +21,11 @@ pub use enum_value::*;
 pub use float::*;
 pub use int::*;
 pub use list::*;
+#[cfg(feature = "graphqlx")]
 pub use map::*;
 pub use null_value::*;
 pub use object::*;
+#[cfg(feature = "graphqlx")]
 pub use set::*;
 pub use string::*;
 pub use variable::*;
@@ -34,9 +36,11 @@ mod enum_value;
 mod float;
 mod int;
 mod list;
+#[cfg(feature = "graphqlx")]
 mod map;
 mod null_value;
 mod object;
+#[cfg(feature = "graphqlx")]
 mod set;
 mod string;
 mod variable;

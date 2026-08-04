@@ -396,7 +396,7 @@ macro_rules! lossless_drivers {
     $(#[$modmeta])*
     #[doc(hidden)]
     pub mod $modname {
-      use ::tokora::{InputRef, Parse as _, cache::DefaultCache, cst::Sink};
+      use ::tokora::{InputRef, cache::DefaultCache, cst::parse_lossless};
 
       #[allow(unused_imports)]
       use $crate::graphql::lossless::value::Constness;
@@ -410,12 +410,15 @@ macro_rules! lossless_drivers {
       };
 
       /// The context pair and the input each driver's closure receives.
-      type TestCtx<'inp, 'sink> = (
-        &'sink mut LosslessSink<'inp>,
+      ///
+      /// The sink is held **by value**: `parse_lossless` mints it from the source itself and
+      /// owns it for the parse, so there is no `&mut Sink` for a driver to hand around.
+      type TestCtx<'inp> = (
+        LosslessSink<'inp>,
         DefaultCache<'inp, GraphqlLosslessLexer<'inp, str>>,
       );
-      type TestInput<'inp, 'input, 'sink> =
-        InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp, 'sink>, GraphQL>;
+      type TestInput<'inp, 'input> =
+        InputRef<'inp, 'input, GraphqlLosslessLexer<'inp, str>, TestCtx<'inp>, GraphQL>;
 
       $(
         $(#[$meta])*
@@ -424,29 +427,29 @@ macro_rules! lossless_drivers {
         pub fn $name<'inp>(src: &'inp str) -> Parse {
           // The `'inp` is **named**, threaded from `src`, for the reason `trivia`'s driver
           // records: elided, it varies independently of the error type and the closure `E0521`s.
-          let mut sink: LosslessSink<'inp> =
-            Sink::new(src, LosslessEmitter::default(), profile::<str>());
-
-          let _out = ::tokora::Parser::with_context::<GraphqlLosslessLexer<'_, str>, (), _>((
-            &mut sink,
+          //
+          // `Lang` is `parse_lossless`'s SECOND parameter and is used only in bounds, so it is
+          // turbofished alongside the lexer or inference settles it on `()`.
+          let (cst, _out) = parse_lossless::<GraphqlLosslessLexer<'inp, str>, GraphQL, _, _, _, _>(
+            src,
+            Default::default(),
+            LosslessEmitter::default(),
+            profile::<str>(),
             DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
-          ))
-          .apply::<_, GraphQL>(|inp: &mut TestInput<'inp, '_, '_>| {
-            // Minted before the call, not inside the argument list: `inp` is already borrowed
-            // mutably as the first argument, so `inp.emitter()` in the second would be a second
-            // mutable borrow of the same value.
-            $(let $mark = ::tokora::emitter::CstEmitter::cst_mark(
-              ::tokora::InputRef::emitter(inp),
-            );)?
-            // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
-            // parameter that matches `L::Source`.
-            let out = super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?);
-            inp.skip_while(|_| true)?;
-            out
-          })
-          .parse_str(src);
+            |inp: &mut TestInput<'inp, '_>| {
+              // Minted before the call, not inside the argument list: `inp` is already borrowed
+              // mutably as the first argument, so a second `inp` method call in the second would
+              // be a second mutable borrow of the same value.
+              $(let $mark = inp.cst_mark();)?
+              // `::<str, _>`: `Src` is not inferable from the input type, and `str` is the
+              // parameter that matches `L::Source`.
+              let out = super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?);
+              inp.skip_while(|_| true)?;
+              out
+            },
+          );
 
-          finish_root(sink)
+          finish_root(cst)
         }
       )*
     }
