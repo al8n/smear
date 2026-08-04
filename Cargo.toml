@@ -17,7 +17,7 @@ edition = "2024"
 repository = "https://github.com/al8n/smear"
 homepage = "https://github.com/al8n/smear"
 license = "Apache-2.0 OR MIT"
-rust-version = "1.89"
+rust-version = "1.95"
 
 [workspace.dependencies]
 bstr = { version = "1", default-features = false }

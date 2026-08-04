@@ -228,7 +228,33 @@ jobs:
 
     - name: Run test
       run: cargo test --all-features -- --quiet
-    
+
+  # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
+  # a floor that silently drifts above the declared value is caught here
+  # instead of surfacing as a hard `cargo` failure for users pinned to it.
+  # Every other job runs `rustup update stable`, so without this job the
+  # declared MSRV is never actually exercised by anything.
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Read declared MSRV from Cargo.toml
+      id: msrv
+      run: |
+        version=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/^rust-version *= *"([^"]+)".*/\1/')
+        if [ -z "$version" ]; then
+          echo "Error: could not read rust-version from Cargo.toml"
+          exit 1
+        fi
+        echo "Declared MSRV: $version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    - name: Install Rust ${{ steps.msrv.outputs.version }}
+      run: |
+        rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal --no-self-update
+        rustup default ${{ steps.msrv.outputs.version }}
+    - name: cargo build --workspace --all-features
+      run: cargo build --workspace --all-features
 
   miri-tb:
     name: miri-tb-${{ matrix.target }}
