@@ -8,7 +8,7 @@ use tokora::{
 
 use super::{
   BlockStringValue, BooleanValue, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
-  IntValue, List, Map, MapEntry, NullValue, Object, ObjectField, Set, StringValue, VariableValue,
+  IntValue, List, NullValue, Object, ObjectField, StringValue, VariableValue,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -119,30 +119,6 @@ fn carriers_support_custom_spans_and_language_markers() {
   assert_eq!(list.values(), &[1, 2]);
   assert_eq!(list.into_components(), (CustomSpan(10), vec![1, 2]));
 
-  let set = Set::<i32, CustomSpan>::new(CustomSpan(11), vec![1, 2]);
-  assert_eq!(set.as_span(), &CustomSpan(11));
-  assert_eq!(set.values(), &[1, 2]);
-  assert_eq!(set.into_components(), (CustomSpan(11), vec![1, 2]));
-
-  let entry = MapEntry::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
-  assert_eq!(entry.as_span(), &CustomSpan(12));
-  assert_eq!(entry.key(), &"answer");
-  assert_eq!(entry.value(), &42);
-  assert_eq!(entry.into_components(), (CustomSpan(12), "answer", 42));
-
-  let map = Map::<_, _, CustomSpan>::new(
-    CustomSpan(13),
-    vec![MapEntry::<_, _, CustomSpan>::new(
-      CustomSpan(14),
-      "answer",
-      42,
-    )],
-  );
-  assert_eq!(map.as_span(), &CustomSpan(13));
-  assert_eq!(map.entries().len(), 1);
-  assert_eq!(map.entries()[0].key(), &"answer");
-  assert_eq!(map.into_entries()[0].value(), &42);
-
   let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(15), "answer", 42);
   assert_eq!(field.as_span(), &CustomSpan(15));
   assert_eq!(field.name(), &"answer");
@@ -168,6 +144,36 @@ fn carriers_support_custom_spans_and_language_markers() {
       BooleanValue::<str, CustomSpan, crate::graphql::GraphQL>::new(CustomSpan(15), false);
     let _: crate::value::BooleanValue<str, CustomSpan, crate::graphql::GraphQL> = branded;
   }
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_collections_support_custom_spans() {
+  use super::{Map, MapEntry, Set};
+
+  let set = Set::<i32, CustomSpan>::new(CustomSpan(11), vec![1, 2]);
+  assert_eq!(set.as_span(), &CustomSpan(11));
+  assert_eq!(set.values(), &[1, 2]);
+  assert_eq!(set.into_components(), (CustomSpan(11), vec![1, 2]));
+
+  let entry = MapEntry::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
+  assert_eq!(entry.as_span(), &CustomSpan(12));
+  assert_eq!(entry.key(), &"answer");
+  assert_eq!(entry.value(), &42);
+  assert_eq!(entry.into_components(), (CustomSpan(12), "answer", 42));
+
+  let map = Map::<_, _, CustomSpan>::new(
+    CustomSpan(13),
+    vec![MapEntry::<_, _, CustomSpan>::new(
+      CustomSpan(14),
+      "answer",
+      42,
+    )],
+  );
+  assert_eq!(map.as_span(), &CustomSpan(13));
+  assert_eq!(map.entries().len(), 1);
+  assert_eq!(map.entries()[0].key(), &"answer");
+  assert_eq!(map.into_entries()[0].value(), &42);
 }
 
 #[test]

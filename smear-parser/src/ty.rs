@@ -3,6 +3,7 @@
 //! These source-independent nodes retain the referenced name or element type,
 //! the complete source span, and whether the reference is non-null.
 
+#[cfg(feature = "graphqlx")]
 use std::vec::Vec;
 use tokora::{
   SimpleSpan,
@@ -10,9 +11,14 @@ use tokora::{
   utils::IntoComponents,
 };
 
+#[cfg(feature = "graphqlx")]
 use crate::path::Path;
 
 /// A named type reference with an optional non-null modifier.
+///
+/// Vanilla GraphQL names its type references directly; GraphQLx uses
+/// [`DefinitionTypePath`] instead, since its type references are namespaced.
+#[cfg(feature = "graphql")]
 #[derive(Debug, Clone, Copy)]
 pub struct NamedType<Name, Span = SimpleSpan> {
   span: Span,
@@ -20,6 +26,7 @@ pub struct NamedType<Name, Span = SimpleSpan> {
   required: bool,
 }
 
+#[cfg(feature = "graphql")]
 impl<Name, Span> AsSpan<Span> for NamedType<Name, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -27,6 +34,7 @@ impl<Name, Span> AsSpan<Span> for NamedType<Name, Span> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<Name, Span> IntoSpan<Span> for NamedType<Name, Span> {
   #[inline]
   fn into_span(self) -> Span {
@@ -34,6 +42,7 @@ impl<Name, Span> IntoSpan<Span> for NamedType<Name, Span> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<Name, Span> IntoComponents for NamedType<Name, Span> {
   type Components = (Span, Name, bool);
 
@@ -43,6 +52,7 @@ impl<Name, Span> IntoComponents for NamedType<Name, Span> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<Name, Span> NamedType<Name, Span> {
   /// Creates a named type reference.
   #[inline]
@@ -131,6 +141,7 @@ impl<Type, Span> ListType<Type, Span> {
 }
 
 /// A GraphQLx set type reference with an optional non-null modifier.
+#[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, Copy)]
 pub struct SetType<Type, Span = SimpleSpan> {
   span: Span,
@@ -138,6 +149,7 @@ pub struct SetType<Type, Span = SimpleSpan> {
   required: bool,
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span> SetType<Type, Span> {
   /// Creates a set type reference.
   #[inline]
@@ -164,6 +176,7 @@ impl<Type, Span> SetType<Type, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span> AsSpan<Span> for SetType<Type, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -171,6 +184,7 @@ impl<Type, Span> AsSpan<Span> for SetType<Type, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span> IntoSpan<Span> for SetType<Type, Span> {
   #[inline]
   fn into_span(self) -> Span {
@@ -178,6 +192,7 @@ impl<Type, Span> IntoSpan<Span> for SetType<Type, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span> IntoComponents for SetType<Type, Span> {
   type Components = (Span, Type, bool);
 
@@ -188,6 +203,7 @@ impl<Type, Span> IntoComponents for SetType<Type, Span> {
 }
 
 /// A GraphQLx map type reference with an optional non-null modifier.
+#[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, Copy)]
 pub struct MapType<Key, Value, Span = SimpleSpan> {
   span: Span,
@@ -196,6 +212,7 @@ pub struct MapType<Key, Value, Span = SimpleSpan> {
   required: bool,
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Key, Value, Span> MapType<Key, Value, Span> {
   /// Creates a map type reference.
   #[inline]
@@ -233,6 +250,7 @@ impl<Key, Value, Span> MapType<Key, Value, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Key, Value, Span> AsSpan<Span> for MapType<Key, Value, Span> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -240,6 +258,7 @@ impl<Key, Value, Span> AsSpan<Span> for MapType<Key, Value, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Key, Value, Span> IntoSpan<Span> for MapType<Key, Value, Span> {
   #[inline]
   fn into_span(self) -> Span {
@@ -247,6 +266,7 @@ impl<Key, Value, Span> IntoSpan<Span> for MapType<Key, Value, Span> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Key, Value, Span> IntoComponents for MapType<Key, Value, Span> {
   type Components = (Span, Key, Value, bool);
 
@@ -257,6 +277,7 @@ impl<Key, Value, Span> IntoComponents for MapType<Key, Value, Span> {
 }
 
 /// Generic type arguments carried by a GraphQLx type path.
+#[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeGenerics<Type, Span = SimpleSpan, Container = Vec<Type>> {
   span: Span,
@@ -264,6 +285,7 @@ pub struct TypeGenerics<Type, Span = SimpleSpan, Container = Vec<Type>> {
   _type: core::marker::PhantomData<Type>,
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span, Container> TypeGenerics<Type, Span, Container> {
   /// Creates a type-argument list from its enclosing span and parameters.
   #[inline]
@@ -297,6 +319,7 @@ impl<Type, Span, Container> TypeGenerics<Type, Span, Container> {
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span, Container> AsSpan<Span> for TypeGenerics<Type, Span, Container> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -304,6 +327,7 @@ impl<Type, Span, Container> AsSpan<Span> for TypeGenerics<Type, Span, Container>
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span, Container> IntoSpan<Span> for TypeGenerics<Type, Span, Container> {
   #[inline]
   fn into_span(self) -> Span {
@@ -311,6 +335,7 @@ impl<Type, Span, Container> IntoSpan<Span> for TypeGenerics<Type, Span, Containe
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Type, Span, Container> IntoComponents for TypeGenerics<Type, Span, Container> {
   type Components = (Span, Container);
 
@@ -321,6 +346,7 @@ impl<Type, Span, Container> IntoComponents for TypeGenerics<Type, Span, Containe
 }
 
 /// A namespaced GraphQLx type path, optional type arguments, and nullability.
+#[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionTypePath<
   Name,
@@ -335,6 +361,7 @@ pub struct DefinitionTypePath<
   required: bool,
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Name, Type, Span, PathContainer, TypeContainer>
   DefinitionTypePath<Name, Type, Span, PathContainer, TypeContainer>
 {
@@ -380,6 +407,7 @@ impl<Name, Type, Span, PathContainer, TypeContainer>
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Name, Type, Span, PathContainer, TypeContainer> AsSpan<Span>
   for DefinitionTypePath<Name, Type, Span, PathContainer, TypeContainer>
 {
@@ -389,6 +417,7 @@ impl<Name, Type, Span, PathContainer, TypeContainer> AsSpan<Span>
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Name, Type, Span, PathContainer, TypeContainer> IntoSpan<Span>
   for DefinitionTypePath<Name, Type, Span, PathContainer, TypeContainer>
 {
@@ -398,6 +427,7 @@ impl<Name, Type, Span, PathContainer, TypeContainer> IntoSpan<Span>
   }
 }
 
+#[cfg(feature = "graphqlx")]
 impl<Name, Type, Span, PathContainer, TypeContainer> IntoComponents
   for DefinitionTypePath<Name, Type, Span, PathContainer, TypeContainer>
 {

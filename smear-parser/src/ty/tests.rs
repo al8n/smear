@@ -1,26 +1,17 @@
 use std::vec;
 
-use crate::path::Path;
 use tokora::{
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
 };
 
-use super::{DefinitionTypePath, ListType, MapType, NamedType, SetType, TypeGenerics};
+use super::ListType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CustomSpan(u8);
 
 #[test]
 fn carriers_support_custom_spans() {
-  let named = NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true);
-  assert_eq!(named.as_span(), &CustomSpan(1));
-  assert_eq!(
-    NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true).into_span(),
-    CustomSpan(1)
-  );
-  assert_eq!(named.into_components(), (CustomSpan(1), "Name", true));
-
   let list = ListType::<_, CustomSpan>::new(CustomSpan(2), "Element", false);
   assert_eq!(list.as_span(), &CustomSpan(2));
   assert_eq!(
@@ -28,6 +19,28 @@ fn carriers_support_custom_spans() {
     CustomSpan(2)
   );
   assert_eq!(list.into_components(), (CustomSpan(2), "Element", false));
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn named_type_carrier_supports_custom_spans() {
+  use super::NamedType;
+
+  let named = NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true);
+  assert_eq!(named.as_span(), &CustomSpan(1));
+  assert_eq!(
+    NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true).into_span(),
+    CustomSpan(1)
+  );
+  assert_eq!(named.into_components(), (CustomSpan(1), "Name", true));
+}
+
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_carriers_support_custom_spans() {
+  use crate::path::Path;
+
+  use super::{DefinitionTypePath, MapType, SetType, TypeGenerics};
 
   let set = SetType::<_, CustomSpan>::new(CustomSpan(3), "Element", true);
   assert_eq!(set.as_span(), &CustomSpan(3));

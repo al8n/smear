@@ -27,10 +27,15 @@ pub struct Name<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Ident<S, Span, 
 /// GraphQL-family dialects use this nominal wrapper for the `Name but not on`
 /// grammar position. Its constructor is kept within this crate so syntactic
 /// productions are the single place that establish that exclusion.
+///
+/// Vanilla GraphQL fragments use this wrapper; GraphQLx has no fragment
+/// grammar.
+#[cfg(feature = "graphql")]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct FragmentName<S: ?Sized, Span = SimpleSpan, Lang: ?Sized = ()>(Name<S, Span, Lang>);
 
+#[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
   #[inline]
   pub(crate) const fn new(span: Span, source: S) -> Self {
@@ -38,6 +43,7 @@ impl<S, Span, Lang: ?Sized> FragmentName<S, Span, Lang> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
   type Target = Name<S, Span, Lang>;
 
@@ -47,6 +53,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> Deref for FragmentName<S, Span, Lang> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for FragmentName<S, Span, Lang> {
   #[inline]
   fn deref_mut(&mut self) -> &mut Self::Target {
@@ -54,6 +61,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> DerefMut for FragmentName<S, Span, Lang> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S: ?Sized, Span, Lang: ?Sized> AsRef<Name<S, Span, Lang>> for FragmentName<S, Span, Lang> {
   #[inline]
   fn as_ref(&self) -> &Name<S, Span, Lang> {
@@ -61,6 +69,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> AsRef<Name<S, Span, Lang>> for FragmentName<
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> PartialEq<S> for FragmentName<S, Span, Lang>
 where
   S: PartialEq,
@@ -71,6 +80,7 @@ where
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for FragmentName<S, Span, Lang> {
   #[inline]
   fn as_span(&self) -> &Span {
@@ -78,6 +88,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> AsSpan<Span> for FragmentName<S, Span, Lang>
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
   #[inline]
   fn into_span(self) -> Span {
@@ -85,6 +96,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FragmentName<S, Span, Lang> {
   }
 }
 
+#[cfg(feature = "graphql")]
 impl<S, Span, Lang: ?Sized> IntoComponents for FragmentName<S, Span, Lang> {
   type Components = (Span, S);
 
