@@ -9,8 +9,10 @@ use tokora::{
 
 use crate::error::{StringError, StringErrors};
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use block::skip_block_str_from_bytes;
 pub use block::{LitBlockStr, LitComplexBlockStr};
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};
 
@@ -361,6 +363,7 @@ impl<'de: 'a, 'a> TryFrom<&'de [u8]> for LitStr<&'a [u8]> {
 
 /// Panic message for the (statically unreachable) case where a string the SIMD
 /// fast path routed to error delegation turns out to lex cleanly.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 const VALID_STRING_UNREACHABLE: &str =
   "SIMD string fast path emits every valid string literal; only errors reach delegation";
 
@@ -385,6 +388,7 @@ const VALID_STRING_UNREACHABLE: &str =
 /// Only ever invoked on the error path: the SIMD fast path emits every *valid*
 /// string itself, so the delegated `lex_*` here always returns `Err` (hence the
 /// [`VALID_STRING_UNREACHABLE`] `expect_err`).
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) trait DelegateStringError {
   /// The `StringErrors` character type this primitive lexes into: `char` for
   /// `str`, `u8` for `[u8]` — matching the SIMD lexer's own `Slice::Char`.
@@ -402,6 +406,7 @@ pub(crate) trait DelegateStringError {
   ) -> (StringErrors<Self::Char>, usize);
 }
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 impl DelegateStringError for str {
   type Char = char;
 
@@ -423,6 +428,7 @@ impl DelegateStringError for str {
   }
 }
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 impl DelegateStringError for [u8] {
   type Char = u8;
 
@@ -444,7 +450,7 @@ impl DelegateStringError for [u8] {
   }
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(all(feature = "bytes", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
   use bytes::Bytes;
 
@@ -458,7 +464,7 @@ const _: () = {
   }
 };
 
-#[cfg(feature = "hipstr")]
+#[cfg(all(feature = "hipstr", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
   use hipstr::{HipByt, HipStr};
 
@@ -486,7 +492,7 @@ const _: () = {
   }
 };
 
-#[cfg(feature = "bstr")]
+#[cfg(all(feature = "bstr", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
   use bstr::BStr;
 

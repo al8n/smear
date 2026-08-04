@@ -3,11 +3,11 @@ use std::{borrow::Cow, string::String};
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::utils::human_display::DisplayHuman;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) use self::u8_slice::skip_block_str_from_bytes;
 pub(crate) use self::{
   str::{BlockStringToken, lex_block_str_from_str},
-  u8_slice::{
-    BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes, skip_block_str_from_bytes,
-  },
+  u8_slice::{BlockStringToken as BytesBlockStringToken, lex_block_str_from_bytes},
 };
 
 mod str;
