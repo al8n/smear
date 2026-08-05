@@ -463,6 +463,82 @@ macro_rules! lossless_error_impls {
   };
 }
 
+/// Generates a dialect's `is_directive_location` from the one list of nineteen spellings.
+///
+/// **The nineteen spellings are a frozen, shared vocabulary** — the eight of
+/// `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`, verified
+/// byte-identical between the two dialects' `classify_location`. Two copies of a frozen list is
+/// two things to get wrong; this is one.
+///
+/// **The count has been wrong in prose before.** It read "eighteen" for three tasks, from the task
+/// that wrote the predicate until a gate report caught it; the *membership* was right the whole
+/// time and identical to the syntactic layer's `is_location_keyword`, so it was a miscount rather
+/// than a behaviour bug. That is the exact failure mode one list closes, and it is why the arms
+/// below — not any sentence about them — are the authority.
+///
+/// A macro rather than a shared function because the two dialects' `ContextualKeyword` are
+/// unrelated types with identical variant names. A trait would put the whole list back in each
+/// impl, and a conversion is the measured dead end Task 0b recorded.
+macro_rules! directive_location_predicate {
+  ($kw:path) => {
+    /// Whether `keyword` is one of the **nineteen** spellings `DirectiveLocation` admits: the
+    /// eight of `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`.
+    ///
+    /// The lexer already tells `QUERY` from `query` — they are different `ContextualKeyword`
+    /// variants — so this is a membership test over the projection and never a string comparison.
+    #[inline]
+    fn is_directive_location(keyword: $kw) -> bool {
+      use $kw as DirectiveLocationKeyword;
+      ::core::matches!(
+        keyword,
+        DirectiveLocationKeyword::QueryLocation
+          | DirectiveLocationKeyword::MutationLocation
+          | DirectiveLocationKeyword::SubscriptionLocation
+          | DirectiveLocationKeyword::FieldLocation
+          | DirectiveLocationKeyword::FragmentDefinitionLocation
+          | DirectiveLocationKeyword::FragmentSpreadLocation
+          | DirectiveLocationKeyword::InlineFragmentLocation
+          | DirectiveLocationKeyword::VariableDefinitionLocation
+          | DirectiveLocationKeyword::SchemaLocation
+          | DirectiveLocationKeyword::ScalarLocation
+          | DirectiveLocationKeyword::ObjectLocation
+          | DirectiveLocationKeyword::FieldDefinitionLocation
+          | DirectiveLocationKeyword::ArgumentDefinitionLocation
+          | DirectiveLocationKeyword::InterfaceLocation
+          | DirectiveLocationKeyword::UnionLocation
+          | DirectiveLocationKeyword::EnumLocation
+          | DirectiveLocationKeyword::EnumValueLocation
+          | DirectiveLocationKeyword::InputObjectLocation
+          | DirectiveLocationKeyword::InputFieldDefinitionLocation
+      )
+    }
+  };
+}
+
+/// Generates a dialect's `starts_description` from the one two-kind test.
+///
+/// The two string kinds are the same two in both dialects, and the question — *does a description
+/// open here?* — is asked by every described definition and by each document dispatcher. Sharing
+/// it costs one macro and removes the second place a dialect could forget `BlockString`.
+macro_rules! description_head_predicate {
+  ($kind:path) => {
+    /// Whether `head` opens a description — the one two-kind test a definition file makes
+    /// repeatedly, and which the document dispatchers make once each.
+    #[inline]
+    pub(crate) fn starts_description(head: ::core::option::Option<$kind>) -> bool {
+      use $kind as DescriptionHeadKind;
+      ::core::matches!(
+        head,
+        ::core::option::Option::Some(
+          DescriptionHeadKind::InlineString | DescriptionHeadKind::BlockString
+        )
+      )
+    }
+  };
+}
+
+pub(crate) use description_head_predicate;
+pub(crate) use directive_location_predicate;
 pub(crate) use lossless_drivers;
 pub(crate) use lossless_error_impls;
 pub(crate) use lossless_production;

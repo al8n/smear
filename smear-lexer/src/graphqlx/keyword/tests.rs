@@ -16,55 +16,8 @@ where
 
 #[test]
 fn classifies_every_contextual_spelling() {
-  const KEYWORDS: &[ContextualKeyword] = &[
-    ContextualKeyword::Type,
-    ContextualKeyword::Interface,
-    ContextualKeyword::Union,
-    ContextualKeyword::Enum,
-    ContextualKeyword::Input,
-    ContextualKeyword::Scalar,
-    ContextualKeyword::Extend,
-    ContextualKeyword::Schema,
-    ContextualKeyword::Directive,
-    ContextualKeyword::Fragment,
-    ContextualKeyword::Query,
-    ContextualKeyword::Mutation,
-    ContextualKeyword::Subscription,
-    ContextualKeyword::Implements,
-    ContextualKeyword::Repeatable,
-    ContextualKeyword::On,
-    ContextualKeyword::True,
-    ContextualKeyword::False,
-    ContextualKeyword::Null,
-    ContextualKeyword::QueryLocation,
-    ContextualKeyword::MutationLocation,
-    ContextualKeyword::SubscriptionLocation,
-    ContextualKeyword::FieldLocation,
-    ContextualKeyword::FragmentDefinitionLocation,
-    ContextualKeyword::FragmentSpreadLocation,
-    ContextualKeyword::InlineFragmentLocation,
-    ContextualKeyword::VariableDefinitionLocation,
-    ContextualKeyword::SchemaLocation,
-    ContextualKeyword::ScalarLocation,
-    ContextualKeyword::ObjectLocation,
-    ContextualKeyword::FieldDefinitionLocation,
-    ContextualKeyword::ArgumentDefinitionLocation,
-    ContextualKeyword::InterfaceLocation,
-    ContextualKeyword::UnionLocation,
-    ContextualKeyword::EnumLocation,
-    ContextualKeyword::EnumValueLocation,
-    ContextualKeyword::InputObjectLocation,
-    ContextualKeyword::InputFieldDefinitionLocation,
-    ContextualKeyword::Import,
-    ContextualKeyword::From,
-    ContextualKeyword::As,
-    ContextualKeyword::Where,
-    ContextualKeyword::Set,
-    ContextualKeyword::Map,
-  ];
-
-  for keyword in KEYWORDS {
-    assert_contextual_keyword(keyword.as_str(), *keyword);
+  for keyword in super::KEYWORDS {
+    assert_contextual_keyword(keyword.as_str(), keyword);
   }
 }
 

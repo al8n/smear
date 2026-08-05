@@ -133,6 +133,9 @@ pub mod graphql;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
+#[cfg(all(test, feature = "graphql", feature = "graphqlx"))]
+mod keyword_prefix;
+
 mod string_lexer;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
