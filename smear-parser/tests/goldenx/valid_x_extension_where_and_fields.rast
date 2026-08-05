@@ -1,0 +1,48 @@
+Root@0..53
+  Document@0..53
+    ObjectTypeExtension@0..52
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "type"
+      Space@11..12 " "
+      ExtensionName@12..16
+        Path@12..13
+          Name@12..13 "T"
+        ExtensionTypeGenerics@13..16
+          LAngle@13..14 "<"
+          Name@14..15 "A"
+          RAngle@15..16 ">"
+      Space@16..17 " "
+      ImplementInterfaces@17..30
+        Name@17..27 "implements"
+        Space@27..28 " "
+        TypePath@28..30
+          Path@28..30
+            Name@28..29 "I"
+            Space@29..30 " "
+      WhereClause@30..44
+        Name@30..35 "where"
+        Space@35..36 " "
+        WherePredicate@36..44
+          TypePath@36..37
+            Path@36..37
+              Name@36..37 "A"
+          Colon@37..38 ":"
+          Space@38..39 " "
+          TypePath@39..44
+            Path@39..44
+              Name@39..43 "Node"
+              Space@43..44 " "
+      FieldsDefinition@44..52
+        LBrace@44..45 "{"
+        Space@45..46 " "
+        FieldDefinition@46..51
+          Name@46..47 "f"
+          Colon@47..48 ":"
+          Space@48..49 " "
+          DefinitionTypePath@49..51
+            Path@49..51
+              Name@49..50 "A"
+              Space@50..51 " "
+        RBrace@51..52 "}"
+    Newline@52..53 "\n"

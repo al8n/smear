@@ -1,0 +1,68 @@
+Root@0..63
+  Document@0..63
+    ObjectTypeDefinition@0..62
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      FieldsDefinition@7..62
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..18
+          Name@9..10 "a"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          DefinitionTypePath@12..16
+            Path@12..15
+              Name@12..15 "Int"
+            Bang@15..16 "!"
+          Comma@16..17 ","
+          Space@17..18 " "
+        FieldDefinition@18..30
+          Name@18..19 "b"
+          Colon@19..20 ":"
+          Space@20..21 " "
+          ListType@21..28
+            LBracket@21..22 "["
+            DefinitionTypePath@22..26
+              Path@22..25
+                Name@22..25 "Int"
+              Bang@25..26 "!"
+            RBracket@26..27 "]"
+            Bang@27..28 "!"
+          Comma@28..29 ","
+          Space@29..30 " "
+        FieldDefinition@30..41
+          Name@30..31 "c"
+          Colon@31..32 ":"
+          Space@32..33 " "
+          SetType@33..39
+            LAngle@33..34 "<"
+            DefinitionTypePath@34..37
+              Path@34..37
+                Name@34..37 "Int"
+            RAngle@37..38 ">"
+            Bang@38..39 "!"
+          Comma@39..40 ","
+          Space@40..41 " "
+        FieldDefinition@41..61
+          Name@41..42 "d"
+          Colon@42..43 ":"
+          Space@43..44 " "
+          MapType@44..60
+            LAngle@44..45 "<"
+            DefinitionTypePath@45..49
+              Path@45..49
+                Name@45..48 "Int"
+                Space@48..49 " "
+            FatArrow@49..51 "=>"
+            Space@51..52 " "
+            DefinitionTypePath@52..58
+              Path@52..58
+                Name@52..58 "String"
+            RAngle@58..59 ">"
+            Bang@59..60 "!"
+          Space@60..61 " "
+        RBrace@61..62 "}"
+    Newline@62..63 "\n"

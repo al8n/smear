@@ -1,0 +1,20 @@
+Root@0..18
+  Document@0..18
+    Name@0..4 "type"
+    Space@4..5 " "
+    Error@5..6
+      LBrace@5..6 "{"
+    Newline@6..7 "\n"
+    Space@7..8 " "
+    Space@8..9 " "
+    Error@9..10
+      Name@9..10 "x"
+    Error@10..12
+      Colon@10..11 ":"
+      Space@11..12 " "
+    Error@12..15
+      Name@12..15 "Int"
+    Newline@15..16 "\n"
+    Error@16..17
+      RBrace@16..17 "}"
+    Newline@17..18 "\n"

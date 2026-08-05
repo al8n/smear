@@ -1,0 +1,47 @@
+Root@0..51
+  Document@0..51
+    ObjectTypeDefinition@0..50
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      ImplementInterfaces@7..40
+        Name@7..17 "implements"
+        Space@17..18 " "
+        Ampersand@18..19 "&"
+        Space@19..20 " "
+        TypePath@20..30
+          Path@20..25
+            Name@20..22 "ns"
+            PathSeparator@22..24 "::"
+            Name@24..25 "I"
+          TypeGenerics@25..30
+            LAngle@25..26 "<"
+            DefinitionTypePath@26..29
+              Path@26..29
+                Name@26..29 "Int"
+            RAngle@29..30 ">"
+        Space@30..31 " "
+        Ampersand@31..32 "&"
+        Space@32..33 " "
+        TypePath@33..40
+          Path@33..40
+            PathSeparator@33..35 "::"
+            Name@35..36 "a"
+            PathSeparator@36..38 "::"
+            Name@38..39 "J"
+            Space@39..40 " "
+      FieldsDefinition@40..50
+        LBrace@40..41 "{"
+        Space@41..42 " "
+        FieldDefinition@42..49
+          Name@42..43 "f"
+          Colon@43..44 ":"
+          Space@44..45 " "
+          DefinitionTypePath@45..49
+            Path@45..49
+              Name@45..48 "Int"
+              Space@48..49 " "
+        RBrace@49..50 "}"
+    Newline@50..51 "\n"

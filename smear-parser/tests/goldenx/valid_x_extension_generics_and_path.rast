@@ -1,0 +1,24 @@
+Root@0..24
+  Document@0..24
+    ObjectTypeExtension@0..24
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "type"
+      Space@11..12 " "
+      ExtensionName@12..20
+        Path@12..17
+          Name@12..14 "ns"
+          PathSeparator@14..16 "::"
+          Name@16..17 "T"
+        ExtensionTypeGenerics@17..20
+          LAngle@17..18 "<"
+          Name@18..19 "A"
+          RAngle@19..20 ">"
+      Space@20..21 " "
+      Directives@21..24
+        Directive@21..24
+          At@21..22 "@"
+          TypePath@22..24
+            Path@22..24
+              Name@22..23 "d"
+              Newline@23..24 "\n"

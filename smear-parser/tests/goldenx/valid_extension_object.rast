@@ -1,0 +1,40 @@
+Root@0..43
+  Document@0..43
+    ObjectTypeExtension@0..42
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "type"
+      Space@11..12 " "
+      ExtensionName@12..14
+        Path@12..14
+          Name@12..13 "T"
+          Space@13..14 " "
+      ImplementInterfaces@14..27
+        Name@14..24 "implements"
+        Space@24..25 " "
+        TypePath@25..27
+          Path@25..27
+            Name@25..26 "A"
+            Space@26..27 " "
+      Directives@27..30
+        Directive@27..30
+          At@27..28 "@"
+          TypePath@28..30
+            Path@28..30
+              Name@28..29 "d"
+              Space@29..30 " "
+      FieldsDefinition@30..42
+        LBrace@30..31 "{"
+        Newline@31..32 "\n"
+        Space@32..33 " "
+        Space@33..34 " "
+        FieldDefinition@34..41
+          Name@34..35 "f"
+          Colon@35..36 ":"
+          Space@36..37 " "
+          DefinitionTypePath@37..41
+            Path@37..41
+              Name@37..40 "Int"
+              Newline@40..41 "\n"
+        RBrace@41..42 "}"
+    Newline@42..43 "\n"

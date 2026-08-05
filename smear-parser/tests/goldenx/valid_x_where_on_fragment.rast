@@ -1,0 +1,40 @@
+Root@0..39
+  Document@0..39
+    FragmentDefinition@0..38
+      Name@0..8 "fragment"
+      Space@8..9 " "
+      ExecutableDefinitionName@9..13
+        Name@9..10 "F"
+        ExecutableDefinitionTypeGenerics@10..13
+          LAngle@10..11 "<"
+          Name@11..12 "T"
+          RAngle@12..13 ">"
+      Space@13..14 " "
+      TypeCondition@14..19
+        Name@14..16 "on"
+        Space@16..17 " "
+        TypePath@17..19
+          Path@17..19
+            Name@17..18 "X"
+            Space@18..19 " "
+      WhereClause@19..33
+        Name@19..24 "where"
+        Space@24..25 " "
+        WherePredicate@25..33
+          TypePath@25..26
+            Path@25..26
+              Name@25..26 "T"
+          Colon@26..27 ":"
+          Space@27..28 " "
+          TypePath@28..33
+            Path@28..33
+              Name@28..32 "Node"
+              Space@32..33 " "
+      SelectionSet@33..38
+        LBrace@33..34 "{"
+        Space@34..35 " "
+        Field@35..37
+          Name@35..36 "g"
+          Space@36..37 " "
+        RBrace@37..38 "}"
+    Newline@38..39 "\n"

@@ -1,0 +1,61 @@
+Root@0..63
+  Document@0..63
+    DirectiveDefinition@0..45
+      Name@0..9 "directive"
+      Space@9..10 " "
+      At@10..11 "@"
+      DefinitionName@11..15
+        Name@11..12 "d"
+        DefinitionTypeGenerics@12..15
+          LAngle@12..13 "<"
+          DefinitionTypeParam@13..14
+            Name@13..14 "A"
+          RAngle@14..15 ">"
+      ArgumentsDefinition@15..21
+        LParen@15..16 "("
+        InputValueDefinition@16..20
+          Name@16..17 "x"
+          Colon@17..18 ":"
+          Space@18..19 " "
+          DefinitionTypePath@19..20
+            Path@19..20
+              Name@19..20 "A"
+        RParen@20..21 ")"
+      Space@21..22 " "
+      Name@22..24 "on"
+      Space@24..25 " "
+      DirectiveLocations@25..31
+        Name@25..30 "FIELD"
+        Space@30..31 " "
+      WhereClause@31..45
+        Name@31..36 "where"
+        Space@36..37 " "
+        WherePredicate@37..45
+          TypePath@37..38
+            Path@37..38
+              Name@37..38 "A"
+          Colon@38..39 ":"
+          Space@39..40 " "
+          TypePath@40..45
+            Path@40..45
+              Name@40..44 "Node"
+              Newline@44..45 "\n"
+    ObjectTypeDefinition@45..62
+      Name@45..49 "type"
+      Space@49..50 " "
+      DefinitionName@50..52
+        Name@50..51 "X"
+        Space@51..52 " "
+      FieldsDefinition@52..62
+        LBrace@52..53 "{"
+        Space@53..54 " "
+        FieldDefinition@54..61
+          Name@54..55 "f"
+          Colon@55..56 ":"
+          Space@56..57 " "
+          DefinitionTypePath@57..61
+            Path@57..61
+              Name@57..60 "Int"
+              Space@60..61 " "
+        RBrace@61..62 "}"
+    Newline@62..63 "\n"

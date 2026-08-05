@@ -1,0 +1,26 @@
+Root@0..22
+  Document@0..22
+    ObjectTypeDefinition@0..21
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      FieldsDefinition@7..21
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        FieldDefinition@11..20
+          Name@11..12 "f"
+          ArgumentsDefinition@12..14
+            LParen@12..13 "("
+            RParen@13..14 ")"
+          Colon@14..15 ":"
+          Space@15..16 " "
+          DefinitionTypePath@16..20
+            Path@16..20
+              Name@16..19 "Int"
+              Newline@19..20 "\n"
+        RBrace@20..21 "}"
+    Newline@21..22 "\n"

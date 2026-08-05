@@ -1,0 +1,137 @@
+Root@0..138
+  Document@0..138
+    ObjectTypeDefinition@0..72
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..15
+        Name@5..9 "Pair"
+        DefinitionTypeGenerics@9..15
+          LAngle@9..10 "<"
+          DefinitionTypeParam@10..13
+            Name@10..11 "K"
+            Comma@11..12 ","
+            Space@12..13 " "
+          DefinitionTypeParam@13..14
+            Name@13..14 "V"
+          RAngle@14..15 ">"
+      Space@15..16 " "
+      WhereClause@16..58
+        Name@16..21 "where"
+        Space@21..22 " "
+        WherePredicate@22..31
+          TypePath@22..23
+            Path@22..23
+              Name@22..23 "K"
+          Colon@23..24 ":"
+          Space@24..25 " "
+          TypePath@25..31
+            Path@25..31
+              Name@25..29 "Node"
+              Comma@29..30 ","
+              Space@30..31 " "
+        WherePredicate@31..58
+          TypePath@31..32
+            Path@31..32
+              Name@31..32 "V"
+          Colon@32..33 ":"
+          Space@33..34 " "
+          TypePath@34..51
+            Path@34..51
+              Name@34..36 "ns"
+              PathSeparator@36..38 "::"
+              Name@38..50 "Serializable"
+              Space@50..51 " "
+          Ampersand@51..52 "&"
+          Space@52..53 " "
+          TypePath@53..58
+            Path@53..58
+              Name@53..57 "Node"
+              Space@57..58 " "
+      FieldsDefinition@58..72
+        LBrace@58..59 "{"
+        Space@59..60 " "
+        FieldDefinition@60..66
+          Name@60..61 "k"
+          Colon@61..62 ":"
+          Space@62..63 " "
+          DefinitionTypePath@63..66
+            Path@63..66
+              Name@63..64 "K"
+              Comma@64..65 ","
+              Space@65..66 " "
+        FieldDefinition@66..71
+          Name@66..67 "v"
+          Colon@67..68 ":"
+          Space@68..69 " "
+          DefinitionTypePath@69..71
+            Path@69..71
+              Name@69..70 "V"
+              Space@70..71 " "
+        RBrace@71..72 "}"
+    Newline@72..73 "\n"
+    InterfaceTypeDefinition@73..137
+      Name@73..82 "interface"
+      Space@82..83 " "
+      DefinitionName@83..95
+        Name@83..89 "Holder"
+        DefinitionTypeGenerics@89..95
+          LAngle@89..90 "<"
+          DefinitionTypeParam@90..93
+            Name@90..91 "A"
+            Comma@91..92 ","
+            Space@92..93 " "
+          DefinitionTypeParam@93..94
+            Name@93..94 "B"
+          RAngle@94..95 ">"
+      Space@95..96 " "
+      WhereClause@96..123
+        Name@96..101 "where"
+        Space@101..102 " "
+        WherePredicate@102..110
+          TypePath@102..103
+            Path@102..103
+              Name@102..103 "A"
+          Colon@103..104 ":"
+          Space@104..105 " "
+          TypePath@105..110
+            Path@105..110
+              Name@105..109 "Node"
+              Space@109..110 " "
+        WherePredicate@110..123
+          TypePath@110..111
+            Path@110..111
+              Name@110..111 "B"
+          Colon@111..112 ":"
+          Space@112..113 " "
+          TypePath@113..122
+            Path@113..117
+              Name@113..117 "Node"
+            TypeGenerics@117..122
+              LAngle@117..118 "<"
+              DefinitionTypePath@118..121
+                Path@118..121
+                  Name@118..121 "Int"
+              RAngle@121..122 ">"
+          Space@122..123 " "
+      FieldsDefinition@123..137
+        LBrace@123..124 "{"
+        Space@124..125 " "
+        FieldDefinition@125..131
+          Name@125..126 "a"
+          Colon@126..127 ":"
+          Space@127..128 " "
+          DefinitionTypePath@128..131
+            Path@128..131
+              Name@128..129 "A"
+              Comma@129..130 ","
+              Space@130..131 " "
+        FieldDefinition@131..136
+          Name@131..132 "b"
+          Colon@132..133 ":"
+          Space@133..134 " "
+          DefinitionTypePath@134..136
+            Path@134..136
+              Name@134..135 "B"
+              Space@135..136 " "
+        RBrace@136..137 "}"
+    Newline@137..138 "\n"

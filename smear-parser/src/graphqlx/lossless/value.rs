@@ -110,7 +110,24 @@ lossless_production! {
   /// The node kind is [`VariableValue`](K::VariableValue), where GraphQL's is `Variable`: this
   /// space takes its node names from GraphQLx's own AST carriers, and `graphqlx::ast` calls it
   /// `VariableValue`.
+  ///
+  /// # The head peek is not redundant, and gate 5 is what proved it
+  ///
+  /// `expect` skips trivia before it matches, so without the peek that skip runs **inside** a node
+  /// that is already open and the node's start lands on the wrong side of the space. Every caller in
+  /// *value* position dispatches on a peek of its own, which is why the omission survived every
+  /// other gate — the trivia was already committed by the time this ran.
+  ///
+  /// [`super::executable::variable_definition`] is the exception, and the one the golden trees
+  /// caught: it parses an optional description and then calls this with nothing in between, so in
+  /// `query Q("the id" $id: ID!)` the `VariableValue` spanned `" $id"` rather than `"$id"` and a
+  /// consumer renaming through that range took the space with it. Two sites, in one corpus entry.
+  ///
+  /// The fix is here rather than at that call site, following the ruling Phase A recorded for
+  /// `named_type`: the guarantee is the production's own rather than a precondition each caller has
+  /// to remember. `path` and `type_ref` in `ty.rs` carry the same leading peek for the same reason.
   fn variable<'inp, Src, Ctx>(inp) {
+    peek_kind::<Src, Ctx>(inp)?;
     node(
       K::VariableValue.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {

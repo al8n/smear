@@ -1,0 +1,34 @@
+Root@0..34
+  Document@0..34
+    ObjectTypeDefinition@0..34
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      FieldsDefinition@7..34
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..33
+          Name@9..10 "f"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          ListType@12..32
+            LBracket@12..13 "["
+            DefinitionTypePath@13..30
+              Path@13..24
+                PathSeparator@13..15 "::"
+                Name@15..17 "ns"
+                PathSeparator@17..19 "::"
+                Name@19..24 "Inner"
+              TypeGenerics@24..29
+                LAngle@24..25 "<"
+                DefinitionTypePath@25..28
+                  Path@25..28
+                    Name@25..28 "Int"
+                RAngle@28..29 ">"
+              Bang@29..30 "!"
+            RBracket@30..31 "]"
+            Bang@31..32 "!"
+          Space@32..33 " "
+        RBrace@33..34 "}"

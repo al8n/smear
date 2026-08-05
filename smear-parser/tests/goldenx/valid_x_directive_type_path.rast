@@ -1,0 +1,61 @@
+Root@0..62
+  Document@0..62
+    ObjectTypeDefinition@0..61
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      Directives@7..39
+        Directive@7..30
+          At@7..8 "@"
+          TypePath@8..22
+            Path@8..17
+              Name@8..10 "ns"
+              PathSeparator@10..12 "::"
+              Name@12..17 "cache"
+            TypeGenerics@17..22
+              LAngle@17..18 "<"
+              DefinitionTypePath@18..21
+                Path@18..21
+                  Name@18..21 "Int"
+              RAngle@21..22 ">"
+          Arguments@22..30
+            LParen@22..23 "("
+            Argument@23..29
+              Name@23..26 "ttl"
+              Colon@26..27 ":"
+              Space@27..28 " "
+              IntValue@28..29
+                Int@28..29 "5"
+            RParen@29..30 ")"
+        Space@30..31 " "
+        Directive@31..39
+          At@31..32 "@"
+          TypePath@32..39
+            Path@32..39
+              PathSeparator@32..34 "::"
+              Name@34..35 "a"
+              PathSeparator@35..37 "::"
+              Name@37..38 "b"
+              Space@38..39 " "
+      FieldsDefinition@39..61
+        LBrace@39..40 "{"
+        Space@40..41 " "
+        FieldDefinition@41..60
+          Name@41..42 "f"
+          Colon@42..43 ":"
+          Space@43..44 " "
+          DefinitionTypePath@44..48
+            Path@44..48
+              Name@44..47 "Int"
+              Space@47..48 " "
+          Directives@48..60
+            Directive@48..60
+              At@48..49 "@"
+              TypePath@49..60
+                Path@49..60
+                  Name@49..59 "deprecated"
+                  Space@59..60 " "
+        RBrace@60..61 "}"
+    Newline@61..62 "\n"

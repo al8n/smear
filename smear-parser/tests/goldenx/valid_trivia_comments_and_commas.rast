@@ -1,0 +1,41 @@
+Root@0..103
+  Document@0..103
+    Comment@0..19 "# a leading comment"
+    Newline@19..20 "\n"
+    ObjectTypeDefinition@20..81
+      Name@20..24 "type"
+      Space@24..25 " "
+      DefinitionName@25..27
+        Name@25..26 "T"
+        Space@26..27 " "
+      FieldsDefinition@27..81
+        LBrace@27..28 "{"
+        Newline@28..29 "\n"
+        Space@29..30 " "
+        Space@30..31 " "
+        Comment@31..58 "# a comment inside the body"
+        Newline@58..59 "\n"
+        Space@59..60 " "
+        Space@60..61 " "
+        FieldDefinition@61..69
+          Name@61..62 "a"
+          Colon@62..63 ":"
+          Space@63..64 " "
+          DefinitionTypePath@64..69
+            Path@64..69
+              Name@64..67 "Int"
+              Comma@67..68 ","
+              Space@68..69 " "
+        FieldDefinition@69..80
+          Name@69..70 "b"
+          Colon@70..71 ":"
+          Space@71..72 " "
+          DefinitionTypePath@72..80
+            Path@72..80
+              Name@72..78 "String"
+              Comma@78..79 ","
+              Newline@79..80 "\n"
+        RBrace@80..81 "}"
+    Newline@81..82 "\n"
+    Comment@82..102 "# a trailing comment"
+    Newline@102..103 "\n"

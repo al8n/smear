@@ -1,0 +1,38 @@
+Root@0..45
+  Document@0..45
+    OperationDefinition@0..44
+      SelectionSet@0..44
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..43
+          Name@4..5 "f"
+          Arguments@5..42
+            LParen@5..6 "("
+            Argument@6..13
+              Name@6..10 "zero"
+              Colon@10..11 ":"
+              Space@11..12 " "
+              IntValue@12..13
+                Int@12..13 "0"
+            Comma@13..14 ","
+            Space@14..15 " "
+            Argument@15..27
+              Name@15..23 "positive"
+              Colon@23..24 ":"
+              Space@24..25 " "
+              IntValue@25..27
+                Int@25..27 "42"
+            Comma@27..28 ","
+            Space@28..29 " "
+            Argument@29..41
+              Name@29..37 "negative"
+              Colon@37..38 ":"
+              Space@38..39 " "
+              IntValue@39..41
+                Int@39..41 "-7"
+            RParen@41..42 ")"
+          Newline@42..43 "\n"
+        RBrace@43..44 "}"
+    Newline@44..45 "\n"

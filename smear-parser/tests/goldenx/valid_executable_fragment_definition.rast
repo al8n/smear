@@ -1,0 +1,41 @@
+Root@0..41
+  Document@0..41
+    FragmentDefinition@0..40
+      Name@0..8 "fragment"
+      Space@8..9 " "
+      ExecutableDefinitionName@9..11
+        Name@9..10 "F"
+        Space@10..11 " "
+      TypeCondition@11..16
+        Name@11..13 "on"
+        Space@13..14 " "
+        TypePath@14..16
+          Path@14..16
+            Name@14..15 "T"
+            Space@15..16 " "
+      Directives@16..33
+        Directive@16..32
+          At@16..17 "@"
+          TypePath@17..21
+            Path@17..21
+              Name@17..21 "skip"
+          Arguments@21..32
+            LParen@21..22 "("
+            Argument@22..31
+              Name@22..24 "if"
+              Colon@24..25 ":"
+              Space@25..26 " "
+              BooleanValue@26..31
+                Name@26..31 "false"
+            RParen@31..32 ")"
+        Space@32..33 " "
+      SelectionSet@33..40
+        LBrace@33..34 "{"
+        Newline@34..35 "\n"
+        Space@35..36 " "
+        Space@36..37 " "
+        Field@37..39
+          Name@37..38 "f"
+          Newline@38..39 "\n"
+        RBrace@39..40 "}"
+    Newline@40..41 "\n"

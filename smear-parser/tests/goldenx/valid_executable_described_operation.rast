@@ -1,0 +1,20 @@
+Root@0..104
+  Document@0..104
+    OperationDefinition@0..103
+      InlineString@0..87 "\"a description before an executable definition: the syntactic/ compatibility extension\""
+      Newline@87..88 "\n"
+      Name@88..93 "query"
+      Space@93..94 " "
+      DefinitionName@94..96
+        Name@94..95 "Q"
+        Space@95..96 " "
+      SelectionSet@96..103
+        LBrace@96..97 "{"
+        Newline@97..98 "\n"
+        Space@98..99 " "
+        Space@99..100 " "
+        Field@100..102
+          Name@100..101 "f"
+          Newline@101..102 "\n"
+        RBrace@102..103 "}"
+    Newline@103..104 "\n"

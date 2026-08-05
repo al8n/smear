@@ -1,0 +1,28 @@
+Root@0..63
+  Document@0..63
+    InlineString@0..35 "\"a description before an extension\""
+    Newline@35..36 "\n"
+    ObjectTypeExtension@36..62
+      Name@36..42 "extend"
+      Space@42..43 " "
+      Name@43..47 "type"
+      Space@47..48 " "
+      ExtensionName@48..50
+        Path@48..50
+          Name@48..49 "T"
+          Space@49..50 " "
+      FieldsDefinition@50..62
+        LBrace@50..51 "{"
+        Newline@51..52 "\n"
+        Space@52..53 " "
+        Space@53..54 " "
+        FieldDefinition@54..61
+          Name@54..55 "f"
+          Colon@55..56 ":"
+          Space@56..57 " "
+          DefinitionTypePath@57..61
+            Path@57..61
+              Name@57..60 "Int"
+              Newline@60..61 "\n"
+        RBrace@61..62 "}"
+    Newline@62..63 "\n"

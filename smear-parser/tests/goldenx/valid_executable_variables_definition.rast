@@ -1,0 +1,72 @@
+Root@0..69
+  Document@0..69
+    OperationDefinition@0..68
+      Name@0..5 "query"
+      Space@5..6 " "
+      DefinitionName@6..7
+        Name@6..7 "Q"
+      VariablesDefinition@7..60
+        LParen@7..8 "("
+        VariableDefinition@8..17
+          VariableValue@8..10
+            Dollar@8..9 "$"
+            Name@9..10 "a"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          DefinitionTypePath@12..17
+            Path@12..17
+              Name@12..15 "Int"
+              Comma@15..16 ","
+              Space@16..17 " "
+        VariableDefinition@17..41
+          VariableValue@17..19
+            Dollar@17..18 "$"
+            Name@18..19 "b"
+          Colon@19..20 ":"
+          Space@20..21 " "
+          ListType@21..31
+            LBracket@21..22 "["
+            DefinitionTypePath@22..29
+              Path@22..28
+                Name@22..28 "String"
+              Bang@28..29 "!"
+            RBracket@29..30 "]"
+            Bang@30..31 "!"
+          Space@31..32 " "
+          DefaultValue@32..39
+            Equal@32..33 "="
+            Space@33..34 " "
+            ListValue@34..39
+              LBracket@34..35 "["
+              StringValue@35..38
+                InlineString@35..38 "\"x\""
+              RBracket@38..39 "]"
+          Comma@39..40 ","
+          Space@40..41 " "
+        VariableDefinition@41..59
+          VariableValue@41..43
+            Dollar@41..42 "$"
+            Name@42..43 "c"
+          Colon@43..44 ":"
+          Space@44..45 " "
+          DefinitionTypePath@45..53
+            Path@45..53
+              Name@45..52 "Boolean"
+              Space@52..53 " "
+          DefaultValue@53..59
+            Equal@53..54 "="
+            Space@54..55 " "
+            BooleanValue@55..59
+              Name@55..59 "true"
+        RParen@59..60 ")"
+      Space@60..61 " "
+      SelectionSet@61..68
+        LBrace@61..62 "{"
+        Newline@62..63 "\n"
+        Space@63..64 " "
+        Space@64..65 " "
+        Field@65..67
+          Name@65..66 "f"
+          Newline@66..67 "\n"
+        RBrace@67..68 "}"
+    Newline@68..69 "\n"

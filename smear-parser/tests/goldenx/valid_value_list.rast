@@ -1,0 +1,67 @@
+Root@0..59
+  Document@0..59
+    OperationDefinition@0..58
+      SelectionSet@0..58
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..57
+          Name@4..5 "f"
+          Arguments@5..56
+            LParen@5..6 "("
+            Argument@6..15
+              Name@6..11 "empty"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              ListValue@13..15
+                LBracket@13..14 "["
+                RBracket@14..15 "]"
+            Comma@15..16 ","
+            Space@16..17 " "
+            Argument@17..32
+              Name@17..21 "flat"
+              Colon@21..22 ":"
+              Space@22..23 " "
+              ListValue@23..32
+                LBracket@23..24 "["
+                IntValue@24..25
+                  Int@24..25 "1"
+                Comma@25..26 ","
+                Space@26..27 " "
+                IntValue@27..28
+                  Int@27..28 "2"
+                Comma@28..29 ","
+                Space@29..30 " "
+                IntValue@30..31
+                  Int@30..31 "3"
+                RBracket@31..32 "]"
+            Comma@32..33 ","
+            Space@33..34 " "
+            Argument@34..55
+              Name@34..40 "nested"
+              Colon@40..41 ":"
+              Space@41..42 " "
+              ListValue@42..55
+                LBracket@42..43 "["
+                ListValue@43..46
+                  LBracket@43..44 "["
+                  IntValue@44..45
+                    Int@44..45 "1"
+                  RBracket@45..46 "]"
+                Comma@46..47 ","
+                Space@47..48 " "
+                ListValue@48..54
+                  LBracket@48..49 "["
+                  IntValue@49..50
+                    Int@49..50 "2"
+                  Comma@50..51 ","
+                  Space@51..52 " "
+                  IntValue@52..53
+                    Int@52..53 "3"
+                  RBracket@53..54 "]"
+                RBracket@54..55 "]"
+            RParen@55..56 ")"
+          Newline@56..57 "\n"
+        RBrace@57..58 "}"
+    Newline@58..59 "\n"

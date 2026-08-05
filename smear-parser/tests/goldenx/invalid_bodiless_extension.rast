@@ -1,0 +1,11 @@
+Root@0..14
+  Document@0..14
+    ObjectTypeExtension@0..14
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "type"
+      Space@11..12 " "
+      ExtensionName@12..14
+        Path@12..14
+          Name@12..13 "T"
+          Newline@13..14 "\n"

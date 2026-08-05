@@ -1,0 +1,42 @@
+Root@0..88
+  Document@0..88
+    DirectiveDefinition@0..88
+      Name@0..9 "directive"
+      Space@9..10 " "
+      At@10..11 "@"
+      DefinitionName@11..12
+        Name@11..12 "d"
+      ArgumentsDefinition@12..50
+        LParen@12..13 "("
+        InputValueDefinition@13..49
+          InlineString@13..38 "\"an argument description\""
+          Space@38..39 " "
+          Name@39..40 "a"
+          Colon@40..41 ":"
+          Space@41..42 " "
+          DefinitionTypePath@42..46
+            Path@42..46
+              Name@42..45 "Int"
+              Space@45..46 " "
+          DefaultValue@46..49
+            Equal@46..47 "="
+            Space@47..48 " "
+            IntValue@48..49
+              Int@48..49 "1"
+        RParen@49..50 ")"
+      Space@50..51 " "
+      Name@51..61 "repeatable"
+      Space@61..62 " "
+      Name@62..64 "on"
+      Space@64..65 " "
+      DirectiveLocations@65..88
+        Name@65..70 "FIELD"
+        Space@70..71 " "
+        Pipe@71..72 "|"
+        Space@72..73 " "
+        Name@73..78 "QUERY"
+        Space@78..79 " "
+        Pipe@79..80 "|"
+        Space@80..81 " "
+        Name@81..87 "OBJECT"
+        Newline@87..88 "\n"
