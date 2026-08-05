@@ -19,6 +19,16 @@ pub mod error;
 // is ever built from it. Its `KindSpace` impl and its `rowan::Language` are the gated parts,
 // because those are the parts that need the substrate.
 pub mod kinds;
+// No `///` here either, and for the same reason `kinds` has none: `lossless/mod.rs` carries its
+// own `//!` header, and a module with doc fragments from both places has the intra-doc links in
+// *all* of them resolved against the scope of the first — this file's.
+//
+// Gated on `rowan` because `crate::lossless`, the substrate every item under it is written over,
+// is. `kinds` above is *not* gated, which is the asymmetry that keeps the `graphqlx`-without-
+// `rowan` build green: the kind space describes GraphQLx's grammar, while a tree over it needs
+// rowan.
+#[cfg(feature = "rowan")]
+pub mod lossless;
 /// GraphQLx syntactic productions over the concrete lexer.
 pub mod syntactic;
 

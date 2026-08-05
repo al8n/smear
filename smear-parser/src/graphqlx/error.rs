@@ -272,6 +272,31 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   }
 }
 
+impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
+  /// Creates the end-of-input error a production raises when it has no particular expectation
+  /// to name.
+  ///
+  /// # Why this is a second impl block, and why it is not `ErrorData::UnexpectedEnd`
+  ///
+  /// It names an [`Expectation`] value, so it cannot live in the `Exp`-generic block above.
+  ///
+  /// And it is spelled as an [`UnexpectedToken`] with no found token rather than as an
+  /// [`UnexpectedEnd`], because **that is what this dialect's own `UnexpectedEot` conversion
+  /// already produces** — the syntactic layer reports the identical event as
+  /// `maybe_unexpected_token(None, Expectation::InputValue, …)`, and the lossless layer is
+  /// compared against the syntactic one, input by input, by the acceptance-parity gate. Two
+  /// spellings of one event across two layers of one dialect is a difference no consumer could
+  /// act on and every consumer would have to handle.
+  ///
+  /// GraphQL's error family has a dedicated expectation-free `ErrorData::EndOfInput` and this one
+  /// deliberately does not gain a copy: adding a variant here would give GraphQLx two spellings
+  /// where it currently has one, and only the *lossless* half would use the new one.
+  #[inline]
+  pub const fn unexpected_end_of_input(span: Span) -> Self {
+    Self::maybe_unexpected_token(None, Expectation::InputValue, span)
+  }
+}
+
 type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
   std::vec::Vec<Error<S, T, Char, Exp, StateError>>;
 
