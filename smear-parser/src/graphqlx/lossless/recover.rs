@@ -140,8 +140,36 @@ pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
 ];
 
 /// The token kinds a bare `Name` position admits — an operation's name, a generic parameter, a
-/// fragment's name.
+/// fragment's name, a directive location.
 pub(crate) const NAME_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds an operation type may begin with.
+///
+/// [`NAME_HEADS`]'s set under its own name: `query`, `mutation` and `subscription` are ordinary
+/// identifiers, so the *kind* answers nothing and only a spelling test can — which is why the
+/// diagnostic naming this set is always accompanied by one.
+pub(crate) const OPERATION_TYPE_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds a described SDL member may begin with: its description, or its own name.
+pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
+
+/// The token kinds a type-system definition may begin with — a description, or one of the eight
+/// keyword spellings, all of which are `Identifier`s.
+pub(crate) const TYPE_SYSTEM_DEFINITION_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
+
+/// The `{` a schema definition's root-operation block must open with.
+pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
+
+/// The `{` a fields or input-fields block must open with — divergence 16's expectation, at the
+/// three definition sites where a present `where` makes the block mandatory.
+pub(crate) const FIELDS_BLOCK_HEADS: &[Kind] = &[Kind::LBrace];
+
+/// The `=` a union's members must open with — divergence 17's expectation, which is `Equal` and
+/// **not** `LBrace`: a union's `where` requires the members *before* it where an object's requires
+/// the block *after* it.
+pub(crate) const UNION_MEMBERS_HEADS: &[Kind] = &[Kind::Equal];
 
 /// Whether `kind` can begin a value.
 ///

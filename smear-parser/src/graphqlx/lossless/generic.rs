@@ -35,22 +35,24 @@
 //! `ExtensionTypeParam` is excluded from the kind space by the census's *one token is not a
 //! region* rule and the executable list's members were never a production at all.
 //!
-//! # The `where` continuation test is `U1` here, and that is exact for every position Task 11 has
+//! # The `where` continuation test needs **two** significant tokens, and one position proves it
 //!
-//! `graphqlx/syntactic/generic/mod.rs:456-472` decides whether another predicate follows with a
-//! **two-token** window: `(Identifier, Colon | PathSeparator | LAngle)` or
-//! `(PathSeparator, Identifier)`. Over a trivia-surfacing stream a fixed two-token peek answers
-//! about trivia — the lesson Task 10's `set`/`map` dispatch recorded — and the atom set
-//! deliberately has no two-*significant*-token lookahead, so `where_clause` asks the one-token
-//! question instead: *does a `TypePath` start here?*
+//! `graphqlx/syntactic/generic/mod.rs:442-472` decides whether another predicate follows with a
+//! two-token window: `(Identifier, Colon | PathSeparator | LAngle)` or
+//! `(PathSeparator, Identifier)`. A one-token test — *does a `TypePath` start here?* — is exact
+//! wherever the clause is followed by a token that cannot start one, which covers divergence 19's
+//! two executable sites and divergence 16's five block sites, because a `{` follows all seven.
 //!
-//! The two tests differ only where a `TypePath` may legally follow a complete `where` clause, and
-//! **no Task 11 position is one**: divergence 19 puts the clause immediately before an
-//! already-mandatory `{`, so the follower is a `{`, or an error either way. Task 12 owns the one
-//! site where they part — a directive definition's trailing `where` (divergence 18), after which
-//! the next top-level definition's keyword is an ordinary `Identifier` — and it is that task's job
-//! to decide what the lossless suite does there. Recorded here rather than in a task report so the
-//! boundary travels with the code.
+//! It is **wrong** at the eighth. Divergence 18 puts a `where` at the *end* of a directive
+//! definition, forcing nothing after it, so `directive @d on FIELD where A: B` followed by
+//! `type X { f: Int }` presents an ordinary `Identifier` that belongs to the next definition. A
+//! one-token test consumes `type` as another predicate's bounded type, fails on the missing `:`,
+//! and costs the whole `ObjectTypeDefinition` — on **valid** input.
+//!
+//! So this module's `where_clause` asks the two-token question, through the atom set's
+//! `peek_second_kind` — the one atom GraphQLx adds to the shared set, and the only place in either
+//! suite that spends the sink's rollback. Its own docs carry why a fixed `peek::<U2>()` cannot
+//! serve and why this is the sink's discipline rather than a second buffering layer.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::ParseInput as _;
@@ -62,7 +64,7 @@ use super::coverage::node;
 use super::{
   GraphqlxLosslessInput, Keyword, recover,
   recover::{NAME_HEADS, PATH_HEADS, opener_span},
-  trivia::{eat_if, expect, peek_as, peek_kind},
+  trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind},
   ty::{type_path, type_ref},
 };
 
@@ -242,8 +244,9 @@ lossless_production! {
   /// through [`peek_as`] before dispatching here; the keyword is consumed with a plain `expect`
   /// and not re-tested, the ruling Task 10 recorded for the reserved value spellings.
   ///
-  /// The continuation test is one significant token — see the module docs for exactly where that
-  /// is exact and where Task 12 will have to widen it.
+  /// The continuation test is the syntactic parser's two-token window, reproduced through
+  /// [`peek_second_kind`](super::trivia::peek_second_kind); the module docs give the position that
+  /// makes the second token load-bearing.
   fn where_clause<'inp, Src, Ctx>(inp) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
@@ -256,13 +259,25 @@ lossless_production! {
           Some(Kind::Identifier | Kind::PathSeparator) => where_predicate::<Src, Ctx>(inp)?,
           _ => return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS),
         }
-        while matches!(
-          peek_kind::<Src, Ctx>(inp)?,
-          Some(Kind::Identifier | Kind::PathSeparator)
-        ) {
+        // The two-token continuation test, reproduced exactly. Every arm that continues has an
+        // `Identifier` or a `::` at the head, which `where_predicate`'s `type_path` consumes, so
+        // the loop makes progress on every turn it takes.
+        loop {
+          let another = match peek_kind::<Src, Ctx>(inp)? {
+            Some(Kind::Identifier) => matches!(
+              peek_second_kind::<Src, Ctx>(inp)?,
+              Some(Kind::Colon | Kind::PathSeparator | Kind::LAngle)
+            ),
+            Some(Kind::PathSeparator) => {
+              matches!(peek_second_kind::<Src, Ctx>(inp)?, Some(Kind::Identifier))
+            }
+            _ => false,
+          };
+          if !another {
+            return Ok(());
+          }
           where_predicate::<Src, Ctx>(inp)?;
         }
-        Ok(())
       },
     )
     .parse_input(inp)

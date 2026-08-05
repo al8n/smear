@@ -18,7 +18,7 @@
 
 use smear_parser::graphqlx::lossless::trivia::test_support::{
   self as atoms, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of, peek_kind_of,
-  try_eat_bang_of,
+  peek_second_kind_of, try_eat_bang_of,
 };
 
 /// Every case pairs a compact input with a trivia-laden one that must behave identically.
@@ -239,16 +239,76 @@ fn try_eat_accepts_or_declines_and_commits_the_trivia_either_way() {
 ///
 /// A guard against the drivers being quietly renamed out from under the productions that will
 /// share them: `atoms::peek_kind_of` and the imported `peek_kind_of` must be the same function.
+/// The one atom that is GraphQLx's own: the kind of the **second significant** token.
+///
+/// Three properties, and the third is the one a bounded raw window cannot have:
+///
+/// - it sees past the trivia *before* the head, like every other atom;
+/// - it sees past the trivia *between* the two, which is what a `peek::<U2>()` cannot — that
+///   window answers `Space` for `A : B` and the answer would be wrong rather than merely coarse;
+/// - **it consumes nothing**, however much trivia it had to cross to answer. The committed text
+///   is the witness: it must hold the head's leading trivia and nothing after it.
 #[test]
-fn the_driver_module_exposes_all_five_atoms() {
-  let five: [fn(&'static str) -> bool; 5] = [
+fn peek_second_kind_sees_the_token_after_the_head_and_consumes_nothing() {
+  // No trivia between the two.
+  assert_eq!(peek_second_kind_of("A:").0, Some(Kind::Colon));
+  // Trivia between the two, in every shape the ignored set admits. A fixed two-token raw window
+  // answers with the trivia kind here; this atom must not.
+  for src in [
+    "A :",
+    "A\t:",
+    "A\n\n:",
+    "A # c\n:",
+    "A,:",
+    "A ,\n # c\n\t,:",
+  ] {
+    assert_eq!(
+      peek_second_kind_of(src).0,
+      Some(Kind::Colon),
+      "peek_second_kind must cross the trivia between the two tokens: {src:?}"
+    );
+  }
+  // The discriminating pairs the `where` continuation actually asks about.
+  assert_eq!(peek_second_kind_of("A::B").0, Some(Kind::PathSeparator));
+  assert_eq!(peek_second_kind_of("A<T>").0, Some(Kind::LAngle));
+  assert_eq!(
+    peek_second_kind_of("type X").0,
+    Some(Kind::Identifier),
+    "the decline case: a definition keyword followed by its name, not by a colon"
+  );
+
+  // Nothing survives the look-ahead. The head's LEADING trivia is committed (every atom does
+  // that); the head itself and everything after it are rolled back.
+  assert_eq!(peek_second_kind_of("  A:B").1, "  ");
+  assert_eq!(peek_second_kind_of("A:B").1, "");
+  assert_eq!(peek_kind_of("  A:B"), Some(Kind::Identifier));
+
+  // Ends of input, at both distances.
+  assert_eq!(peek_second_kind_of("A").0, None, "no second token");
+  assert_eq!(
+    peek_second_kind_of("A  # c\n").0,
+    None,
+    "only trivia after the head"
+  );
+  assert_eq!(peek_second_kind_of("").0, None, "no head at all");
+  assert_eq!(
+    peek_second_kind_of("   ").1,
+    "   ",
+    "and its trivia is still committed"
+  );
+}
+
+#[test]
+fn the_driver_module_exposes_all_six_atoms() {
+  let six: [fn(&'static str) -> bool; 6] = [
     |s| atoms::peek_kind_of(s).is_some(),
+    |s| atoms::peek_second_kind_of(s).0.is_some(),
     |s| atoms::peek_keyword_of(s).is_some(),
     |s| atoms::expect_brace_of(s).0,
     |s| atoms::eat_if_brace_of(s).0,
     |s| atoms::try_eat_bang_of(s).0,
   ];
-  // `{` matches the two brace drivers and not the bang one, so the array is not uniformly true.
-  let answers: Vec<bool> = five.iter().map(|driver| driver("{")).collect();
-  assert_eq!(answers, vec![true, false, true, true, false]);
+  // `{}` matches the two brace drivers and the second-kind one, and not the bang or keyword ones.
+  let answers: Vec<bool> = six.iter().map(|driver| driver("{}")).collect();
+  assert_eq!(answers, vec![true, true, false, true, true, false]);
 }

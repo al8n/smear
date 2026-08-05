@@ -82,6 +82,72 @@ where
   crate::lossless::trivia::peek_kind(inp)
 }
 
+/// Commit any leading trivia, then report the kind of the **second significant** token — the one
+/// after the head — without consuming either.
+///
+/// # The one atom that is GraphQLx's and not the substrate's, and why it has to exist
+///
+/// Every other atom answers about the head, and that is deliberate: over a trivia-surfacing stream
+/// a fixed `peek::<U2>()` answers about *trivia*, which is the trap Task 10's `set`/`map` dispatch
+/// recorded and worked around by consuming the keyword and peeking again. **One GraphQLx
+/// production cannot use that workaround.** A `where` clause's continuation test is
+/// `(Identifier, Colon | PathSeparator | LAngle) | (PathSeparator, Identifier)`
+/// (`graphqlx/syntactic/generic/mod.rs:442-453`), and on the *decline* branch the head belongs to
+/// the next definition — `directive @d on FIELD where A: B` followed by `type X { f: Int }` ends
+/// its clause at `B`, and a one-token test would read `type` as another predicate's bounded type,
+/// consume it, and lose the whole `ObjectTypeDefinition`. There is no retro-wrap for a token that
+/// must not be consumed at all.
+///
+/// # Why this is the sink's own discipline and not a second buffering layer
+///
+/// The substrate's docs rule out a peek that "crossed trivia without committing it", because that
+/// would hand the tree's ordering to a buffer beside the sink's mark/rollback discipline. This
+/// atom does the opposite: it *commits* — head token and trivia alike — and then spends the sink's
+/// **own** rollback ([`InputRef::attempt`](tokora::InputRef::attempt), which captures the cursor,
+/// the lexer state and the emitter's emission mark, and on a decline truncates the sink's event
+/// log back to it, `tokora/src/cst/sink.rs:944-1010`). Nothing is buffered anywhere else, and on
+/// return the input is byte-for-byte where it was.
+///
+/// The closure **always declines**, so the rollback is unconditional; the answer leaves through a
+/// `&mut` binding rather than through the return value, which is what lets a rewinding attempt
+/// still report something. The inner peek's own error is carried out the same way rather than
+/// swallowed — a lexer limit hit two tokens ahead is a real failure, and folding it into `None`
+/// would let it pass for end of input.
+#[inline]
+pub(crate) fn peek_second_kind<'inp, Src, Ctx>(
+  inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
+) -> Result<
+  Option<<GraphqlxLosslessToken<'inp, Src> as Token<'inp>>::Kind>,
+  GraphqlxLosslessError<'inp, Src, Ctx>,
+>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp>,
+  GraphqlxLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
+{
+  // Outside the attempt, so the head's own leading trivia is committed for good and only the
+  // speculative step is rolled back. Also settles "is there a head at all".
+  if peek_kind::<Src, Ctx>(inp)?.is_none() {
+    return Ok(None);
+  }
+  let mut answer = Ok(None);
+  inp.attempt(|inp| {
+    answer = match inp.try_expect(|_| true) {
+      // The head is consumed; the next peek crosses whatever trivia follows it and reports the
+      // token after. Both are undone on the way out.
+      Ok(Some(_)) => peek_kind::<Src, Ctx>(inp),
+      Ok(None) => Ok(None),
+      Err(err) => Err(err),
+    };
+    // Always. The whole point is that nothing here survives.
+    None::<()>
+  });
+  answer
+}
+
 /// [`crate::lossless::trivia::peek_as`] over this dialect's input.
 #[inline]
 pub(crate) fn peek_as<'inp, Src, Ctx, Projection>(
@@ -305,6 +371,17 @@ pub mod test_support {
 
   /// `super::try_eat` for `!` over `src`: did it accept, and what did it commit?
   ///
+  /// `super::peek_second_kind` over `src`: the kind after the head, and what the atom committed.
+  ///
+  /// The committed text is the assertion that matters as much as the kind: the atom rolls its
+  /// speculative step back, so the head must **not** be in the tree afterwards while the trivia
+  /// *before* the head must be.
+  pub fn peek_second_kind_of<'inp>(src: &'inp str) -> (Option<Kind>, String) {
+    let (kind, text) = drive!('inp, src, None, |inp| super::peek_second_kind::<str, _>(inp)
+      .expect("peek_second_kind must not error over these fixtures"));
+    (kind, text)
+  }
+
   /// `!` because that is the retro-wrap probe GraphQLx's type references will spend it on — the
   /// non-null marker, which this dialect folds into the type node it follows rather than wrapping.
   /// The `bool` is `ParseAttempt::Accept`, so a decline and an accept are told apart while the
