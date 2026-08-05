@@ -26,10 +26,12 @@ smallvec = ["dep:smallvec", "smear-lexer/smallvec"]
 
 rowan = ["dep:rowan", "tokora/rowan", "std"]
 
-# Instruments the GraphQL lossless productions with a per-node-kind hit counter, so the
+# Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
-# success over whichever handful of shapes it happens to exercise. Test-only: it changes no
-# behaviour, and without it the instrumentation is not compiled at all.
+# success over whichever handful of shapes it happens to exercise. The two dialects tally in
+# separate lanes keyed by `KindSpace::NAME`, so one gate's reset cannot clear the other's
+# measurement. Test-only: it changes no behaviour, and without it the instrumentation is not
+# compiled at all.
 lossless-coverage = ["rowan"]
 
 [dependencies]

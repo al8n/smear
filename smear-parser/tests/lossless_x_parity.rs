@@ -64,16 +64,16 @@
 //! next significant token is — `set`/`map` followed by `{`, `<T>` versus `<K => V>`, and a `where`
 //! clause's two-token continuation window — and each has to reach past arbitrary trivia to ask.
 //!
-//! **The alphabet is defined here rather than imported from gate 2, and Task 17 does not exist
-//! yet.** The plan's Step 6 says to assert the padded set is exactly the one gate 2 derives; that
-//! assertion belongs to Task 17, which is the half that can be written second. What is here is the
-//! derivation itself, stated so Task 17 can be pinned against it: [`ALPHABET`] is the eight
-//! ignorable forms of GraphQLx's lexer, [`token_boundaries`] measures with the **lexer** rather
-//! than with a tree, and [`UNPADDABLE`] names every entry with no boundaries to inject at.
+//! **The padding is not defined here.** The plan's Step 6 says to assert the padded set is exactly
+//! the one gate 2 derives, and two agreeing `const`s in two test binaries cannot be that — nothing
+//! in one integration-test crate can name an item in another, so the "assertion" would be a copy
+//! keeping its own counsel. Task 17 discharged it by identity instead: [`ALPHABET`],
+//! [`token_boundaries`], [`inject`] and [`UNPADDABLE`] are gate 2's, imported from
+//! `tests/support/graphqlx_padding.rs`, and this gate's padded sweep is therefore gate 2's set
+//! widened to the invalid half rather than a second set that resembles it.
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use smear_lexer::graphqlx::lossless::LosslessLexer;
 use smear_parser::graphqlx::{
   GraphQLx,
   ast::Document,
@@ -81,7 +81,12 @@ use smear_parser::graphqlx::{
   lossless::{document::test_support::parse_type_system_document, parse_str},
   syntactic::{GraphqlxLexer, document},
 };
-use tokora::{Lexer as _, Parse as _, Parser};
+use tokora::{Parse as _, Parser};
+
+#[path = "support/graphqlx_padding.rs"]
+mod padding;
+
+use padding::{ALPHABET, UNPADDABLE, corpus_files, inject, name_of, token_boundaries};
 
 /// The lossless verdict: did the parse report a grammar **error**?
 ///
@@ -107,37 +112,6 @@ fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
   >(document)
   .parse_str(src)
   .is_err()
-}
-
-/// Every `.graphqlx` file in the GraphQLx corpus, in a deterministic order.
-///
-/// The corpus lives beside this file because gates 2, 3 and 5 will all read it; it is not this
-/// gate's private fixture set.
-fn corpus_files() -> Vec<PathBuf> {
-  let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("tests")
-    .join("corpusx");
-  let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
-    .unwrap_or_else(|e| {
-      panic!(
-        "the GraphQLx corpus at {} is unreadable: {e}",
-        dir.display()
-      )
-    })
-    .map(|entry| entry.expect("a corpus directory entry").path())
-    .filter(|path| path.extension().is_some_and(|ext| ext == "graphqlx"))
-    .collect();
-  files.sort();
-  files
-}
-
-/// The file name of `path`, as a `String`.
-fn name_of(path: &std::path::Path) -> String {
-  path
-    .file_name()
-    .expect("a corpus entry has a file name")
-    .to_string_lossy()
-    .to_string()
 }
 
 /// The cross-suite invariant: both suites must agree on *whether* the input is valid GraphQLx.
@@ -345,74 +319,6 @@ fn the_corpus_can_tell_the_two_suites_apart() {
     "only {discriminators} entries separate the SDL-only root from the mixed one; the corpus \
      cannot tell two GraphQLx productions apart and this gate would pass on an inert set"
   );
-}
-
-/// The eight ignorable forms, one variant of each corpus entry per form.
-///
-/// GraphQLx's trivia block is the same six images as GraphQL's — BOM, comma, space, tab, line
-/// terminator, comment — with the three line terminators folded onto one kind, so the eight
-/// *forms* are the same eight and this alphabet is deliberately identical to the GraphQL twin's.
-/// Task 17 restates it and must be pinned against this list.
-///
-/// The comment carries its own line terminator: a comment runs to the end of the line, so `"# c"`
-/// alone would swallow the token after it and the variant would stop being an injection.
-const ALPHABET: &[(&str, &str)] = &[
-  ("space", " "),
-  ("tab", "\t"),
-  ("newline", "\n"),
-  ("carriage-return", "\r"),
-  ("crlf", "\r\n"),
-  ("comment", "# c\n"),
-  ("comma", ","),
-  ("bom", "\u{FEFF}"),
-];
-
-/// The corpus entries that cannot be padded, because they cannot be lexed.
-///
-/// Injection is defined at *token* boundaries, so a source the lexer refuses byte for byte has no
-/// boundaries to inject at. Four entries are in that state, all inherited from the GraphQL corpus
-/// and all still unlexable under GraphQLx's lexer — which is not automatic: GraphQLx lexes seven
-/// images GraphQL does not (`*`, `+`, `-`, `<`, `>`, `::`, `=>`), so an "illegal character" in one
-/// dialect is not necessarily one in the other, and this list is the measured answer rather than
-/// the copied one.
-///
-/// Pinned as a set rather than skipped silently: a **new** unlexable entry is a corpus decision
-/// somebody should have to make on purpose.
-const UNPADDABLE: &[&str] = &[
-  "invalid_lex_illegal_character.graphqlx",
-  "invalid_lex_unterminated_block_string.graphqlx",
-  "invalid_lex_unterminated_string.graphqlx",
-  "invalid_unterminated_string.graphqlx",
-];
-
-/// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.
-///
-/// `None` when the source does not lex — see [`UNPADDABLE`]. Measured with the **lexer**, not with
-/// the tree under test: reading the boundaries off a parse would make the padding a function of
-/// the artifact being asserted about, so a parser that lost a token would quietly stop being
-/// padded there.
-fn token_boundaries(src: &str) -> Option<Vec<usize>> {
-  let mut lexer = LosslessLexer::<'_, &str>::new(src);
-  let mut boundaries = vec![0usize];
-  while let Some(result) = lexer.lex() {
-    result.ok()?;
-    boundaries.push(lexer.span().end());
-  }
-  boundaries.dedup();
-  Some(boundaries)
-}
-
-/// `src` with `pad` inserted at every boundary in `boundaries`.
-fn inject(src: &str, boundaries: &[usize], pad: &str) -> String {
-  let mut out = String::with_capacity(src.len() + boundaries.len() * pad.len());
-  let mut cursor = 0usize;
-  for &boundary in boundaries {
-    out.push_str(&src[cursor..boundary]);
-    out.push_str(pad);
-    cursor = boundary;
-  }
-  out.push_str(&src[cursor..]);
-  out
 }
 
 /// Gate 1 over the padded variants: the two suites agree about trivia-laden input too.
