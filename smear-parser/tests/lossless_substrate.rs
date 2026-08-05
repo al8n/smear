@@ -143,3 +143,28 @@ fn token_any_answers_in_document_order_not_in_kinds_order() {
   let found = gast::token_any(&arguments, &[K::RParen, K::LParen]).expect("neither kind matched");
   assert_eq!(found.kind(), K::LParen);
 }
+
+/// The atoms are reachable through the substrate and nameable with four parameters.
+///
+/// The dialect wrappers stay — a production writes `expect::<Src, Ctx>(inp, Kind::LBrace)`, not a
+/// four-parameter turbofish — so what this asserts is that the substrate exists and is nameable
+/// at all, which is the one claim that could not be made before the lift.
+/// `tests/lossless_trivia_atoms.rs` already drives the wrappers over real sources, and
+/// `tests/lossless_trivia.rs` drives the whole corpus through them.
+#[test]
+fn the_trivia_atoms_are_reachable_through_the_substrate() {
+  // A compile-time reachability check: the four generic parameters resolve and the function item
+  // has the shape every production depends on. Running it is the assertion.
+  fn _assert_signature<'inp, L, Ctx, Lang>()
+  where
+    Lang: ?Sized,
+    L: tokora::Lexer<'inp, Span = tokora::SimpleSpan, Offset = usize>,
+    L::Token: tokora::lexer::FromLogos<'inp>,
+    Ctx: tokora::ParseContext<'inp, L, Lang>,
+    tokora::ErrorOf<'inp, L, Ctx, Lang>: From<tokora::error::UnexpectedEot<usize, Lang>>,
+  {
+    let _ = smear_parser::lossless::trivia::peek_kind::<L, Ctx, Lang>;
+    let _ = smear_parser::lossless::trivia::eat_if::<L, Ctx, Lang>;
+    let _ = smear_parser::lossless::trivia::try_eat::<L, Ctx, Lang>;
+  }
+}
