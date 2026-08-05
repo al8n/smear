@@ -1,0 +1,1 @@
+schema @d(a: $v) { query: Q }

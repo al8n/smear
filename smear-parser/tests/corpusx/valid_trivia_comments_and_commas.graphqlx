@@ -1,0 +1,6 @@
+# a leading comment
+type T {
+  # a comment inside the body
+  a: Int, b: String,
+}
+# a trailing comment

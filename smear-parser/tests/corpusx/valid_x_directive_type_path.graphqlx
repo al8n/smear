@@ -1,0 +1,1 @@
+type T @ns::cache<Int>(ttl: 5) @::a::b { f: Int @deprecated }

@@ -1,0 +1,9 @@
+type A {
+  x: Int
+}
+
+!!!
+
+type B {
+  y: Int
+}

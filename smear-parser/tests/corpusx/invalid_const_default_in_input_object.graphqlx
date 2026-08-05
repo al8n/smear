@@ -1,0 +1,1 @@
+input I { a: Int = $v }

@@ -1,0 +1,1 @@
+fragment <T, U> F<A, B> on X { f }

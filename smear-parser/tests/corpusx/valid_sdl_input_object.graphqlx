@@ -1,0 +1,4 @@
+input I @d {
+  "a field description" a: Int = 1
+  b: String!
+}

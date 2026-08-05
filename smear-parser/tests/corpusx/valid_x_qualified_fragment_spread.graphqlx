@@ -1,0 +1,1 @@
+query { ...::ns::F ...ns::G<Int> ...H }

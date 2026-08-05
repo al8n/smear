@@ -1,0 +1,2 @@
+directive @d<A>(x: A) on FIELD where A: Node
+type X { f: Int }

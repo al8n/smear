@@ -1,0 +1,1 @@
+input In<A> where A: Node { f: A }

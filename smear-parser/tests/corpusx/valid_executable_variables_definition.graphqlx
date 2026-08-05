@@ -1,0 +1,3 @@
+query Q($a: Int, $b: [String!]! = ["x"], $c: Boolean = true) {
+  f
+}
