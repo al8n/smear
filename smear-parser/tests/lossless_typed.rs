@@ -1419,11 +1419,18 @@ fn source_inventory() -> Vec<SourceGetter> {
         .rsplit_once('}')
         .unwrap_or_else(|| panic!("{file}: an ast_node! body closes its brace"))
         .0;
+      // The header is `lang = <path>; <docs> Name`, and the wrapper is its **last** word. Taking
+      // the whole trimmed prefix would have worked while `lang =` did not exist and would have
+      // silently started answering `lang = crate::graphql::kinds::GraphQLLang; Name` the moment
+      // it did — a wrapper name no census entry matches, which turns this inventory into a
+      // uniformly-wrong list rather than an empty one.
       let wrapper = header
         .split_once("=>")
         .unwrap_or_else(|| panic!("{file}: an ast_node! header reads `Name => K::Kind`"))
         .0
-        .trim()
+        .split_whitespace()
+        .next_back()
+        .unwrap_or_else(|| panic!("{file}: an ast_node! header names no wrapper"))
         .to_string();
 
       for entry in getters.split(',') {

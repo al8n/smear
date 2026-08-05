@@ -26,6 +26,7 @@ use crate::{
 };
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// One variable definition, `$v : T = default @directives`.
   VariableDefinition => K::VariableDefinition {
     /// The variable being defined.
@@ -44,6 +45,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An operation's variable definitions, `( … )`.
   VariablesDefinition => K::VariablesDefinition {
     /// Every variable defined, in order.
@@ -52,6 +54,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An operation definition — the shorthand `{ … }` or the full keyword form.
   OperationDefinition => K::OperationDefinition {
     /// The operation's description, if one was written before it.
@@ -75,6 +78,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A fragment definition, `fragment F on T { … }`.
   FragmentDefinition => K::FragmentDefinition {
     /// The fragment's description, if one was written before it.
@@ -91,6 +95,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An executable-only document root.
   ///
   /// Not what [`parse_str`](crate::graphql::lossless::parse_str) builds — that parses the mixed

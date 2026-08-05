@@ -21,6 +21,9 @@
 //! that decided it is in the design document; the short version is that a shared production needs
 //! ~26 trait members against a budget of 8, and no vocabulary change reaches that.
 
+/// The typed-accessor substrate: `ast_node!`'s helpers and the language-generic navigation types.
+pub mod ast;
+
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and
 /// typed layer to work over it.
 ///

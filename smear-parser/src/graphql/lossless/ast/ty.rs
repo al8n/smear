@@ -11,6 +11,7 @@
 use crate::{ast_node, graphql::kinds::SyntaxKind as K};
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A named type reference.
   NamedType => K::NamedType {
     /// The type's name.
@@ -19,6 +20,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A list type reference, `[T]`.
   ListType => K::ListType {
     /// The element type, when it is a named type.
@@ -31,6 +33,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A non-null type reference, `T!`.
   ///
   /// The `!` is a suffix, so this node is a retro-wrap around a type that was already committed;

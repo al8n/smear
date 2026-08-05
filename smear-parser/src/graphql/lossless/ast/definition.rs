@@ -38,6 +38,7 @@ use crate::{
 };
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A definition's leading documentation string.
   Description => K::Description {
     /// The string token — [`String`](K::String) for `"doc"`, [`BlockString`](K::BlockString) for
@@ -47,6 +48,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// One input value definition — an argument definition, or an input object's field.
   InputValueDefinition => K::InputValueDefinition {
     /// The definition's description, if it was given one.
@@ -69,6 +71,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A field's or directive's argument definitions, `( … )`.
   ArgumentsDefinition => K::ArgumentsDefinition {
     /// Every argument defined, in order.
@@ -77,6 +80,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// One field definition, `name(args) : T @directives`.
   FieldDefinition => K::FieldDefinition {
     /// The definition's description, if it was given one.
@@ -97,6 +101,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An object or interface type's fields block, `{ … }`.
   FieldsDefinition => K::FieldsDefinition {
     /// Every field defined, in order.
@@ -105,6 +110,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An input object type's fields block, `{ … }`.
   ///
   /// A separate node kind from [`FieldsDefinition`] because the two blocks admit different
@@ -117,6 +123,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An `implements A & B` clause.
   ImplementsInterfaces => K::ImplementsInterfaces {
     /// Every interface named, in order.
@@ -125,6 +132,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A union's `= A | B` member list.
   UnionMemberTypes => K::UnionMemberTypes {
     /// Every member type named, in order.
@@ -133,6 +141,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A directive definition's `on FIELD | QUERY` location list.
   ///
   /// A location has no node kind of its own, so the locations are bare [`Name`](K::Name) tokens
@@ -144,6 +153,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// One enum value definition.
   EnumValueDefinition => K::EnumValueDefinition {
     /// The definition's description, if it was given one.
@@ -156,6 +166,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An enum type's values block, `{ … }`.
   EnumValuesDefinition => K::EnumValuesDefinition {
     /// Every value defined, in order.
@@ -164,6 +175,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An operation type keyword — `query`, `mutation` or `subscription`.
   ///
   /// One node kind for both positions it appears in: introducing an operation, and naming a root
@@ -175,6 +187,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// One root operation type definition, `query : Q`.
   RootOperationTypeDefinition => K::RootOperationTypeDefinition {
     /// Which operation this root serves.
@@ -185,6 +198,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A schema's root operation types block, `{ … }`.
   RootOperationTypeDefinitions => K::RootOperationTypeDefinitions {
     /// Every root operation type defined, in order.
@@ -193,6 +207,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A scalar type definition.
   ScalarTypeDefinition => K::ScalarTypeDefinition {
     /// The definition's description, if it was given one.
@@ -205,6 +220,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An object type definition.
   ObjectTypeDefinition => K::ObjectTypeDefinition {
     /// The definition's description, if it was given one.
@@ -221,6 +237,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An interface type definition.
   ///
   /// [`ObjectTypeDefinition`]'s shape keyword for keyword; the two grammars are identical after
@@ -240,6 +257,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A union type definition.
   UnionTypeDefinition => K::UnionTypeDefinition {
     /// The definition's description, if it was given one.
@@ -254,6 +272,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An enum type definition.
   EnumTypeDefinition => K::EnumTypeDefinition {
     /// The definition's description, if it was given one.
@@ -268,6 +287,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// An input object type definition.
   InputObjectTypeDefinition => K::InputObjectTypeDefinition {
     /// The definition's description, if it was given one.
@@ -282,6 +302,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A directive definition.
   DirectiveDefinition => K::DirectiveDefinition {
     /// The definition's description, if it was given one.
@@ -299,6 +320,7 @@ ast_node!(
 );
 
 ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A schema definition.
   ///
   /// No `name` getter: a schema has nothing to be called, so the one `Name` directly beneath this
