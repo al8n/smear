@@ -1,11 +1,9 @@
 //! The typed-accessor substrate, generic over the dialect's `rowan::Language`.
 //!
-//! **Most of it is tokora's.** [`CastNode`](tokora::cst::CastNode) is a one-method trait — a kind
-//! check and a wrap — and [`cast::child`](tokora::cst::cast::child),
-//! [`cast::children`](tokora::cst::cast::children) and
-//! [`NodeChildren`](tokora::cst::NodeChildren) are bound on it rather than on tokora's
-//! parser-facing `Node`, so a wrapper whose entire job is `field.name()` never names the `Syntax`
-//! component model.
+//! **Most of it is tokora's.** [`CastNode`] is a one-method trait — a kind check and a wrap — and
+//! [`cast::child`], [`cast::children`] and [`NodeChildren`] are bound on it rather than on
+//! tokora's parser-facing `Node`, so a wrapper whose entire job is `field.name()` never names the
+//! `Syntax` component model.
 //!
 //! What is smear's own is [`ast_node!`](crate::ast_node) and the two token getters `cast` does not
 //! have. Both were dialect-bound in Phase A; both are language-generic here.

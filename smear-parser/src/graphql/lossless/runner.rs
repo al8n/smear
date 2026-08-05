@@ -4,11 +4,10 @@
 use tokora::{
   Source,
   cst::{Cst, CstProfile, KindValidator, Sink, parse_lossless},
-  emitter::Severity,
 };
 
-use super::{GraphqlLosslessLexer, GraphqlLosslessSlice, GraphqlLosslessToken, SyntaxNode};
-use crate::graphql::kinds::SyntaxKind as K;
+use super::{GraphqlLosslessLexer, GraphqlLosslessSlice, GraphqlLosslessToken};
+use crate::{graphql::kinds::SyntaxKind as K, lossless::KindSpace};
 
 /// The profile every GraphQL lossless parse uses.
 ///
@@ -65,139 +64,27 @@ pub(crate) type LosslessCst<'inp> =
 /// Materialize `cst` at the root kind and collect its diagnostics.
 ///
 /// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
-/// root kind, the fallible-materialization contract and the diagnostic projection are stated
-/// once. The materialization door names the root kind — it is NOT profile data — and hands back
-/// the inner emitter, which is where the diagnostics live.
-///
-/// # Why the partial door
-///
-/// The door is [`Cst::finish_partial`], not [`Cst::finish`], and the difference is exactly two
-/// refusals: `finish` rejects an event stream that leaves a node open (`UnclosedNodes`) or leaves
-/// a source byte covered by neither a committed token nor a recorded lexer-error diagnostic
-/// (`UncoveredGap`); `finish_partial` closes the one and tiles the other as a `gap_kind` run.
-/// **Both of those are reachable from ordinary input**, so under `finish` they were a panic on a
-/// public entry point:
-///
-/// - The nesting budget is the **lexer's**, not the parser's. Every `{`, `[` and `(` steps the
-///   [`Limiter`](tokora::state::tracker::Limiter) carried in the Logos `Extras`, and that
-///   tracker's inherited ceiling is tokora's *general-purpose* **500**
-///   ([`RecursionLimiter::new`](tokora::state::recursion_tracker::RecursionLimiter)), not the
-///   parser-facing 64 — nothing in this crate descends through
-///   [`InputRef::descend`](tokora::InputRef::descend), so the parser-side limiter is never
-///   consulted at all.
-/// - The **501st** simultaneously-open bracket therefore fails its lex, and a resource-limit trip
-///   *latches a poison boundary*: the scanner refuses to rebuild a lexer past that offset. No
-///   token and no diagnostic can ever cover the tail, and [`document_entry`]'s `skip_while` drain
-///   cannot reach it either — that drain is the mechanism which otherwise guarantees coverage.
-/// - So `finish` reported `UncoveredGap` and [`parse_str`] panicked, at 501 open brackets, for
-///   input an IDE produces by typing. That was smear issue #57.
-///
-/// Under this door the same parse hands back a tree over every byte (`tree.text() == source`
-/// still holds, the un-lexable tail tiled as gaps) plus the limit trip already on the diagnostic
-/// channel, which is where a consumer routes on it.
-///
-/// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
-/// hygiene, span discipline and the token-channel wall are enforced identically through both
-/// doors, so the panic below still guards a genuine sink bug — and it now names the
-/// [`FinishError`](tokora::cst::FinishError) it refused, because a message that dropped it made
-/// #57 diagnosable only by patching this line.
-///
-/// The widening costs nothing for input that already worked: gap **placement** differs between
-/// the two doors only for a run that trails no committed token, and only when the stream is
-/// unbalanced — a shape `finish` refuses outright rather than places differently.
-///
-/// [`document_entry`]: super::document::document_entry
+/// root kind is named once. Everything below that — the **partial** materialization door
+/// (`Cst::finish_partial`, smear issue #57 — see [`crate::lossless::runner::finish_root`]'s
+/// `Why the partial door` note), the fallible-materialization contract and the diagnostic
+/// projection — is [`crate::lossless::runner::finish_root`]'s; this wrapper's whole content is
+/// *which* root kind and *which* dialect the panic names.
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
-  // `finish_partial`, NOT `finish`. See this function's `Why the partial door` note.
-  let (green, emitter) = cst.finish_partial(K::Root.raw());
-  let green = green
-    .unwrap_or_else(|e| panic!("the GraphQL lossless sink emitted a malformed event stream: {e}"));
-
-  // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
-  // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
-  let diagnostics = emitter
-    .diagnostics()
-    .map(|d| Diagnostic {
-      span: d.span().start()..d.span().end(),
-      severity: d.severity(),
-      skipped_tokens: match d.kind() {
-        tokora::emitter::DiagnosticKind::SkippedRegion(n) => Some(n),
-        _ => None,
-      },
-    })
-    .collect();
-
-  Parse { green, diagnostics }
+  crate::lossless::runner::finish_root(cst, K::Root.raw(), <K as KindSpace>::NAME)
 }
 
-/// One diagnostic a lossless parse recorded, owned and source-independent.
+/// One diagnostic a GraphQL lossless parse recorded.
 ///
-/// **Why not the typed payload.** `Verbose::diagnostics()` hands back `Diagnostic<'_, S, Error>`
-/// borrowed from the emitter, and this crate's dialect error is keyed to the *source slice*
-/// (`GraphqlError<S>`), so carrying the payload would give [`Parse`] the parse's lifetime. A
-/// lifetime-free `Parse` is what lets a consumer cache one per file, so the payload is dropped
-/// at this boundary and the two facts that survive are the two an IDE actually routes on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Diagnostic {
-  span: core::ops::Range<usize>,
-  severity: Severity,
-  skipped_tokens: Option<usize>,
-}
-
-impl Diagnostic {
-  /// The byte range this diagnostic covers.
-  pub fn span(&self) -> core::ops::Range<usize> {
-    self.span.clone()
-  }
-
-  /// Whether this is a hard error or a soft one.
-  pub fn severity(&self) -> Severity {
-    self.severity
-  }
-
-  /// For a recovery hole, how many tokens were skipped; `None` for an error or a warning.
-  ///
-  /// A hole reports [`Severity::Warning`] like a genuine warning does, so this is the field
-  /// that tells the two apart.
-  pub fn skipped_tokens(&self) -> Option<usize> {
-    self.skipped_tokens
-  }
-}
+/// Nothing in it is per-dialect — it is owned, source-independent and lifetime-free by design —
+/// so it is the substrate's type re-exported rather than a second copy of it.
+pub use crate::lossless::runner::Diagnostic;
 
 /// The result of a GraphQL lossless parse.
-pub struct Parse {
-  green: rowan::GreenNode,
-  diagnostics: std::vec::Vec<Diagnostic>,
-}
-
-impl Parse {
-  /// The raw `rowan` tree. Walk this for generic tooling — formatters, highlighters.
-  pub fn syntax(&self) -> SyntaxNode {
-    SyntaxNode::new_root(self.green.clone())
-  }
-
-  /// Every diagnostic the parse recorded, in emission order — errors, warnings and recovery
-  /// holes alike.
-  pub fn diagnostics(&self) -> &[Diagnostic] {
-    &self.diagnostics
-  }
-
-  /// Whether any grammar **error** was reported.
-  ///
-  /// This is the verdict the acceptance-parity gate compares against `syntactic`: both
-  /// suites must agree here for every input, though their diagnostic *sets* need not match.
-  ///
-  /// Note what it does not count. A recovery hole and a warning both report
-  /// [`Severity::Warning`], and neither is a rejection — a parse that recovered still accepted
-  /// the document. Counting diagnostics instead of errors would make every recovered parse
-  /// read as a failure.
-  pub fn has_errors(&self) -> bool {
-    self
-      .diagnostics
-      .iter()
-      .any(|d| d.severity == Severity::Error)
-  }
-}
+///
+/// A **type alias**, not a newtype. A newtype would need `syntax`, `diagnostics` and
+/// `has_errors` re-written per dialect, which is the duplication the lift exists to remove; an
+/// alias keeps `parse_str(&str) -> Parse` reading exactly as it did at every call site.
+pub type Parse = crate::lossless::runner::Parse<crate::graphql::kinds::GraphQLLang>;
 
 /// Parse a `&str` as a GraphQL document, losslessly.
 pub fn parse_str(src: &str) -> Parse {
@@ -295,6 +182,52 @@ pub mod test_support {
         inp.cst_start_at(mark, kind);
         inp.cst_finish(kind);
         inp.skip_while(|_| true)
+      },
+    );
+
+    finish_root(cst)
+  }
+
+  /// Wraps a node over a nonempty `src` and commits **no token**, so materialization fails.
+  ///
+  /// The one shape no production can produce: every production that opens a node either commits
+  /// what it matched or reports what it did not, and the `lossless_production!` bundle gives it
+  /// no other door. This probe opens and closes a node and drains nothing, which is what makes
+  /// [`crate::lossless::runner::finish_root`]'s `FinishError` arm reachable at all — and that
+  /// arm's panic message is the only place the *dialect's* name appears in a materialization
+  /// failure, so without a caller that reaches it, the `space` argument is threaded on trust.
+  ///
+  /// **The severed token channel, not an unclosed node.** The obvious probe — spend
+  /// [`cst_start_at`] without its [`cst_finish`] — does not reach the arm, because the door is
+  /// [`Cst::finish_partial`](tokora::cst::Cst::finish_partial): that door *closes* an open node
+  /// rather than refusing it, since an unbalanced stream is one of the two shapes ordinary input
+  /// can force (smear issue #57). A **balanced** stream that builds structure over a nonempty
+  /// source without one committed token is corruption instead —
+  /// `FinishError::StructureWithoutTokens`, tokora's token-channel wall — and both doors refuse
+  /// it. `src` must be nonempty: the wall is stated over a source there was something to commit
+  /// from.
+  ///
+  /// The orphan-finish shape is *not* the substitute either: `cst_finish` with nothing open
+  /// panics at the emit door, so it never reaches materialization at all.
+  ///
+  /// # Panics
+  ///
+  /// Always, with the message `finish_root` composes.
+  ///
+  /// [`cst_start_at`]: tokora::InputRef::cst_start_at
+  /// [`cst_finish`]: tokora::InputRef::cst_finish
+  pub fn structure_without_tokens<'inp>(src: &'inp str, kind: u16) -> Parse {
+    let (cst, _out) = parse_lossless::<GraphqlLosslessLexer<'inp, str>, GraphQL, _, _, _, _>(
+      src,
+      Default::default(),
+      LosslessEmitter::default(),
+      profile::<str>(),
+      DefaultCache::<GraphqlLosslessLexer<'_, str>>::default(),
+      |inp: &mut TestInput<'inp, '_>| {
+        let mark = inp.cst_mark();
+        inp.cst_start_at(mark, kind);
+        inp.cst_finish(kind);
+        Ok(())
       },
     );
 

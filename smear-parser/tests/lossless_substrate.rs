@@ -168,3 +168,150 @@ fn the_trivia_atoms_are_reachable_through_the_substrate() {
     let _ = smear_parser::lossless::trivia::try_eat::<L, Ctx, Lang>;
   }
 }
+
+/// The two dialects' coverage tallies are separate lanes and do not contaminate each other.
+///
+/// This is the property a single thread-local `Vec<u32>` could not have, and it is the reason the
+/// counter had to be redesigned rather than moved. Before the GraphQLx space exists there is only
+/// one lane to check, so this asserts the *mechanism*: the lane is addressable by kind space, and
+/// resetting it clears exactly it.
+#[cfg(feature = "lossless-coverage")]
+#[test]
+fn a_coverage_lane_is_per_kind_space() {
+  use smear_parser::lossless::coverage;
+
+  coverage::reset::<GK>();
+  let _ = parse_str("type T { f: Int }\n");
+  let after = coverage::hits_of::<GK>(GK::ObjectTypeDefinition);
+  assert!(after >= 1, "the graphql lane recorded nothing");
+
+  // Resetting a *different* lane leaves this one alone. This is the assertion that a degenerate
+  // tally — one keyed by a constant on every door, which is what the pre-lift single `Vec<u32>`
+  // amounts to — cannot pass, and it does not need a second dialect to exist: a second
+  // `KindSpace` impl declared in this test crate is a second lane by definition.
+  coverage::reset::<OtherSpace>();
+  assert_eq!(
+    coverage::hits_of::<GK>(GK::ObjectTypeDefinition),
+    after,
+    "resetting another kind space's lane cleared the graphql lane, so the tally is not keyed"
+  );
+
+  // A second reset of *this* lane clears it; the assertion is that the lane is addressable at
+  // all, which is what a keyed tally buys over a single global one.
+  coverage::reset::<GK>();
+  assert_eq!(coverage::hits_of::<GK>(GK::ObjectTypeDefinition), 0);
+}
+
+/// A second kind space, declared here so the lane property has two lanes to be about.
+///
+/// It is never parsed into and never emits a node — it exists only to be a distinct
+/// [`KindSpace::NAME`], which is the whole key the tally is addressed by. Three kinds, because
+/// the contract's bookkeeping triple is the last three and a space needs at least that many.
+#[cfg(feature = "lossless-coverage")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OtherSpace {
+  Error,
+  Gap,
+  Root,
+}
+
+#[cfg(feature = "lossless-coverage")]
+impl KindSpace for OtherSpace {
+  const NAME: &'static str = "other-space-for-the-lane-test";
+  const ERROR: Self = Self::Error;
+  const GAP: Self = Self::Gap;
+  const ROOT: Self = Self::Root;
+  const ALL: &'static [Self] = &[Self::Error, Self::Gap, Self::Root];
+
+  fn raw(self) -> u16 {
+    self as u16
+  }
+
+  fn from_raw(raw: u16) -> Option<Self> {
+    Self::ALL.get(raw as usize).copied()
+  }
+}
+
+/// The second space is itself well-formed, so the lane test is not keyed off a broken one.
+#[cfg(feature = "lossless-coverage")]
+#[test]
+fn the_other_space_is_well_formed() {
+  assert_kind_space_is_well_formed::<OtherSpace>();
+}
+
+/// `Parse` is generic over the language and still answers the three questions every gate asks.
+#[test]
+fn the_parse_surface_is_language_generic() {
+  let parse: smear_parser::lossless::runner::Parse<GraphQLLang> = parse_str("type T { f: Int }\n");
+  assert!(!parse.has_errors());
+  assert_eq!(parse.syntax().text().to_string(), "type T { f: Int }\n");
+  assert!(parse.diagnostics().is_empty());
+}
+
+/// A **declined** retro-wrap is not counted, only an accepted one.
+///
+/// **This closes a hole the shipped counter test could not see.** `lossless_trivia.rs`'s
+/// `the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one` drives
+/// `ObjectTypeDefinition` and `EnumTypeDefinition`, both opened with `node` — the `ParseInput`
+/// shape, whose success test is simply `Ok`. Nothing exercised the `TryParseInput` shape, so
+/// relaxing its `Ok(Accept)` test to a bare `is_ok()` left the whole suite green.
+///
+/// The distinction is the counter's entire worth for the two retro-wrap probes: `node_at` over
+/// `try_eat` runs on **every** field and **every** type reference, so counting declines would
+/// report thousands of `Alias` and `NonNullType` hits over a corpus containing neither, and the
+/// coverage gate would read as satisfied by productions the corpus never reached.
+#[cfg(feature = "lossless-coverage")]
+#[test]
+fn a_declined_retro_wrap_is_not_counted() {
+  use smear_parser::lossless::coverage;
+
+  coverage::reset::<GK>();
+  // Two fields and two type references, so both retro-wrap probes run — and decline: no `:` in
+  // alias position, no `!` anywhere.
+  let parse = parse_str("query { a b } type T { f: Int }\n");
+  assert!(!parse.has_errors());
+
+  // The positive control: the probes really did run, which is what makes the two zeroes below
+  // evidence rather than an absence of parsing.
+  assert!(
+    coverage::hits_of::<GK>(GK::Field) >= 2,
+    "the fixture opened no Field, so nothing ran a retro-wrap probe"
+  );
+  assert!(
+    coverage::hits_of::<GK>(GK::NamedType) >= 1,
+    "the fixture opened no NamedType, so nothing ran the non-null probe"
+  );
+
+  assert_eq!(
+    coverage::hits_of::<GK>(GK::Alias),
+    0,
+    "a declined `node_at` over try_eat(Colon) was counted"
+  );
+  assert_eq!(
+    coverage::hits_of::<GK>(GK::NonNullType),
+    0,
+    "a declined `node_at` over try_eat(Bang) was counted"
+  );
+
+  // And an *accepted* one is counted, so the impl is not simply never firing.
+  coverage::reset::<GK>();
+  let parse = parse_str("query { alias: a } type T { f: Int! }\n");
+  assert!(!parse.has_errors());
+  assert_eq!(coverage::hits_of::<GK>(GK::Alias), 1);
+  assert_eq!(coverage::hits_of::<GK>(GK::NonNullType), 1);
+}
+
+/// A materialization failure names the dialect whose sink produced it.
+///
+/// **The `space` argument's only job, and until now nothing reached it.** `finish_root` is shared
+/// by both dialects, so its panic is the one place a reader of a malformed-stream crash learns
+/// *which* suite emitted it — and replacing the message with a bare `unwrap()` left every test
+/// green, because no production can sever the token channel and no probe tried to.
+/// `structure_without_tokens` is that probe: it wraps a node over a nonempty source and commits
+/// nothing. An unclosed node is *not* the shape to probe with — `finish_partial` closes one by
+/// design, so it never reaches the arm.
+#[test]
+#[should_panic(expected = "the graphql lossless sink emitted a malformed event stream")]
+fn a_malformed_stream_panics_naming_the_dialect() {
+  let _ = smear_parser::graphql::lossless::runner::test_support::structure_without_tokens("a", 0);
+}
