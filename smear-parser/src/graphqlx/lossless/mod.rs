@@ -237,6 +237,7 @@ pub mod definition;
 pub mod directive;
 pub mod executable;
 pub mod generic;
+pub mod import;
 pub mod kind_map;
 pub mod recover;
 pub mod runner;

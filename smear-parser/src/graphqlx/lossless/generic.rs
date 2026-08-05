@@ -20,20 +20,20 @@
 //! `try_definition_name`, not the executable one (`graphqlx/syntactic/executable/mod.rs:469`), so
 //! `query Q<T = Int>` is grammatical and the parameter-with-default shape is reachable from here.
 //! Writing them twice, or writing a narrower stand-in for Task 13 to replace, both cost more than
-//! writing them once in the file they belong to. Task 13 adds the extension family and the
-//! imports.
+//! writing them once in the file they belong to. Task 13 added the extension family below them.
 //!
 //! # The three generic lists are three node kinds, and the difference is their members
 //!
 //! | node | member | reached from |
 //! |---|---|---|
 //! | [`DefinitionTypeGenerics`](K::DefinitionTypeGenerics) | `Name ('=' Type)?` — a node | a definition's name |
-//! | [`ExtensionTypeGenerics`](K::ExtensionTypeGenerics) | a bare `Name` token | an extension's target (Task 13) |
+//! | [`ExtensionTypeGenerics`](K::ExtensionTypeGenerics) | a bare `Name` token | an extension's target |
 //! | [`ExecutableDefinitionTypeGenerics`](K::ExecutableDefinitionTypeGenerics) | a bare `Name` token | a fragment's header and its name |
 //!
 //! Only the first has a member node, because only its member can carry something —
 //! `ExtensionTypeParam` is excluded from the kind space by the census's *one token is not a
-//! region* rule and the executable list's members were never a production at all.
+//! region* rule and the executable list's members were never a production at all. The lower two
+//! rows are one production under two kinds; see `angle_name_list`.
 //!
 //! # The `where` continuation test needs **two** significant tokens, and one position proves it
 //!
@@ -65,7 +65,7 @@ use super::{
   GraphqlxLosslessInput, Keyword, recover,
   recover::{NAME_HEADS, PATH_HEADS, opener_span},
   trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind},
-  ty::{type_path, type_ref},
+  ty::{path, type_path, type_ref},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -148,15 +148,20 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `< Name+ >` — the generic list an executable definition declares.
+  /// `< Name+ >` under `kind` — the shape **two** of the three generic lists have.
   ///
-  /// Its members are **bare `Name` tokens**, not nodes: `generic/mod.rs:309` repeats `take_name`,
-  /// and the census gives one identifier token no kind of its own. A port of
+  /// Their members are **bare `Name` tokens**, not nodes: `generic/mod.rs:279` and `:309` both
+  /// repeat `take_name`, and the census gives one identifier token no kind of its own. A port of
   /// [`definition_type_generics`] that kept the member node here would nest a
-  /// `DefinitionTypeParam` inside an executable list, which re-prints identically.
-  fn executable_definition_type_generics<'inp, Src, Ctx>(inp) {
+  /// `DefinitionTypeParam` inside a list that declares no defaults, which re-prints identically.
+  ///
+  /// The node kind is a parameter rather than the two lists being written out twice: they differ
+  /// in nothing else, and the one thing that *must* differ — which kind — is then impossible to
+  /// get wrong by editing one copy. It is also what a typed accessor distinguishes them by, since
+  /// `< T >` is the same bytes in both positions.
+  fn angle_name_list<'inp, Src, Ctx>(inp, kind: K) {
     node(
-      K::ExecutableDefinitionTypeGenerics.raw(),
+      kind.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
@@ -176,6 +181,45 @@ lossless_production! {
             Some(_) => recover::unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
           }
         }
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `< Name+ >` — the generic list an executable definition declares.
+  fn executable_definition_type_generics<'inp, Src, Ctx>(inp) {
+    angle_name_list::<Src, Ctx>(inp, K::ExecutableDefinitionTypeGenerics)
+  }
+
+  /// `< Name+ >` — the generic **arguments** a type-system extension applies.
+  ///
+  /// Divergence 14's third row: a definition *declares* parameters and may default them
+  /// ([`definition_type_generics`]), an extension *applies* arguments and may not
+  /// (`generic/mod.rs:284-300`). The two are the same bytes for `<T>`, so the node kind is the
+  /// only thing that tells a consumer which side of that it is looking at.
+  fn extension_type_generics<'inp, Src, Ctx>(inp) {
+    angle_name_list::<Src, Ctx>(inp, K::ExtensionTypeGenerics)
+  }
+
+  /// `Path ExtensionTypeGenerics?` — a type-system extension's target.
+  ///
+  /// **A [`Path`](K::Path), where [`definition_name`] takes a bare `Name`** — `extension_name`
+  /// calls `path` and `definition_name` calls `take_name` (`generic/mod.rs:363` against `:327`).
+  /// `extend type ns::T` names a qualified target and `type ns::T` does not, and the two spell one
+  /// identifier for the simple case, so the nesting is the only witness.
+  ///
+  /// **Precondition: the head starts a path.** Task 14's extension dispatchers decide that, and
+  /// their peek is what commits the leading trivia.
+  fn extension_name<'inp, Src, Ctx>(inp) {
+    peek_kind::<Src, Ctx>(inp)?;
+    node(
+      K::ExtensionName.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        path::<Src, Ctx>(inp)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
+          extension_type_generics::<Src, Ctx>(inp)?;
+        }
+        Ok(())
       },
     )
     .parse_input(inp)
@@ -314,6 +358,12 @@ lossless_drivers! {
   /// `super::executable_definition_type_generics` over `src` — the list whose members are bare
   /// name tokens.
   fn parse_executable_definition_type_generics => executable_definition_type_generics;
+
+  /// `super::extension_type_generics` over `src` — the same shape under the other kind.
+  fn parse_extension_type_generics => extension_type_generics;
+
+  /// `super::extension_name` over `src` — the target of every type-system extension.
+  fn parse_extension_name => extension_name;
 
   /// `super::executable_definition_name` over `src`.
   fn parse_executable_definition_name => executable_definition_name;
