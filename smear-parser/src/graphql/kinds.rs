@@ -338,6 +338,31 @@ impl SyntaxKind {
   }
 }
 
+/// This dialect's side of the shared kind-space contract.
+///
+/// Every member forwards to the inherent item of the same name; the trait exists so the shared
+/// runner, coverage counter and typed layer can be written once over `K: KindSpace` rather than
+/// once per dialect. Gated on `rowan` because that is the only feature under which any of those
+/// three is compiled.
+#[cfg(feature = "rowan")]
+impl crate::lossless::KindSpace for SyntaxKind {
+  const NAME: &'static str = "graphql";
+  const ERROR: Self = Self::Error;
+  const GAP: Self = Self::Gap;
+  const ROOT: Self = Self::Root;
+  const ALL: &'static [Self] = Self::ALL;
+
+  #[inline]
+  fn raw(self) -> u16 {
+    Self::raw(self)
+  }
+
+  #[inline]
+  fn from_raw(raw: u16) -> Option<Self> {
+    Self::from_raw(raw)
+  }
+}
+
 /// The `rowan::Language` brand for the GraphQL lossless CST.
 ///
 /// Separate from [`GraphQL`](crate::graphql::GraphQL), which is tokora's *grammar brand*
@@ -373,36 +398,13 @@ impl rowan::Language for GraphQLLang {
 
 #[cfg(test)]
 mod tests {
-  use super::SyntaxKind as K;
-
+  #[cfg(feature = "rowan")]
   #[test]
-  fn kind_decl_index_is_stable() {
-    // The raw value of each kind is exactly its declaration index, so the
-    // lossless `kind_from_raw` array (this same order) round-trips every kind.
-    for (index, kind) in K::ALL.iter().enumerate() {
-      assert_eq!(
-        kind.raw(),
-        index as u16,
-        "declaration index drifted at {kind:?}"
-      );
-    }
-  }
-
-  #[test]
-  fn tombstone_value_is_unused() {
-    // `u16::MAX` is tokora's reserved tombstone; no kind may occupy it.
-    for kind in K::ALL {
-      assert_ne!(kind.raw(), u16::MAX, "{kind:?} collides with the tombstone");
-    }
-  }
-
-  #[test]
-  fn bookkeeping_kinds_are_last_and_distinct() {
-    // `Root`/`Error`/`Gap` exist and sit past every content kind, so appending a
-    // content kind before them is caught by `kind_decl_index_is_stable`.
-    let content = K::ALL.len() as u16 - 3;
-    assert_eq!(K::Error.raw(), content);
-    assert_eq!(K::Gap.raw(), content + 1);
-    assert_eq!(K::Root.raw(), content + 2);
+  fn the_space_satisfies_the_shared_contract() {
+    // The three properties this module used to assert by hand — declaration index, tombstone,
+    // bookkeeping triple last — now live in one helper so the GraphQLx space inherits them by
+    // declaring the impl instead of by copying three tests. The named-constant check and the
+    // liveness check are in `tests/lossless_substrate.rs`, which can see the trait's constants.
+    crate::lossless::test_support::assert_kind_space_is_well_formed::<super::SyntaxKind>();
   }
 }

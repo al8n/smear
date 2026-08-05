@@ -16,6 +16,11 @@ pub use smear_lexer as lexer;
 
 pub mod combinator;
 
+/// The dialect-generic lossless substrate: the kind-space contract, the trivia atoms, the
+/// `Parse` surface, the coverage shims and the typed-wrapper macro's helpers.
+#[cfg(feature = "rowan")]
+pub mod lossless;
+
 /// Name-node carrier shared by the GraphQL-family dialect ASTs.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod name;
