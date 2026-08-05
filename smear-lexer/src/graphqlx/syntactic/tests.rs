@@ -317,3 +317,66 @@ fn keyword_literal_and_punctuator_capabilities_are_mapped() {
     Some(crate::graphqlx::syntactic::SyntacticTokenKind::Spread)
   );
 }
+
+/// Census: every declared `SyntacticTokenKind` variant must be producible by some
+/// `SyntacticToken`, i.e. by some arm of `SyntacticToken::kind`.
+///
+/// Mirrors `lossless_token_kind_census` (`graphqlx/lossless/mod.rs`), added after the graphql
+/// (non-x) dialect shipped a `LosslessTokenKind::Boolean` with no `LosslessToken` able to
+/// produce it. `SyntacticTokenKind` has no such gap today — trivia kinds don't exist here at
+/// all, since `SyntacticToken` skips trivia — so this is a regression guard, not a fix. The
+/// `census!` macro shape (one variant list driving both an exhaustive `match` and the
+/// round-trip assertions) means a variant added without a case here fails to compile, naming
+/// the variant, instead of silently staying untested.
+#[test]
+fn syntactic_token_kind_census() {
+  use crate::{LitBlockStr, LitInlineStr, LitPlainStr, graphqlx::syntactic::SyntacticTokenKind};
+
+  macro_rules! census {
+    ($($variant:ident => $token:expr),+ $(,)?) => {
+      fn sample(kind: SyntacticTokenKind) -> SyntacticToken<&'static str> {
+        match kind {
+          $(SyntacticTokenKind::$variant => $token,)+
+        }
+      }
+
+      $(
+        assert_eq!(
+          sample(SyntacticTokenKind::$variant).kind(),
+          SyntacticTokenKind::$variant,
+          "SyntacticTokenKind::{} is declared but its sample token maps to a different kind",
+          stringify!($variant),
+        );
+      )+
+    };
+  }
+
+  census! {
+    Identifier => SyntacticToken::Identifier("x"),
+    Int => SyntacticToken::LitInt(LitInt::Decimal("1")),
+    Float => SyntacticToken::LitFloat(LitFloat::Decimal("1.0")),
+    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
+    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+    Dollar => SyntacticToken::Dollar,
+    FatArrow => SyntacticToken::FatArrow,
+    LAngle => SyntacticToken::LAngle,
+    RAngle => SyntacticToken::RAngle,
+    LParen => SyntacticToken::LParen,
+    RParen => SyntacticToken::RParen,
+    Spread => SyntacticToken::Spread,
+    Colon => SyntacticToken::Colon,
+    Equal => SyntacticToken::Equal,
+    Asterisk => SyntacticToken::Asterisk,
+    At => SyntacticToken::At,
+    LBracket => SyntacticToken::LBracket,
+    RBracket => SyntacticToken::RBracket,
+    LBrace => SyntacticToken::LBrace,
+    RBrace => SyntacticToken::RBrace,
+    Pipe => SyntacticToken::Pipe,
+    Bang => SyntacticToken::Bang,
+    Ampersand => SyntacticToken::Ampersand,
+    Plus => SyntacticToken::Plus,
+    Minus => SyntacticToken::Minus,
+    PathSeparator => SyntacticToken::PathSeparator,
+  }
+}

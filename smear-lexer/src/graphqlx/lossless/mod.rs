@@ -316,3 +316,83 @@ impl core::fmt::Display for LosslessTokenKind {
     core::fmt::Debug::fmt(self, f)
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::LitPlainStr;
+
+  /// Census: every declared [`LosslessTokenKind`] variant must be producible by some
+  /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
+  ///
+  /// See the graphql (non-x) twin of this test
+  /// (`smear-lexer/src/graphql/lossless/mod.rs`) for why: that dialect shipped a
+  /// `LosslessTokenKind::Boolean` with no `LosslessToken` able to produce it. GraphQLx's kind
+  /// enum has no such gap today, but nothing previously stopped one from being added the same
+  /// way, silently.
+  ///
+  /// `census!` builds an exhaustive `match` — no wildcard arm — mapping each
+  /// `LosslessTokenKind` to a `LosslessToken` that produces it, from the same variant list it
+  /// uses to drive the round-trip assertions below. There is one list, not two kept in sync by
+  /// hand: add a `LosslessTokenKind` variant without adding a case here and the generated
+  /// `match` stops being exhaustive, which is a compile error naming the missing variant
+  /// rather than a runtime assertion that might simply never run.
+  #[test]
+  fn lossless_token_kind_census() {
+    macro_rules! census {
+      ($($variant:ident => $token:expr),+ $(,)?) => {
+        fn sample(kind: LosslessTokenKind) -> LosslessToken<&'static str> {
+          match kind {
+            $(LosslessTokenKind::$variant => $token,)+
+          }
+        }
+
+        $(
+          assert_eq!(
+            sample(LosslessTokenKind::$variant).kind(),
+            LosslessTokenKind::$variant,
+            "LosslessTokenKind::{} is declared but its sample token maps to a different kind",
+            stringify!($variant),
+          );
+        )+
+      };
+    }
+
+    census! {
+      Asterisk => LosslessToken::Asterisk,
+      At => LosslessToken::At,
+      Bom => LosslessToken::Bom("\u{FEFF}"),
+      Dollar => LosslessToken::Dollar,
+      FatArrow => LosslessToken::FatArrow,
+      LAngle => LosslessToken::LAngle,
+      RAngle => LosslessToken::RAngle,
+      LParen => LosslessToken::LParen,
+      RParen => LosslessToken::RParen,
+      Spread => LosslessToken::Spread,
+      Colon => LosslessToken::Colon,
+      Equal => LosslessToken::Equal,
+      LBracket => LosslessToken::LBracket,
+      RBracket => LosslessToken::RBracket,
+      LBrace => LosslessToken::LBrace,
+      RBrace => LosslessToken::RBrace,
+      Pipe => LosslessToken::Pipe,
+      Bang => LosslessToken::Bang,
+      Ampersand => LosslessToken::Ampersand,
+      Plus => LosslessToken::Plus,
+      Minus => LosslessToken::Minus,
+      PathSeparator => LosslessToken::PathSeparator,
+      Comma => LosslessToken::Comma,
+      Space => LosslessToken::Space,
+      Tab => LosslessToken::Tab,
+      Newline => LosslessToken::Newline,
+      CarriageReturn => LosslessToken::CarriageReturn,
+      CarriageReturnAndNewline => LosslessToken::CarriageReturnAndNewline,
+      Comment => LosslessToken::Comment("# c"),
+      Identifier => LosslessToken::Identifier("x"),
+      Float => LosslessToken::LitFloat(LitFloat::Decimal("1.0")),
+      Int => LosslessToken::LitInt(LitInt::Decimal("1")),
+      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
+      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+    }
+  }
+}

@@ -225,3 +225,56 @@ fn capability_traits_classify_tokens() {
     Some(SyntacticTokenKind::Spread)
   );
 }
+
+/// Census: every declared `SyntacticTokenKind` variant must be producible by some
+/// `SyntacticToken`, i.e. by some arm of `SyntacticToken::kind`.
+///
+/// Mirrors `lossless_token_kind_census` (`graphql/lossless/mod.rs`), which exists because
+/// `LosslessTokenKind::Boolean` was declared with no `LosslessToken` able to produce it.
+/// `SyntacticTokenKind` has no such gap today — trivia kinds don't exist here at all, since
+/// `SyntacticToken` skips trivia — so this is a regression guard, not a fix. See that test for
+/// why the `census!` macro shape (one variant list driving both an exhaustive `match` and the
+/// round-trip assertions) is the point: a variant added without a case here fails to compile.
+#[test]
+fn syntactic_token_kind_census() {
+  macro_rules! census {
+    ($($variant:ident => $token:expr),+ $(,)?) => {
+      fn sample(kind: SyntacticTokenKind) -> SyntacticToken<&'static str> {
+        match kind {
+          $(SyntacticTokenKind::$variant => $token,)+
+        }
+      }
+
+      $(
+        assert_eq!(
+          sample(SyntacticTokenKind::$variant).kind(),
+          SyntacticTokenKind::$variant,
+          "SyntacticTokenKind::{} is declared but its sample token maps to a different kind",
+          stringify!($variant),
+        );
+      )+
+    };
+  }
+
+  census! {
+    Ampersand => SyntacticToken::Ampersand,
+    At => SyntacticToken::At,
+    RBrace => SyntacticToken::RBrace,
+    RBracket => SyntacticToken::RBracket,
+    RParen => SyntacticToken::RParen,
+    Colon => SyntacticToken::Colon,
+    Dollar => SyntacticToken::Dollar,
+    Equal => SyntacticToken::Equal,
+    Bang => SyntacticToken::Bang,
+    LBrace => SyntacticToken::LBrace,
+    LBracket => SyntacticToken::LBracket,
+    LParen => SyntacticToken::LParen,
+    Pipe => SyntacticToken::Pipe,
+    Spread => SyntacticToken::Spread,
+    Identifier => SyntacticToken::Identifier("x"),
+    Float => SyntacticToken::LitFloat("1.0"),
+    Int => SyntacticToken::LitInt("1"),
+    InlineString => SyntacticToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
+    BlockString => SyntacticToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+  }
+}
