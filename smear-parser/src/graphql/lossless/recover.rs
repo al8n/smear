@@ -2,51 +2,30 @@
 //! an `Error` node; the parse then continues. `finish` gap-tiles anything left uncovered, so
 //! text fidelity holds regardless.
 //!
-//! Built on tokora's sync family, not on hand-rolled skip loops. The members behave
-//! differently and the differences decide which one each helper uses:
+//! # What is here and what is in the substrate
 //!
-//! - `sync_balanced(classifier, pred)` — **two** args: `classifier` names which kinds open and
-//!   close pairs (`DelimClass`), `pred` is the depth-0 sync predicate. On a **successful** sync
-//!   that skipped ≥1 token it reports the region once through `emit_skipped_region`, and the
-//!   sink wraps those tokens in the profile's `error_kind` **automatically** — no explicit
-//!   `node` call.
-//! - `sync_balanced` **makes no progress in two cases**, and both are reachable here. A
-//!   no-match run to end of input "commits nothing and returns `Ok(None)`, leaving no trace";
-//!   and a *successful* sync whose predicate matches the very first token returns
-//!   `Some(Hole { skipped: 0 })` — the sync point was already at hand — consuming nothing and
-//!   emitting nothing. See `unexpected` for why that pair is a termination hazard rather than
-//!   a curiosity.
-//! - `sync_to` / `sync_through` — also two args, and they do **not** auto-wrap, so a caller
-//!   that wants the skipped tokens inside a node must open one itself. Task 8's top-level
-//!   resync is their caller; nothing in Task 5 reaches them, and the plan's
-//!   `resync_to_definition` is therefore deferred to the task that can test it at its own call
-//!   site.
+//! Everything below is **table**: the twenty-one head sets an "expected one of" diagnostic names,
+//! this dialect's three balanced pairs, its depth-zero restart predicate and its definition-start
+//! predicate. The *logic* — report, skip, attribute, guarantee progress — is
+//! [`crate::lossless::recover`]'s, shared with every dialect, and its module docs carry the
+//! reasoning about `sync_balanced`'s two no-progress cases and the termination rule that follows
+//! from them.
 //!
-//! # Every helper called from inside a loop must consume at least one token
-//!
-//! A helper that returns `Ok` without consuming turns its caller's `while` into an infinite
-//! loop. `unexpected` is in that class and guarantees progress explicitly; `unclosed_list` and
-//! `unclosed_object` are not, because their call sites `return` out of the loop rather than
-//! falling through it. The distinction is not "does it consume" but "does the call site
-//! continue".
-//!
-//! **Do not write `node(K::Error.raw(), |_| Ok(()))`.** It is a no-op: an empty, zero-width
-//! `Error` node that consumes nothing, which is the rule above violated in the one place it
-//! looks like recovery.
+//! The wrappers at the bottom exist so a production still writes
+//! `unexpected::<Src, Ctx>(inp, VALUE_HEADS)` rather than a five-argument call naming this
+//! dialect's tables at every one of ~40 sites. They add no behaviour, exactly as `trivia.rs`'s do.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
 use tokora::{
   SimpleSpan,
-  emitter::FromUnclosed,
-  error::{UnclosedBrace, UnclosedBracket, UnclosedParen, UnexpectedEot, token::UnexpectedToken},
+  error::{UnclosedBrace, UnclosedBracket, UnclosedParen},
   input::Balance,
-  span::Spanned,
   utils::DowncastRef,
 };
 
 use crate::graphql::{GraphQL, kinds::SyntaxKind as K};
 
-use super::{GraphqlLosslessError, GraphqlLosslessLexer, trivia::kind_of};
+use super::trivia::kind_of;
 
 /// The token kinds a `Value` may begin with — what an "expected a value" diagnostic names.
 ///
@@ -187,17 +166,7 @@ pub(crate) const BLOCK_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::LBrace]
 /// The token kinds a `SchemaDefinition`'s root-operation block may begin with.
 pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 
-/// The span of the single-byte delimiter an [`expect`] has just
-/// committed, given the input's committed extent.
-///
-/// `expect` reports only whether it matched, so the opener's own span has to be recovered from
-/// the input: its end is the delimiter's end, and every delimiter this suite opens (`[`, `{`,
-/// `(`) is exactly one byte. That span is what an unclosed-delimiter diagnostic points at — the
-/// opener that was never closed, not the end of input where the absence was noticed.
-#[inline]
-pub(crate) fn opener_span(end: usize) -> SimpleSpan {
-  SimpleSpan::new(end.saturating_sub(1), end)
-}
+pub(crate) use crate::lossless::recover::opener_span;
 
 /// Where a recovery is willing to stop: a token that could start something the caller knows
 /// how to parse, or a closer the enclosing shape knows how to consume.
@@ -288,15 +257,13 @@ fn is_definition_start(kind: Kind, keyword: Option<ContextualKeyword>) -> bool {
   }
 }
 
-/// [`kind_of`](super::trivia::kind_of)'s twin for the spelling: `DowncastRef`, reached without
-/// letting method resolution pick the wrong `Self`.
+/// [`crate::lossless::recover::keyword_of`] with this dialect's keyword projection pinned.
 ///
-/// `sync_balanced` hands its predicate a `Spanned<&Token, &Span>`, so the same `&&Token`
-/// receiver that costs `kind_of` its own helper applies here. The projection is owned and
-/// `Copy`, so nothing borrowed escapes.
+/// The wrapper exists so the two predicates below read as membership tests over a named enum
+/// rather than as turbofished downcasts.
 #[inline]
 fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<ContextualKeyword> {
-  token.downcast_ref()
+  crate::lossless::recover::keyword_of(token)
 }
 
 /// GraphQL's three delimiter pairs, for `sync_balanced`'s depth counting.
@@ -317,205 +284,73 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The wrappers. Each one binds this dialect's tables to `crate::lossless::recover`'s logic and
+// adds nothing else; the `lossless_production!` bundle is what makes them nameable from a
+// production without a turbofish per argument.
+// ---------------------------------------------------------------------------------------------
+
+// The substrate's two restart predicates take `fn(&L::Token) -> bool`, never `fn(Kind) -> bool`,
+// so that it never has to name a kind space. The adapters are non-capturing closures at the two
+// call sites below rather than named items: written as `fn`s they would need the token's
+// `Token<'a>` and `DowncastRef` bounds restated, because a lossless `Token` impl is generated per
+// concrete slice type — and inside a `lossless_production!` body those bounds are already in
+// scope.
+
+use crate::lossless::lossless_production;
+
 lossless_production! {
-  /// A list ran to end of input before its `]` arrived.
-  ///
-  /// `open` is the opening `[`'s span, which is where the diagnostic points — the closer that
-  /// never came has no position of its own.
-  ///
-  /// **This helper opens no node and consumes nothing, and that is correct rather than a
-  /// shortcoming.** Its only caller reaches it when the atom set reported end of input, so
-  /// there is no token left to skip, nothing to attribute to an `Error` node, and nothing for
-  /// `sync_balanced` to settle: at end of input it would commit nothing, wrap nothing and emit
-  /// no hole diagnostic. Calling it here would be dead code that *reads* as the mechanism.
-  ///
-  /// **Loop safety does not depend on consuming here.** The caller's `while` is guarded by an
-  /// end-of-input test and this helper's result is `return`ed out of that loop rather than
-  /// continuing it, so there is no iteration to starve. The missing closer's absence is
-  /// recorded in the diagnostic; the source bytes are already accounted for by the tokens
-  /// committed before end of input.
+  dialect = graphql::lossless;
+
+  /// A list ran to end of input before its `]` arrived. [`crate::lossless::recover::unclosed`]
+  /// with this pair's marker.
   fn unclosed_list<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    let err = <GraphqlLosslessError<'inp, Src, Ctx> as FromUnclosed<
-      'inp,
-      GraphqlLosslessLexer<'inp, Src>,
-      GraphQL,
-    >>::from_unclosed(UnclosedBracket::<SimpleSpan, GraphQL>::bracket_of(open));
-    inp.emit_error(Spanned::new(open, err))?;
-    Ok(())
+    crate::lossless::recover::unclosed(
+      inp,
+      UnclosedBracket::<SimpleSpan, GraphQL>::bracket_of(open),
+    )
   }
 
-  /// An object ran to end of input before its `}` arrived — `unclosed_list`'s twin, and the
-  /// same reasoning applies clause for clause.
+  /// An object ran to end of input before its `}` arrived.
   fn unclosed_object<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    let err = <GraphqlLosslessError<'inp, Src, Ctx> as FromUnclosed<
-      'inp,
-      GraphqlLosslessLexer<'inp, Src>,
-      GraphQL,
-    >>::from_unclosed(UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open));
-    inp.emit_error(Spanned::new(open, err))?;
-    Ok(())
+    crate::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(open))
   }
 
-  /// An argument list ran to end of input before its `)` arrived — the third of the same twin,
-  /// and the reason [`FromUnclosed`] is generic over the delimiter marker: one impl in
-  /// `lossless/mod.rs` covers `[]`, `{}` and `()`, so a new pair costs a constructor call and
-  /// no new bound.
+  /// An argument list ran to end of input before its `)` arrived — and the reason
+  /// [`FromUnclosed`] is generic over the delimiter marker: one impl covers `[]`, `{}` and `()`,
+  /// so a new pair costs a constructor call and no new bound.
   fn unclosed_parens<'inp, Src, Ctx>(inp, open: SimpleSpan) {
-    let err = <GraphqlLosslessError<'inp, Src, Ctx> as FromUnclosed<
-      'inp,
-      GraphqlLosslessLexer<'inp, Src>,
-      GraphQL,
-    >>::from_unclosed(UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open));
-    inp.emit_error(Spanned::new(open, err))?;
-    Ok(())
+    crate::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQL>::paren_of(open))
   }
 
   /// Nothing that could start one of `expected` is here. **Report, and consume nothing.**
-  ///
-  /// # When to reach for this rather than [`unexpected`]
-  ///
-  /// Whenever the offending token is worth more to the *next* production than it would be
-  /// inside an `Error` node. Three shapes in this suite are in that class, and each one is a
-  /// bug if it consumes:
-  ///
-  /// - **A required keyword is absent**, as with a type condition's `on`. The name that *is*
-  ///   there is still the condition's type, so eating it would trade one diagnostic for a lost
-  ///   subtree.
-  /// - **A delimited shape is empty** where the grammar says `+` — `{}`, `()`. The report
-  ///   points at the closer, which the enclosing loop is about to eat as its own.
-  /// - **A prefix has no tail**, as with a `...` at the end of a selection set. The `}` after
-  ///   it belongs to the enclosing set; [`unexpected`] would swallow it (a closer *is* a sync
-  ///   point) and the set would then run to end of input looking for a closer it had already
-  ///   consumed.
-  ///
-  /// **Consuming nothing makes this unsafe inside a loop that continues.** Every caller here
-  /// either `return`s afterwards or has already made progress on its own — the same
-  /// distinction [`unclosed_list`] documents, and the reason [`unexpected`] exists at all.
+  /// [`crate::lossless::recover::report_unexpected`]; that function's docs say when to reach for
+  /// it rather than for [`unexpected`], and each of the three shapes is a bug if it consumes.
   fn report_unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field is
-    // already a reference, so the method form resolves to `<&Token as Clone>::clone` and hands
-    // back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and fails the
-    // `From` bound a long way from here.
-    match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
-      Some(found) => {
-        let span = found.span;
-        let err = UnexpectedToken::<_, _, _, GraphQL>::expected_one_of(span, expected)
-          .with_found(found.data);
-        inp.emit_error(Spanned::new(span, err.into()))?;
-      }
-      None => {
-        let end = inp.span().end();
-        let span = SimpleSpan::new(end, end);
-        let err = UnexpectedEot::<usize, GraphQL>::eot_of(end);
-        inp.emit_error(Spanned::new(span, err.into()))?;
-      }
-    }
-    Ok(())
+    crate::lossless::recover::report_unexpected(inp, expected)
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  ///
-  /// Reports once through [`report_unexpected`], then makes progress — in that order, because
-  /// the diagnostic names the token that is about to be skipped.
-  ///
-  /// # Why this cannot be `sync_balanced` alone
-  ///
-  /// The plan's draft was a bare `inp.sync_balanced(…)`, on the reasoning that a balanced skip
-  /// both makes progress and reports itself. It does neither reliably, and the two gaps are
-  /// exactly the inputs a recovery path meets:
-  ///
-  /// - **A stray closer is itself a sync point.** At depth zero `pred` is consulted *first*,
-  ///   so over `[1 ) 2]` the scan matches the `)` the caller is standing on, returns
-  ///   `Some(Hole { skipped: 0 })` and consumes nothing. The caller's `while` then re-reads
-  ///   that same `)` — forever.
-  /// - **Garbage running to end of input never matches.** Over `[1 ! ! !` there is no sync
-  ///   point, so the scan rewinds wholesale and returns `Ok(None)`. Same spin.
-  ///
-  /// So the skip is *attempted first* — it is the good outcome: one hole diagnostic for a
-  /// whole garbage run, nesting-aware, wrapped by the sink itself — and a fallback consumes
-  /// exactly one token into an `Error` node when the skip made no progress. Progress is then
-  /// unconditional whenever input remains, which is the enclosing loop's whole safety
-  /// argument.
-  ///
-  /// The fallback node is opened **only once the token is in hand**, by hand rather than
-  /// through the `node` combinator, so a caller that reaches this at genuine end of input gets
-  /// no node at all rather than an empty zero-width `Error` one.
+  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and restart predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    report_unexpected::<Src, Ctx>(inp, expected)?;
-
-    let hole = inp.sync_balanced(delimiters, |t| is_sync_point(kind_of(t.data)))?;
-    if hole.is_some_and(|h| h.skipped() > 0) {
-      // The sink wrapped the skipped region in the profile's `error_kind` on its own.
-      return Ok(());
-    }
-
-    let mark = inp.cst_mark();
-    if inp.try_expect(|_| true)?.is_some() {
-      inp.cst_start_at(mark, K::Error.raw());
-      inp.cst_finish(K::Error.raw());
-    }
-    Ok(())
+    crate::lossless::recover::unexpected(
+      inp,
+      expected,
+      delimiters,
+      |t| is_sync_point(kind_of(t)),
+      K::Error.raw(),
+    )
   }
 
   /// A definition returned `Err`: skip its wreckage and stop before the next definition head.
-  ///
-  /// # This helper reports nothing, and that is the point
-  ///
-  /// Its only callers are the two document loops, and they reach it *because* a production
-  /// failed — which means [`expect`] already emitted at the position the
-  /// failure happened. A second diagnostic here would point at whatever the resync happens to
-  /// start on, which is not where anything went wrong.
-  ///
-  /// # The fallback is **not** [`unexpected`]'s, and copying it there was a defect
-  ///
-  /// [`unexpected`] consumes one token whenever its balanced skip made no progress, because its
-  /// caller has already ruled the token at hand junk. Here the opposite is true: a scan that
-  /// stops having skipped **zero** tokens has stopped *on a definition head* — the exact token
-  /// this helper went looking for — and eating it costs the whole definition. `type T { a scalar
-  /// S }` loses its `ScalarTypeDefinition` that way, which is what
-  /// `a_resync_that_lands_on_a_definition_head_does_not_eat_it` pins.
-  ///
-  /// So the outcomes are told apart rather than lumped together:
-  ///
-  /// - **`Some(hole)`** — a definition head is at hand, whether the scan crossed anything to
-  ///   reach it or not. Whatever it crossed is already wrapped in `error_kind` by the sink;
-  ///   return, and the caller's next turn parses the head.
-  /// - **`None`** — the scan ran to end of input without finding one, rewound, and committed
-  ///   nothing. Everything left is junk, so consuming one token into an `Error` node can eat no
-  ///   definition, and it is the branch that keeps this helper self-sufficient.
-  ///
-  /// # Termination does not rest on that fallback
-  ///
-  /// The document loops' dispatchers consume at least one token before they can fail — a
-  /// description commits its string, every keyword arm commits its keyword, and the fall-through
-  /// is [`unexpected`], which guarantees progress on its own — so a resync that consumes nothing
-  /// cannot starve the loop. Deleting the `None` branch is therefore **not** observable as a
-  /// hang; it is kept because a helper whose safety depends on a caller's internals is one
-  /// refactor away from being wrong, and because a token nobody attributes is a token that
-  /// reaches the tree as a loose child of `Document`.
-  ///
-  /// The leading peek is not decoration either. `sync_balanced` counts *every* token into its
-  /// hole, trivia included, so trivia the failed production left uncrossed would otherwise land
-  /// inside the `Error` node instead of beside it.
+  /// [`crate::lossless::recover::resync_to`] with this dialect's definition-start predicate,
+  /// which is deliberately narrower than [`is_sync_point`] — see both predicates' docs.
   fn resync_to_definition<'inp, Src, Ctx>(inp) {
-    if super::trivia::peek_kind::<Src, Ctx>(inp)?.is_none() {
-      return Ok(());
-    }
-
-    if inp
-      .sync_balanced(delimiters, |t| {
-        is_definition_start(kind_of(t.data), keyword_of(t.data))
-      })?
-      .is_some()
-    {
-      return Ok(());
-    }
-
-    let mark = inp.cst_mark();
-    if inp.try_expect(|_| true)?.is_some() {
-      inp.cst_start_at(mark, K::Error.raw());
-      inp.cst_finish(K::Error.raw());
-    }
-    Ok(())
+    crate::lossless::recover::resync_to(
+      inp,
+      delimiters,
+      |t| is_definition_start(kind_of(t), keyword_of(t)),
+      K::Error.raw(),
+    )
   }
 }

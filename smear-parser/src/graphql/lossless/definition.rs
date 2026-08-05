@@ -122,7 +122,11 @@ fn is_directive_location(keyword: ContextualKeyword) -> bool {
   )
 }
 
+use crate::lossless::lossless_production;
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `StringValue` — a definition's leading documentation string.
   ///
   /// **Precondition: the head is an inline or block string.** Every caller decides that on a

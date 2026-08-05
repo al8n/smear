@@ -69,7 +69,11 @@ use super::{
   value::{Constness, value},
 };
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `Name : Value` — `Name : Value[Const]` when `konst` says so.
   ///
   /// One production for both the executable and the constant spelling, the flavour riding in as
@@ -169,6 +173,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one argument or directive production over a `&str` and hand back the tree
   /// it built, for `tests/lossless_ty_directive.rs`.
   mod test_support;
