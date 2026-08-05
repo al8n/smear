@@ -24,6 +24,9 @@
 /// The typed-accessor substrate: `ast_node!`'s helpers and the language-generic navigation types.
 pub mod ast;
 
+/// The trivia-aware atom set: the only door a production peeks through.
+pub mod trivia;
+
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and
 /// typed layer to work over it.
 ///

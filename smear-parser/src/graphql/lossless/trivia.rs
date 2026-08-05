@@ -64,7 +64,6 @@ use tokora::{
   Lexer, SimpleSpan, Source, Token,
   error::{UnexpectedEot, token::UnexpectedToken},
   lexer::FromLogos,
-  span::Spanned,
   try_parse_input::ParseAttempt,
   utils::DowncastRef,
 };
@@ -75,26 +74,29 @@ use super::{
   GraphqlLosslessError, GraphqlLosslessInput, GraphqlLosslessLexer, GraphqlLosslessToken,
 };
 
-/// `Token::kind`, reached without letting method resolution pick the wrong `Self`.
-///
-/// `skip_while` and `try_expect` hand their predicate a `Spanned<&Token, &Span>`, so `t.data()`
-/// is a `&&Token`. At that receiver the inherent `LosslessToken::kind` (which wants `&Token`)
-/// does not apply and the blanket `impl<'a, T: Token<'a>> Token<'a> for &'a T` does — which
-/// ties the borrow's lifetime to `'inp` and makes the predicate's argument escape the closure.
-/// Going through `t.data` (a `&Token`) instead reaches the *inherent* `kind`, whose return type
-/// is the concrete `LosslessTokenKind` rather than the projection the atoms are generic over.
-/// This helper is the one spelling that is both: the trait method, on the token itself.
-///
-/// `pub(crate)` because every predicate handed to `skip_while`, `try_expect` or
-/// `sync_balanced` meets the same `&&Token` receiver — `recover.rs`'s sync predicate is the
-/// second caller. One spelling, so the E0521 cannot be rediscovered per module.
-#[inline]
-pub(crate) fn kind_of<'a, T: Token<'a>>(token: &T) -> T::Kind {
-  token.kind()
-}
+// ---------------------------------------------------------------------------------------------
+// The six atoms are `crate::lossless::trivia`'s, wrapped here with this dialect's four aliases
+// pinned.
+//
+// **Wrappers, not `pub use` re-exports.** A re-export would force every call site's turbofish to
+// become `expect::<GraphqlLosslessLexer<'inp, Src>, Ctx, GraphQL>(…)`, changing ~200 lines across
+// seven production files for no gain — and destroying the property that makes this lift
+// reviewable, namely that no production file changed at all. The wrappers add no behaviour; each
+// is a single delegating call, and `#[inline]` makes the indirection free.
+//
+// The where-bundles below are the *dialect-bound* spellings, and they are longer than the
+// substrate's on purpose. `GraphqlLosslessToken<'inp, Src>: Token<'inp> + …` and the
+// `Lexer<Token = …>` equality are not implied over a generic `Src`, because `LosslessToken<S>`
+// receives its `Token` impl from `smear-lexer`'s `token!` macro **once per concrete slice type**
+// — unlike `SyntacticToken<S>`, whose impl is generic. Generically, `L::Token` simply *is* the
+// lexer's associated type, so the substrate needs neither clause; here they are what makes the
+// projection normalize.
+// ---------------------------------------------------------------------------------------------
 
-/// Commit any leading trivia, then report the next token's kind without consuming it.
-/// `None` at end of input.
+pub(crate) use crate::lossless::trivia::kind_of;
+
+/// [`crate::lossless::trivia::peek_kind`] over this dialect's input.
+#[inline]
 pub(crate) fn peek_kind<'inp, Src, Ctx>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
 ) -> Result<
@@ -103,43 +105,17 @@ pub(crate) fn peek_kind<'inp, Src, Ctx>(
 >
 where
   Src: Source<usize> + ?Sized,
-  // Both halves are load-bearing and neither is implied by `Lexer<'inp>`. `LosslessToken<S>`
-  // gets its `Token` impl from `smear-lexer`'s `token!` macro, **once per concrete slice
-  // type** — unlike `SyntacticToken<S>`, whose impl is generic (`syntactic/mod.rs:201`) — so
-  // over a generic `Src` the projection `<Token>::Kind` has nothing to normalize against
-  // without this bound. `FromLogos` sits on `LogosLexer`'s struct definition, which is what
-  // makes the lexer alias nameable at all (see `document.rs`).
   GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp>,
   GraphqlLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
-  // `InputRef::peek_kind` needs this; the free `parser::peek_kind` needs
-  // `Ctx: ComposableParseContext` instead, which is strictly stronger.
   GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
 {
-  inp.skip_while(|t| t.is_trivia())?;
-  inp.peek_kind()
+  crate::lossless::trivia::peek_kind(inp)
 }
 
-/// Commit any leading trivia, then project the next token to `Projection` without consuming
-/// it. `None` at end of input, and `None` for a token that carries no `Projection`.
-///
-/// # Why the two `None`s are not told apart
-///
-/// Every caller asks the same question — *is the head this particular keyword?* — and both a
-/// head that spells something else and an absent head answer it the same way. Distinguishing
-/// them would put a second `Option` at every call site to carry a difference none of them
-/// branches on; the kind-level [`peek_kind`] is already the atom that reports end of input.
-///
-/// # The projection is a type parameter, and must be
-///
-/// GraphQL's `true`, `false`, `null`, `on`, `query`, `fragment` and the rest are **contextual
-/// keywords**: the lexer hands them back as ordinary `Identifier` tokens, so a production that
-/// needs one has to read the *spelling*, which [`peek_kind`] cannot see.
-/// [`DowncastRef`](tokora::utils::DowncastRef) is that door — and naming its target here would
-/// make this module name a concrete dialect type, which the Lego rule forbids. One atom over
-/// the type parameter serves every projection a dialect defines; the call site names the one
-/// it wants.
+/// [`crate::lossless::trivia::peek_as`] over this dialect's input.
+#[inline]
 pub(crate) fn peek_as<'inp, Src, Ctx, Projection>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
 ) -> Result<Option<Projection>, GraphqlLosslessError<'inp, Src, Ctx>>
@@ -151,96 +127,17 @@ where
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
   GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>,
 {
-  inp.skip_while(|t| t.is_trivia())?;
-  // The projection is owned and `Copy`, so nothing borrowed escapes the closure — the `&&Token`
-  // receiver that costs `kind_of` its own helper is harmless here. The outer `Option` is the
-  // peek and the inner one is the downcast; see above for why they are flattened into one.
-  Ok(inp.peek_head_map(|t| t.data.downcast_ref())?.flatten())
+  crate::lossless::trivia::peek_as(inp)
 }
 
-/// The diagnostic a failed [`expect`] carries: an unexpected-token error naming `kind`, or the
-/// end-of-input error when there is no token to name.
-///
-/// Split out because `expect` needs the *same* value twice — once to emit and once to return —
-/// and the parse context's error type is not `Clone` without a tenth clause in every
-/// production's where-bundle. Building it twice costs a second peek, which is served straight
-/// out of the cache and consumes nothing.
-fn expectation_failure<'inp, Src, Ctx>(
-  inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
-  kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
-) -> Result<
-  Spanned<GraphqlLosslessError<'inp, Src, Ctx>, SimpleSpan>,
-  GraphqlLosslessError<'inp, Src, Ctx>,
->
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp> + Clone,
-  GraphqlLosslessLexer<'inp, Src>:
-    Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
-  GraphqlLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQL>>
-    + From<
-      UnexpectedToken<
-        'inp,
-        GraphqlLosslessToken<'inp, Src>,
-        <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
-        SimpleSpan,
-        GraphQL,
-      >,
-    >,
-{
-  // The declined token is still at the cache front, so peeking it costs no re-lex and — the
-  // point — does not consume it. `try_expect` also declines at genuine end of input, where the
-  // peek is `None` and the right diagnostic is the end-of-input one, not "unexpected token:
-  // <nothing>".
-  //
-  // `Clone::clone(t.data)`, not `t.data.clone()`: `Spanned<&Token, &Span>`'s `data` field is
-  // already a reference, so the method form resolves to `<&Token as Clone>::clone` and hands
-  // back another borrow — which then infers `UnexpectedToken`'s `T` as `&Token` and fails the
-  // `From` bound a long way from here.
-  Ok(
-    match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
-      Some(found) => Spanned::new(
-        found.span,
-        UnexpectedToken::<_, _, _, GraphQL>::expected_one(found.span, kind)
-          .with_found(found.data)
-          .into(),
-      ),
-      None => {
-        let end = inp.span().end();
-        Spanned::new(SimpleSpan::new(end, end), UnexpectedEot::eot_of(end).into())
-      }
-    },
-  )
-}
-
-/// Commit any leading trivia, then require `kind`.
-///
-/// On a mismatch the offending token is **left unconsumed**, at the cache front where
-/// `try_expect` put it. That is the contract a lossless recovery needs: the caller's
-/// `sync_to`/`sync_balanced` still gets to commit that token inside an `Error` node, so it
-/// reaches the tree. Consuming it here — which is what `tokora::parser::expect` does, since it
-/// reads through `next_or_stop` — would commit it to whatever node happens to be open, and the
-/// recovery could only wrap the tokens after it.
-///
-/// # A mismatch is **emitted** as well as returned, and that is load-bearing
-///
-/// The `Err` this returns is not a diagnostic: it unwinds to
-/// [`document`](super::document::document), which catches it, resynchronises and continues —
-/// deliberately *without* reporting, since the failure's own position is here and not there.
-/// Emitting at the point of failure is therefore the only report the failure ever gets, and
-/// [`Parse::has_errors`](super::Parse::has_errors) is the verdict the acceptance-parity gate
-/// compares against `syntactic/`. Returning `Err` alone left a failed parse reading as a clean
-/// one — the defect Task 5 found and Task 8 owns.
+/// [`crate::lossless::trivia::expect`] over this dialect's input.
+#[inline]
 pub(crate) fn expect<'inp, Src, Ctx>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
   kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
 ) -> Result<(), GraphqlLosslessError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  // `Clone` on top of `peek_kind`'s pair: `UnexpectedToken::with_found` takes the token by
-  // value, and the declined token is only ever borrowed (that is the whole point — it stays
-  // unconsumed), so the diagnostic gets a copy.
   GraphqlLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp> + Clone,
   GraphqlLosslessLexer<'inp, Src>:
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
@@ -256,25 +153,11 @@ where
       >,
     >,
 {
-  inp.skip_while(|t| t.is_trivia())?;
-  // There is no `expect_kind`. `try_expect` consumes-and-returns on a match and declines with
-  // `None` otherwise, so the "or error" half is this function's job.
-  match inp.try_expect(|t| kind_of(t.data) == kind)? {
-    Some(_) => Ok(()),
-    None => {
-      // Emit first, then return the same diagnostic as the `Err`. Built twice rather than
-      // cloned: see [`expectation_failure`].
-      let reported = expectation_failure::<Src, Ctx>(inp, kind)?;
-      inp.emit_error(reported)?;
-      Err(expectation_failure::<Src, Ctx>(inp, kind)?.data)
-    }
-  }
+  crate::lossless::trivia::expect(inp, kind)
 }
 
-/// Commit any leading trivia, then consume the next token only if it is `kind`.
-///
-/// A decline still commits the trivia it crossed — once. That is not a leak: the trivia was
-/// read, it belongs to the tree, and the branch that wins next will not re-read it.
+/// [`crate::lossless::trivia::eat_if`] over this dialect's input.
+#[inline]
 pub(crate) fn eat_if<'inp, Src, Ctx>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
   kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
@@ -286,35 +169,11 @@ where
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
 {
-  inp.skip_while(|t| t.is_trivia())?;
-  // One `try_expect`, not a peek then an expect: a declining `try_expect` consumes nothing, so
-  // this is already the conditional consume. Peeking first would read the same token twice.
-  Ok(inp.try_expect(|t| kind_of(t.data) == kind)?.is_some())
+  crate::lossless::trivia::eat_if(inp, kind)
 }
 
-/// [`eat_if`]'s declining form: commit any leading trivia, then consume the next token only if
-/// it is `kind`, answering in [`ParseAttempt`] rather than `bool`.
-///
-/// # Why a second spelling of the same conditional consume
-///
-/// A [`ParseAttempt`] is what [`node_at`](tokora::parser::node_at) requires of its inner
-/// parser: `NodeAt` implements [`TryParseInput`](tokora::TryParseInput) over a declining
-/// parser, and spends the caller's mark **only** on `Accept`. That is the whole retro-wrap
-/// mechanism — the mark is spent by the same call that finds the token justifying it, so no
-/// statement (and no `?`) can come between the two and strand a spent-or-unspent mark. An
-/// `eat_if` + unconditional wrap cannot express that: the token would be committed *outside*
-/// the wrap's parser.
-///
-/// # The kind is a parameter, not a token this module names
-///
-/// The retro-wrap shapes each want a different token — `!` for `NonNullType`, `:` for an
-/// `Alias` — and this module may not name a concrete dialect kind (the Lego rule). One atom
-/// over the projection serves both; the call site closes over the kind it wants.
-///
-/// A decline still commits the trivia it crossed — once, exactly as [`eat_if`]'s does. That is
-/// not a leak: the trivia was read, it belongs to the tree, and the branch that wins next will
-/// not re-read it. It lands in whichever node is open at the decision point, which for a
-/// declined retro-wrap is the enclosing node rather than the one that was never opened.
+/// [`crate::lossless::trivia::try_eat`] over this dialect's input.
+#[inline]
 pub(crate) fn try_eat<'inp, Src, Ctx>(
   inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>,
   kind: <GraphqlLosslessToken<'inp, Src> as Token<'inp>>::Kind,
@@ -326,11 +185,7 @@ where
     Lexer<'inp, Token = GraphqlLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: tokora::ParseContext<'inp, GraphqlLosslessLexer<'inp, Src>, GraphQL>,
 {
-  inp.skip_while(|t| t.is_trivia())?;
-  Ok(match inp.try_expect(|t| kind_of(t.data) == kind)? {
-    Some(_) => ParseAttempt::Accept(()),
-    None => ParseAttempt::Decline,
-  })
+  crate::lossless::trivia::try_eat(inp, kind)
 }
 
 /// Drivers that run one atom over a `&str` and report what it committed.
