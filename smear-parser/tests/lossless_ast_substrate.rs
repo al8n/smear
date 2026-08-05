@@ -32,6 +32,7 @@ use smear_parser::graphql::{
 // an undocumented item. The `deny` at the top of this file is what turns that trap into a
 // failure here instead of in Task 10.
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// A document.
   TestDoc => K::Document {
     /// Every operation definition in the document.
@@ -40,6 +41,7 @@ smear_parser::ast_node!(
 );
 
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// An operation definition.
   TestOpDef => K::OperationDefinition {
     /// The operation's selection set.
@@ -52,6 +54,7 @@ smear_parser::ast_node!(
 );
 
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// A selection set.
   TestSelSet => K::SelectionSet {
     /// Every field selected.
@@ -63,6 +66,7 @@ smear_parser::ast_node!(
 );
 
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// A field selection.
   TestField => K::Field {
     /// The field's own name token.
@@ -71,6 +75,7 @@ smear_parser::ast_node!(
 );
 
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// A directives list.
   TestDirectives => K::Directives {
     /// Every directive in the list.
@@ -79,6 +84,7 @@ smear_parser::ast_node!(
 );
 
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// A single directive.
   TestDirective => K::Directive {
     /// The directive's name token, which its `@` precedes.
@@ -89,6 +95,7 @@ smear_parser::ast_node!(
 // An empty getter list, which several of Task 10's wrappers will have: the muncher's base arm
 // has to accept a body with nothing in it, not merely the tail of a non-empty one.
 smear_parser::ast_node!(
+  lang = smear_parser::graphql::kinds::GraphQLLang;
   /// An operation-type keyword, which carries nothing but its own token.
   TestOpType => K::OperationType {}
 );
