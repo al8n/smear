@@ -1,0 +1,18 @@
+Root@0..18
+  Document@0..18
+    EnumTypeDefinition@0..17
+      Name@0..4 "enum"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "E"
+        Space@6..7 " "
+      EnumValuesDefinition@7..17
+        LBrace@7..8 "{"
+        Newline@8..9 "\n"
+        Space@9..10 " "
+        Space@10..11 " "
+        EnumValueDefinition@11..16
+          Name@11..15 "true"
+          Newline@15..16 "\n"
+        RBrace@16..17 "}"
+    Newline@17..18 "\n"

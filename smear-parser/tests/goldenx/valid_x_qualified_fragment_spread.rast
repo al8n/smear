@@ -1,0 +1,39 @@
+Root@0..40
+  Document@0..40
+    OperationDefinition@0..39
+      Name@0..5 "query"
+      Space@5..6 " "
+      SelectionSet@6..39
+        LBrace@6..7 "{"
+        Space@7..8 " "
+        FragmentSpread@8..19
+          Spread@8..11 "..."
+          TypePath@11..19
+            Path@11..19
+              PathSeparator@11..13 "::"
+              Name@13..15 "ns"
+              PathSeparator@15..17 "::"
+              Name@17..18 "F"
+              Space@18..19 " "
+        FragmentSpread@19..33
+          Spread@19..22 "..."
+          TypePath@22..32
+            Path@22..27
+              Name@22..24 "ns"
+              PathSeparator@24..26 "::"
+              Name@26..27 "G"
+            TypeGenerics@27..32
+              LAngle@27..28 "<"
+              DefinitionTypePath@28..31
+                Path@28..31
+                  Name@28..31 "Int"
+              RAngle@31..32 ">"
+          Space@32..33 " "
+        FragmentSpread@33..38
+          Spread@33..36 "..."
+          TypePath@36..38
+            Path@36..38
+              Name@36..37 "H"
+              Space@37..38 " "
+        RBrace@38..39 "}"
+    Newline@39..40 "\n"

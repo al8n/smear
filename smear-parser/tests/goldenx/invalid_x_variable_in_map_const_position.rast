@@ -1,0 +1,51 @@
+Root@0..41
+  Document@0..41
+    ObjectTypeDefinition@0..40
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      Directives@7..30
+        Directive@7..29
+          At@7..8 "@"
+          TypePath@8..9
+            Path@8..9
+              Name@8..9 "d"
+          Arguments@9..29
+            LParen@9..10 "("
+            Argument@10..28
+              Name@10..11 "m"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              MapValue@13..28
+                Name@13..16 "map"
+                Space@16..17 " "
+                LBrace@17..18 "{"
+                Space@18..19 " "
+                MapEntry@19..26
+                  VariableValue@19..21
+                    Dollar@19..20 "$"
+                    Name@20..21 "k"
+                  Space@21..22 " "
+                  FatArrow@22..24 "=>"
+                  Space@24..25 " "
+                  IntValue@25..26
+                    Int@25..26 "1"
+                Space@26..27 " "
+                RBrace@27..28 "}"
+            RParen@28..29 ")"
+        Space@29..30 " "
+      FieldsDefinition@30..40
+        LBrace@30..31 "{"
+        Space@31..32 " "
+        FieldDefinition@32..39
+          Name@32..33 "f"
+          Colon@33..34 ":"
+          Space@34..35 " "
+          DefinitionTypePath@35..39
+            Path@35..39
+              Name@35..38 "Int"
+              Space@38..39 " "
+        RBrace@39..40 "}"
+    Newline@40..41 "\n"

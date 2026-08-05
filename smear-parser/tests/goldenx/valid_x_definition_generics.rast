@@ -1,0 +1,36 @@
+Root@0..28
+  Document@0..28
+    ObjectTypeDefinition@0..27
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..18
+        Name@5..6 "T"
+        DefinitionTypeGenerics@6..18
+          LAngle@6..7 "<"
+          DefinitionTypeParam@7..10
+            Name@7..8 "A"
+            Comma@8..9 ","
+            Space@9..10 " "
+          DefinitionTypeParam@10..17
+            Name@10..11 "B"
+            Space@11..12 " "
+            Equal@12..13 "="
+            Space@13..14 " "
+            DefinitionTypePath@14..17
+              Path@14..17
+                Name@14..17 "Int"
+          RAngle@17..18 ">"
+      Space@18..19 " "
+      FieldsDefinition@19..27
+        LBrace@19..20 "{"
+        Space@20..21 " "
+        FieldDefinition@21..26
+          Name@21..22 "f"
+          Colon@22..23 ":"
+          Space@23..24 " "
+          DefinitionTypePath@24..26
+            Path@24..26
+              Name@24..25 "A"
+              Space@25..26 " "
+        RBrace@26..27 "}"
+    Newline@27..28 "\n"

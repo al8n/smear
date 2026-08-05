@@ -1,0 +1,74 @@
+Root@0..76
+  Document@0..76
+    OperationDefinition@0..75
+      SelectionSet@0..75
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..74
+          Name@4..5 "f"
+          Arguments@5..73
+            LParen@5..6 "("
+            Argument@6..15
+              Name@6..11 "empty"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              ObjectValue@13..15
+                LBrace@13..14 "{"
+                RBrace@14..15 "}"
+            Comma@15..16 ","
+            Space@16..17 " "
+            Argument@17..39
+              Name@17..21 "flat"
+              Colon@21..22 ":"
+              Space@22..23 " "
+              ObjectValue@23..39
+                LBrace@23..24 "{"
+                Space@24..25 " "
+                ObjectField@25..29
+                  Name@25..26 "k"
+                  Colon@26..27 ":"
+                  Space@27..28 " "
+                  IntValue@28..29
+                    Int@28..29 "1"
+                Comma@29..30 ","
+                Space@30..31 " "
+                ObjectField@31..37
+                  Name@31..32 "j"
+                  Colon@32..33 ":"
+                  Space@33..34 " "
+                  StringValue@34..37
+                    InlineString@34..37 "\"s\""
+                Space@37..38 " "
+                RBrace@38..39 "}"
+            Comma@39..40 ","
+            Space@40..41 " "
+            Argument@41..72
+              Name@41..47 "nested"
+              Colon@47..48 ":"
+              Space@48..49 " "
+              ObjectValue@49..72
+                LBrace@49..50 "{"
+                Space@50..51 " "
+                ObjectField@51..70
+                  Name@51..56 "outer"
+                  Colon@56..57 ":"
+                  Space@57..58 " "
+                  ObjectValue@58..70
+                    LBrace@58..59 "{"
+                    Space@59..60 " "
+                    ObjectField@60..68
+                      Name@60..65 "inner"
+                      Colon@65..66 ":"
+                      Space@66..67 " "
+                      IntValue@67..68
+                        Int@67..68 "2"
+                    Space@68..69 " "
+                    RBrace@69..70 "}"
+                Space@70..71 " "
+                RBrace@71..72 "}"
+            RParen@72..73 ")"
+          Newline@73..74 "\n"
+        RBrace@74..75 "}"
+    Newline@75..76 "\n"

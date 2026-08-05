@@ -1,0 +1,67 @@
+Root@0..66
+  Document@0..66
+    OperationDefinition@0..65
+      Name@0..5 "query"
+      Space@5..6 " "
+      DefinitionName@6..7
+        Name@6..7 "Q"
+      VariablesDefinition@7..50
+        LParen@7..8 "("
+        VariableDefinition@8..27
+          InlineString@8..16 "\"the id\""
+          Space@16..17 " "
+          VariableValue@17..20
+            Dollar@17..18 "$"
+            Name@18..20 "id"
+          Colon@20..21 ":"
+          Space@21..22 " "
+          DefinitionTypePath@22..25
+            Path@22..24
+              Name@22..24 "ID"
+            Bang@24..25 "!"
+          Comma@25..26 ","
+          Space@26..27 " "
+        VariableDefinition@27..49
+          BlockString@27..34 "\"\"\"n\"\"\""
+          Space@34..35 " "
+          VariableValue@35..37
+            Dollar@35..36 "$"
+            Name@36..37 "n"
+          Colon@37..38 ":"
+          Space@38..39 " "
+          DefinitionTypePath@39..43
+            Path@39..43
+              Name@39..42 "Int"
+              Space@42..43 " "
+          DefaultValue@43..46
+            Equal@43..44 "="
+            Space@44..45 " "
+            IntValue@45..46
+              Int@45..46 "1"
+          Space@46..47 " "
+          Directives@47..49
+            Directive@47..49
+              At@47..48 "@"
+              TypePath@48..49
+                Path@48..49
+                  Name@48..49 "d"
+        RParen@49..50 ")"
+      Space@50..51 " "
+      SelectionSet@51..65
+        LBrace@51..52 "{"
+        Space@52..53 " "
+        Field@53..64
+          Name@53..54 "f"
+          Arguments@54..63
+            LParen@54..55 "("
+            Argument@55..62
+              Name@55..57 "id"
+              Colon@57..58 ":"
+              Space@58..59 " "
+              VariableValue@59..62
+                Dollar@59..60 "$"
+                Name@60..62 "id"
+            RParen@62..63 ")"
+          Space@63..64 " "
+        RBrace@64..65 "}"
+    Newline@65..66 "\n"

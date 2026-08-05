@@ -1,0 +1,18 @@
+Root@0..26
+  Document@0..26
+    ImportDefinition@0..25
+      Name@0..6 "import"
+      Space@6..7 " "
+      ImportList@7..12
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        NamedSpecifier@9..11
+          Name@9..10 "A"
+          Space@10..11 " "
+        RBrace@11..12 "}"
+      Space@12..13 " "
+      Name@13..17 "from"
+      Space@17..18 " "
+      StringValue@18..25
+        BlockString@18..25 "\"\"\"m\"\"\""
+    Newline@25..26 "\n"

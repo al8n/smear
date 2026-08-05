@@ -1,0 +1,39 @@
+Root@0..33
+  Document@0..33
+    UnionTypeDefinition@0..33
+      Name@0..5 "union"
+      Space@5..6 " "
+      DefinitionName@6..10
+        Name@6..7 "U"
+        DefinitionTypeGenerics@7..10
+          LAngle@7..8 "<"
+          DefinitionTypeParam@8..9
+            Name@8..9 "A"
+          RAngle@9..10 ">"
+      Space@10..11 " "
+      UnionMemberTypes@11..19
+        Equal@11..12 "="
+        Space@12..13 " "
+        TypePath@13..15
+          Path@13..15
+            Name@13..14 "X"
+            Space@14..15 " "
+        Pipe@15..16 "|"
+        Space@16..17 " "
+        TypePath@17..19
+          Path@17..19
+            Name@17..18 "Y"
+            Space@18..19 " "
+      WhereClause@19..33
+        Name@19..24 "where"
+        Space@24..25 " "
+        WherePredicate@25..33
+          TypePath@25..26
+            Path@25..26
+              Name@25..26 "A"
+          Colon@26..27 ":"
+          Space@27..28 " "
+          TypePath@28..33
+            Path@28..33
+              Name@28..32 "Node"
+              Newline@32..33 "\n"

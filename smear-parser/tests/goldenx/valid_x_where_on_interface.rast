@@ -1,0 +1,39 @@
+Root@0..38
+  Document@0..38
+    InterfaceTypeDefinition@0..37
+      Name@0..9 "interface"
+      Space@9..10 " "
+      DefinitionName@10..14
+        Name@10..11 "I"
+        DefinitionTypeGenerics@11..14
+          LAngle@11..12 "<"
+          DefinitionTypeParam@12..13
+            Name@12..13 "A"
+          RAngle@13..14 ">"
+      Space@14..15 " "
+      WhereClause@15..29
+        Name@15..20 "where"
+        Space@20..21 " "
+        WherePredicate@21..29
+          TypePath@21..22
+            Path@21..22
+              Name@21..22 "A"
+          Colon@22..23 ":"
+          Space@23..24 " "
+          TypePath@24..29
+            Path@24..29
+              Name@24..28 "Node"
+              Space@28..29 " "
+      FieldsDefinition@29..37
+        LBrace@29..30 "{"
+        Space@30..31 " "
+        FieldDefinition@31..36
+          Name@31..32 "f"
+          Colon@32..33 ":"
+          Space@33..34 " "
+          DefinitionTypePath@34..36
+            Path@34..36
+              Name@34..35 "A"
+              Space@35..36 " "
+        RBrace@36..37 "}"
+    Newline@37..38 "\n"

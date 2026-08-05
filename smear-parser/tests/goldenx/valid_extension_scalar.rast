@@ -1,0 +1,18 @@
+Root@0..19
+  Document@0..19
+    ScalarTypeExtension@0..19
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..13 "scalar"
+      Space@13..14 " "
+      ExtensionName@14..16
+        Path@14..16
+          Name@14..15 "S"
+          Space@15..16 " "
+      Directives@16..19
+        Directive@16..19
+          At@16..17 "@"
+          TypePath@17..19
+            Path@17..19
+              Name@17..18 "d"
+              Newline@18..19 "\n"

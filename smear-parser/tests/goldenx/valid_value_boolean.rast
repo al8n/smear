@@ -1,0 +1,30 @@
+Root@0..30
+  Document@0..30
+    OperationDefinition@0..29
+      SelectionSet@0..29
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..28
+          Name@4..5 "f"
+          Arguments@5..27
+            LParen@5..6 "("
+            Argument@6..15
+              Name@6..9 "yes"
+              Colon@9..10 ":"
+              Space@10..11 " "
+              BooleanValue@11..15
+                Name@11..15 "true"
+            Comma@15..16 ","
+            Space@16..17 " "
+            Argument@17..26
+              Name@17..19 "no"
+              Colon@19..20 ":"
+              Space@20..21 " "
+              BooleanValue@21..26
+                Name@21..26 "false"
+            RParen@26..27 ")"
+          Newline@27..28 "\n"
+        RBrace@28..29 "}"
+    Newline@29..30 "\n"

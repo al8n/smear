@@ -1,0 +1,56 @@
+Root@0..50
+  Document@0..50
+    OperationDefinition@0..21
+      Name@0..5 "query"
+      Space@5..6 " "
+      DefinitionName@6..8
+        Name@6..7 "A"
+        Space@7..8 " "
+      SelectionSet@8..21
+        LBrace@8..9 "{"
+        Space@9..10 " "
+        Field@10..20
+          Name@10..11 "f"
+          Arguments@11..19
+            LParen@11..12 "("
+            Argument@12..18
+              Name@12..13 "a"
+              Colon@13..14 ":"
+              Space@14..15 " "
+              EnumValue@15..18
+                Path@15..18
+                  Name@15..18 "set"
+            RParen@18..19 ")"
+          Space@19..20 " "
+        RBrace@20..21 "}"
+    Newline@21..22 "\n"
+    OperationDefinition@22..49
+      Name@22..27 "query"
+      Space@27..28 " "
+      DefinitionName@28..30
+        Name@28..29 "B"
+        Space@29..30 " "
+      SelectionSet@30..49
+        LBrace@30..31 "{"
+        Space@31..32 " "
+        Field@32..48
+          Name@32..33 "f"
+          Arguments@33..47
+            LParen@33..34 "("
+            Argument@34..46
+              Name@34..35 "a"
+              Colon@35..36 ":"
+              Space@36..37 " "
+              SetValue@37..46
+                Name@37..40 "set"
+                Space@40..41 " "
+                LBrace@41..42 "{"
+                Space@42..43 " "
+                IntValue@43..44
+                  Int@43..44 "1"
+                Space@44..45 " "
+                RBrace@45..46 "}"
+            RParen@46..47 ")"
+          Space@47..48 " "
+        RBrace@48..49 "}"
+    Newline@49..50 "\n"

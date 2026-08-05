@@ -1,0 +1,36 @@
+Root@0..40
+  Document@0..40
+    SchemaDefinition@0..39
+      Name@0..6 "schema"
+      Space@6..7 " "
+      Directives@7..10
+        Directive@7..10
+          At@7..8 "@"
+          TypePath@8..10
+            Path@8..10
+              Name@8..9 "d"
+              Space@9..10 " "
+      RootOperationTypesDefinition@10..39
+        LBrace@10..11 "{"
+        Space@11..12 " "
+        RootOperationTypeDefinition@12..26
+          Name@12..17 "query"
+          Colon@17..18 ":"
+          Space@18..19 " "
+          TypePath@19..26
+            Path@19..26
+              Name@19..21 "ns"
+              PathSeparator@21..23 "::"
+              Name@23..24 "Q"
+              Comma@24..25 ","
+              Space@25..26 " "
+        RootOperationTypeDefinition@26..38
+          Name@26..34 "mutation"
+          Colon@34..35 ":"
+          Space@35..36 " "
+          TypePath@36..38
+            Path@36..38
+              Name@36..37 "M"
+              Space@37..38 " "
+        RBrace@38..39 "}"
+    Newline@39..40 "\n"

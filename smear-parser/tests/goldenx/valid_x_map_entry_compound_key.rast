@@ -1,0 +1,65 @@
+Root@0..58
+  Document@0..58
+    OperationDefinition@0..57
+      Name@0..5 "query"
+      Space@5..6 " "
+      SelectionSet@6..57
+        LBrace@6..7 "{"
+        Space@7..8 " "
+        Field@8..56
+          Name@8..9 "f"
+          Arguments@9..55
+            LParen@9..10 "("
+            Argument@10..54
+              Name@10..11 "m"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              MapValue@13..54
+                Name@13..16 "map"
+                Space@16..17 " "
+                LBrace@17..18 "{"
+                Space@18..19 " "
+                MapEntry@19..29
+                  ListValue@19..22
+                    LBracket@19..20 "["
+                    IntValue@20..21
+                      Int@20..21 "1"
+                    RBracket@21..22 "]"
+                  Space@22..23 " "
+                  FatArrow@23..25 "=>"
+                  Space@25..26 " "
+                  StringValue@26..29
+                    InlineString@26..29 "\"a\""
+                Comma@29..30 ","
+                Space@30..31 " "
+                MapEntry@31..52
+                  ObjectValue@31..39
+                    LBrace@31..32 "{"
+                    Space@32..33 " "
+                    ObjectField@33..37
+                      Name@33..34 "k"
+                      Colon@34..35 ":"
+                      Space@35..36 " "
+                      IntValue@36..37
+                        Int@36..37 "1"
+                    Space@37..38 " "
+                    RBrace@38..39 "}"
+                  Space@39..40 " "
+                  FatArrow@40..42 "=>"
+                  Space@42..43 " "
+                  SetValue@43..52
+                    Name@43..46 "set"
+                    Space@46..47 " "
+                    LBrace@47..48 "{"
+                    Space@48..49 " "
+                    EnumValue@49..51
+                      Path@49..51
+                        Name@49..50 "X"
+                        Space@50..51 " "
+                    RBrace@51..52 "}"
+                Space@52..53 " "
+                RBrace@53..54 "}"
+            RParen@54..55 ")"
+          Space@55..56 " "
+        RBrace@56..57 "}"
+    Newline@57..58 "\n"

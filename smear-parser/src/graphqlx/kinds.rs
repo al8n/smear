@@ -292,7 +292,14 @@ pub enum SyntaxKind {
   InputFieldsDefinition,
   /// `{ EnumValueDefinition+ }`.
   EnumValuesDefinition,
-  /// `Description? EnumValue Directives?`.
+  /// `Description? Name Directives?`.
+  ///
+  /// A bare `Name` token and **not** an [`EnumValue`](Self::EnumValue), which is the one place the
+  /// two spellings of an enum value come apart. In value position GraphQLx widens the name to a
+  /// whole [`Path`](Self::Path); in *declaring* position it does not — `enum E { ns::RED }` is a
+  /// syntax error in both suites, so a node that could hold a path would be claiming a grammar
+  /// GraphQLx does not have. The declaring name is therefore one token whose parent already says
+  /// what it is, which is the census's *one token is not a region* rule.
   EnumValueDefinition,
   /// `|? Name (| Name)*` after `on` in a directive definition.
   DirectiveLocations,

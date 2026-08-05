@@ -1,0 +1,4 @@
+Root@0..38
+  Document@0..38
+    Comment@0..37 "# no definition anywhere in this file"
+    Newline@37..38 "\n"

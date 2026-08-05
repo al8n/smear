@@ -1,0 +1,43 @@
+Root@0..47
+  Document@0..47
+    ImportDefinition@0..46
+      Name@0..6 "import"
+      Space@6..7 " "
+      ImportList@7..37
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        NamedSpecifier@9..17
+          Name@9..10 "a"
+          Space@10..11 " "
+          Name@11..13 "as"
+          Space@13..14 " "
+          Path@14..17
+            Name@14..15 "b"
+            Comma@15..16 ","
+            Space@16..17 " "
+        NamedSpecifier@17..29
+          Name@17..18 "c"
+          Space@18..19 " "
+          Name@19..21 "as"
+          Space@21..22 " "
+          Path@22..29
+            Name@22..24 "ns"
+            PathSeparator@24..26 "::"
+            Name@26..27 "d"
+            Comma@27..28 ","
+            Space@28..29 " "
+        WildcardSpecifier@29..36
+          Asterisk@29..30 "*"
+          Space@30..31 " "
+          Name@31..33 "as"
+          Space@33..34 " "
+          Path@34..36
+            Name@34..35 "w"
+            Space@35..36 " "
+        RBrace@36..37 "}"
+      Space@37..38 " "
+      Name@38..42 "from"
+      Space@42..43 " "
+      StringValue@43..46
+        InlineString@43..46 "\"m\""
+    Newline@46..47 "\n"

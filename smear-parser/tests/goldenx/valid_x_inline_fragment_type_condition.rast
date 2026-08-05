@@ -1,0 +1,72 @@
+Root@0..60
+  Document@0..60
+    OperationDefinition@0..59
+      Name@0..5 "query"
+      Space@5..6 " "
+      SelectionSet@6..59
+        LBrace@6..7 "{"
+        Space@7..8 " "
+        InlineFragment@8..34
+          Spread@8..11 "..."
+          Space@11..12 " "
+          TypeCondition@12..25
+            Name@12..14 "on"
+            Space@14..15 " "
+            TypePath@15..25
+              Path@15..20
+                Name@15..17 "ns"
+                PathSeparator@17..19 "::"
+                Name@19..20 "T"
+              TypeGenerics@20..25
+                LAngle@20..21 "<"
+                DefinitionTypePath@21..24
+                  Path@21..24
+                    Name@21..24 "Int"
+                RAngle@24..25 ">"
+          Space@25..26 " "
+          Directives@26..29
+            Directive@26..29
+              At@26..27 "@"
+              TypePath@27..29
+                Path@27..29
+                  Name@27..28 "d"
+                  Space@28..29 " "
+          SelectionSet@29..34
+            LBrace@29..30 "{"
+            Space@30..31 " "
+            Field@31..33
+              Name@31..32 "f"
+              Space@32..33 " "
+            RBrace@33..34 "}"
+        Space@34..35 " "
+        InlineFragment@35..47
+          Spread@35..38 "..."
+          Space@38..39 " "
+          Directives@39..42
+            Directive@39..42
+              At@39..40 "@"
+              TypePath@40..42
+                Path@40..42
+                  Name@40..41 "e"
+                  Space@41..42 " "
+          SelectionSet@42..47
+            LBrace@42..43 "{"
+            Space@43..44 " "
+            Field@44..46
+              Name@44..45 "g"
+              Space@45..46 " "
+            RBrace@46..47 "}"
+        Space@47..48 " "
+        InlineFragment@48..57
+          Spread@48..51 "..."
+          Space@51..52 " "
+          SelectionSet@52..57
+            LBrace@52..53 "{"
+            Space@53..54 " "
+            Field@54..56
+              Name@54..55 "h"
+              Space@55..56 " "
+            RBrace@56..57 "}"
+        Space@57..58 " "
+        RBrace@58..59 "}"
+    Newline@59..60 "\n"

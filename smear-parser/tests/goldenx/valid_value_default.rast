@@ -1,0 +1,88 @@
+Root@0..81
+  Document@0..81
+    OperationDefinition@0..80
+      Name@0..5 "query"
+      Space@5..6 " "
+      DefinitionName@6..7
+        Name@6..7 "Q"
+      VariablesDefinition@7..65
+        LParen@7..8 "("
+        VariableDefinition@8..21
+          VariableValue@8..10
+            Dollar@8..9 "$"
+            Name@9..10 "v"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          DefinitionTypePath@12..16
+            Path@12..16
+              Name@12..15 "Int"
+              Space@15..16 " "
+          DefaultValue@16..19
+            Equal@16..17 "="
+            Space@17..18 " "
+            IntValue@18..19
+              Int@18..19 "7"
+          Comma@19..20 ","
+          Space@20..21 " "
+        VariableDefinition@21..45
+          VariableValue@21..23
+            Dollar@21..22 "$"
+            Name@22..23 "w"
+          Colon@23..24 ":"
+          Space@24..25 " "
+          ListType@25..35
+            LBracket@25..26 "["
+            DefinitionTypePath@26..33
+              Path@26..32
+                Name@26..32 "String"
+              Bang@32..33 "!"
+            RBracket@33..34 "]"
+            Bang@34..35 "!"
+          Space@35..36 " "
+          DefaultValue@36..43
+            Equal@36..37 "="
+            Space@37..38 " "
+            ListValue@38..43
+              LBracket@38..39 "["
+              StringValue@39..42
+                InlineString@39..42 "\"x\""
+              RBracket@42..43 "]"
+          Comma@43..44 ","
+          Space@44..45 " "
+        VariableDefinition@45..64
+          VariableValue@45..47
+            Dollar@45..46 "$"
+            Name@46..47 "b"
+          Colon@47..48 ":"
+          Space@48..49 " "
+          DefinitionTypePath@49..57
+            Path@49..57
+              Name@49..56 "Boolean"
+              Space@56..57 " "
+          DefaultValue@57..64
+            Equal@57..58 "="
+            Space@58..59 " "
+            BooleanValue@59..64
+              Name@59..64 "false"
+        RParen@64..65 ")"
+      Space@65..66 " "
+      SelectionSet@66..80
+        LBrace@66..67 "{"
+        Newline@67..68 "\n"
+        Space@68..69 " "
+        Space@69..70 " "
+        Field@70..79
+          Name@70..71 "f"
+          Arguments@71..78
+            LParen@71..72 "("
+            Argument@72..77
+              Name@72..73 "a"
+              Colon@73..74 ":"
+              Space@74..75 " "
+              VariableValue@75..77
+                Dollar@75..76 "$"
+                Name@76..77 "v"
+            RParen@77..78 ")"
+          Newline@78..79 "\n"
+        RBrace@79..80 "}"
+    Newline@80..81 "\n"

@@ -1,0 +1,33 @@
+Root@0..23
+  Document@0..23
+    EnumTypeDefinition@0..22
+      Name@0..4 "enum"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "E"
+        Space@6..7 " "
+      EnumValuesDefinition@7..22
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        EnumValueDefinition@9..21
+          Name@9..10 "A"
+          Space@10..11 " "
+          Directives@11..21
+            Directive@11..20
+              At@11..12 "@"
+              TypePath@12..13
+                Path@12..13
+                  Name@12..13 "d"
+              Arguments@13..20
+                LParen@13..14 "("
+                Argument@14..19
+                  Name@14..15 "a"
+                  Colon@15..16 ":"
+                  Space@16..17 " "
+                  VariableValue@17..19
+                    Dollar@17..18 "$"
+                    Name@18..19 "v"
+                RParen@19..20 ")"
+            Space@20..21 " "
+        RBrace@21..22 "}"
+    Newline@22..23 "\n"

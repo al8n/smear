@@ -1,0 +1,16 @@
+Root@0..18
+  Document@0..18
+    OperationDefinition@0..17
+      Name@0..5 "query"
+      Space@5..6 " "
+      DefinitionName@6..12
+        Name@6..11 "query"
+        Space@11..12 " "
+      SelectionSet@12..17
+        LBrace@12..13 "{"
+        Space@13..14 " "
+        Field@14..16
+          Name@14..15 "f"
+          Space@15..16 " "
+        RBrace@16..17 "}"
+    Newline@17..18 "\n"

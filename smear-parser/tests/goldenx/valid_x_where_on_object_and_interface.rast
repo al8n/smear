@@ -1,0 +1,45 @@
+Root@0..37
+  Document@0..37
+    ObjectTypeDefinition@0..36
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..9
+        Name@5..6 "T"
+        DefinitionTypeGenerics@6..9
+          LAngle@6..7 "<"
+          DefinitionTypeParam@7..8
+            Name@7..8 "A"
+          RAngle@8..9 ">"
+      Space@9..10 " "
+      WhereClause@10..28
+        Name@10..15 "where"
+        Space@15..16 " "
+        WherePredicate@16..28
+          TypePath@16..17
+            Path@16..17
+              Name@16..17 "A"
+          Colon@17..18 ":"
+          Space@18..19 " "
+          TypePath@19..24
+            Path@19..24
+              Name@19..23 "Node"
+              Space@23..24 " "
+          Ampersand@24..25 "&"
+          Space@25..26 " "
+          TypePath@26..28
+            Path@26..28
+              Name@26..27 "X"
+              Space@27..28 " "
+      FieldsDefinition@28..36
+        LBrace@28..29 "{"
+        Space@29..30 " "
+        FieldDefinition@30..35
+          Name@30..31 "f"
+          Colon@31..32 ":"
+          Space@32..33 " "
+          DefinitionTypePath@33..35
+            Path@33..35
+              Name@33..34 "A"
+              Space@34..35 " "
+        RBrace@35..36 "}"
+    Newline@36..37 "\n"

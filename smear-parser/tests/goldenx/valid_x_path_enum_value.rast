@@ -1,0 +1,48 @@
+Root@0..61
+  Document@0..61
+    OperationDefinition@0..60
+      Name@0..5 "query"
+      Space@5..6 " "
+      SelectionSet@6..60
+        LBrace@6..7 "{"
+        Space@7..8 " "
+        Field@8..59
+          Name@8..9 "f"
+          Arguments@9..58
+            LParen@9..10 "("
+            Argument@10..27
+              Name@10..11 "a"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              EnumValue@13..27
+                Path@13..27
+                  PathSeparator@13..15 "::"
+                  Name@15..17 "ns"
+                  PathSeparator@17..19 "::"
+                  Name@19..25 "Colour"
+                  Comma@25..26 ","
+                  Space@26..27 " "
+            Argument@27..38
+              Name@27..28 "b"
+              Colon@28..29 ":"
+              Space@29..30 " "
+              EnumValue@30..38
+                Path@30..38
+                  Name@30..36 "Colour"
+                  Comma@36..37 ","
+                  Space@37..38 " "
+            Argument@38..57
+              Name@38..39 "c"
+              Colon@39..40 ":"
+              Space@40..41 " "
+              EnumValue@41..57
+                Path@41..57
+                  Name@41..43 "ns"
+                  PathSeparator@43..45 "::"
+                  Name@45..49 "deep"
+                  PathSeparator@49..51 "::"
+                  Name@51..57 "Colour"
+            RParen@57..58 ")"
+          Space@58..59 " "
+        RBrace@59..60 "}"
+    Newline@60..61 "\n"

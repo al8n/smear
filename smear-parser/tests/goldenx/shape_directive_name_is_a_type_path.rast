@@ -1,0 +1,53 @@
+Root@0..41
+  Document@0..41
+    ObjectTypeDefinition@0..41
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      Directives@7..31
+        Directive@7..22
+          At@7..8 "@"
+          TypePath@8..16
+            Path@8..13
+              Name@8..10 "ns"
+              PathSeparator@10..12 "::"
+              Name@12..13 "d"
+            TypeGenerics@13..16
+              LAngle@13..14 "<"
+              DefinitionTypePath@14..15
+                Path@14..15
+                  Name@14..15 "A"
+              RAngle@15..16 ">"
+          Arguments@16..22
+            LParen@16..17 "("
+            Argument@17..21
+              Name@17..18 "a"
+              Colon@18..19 ":"
+              Space@19..20 " "
+              IntValue@20..21
+                Int@20..21 "1"
+            RParen@21..22 ")"
+        Space@22..23 " "
+        Directive@23..31
+          At@23..24 "@"
+          TypePath@24..31
+            Path@24..31
+              PathSeparator@24..26 "::"
+              Name@26..27 "x"
+              PathSeparator@27..29 "::"
+              Name@29..30 "y"
+              Space@30..31 " "
+      FieldsDefinition@31..41
+        LBrace@31..32 "{"
+        Space@32..33 " "
+        FieldDefinition@33..40
+          Name@33..34 "f"
+          Colon@34..35 ":"
+          Space@35..36 " "
+          DefinitionTypePath@36..40
+            Path@36..40
+              Name@36..39 "Int"
+              Space@39..40 " "
+        RBrace@40..41 "}"

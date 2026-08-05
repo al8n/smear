@@ -1,0 +1,23 @@
+Root@0..23
+  Document@0..23
+    FragmentDefinition@0..22
+      Name@0..8 "fragment"
+      Space@8..9 " "
+      ExecutableDefinitionName@9..12
+        Name@9..11 "on"
+        Space@11..12 " "
+      TypeCondition@12..17
+        Name@12..14 "on"
+        Space@14..15 " "
+        TypePath@15..17
+          Path@15..17
+            Name@15..16 "T"
+            Space@16..17 " "
+      SelectionSet@17..22
+        LBrace@17..18 "{"
+        Space@18..19 " "
+        Field@19..21
+          Name@19..20 "f"
+          Space@20..21 " "
+        RBrace@21..22 "}"
+    Newline@22..23 "\n"

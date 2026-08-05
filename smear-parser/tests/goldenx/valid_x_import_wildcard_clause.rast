@@ -1,0 +1,48 @@
+Root@0..61
+  Document@0..61
+    ImportDefinition@0..17
+      Name@0..6 "import"
+      Space@6..7 " "
+      WildcardSpecifier@7..9
+        Asterisk@7..8 "*"
+        Space@8..9 " "
+      Name@9..13 "from"
+      Space@13..14 " "
+      StringValue@14..17
+        InlineString@14..17 "\"n\""
+    Newline@17..18 "\n"
+    ImportDefinition@18..42
+      Name@18..24 "import"
+      Space@24..25 " "
+      WildcardSpecifier@25..34
+        Asterisk@25..26 "*"
+        Space@26..27 " "
+        Name@27..29 "as"
+        Space@29..30 " "
+        Path@30..34
+          Name@30..33 "all"
+          Space@33..34 " "
+      Name@34..38 "from"
+      Space@38..39 " "
+      StringValue@39..42
+        InlineString@39..42 "\"o\""
+    Newline@42..43 "\n"
+    ObjectTypeDefinition@43..60
+      Name@43..47 "type"
+      Space@47..48 " "
+      DefinitionName@48..50
+        Name@48..49 "T"
+        Space@49..50 " "
+      FieldsDefinition@50..60
+        LBrace@50..51 "{"
+        Space@51..52 " "
+        FieldDefinition@52..59
+          Name@52..53 "f"
+          Colon@53..54 ":"
+          Space@54..55 " "
+          DefinitionTypePath@55..59
+            Path@55..59
+              Name@55..58 "Int"
+              Space@58..59 " "
+        RBrace@59..60 "}"
+    Newline@60..61 "\n"

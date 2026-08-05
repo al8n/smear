@@ -1,0 +1,14 @@
+Root@0..24
+  Document@0..24
+    DirectiveDefinition@0..24
+      Name@0..9 "directive"
+      Space@9..10 " "
+      At@10..11 "@"
+      DefinitionName@11..13
+        Name@11..12 "d"
+        Space@12..13 " "
+      Name@13..15 "on"
+      Space@15..16 " "
+      DirectiveLocations@16..24
+        Name@16..23 "NOWHERE"
+        Newline@23..24 "\n"

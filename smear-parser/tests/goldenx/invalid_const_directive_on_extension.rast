@@ -1,0 +1,28 @@
+Root@0..24
+  Document@0..24
+    ObjectTypeExtension@0..24
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "type"
+      Space@11..12 " "
+      ExtensionName@12..14
+        Path@12..14
+          Name@12..13 "T"
+          Space@13..14 " "
+      Directives@14..24
+        Directive@14..23
+          At@14..15 "@"
+          TypePath@15..16
+            Path@15..16
+              Name@15..16 "d"
+          Arguments@16..23
+            LParen@16..17 "("
+            Argument@17..22
+              Name@17..18 "a"
+              Colon@18..19 ":"
+              Space@19..20 " "
+              VariableValue@20..22
+                Dollar@20..21 "$"
+                Name@21..22 "v"
+            RParen@22..23 ")"
+        Newline@23..24 "\n"

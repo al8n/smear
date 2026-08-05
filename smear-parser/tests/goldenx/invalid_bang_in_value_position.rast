@@ -1,0 +1,22 @@
+Root@0..14
+  Document@0..14
+    OperationDefinition@0..13
+      SelectionSet@0..13
+        LBrace@0..1 "{"
+        Newline@1..2 "\n"
+        Space@2..3 " "
+        Space@3..4 " "
+        Field@4..12
+          Name@4..5 "f"
+          Arguments@5..11
+            LParen@5..6 "("
+            Argument@6..10
+              Name@6..7 "a"
+              Colon@7..8 ":"
+              Space@8..9 " "
+              Error@9..10
+                Bang@9..10 "!"
+            RParen@10..11 ")"
+          Newline@11..12 "\n"
+        RBrace@12..13 "}"
+    Newline@13..14 "\n"

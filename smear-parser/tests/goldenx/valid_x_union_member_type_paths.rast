@@ -1,0 +1,32 @@
+Root@0..30
+  Document@0..30
+    UnionTypeDefinition@0..30
+      Name@0..5 "union"
+      Space@5..6 " "
+      DefinitionName@6..8
+        Name@6..7 "U"
+        Space@7..8 " "
+      UnionMemberTypes@8..30
+        Equal@8..9 "="
+        Space@9..10 " "
+        TypePath@10..20
+          Path@10..15
+            Name@10..12 "ns"
+            PathSeparator@12..14 "::"
+            Name@14..15 "A"
+          TypeGenerics@15..20
+            LAngle@15..16 "<"
+            DefinitionTypePath@16..19
+              Path@16..19
+                Name@16..19 "Int"
+            RAngle@19..20 ">"
+        Space@20..21 " "
+        Pipe@21..22 "|"
+        Space@22..23 " "
+        TypePath@23..30
+          Path@23..30
+            PathSeparator@23..25 "::"
+            Name@25..26 "b"
+            PathSeparator@26..28 "::"
+            Name@28..29 "B"
+            Newline@29..30 "\n"

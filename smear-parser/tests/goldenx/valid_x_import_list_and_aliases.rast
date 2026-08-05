@@ -1,0 +1,57 @@
+Root@0..58
+  Document@0..58
+    ImportDefinition@0..41
+      Name@0..6 "import"
+      Space@6..7 " "
+      ImportList@7..32
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        NamedSpecifier@9..12
+          Name@9..10 "A"
+          Comma@10..11 ","
+          Space@11..12 " "
+        NamedSpecifier@12..24
+          Name@12..13 "B"
+          Space@13..14 " "
+          Name@14..16 "as"
+          Space@16..17 " "
+          Path@17..24
+            Name@17..19 "ns"
+            PathSeparator@19..21 "::"
+            Name@21..22 "C"
+            Comma@22..23 ","
+            Space@23..24 " "
+        WildcardSpecifier@24..31
+          Asterisk@24..25 "*"
+          Space@25..26 " "
+          Name@26..28 "as"
+          Space@28..29 " "
+          Path@29..31
+            Name@29..30 "w"
+            Space@30..31 " "
+        RBrace@31..32 "}"
+      Space@32..33 " "
+      Name@33..37 "from"
+      Space@37..38 " "
+      StringValue@38..41
+        InlineString@38..41 "\"m\""
+    Newline@41..42 "\n"
+    ObjectTypeDefinition@42..57
+      Name@42..46 "type"
+      Space@46..47 " "
+      DefinitionName@47..49
+        Name@47..48 "T"
+        Space@48..49 " "
+      FieldsDefinition@49..57
+        LBrace@49..50 "{"
+        Space@50..51 " "
+        FieldDefinition@51..56
+          Name@51..52 "f"
+          Colon@52..53 ":"
+          Space@53..54 " "
+          DefinitionTypePath@54..56
+            Path@54..56
+              Name@54..55 "A"
+              Space@55..56 " "
+        RBrace@56..57 "}"
+    Newline@57..58 "\n"
