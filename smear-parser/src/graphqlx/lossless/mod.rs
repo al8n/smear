@@ -232,8 +232,12 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
   }
 }
 
+pub mod coverage;
 pub mod kind_map;
+pub mod recover;
 pub mod runner;
 pub mod trivia;
+pub mod ty;
+pub mod value;
 
 pub use runner::{Parse, parse_str, profile};
