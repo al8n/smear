@@ -72,5 +72,37 @@ pub mod graphql;
 
 /// The GraphQLx dialect: namespaced paths, collection values, generic type
 /// references, and imports over the concrete GraphQLx lexer.
+#[cfg_attr(
+  all(feature = "graphql", feature = "rowan"),
+  doc = r#"
+# A GraphQL node may not be cast through a GraphQLx wrapper
+
+True by construction — the two dialects derive their kind spaces independently, so
+`rowan::SyntaxNode<GraphQLLang>` and `rowan::SyntaxNode<GraphQLxLang>` are different types. But
+"true by construction" is what a refactor breaks silently, so it is asserted:
+
+```compile_fail
+# use smear_parser::{graphql, graphqlx};
+# use smear_parser::lossless::ast::CastNode;
+let parse = graphql::lossless::parse_str("type T { f: Int }");
+let node = parse.syntax();
+// error[E0308]: expected `SyntaxNode<GraphQLxLang>`, found `SyntaxNode<GraphQLLang>`
+let _ = graphqlx::lossless::ast::ObjectTypeDefinition::cast_node(node);
+```
+
+Two things about where this sits.
+
+It is **gated on `graphql`**. Without the gate the snippet would still fail to compile — on
+`graphql` being an unresolved module — and a `compile_fail` doctest that fails for the wrong reason
+is green in exactly the same way as one that fails for the right one. The failure was checked by
+running the block un-gated and reading the error: `E0308`, naming both languages.
+
+It is **at the crate root and not in `graphqlx::lossless::ast`**, where the plan put it. A doctest
+that names both dialects has to live in a module allowed to name both, and
+`tests/lossless_isolation.rs` forbids exactly that of either dialect's tree. This module
+declaration is where the two dialects are introduced, so it is the one place the assertion is not
+itself a boundary crossing.
+"#
+)]
 #[cfg(feature = "graphqlx")]
 pub mod graphqlx;
