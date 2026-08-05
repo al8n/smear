@@ -15,8 +15,15 @@
 /// - `lossless` — preserves every byte of trivia. For formatters, linters, IDEs and
 ///   syntax highlighters, where the source must round-trip exactly.
 ///
-/// Available dialects are [`graphql`](lexer::graphql) and, under the `graphqlx`
-/// feature, [`graphqlx`](lexer::graphqlx).
+/// A dialect is a module only in a build that enables its feature, so each link below is gated
+/// to the build that has something to link to. Ungated, they are `unresolved link` errors under
+/// `RUSTDOCFLAGS="-D warnings"` in every single-dialect configuration — the failure the `docs`
+/// CI job's dialect-alone legs exist to catch.
+///
+/// Available dialects:
+///
+#[cfg_attr(feature = "graphql", doc = "- [`graphql`](lexer::graphql)")]
+#[cfg_attr(feature = "graphqlx", doc = "- [`graphqlx`](lexer::graphqlx)")]
 pub use smear_lexer as lexer;
 
 /// Parsers for GraphQL and GraphQL-like DSLs.
@@ -25,9 +32,14 @@ pub use smear_lexer as lexer;
 /// that build AST nodes from the token streams produced by [`lexer`], composed with
 /// the `tokora` combinator library.
 ///
-/// Available dialects are [`graphql`](parser::graphql) and, under the `graphqlx`
-/// feature, [`graphqlx`](parser::graphqlx) — the latter adding imports, generics,
-/// where-clauses, map and set types, and namespaced paths on top of GraphQL.
+/// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
+///
+#[cfg_attr(feature = "graphql", doc = "- [`graphql`](parser::graphql)")]
+#[cfg_attr(
+  feature = "graphqlx",
+  doc = "- [`graphqlx`](parser::graphqlx) — adds imports, generics, where-clauses, map and set \
+         types, and namespaced paths on top of GraphQL."
+)]
 pub use smear_parser as parser;
 
 #[doc(hidden)]

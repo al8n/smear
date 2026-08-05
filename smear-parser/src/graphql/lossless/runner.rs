@@ -153,10 +153,10 @@ pub mod test_support {
   /// (`tokora/src/parser/node.rs`'s own `wrap`) — with `kind` standing in for a production's.
   /// `'inp` is named and threaded from `src`, not elided, for the reason `trivia.rs`'s driver
   /// and `lossless_drivers!` both record: a closure's parameter type is spelled out explicitly
-  /// (see [`TestInput`]), and an elided lifetime there is free to be inferred shorter than the
-  /// source's, which the borrow checker then refuses. Nothing else in the crate calls this; it
-  /// exists for `tests/lossless_runner.rs`'s validator-discrimination test, which always passes
-  /// `""` — the node this probes wraps zero tokens either way.
+  /// (the private `TestInput` alias above), and an elided lifetime there is free to be inferred
+  /// shorter than the source's, which the borrow checker then refuses. Nothing else in the crate
+  /// calls this; it exists for `tests/lossless_runner.rs`'s validator-discrimination test, which
+  /// always passes `""` — the node this probes wraps zero tokens either way.
   ///
   /// # Panics
   ///

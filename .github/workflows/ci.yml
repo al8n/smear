@@ -4,18 +4,26 @@ on:
   push:
     branches:
       - main
+    # `**.md` used to sit in these lists. It cannot: `README.md`,
+    # `smear-lexer/README.md` and `smear-parser/README.md` are `include_str!`-ed
+    # into their crates' rustdoc, so editing one is a compile-time change to the
+    # documentation, and a broken reference-style link in a README fails the
+    # `docs` job below. Ignoring them meant the one job that can catch such a
+    # break never ran for the one change class that causes it. Only the markdown
+    # no crate compiles — `docs/` notes and the excluded `legacy/` tree — is
+    # ignored.
     paths-ignore:
-      - 'README'
       - 'COPYRIGHT'
       - 'LICENSE-*'
-      - '**.md'
+      - 'docs/**.md'
+      - 'legacy/**.md'
       - '**.txt'
   pull_request:
     paths-ignore:
-      - 'README'
       - 'COPYRIGHT'
       - 'LICENSE-*'
-      - '**.md'
+      - 'docs/**.md'
+      - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
   schedule: [cron: "0 1 */7 * *"]
@@ -228,6 +236,81 @@ jobs:
 
     - name: Run test
       run: cargo test --all-features -- --quiet
+
+  # Build the documentation under `-D warnings`.
+  #
+  # An intra-doc link is a compile-time reference, not prose: it resolves against
+  # exactly the items the selected feature set compiles, and nothing else. That is
+  # why `--all-features` is the one configuration that *cannot* see a cross-dialect
+  # link — with both `graphql` and `graphqlx` present, every cross-dialect target
+  # resolves, and a link from one dialect's tree into the other's reads as valid.
+  # It is only a build that leaves a dialect out that has nothing to resolve to.
+  #
+  # So this job is a matrix, not a step. The `--all-features` leg catches the
+  # ordinary breakage (a private target, a renamed item, a broken README
+  # reference); the dialect-alone legs catch the isolation breach that reads like
+  # a comment. Both are needed, and neither subsumes the other: the two links this
+  # job was added for failed under `--all-features`, while the two in `smear`'s
+  # facade were invisible there and only the single-dialect legs saw them.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: cargo doc --workspace --all-features
+      run: |
+        set -euo pipefail
+        TD="${CARGO_TARGET_DIR:-target}"
+        rm -rf "$TD/doc"
+        cargo doc --workspace --all-features --no-deps
+        for page in smear smear_lexer smear_parser; do
+          if [ ! -f "$TD/doc/$page/index.html" ]; then
+            echo "::error::cargo doc --workspace --all-features exited 0 but wrote no page for $page"
+            exit 1
+          fi
+        done
+    - name: cargo doc, one dialect at a time
+      run: |
+        set -euo pipefail
+        TD="${CARGO_TARGET_DIR:-target}"
+
+        # `package|features|rendered page`.
+        #
+        # Every leg is `--no-default-features` plus exactly one dialect, because a
+        # cross-dialect link is only unresolvable when the other dialect is absent.
+        # `rowan` rides along for `smear-parser` because the lossless tree — where
+        # Phase B found the first such link — is compiled out without it.
+        legs=(
+          "smear-parser|rowan,graphql|smear_parser"
+          "smear-parser|rowan,graphqlx|smear_parser"
+          "smear-lexer|graphql|smear_lexer"
+          "smear-lexer|graphqlx|smear_lexer"
+          "smear|graphql|smear"
+          "smear|graphqlx|smear"
+        )
+
+        for leg in "${legs[@]}"; do
+          IFS='|' read -r pkg features page <<< "$leg"
+          echo "::group::cargo doc -p $pkg --no-default-features --features $features"
+
+          # `required-features` makes cargo *skip* a target rather than fail it, so a
+          # feature set that selects nothing at all exits 0 having documented nothing,
+          # and a green step is not evidence the leg ran. Each leg therefore deletes
+          # its own page first and asserts it came back: the page can only exist
+          # because this leg wrote it, not because an earlier leg did.
+          rm -rf "$TD/doc/$page"
+          cargo doc -p "$pkg" --no-default-features --features "$features" --no-deps
+          if [ ! -f "$TD/doc/$page/index.html" ]; then
+            echo "::error::cargo doc -p $pkg --features $features exited 0 but documented nothing"
+            exit 1
+          fi
+
+          echo "::endgroup::"
+        done
 
   # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
   # a floor that silently drifts above the declared value is caught here
