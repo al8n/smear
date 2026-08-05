@@ -90,7 +90,11 @@ use super::{
   value::Constness,
 };
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `extend scalar Name Directives`
   ///
   /// The one extension whose directives are **mandatory** — the grammar gives it no other
@@ -448,6 +452,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one document-level production over a `&str` and hand back the tree it
   /// built, for `tests/lossless_document.rs`.
   mod test_support;

@@ -32,9 +32,22 @@ pub mod ast;
 
 pub mod coverage;
 
+// Gated on there being a dialect assembly to consume them. `rowan` alone — which is what
+// `cargo hack --each-feature` builds, and what `lossless-coverage` implies — compiles this
+// substrate with no dialect in the crate, and three macros nobody invokes are three
+// `unused_macros` denials. The cfg is `any(…)` rather than `graphql` because GraphQLx's assembly
+// is the second consumer.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+mod macros;
+
+pub mod recover;
+
 pub mod runner;
 
 pub mod trivia;
+
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) use macros::{lossless_drivers, lossless_error_impls, lossless_production};
 
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and
 /// typed layer to work over it.

@@ -315,3 +315,88 @@ fn a_declined_retro_wrap_is_not_counted() {
 fn a_malformed_stream_panics_naming_the_dialect() {
   let _ = smear_parser::graphql::lossless::runner::test_support::structure_without_tokens("a", 0);
 }
+
+/// Every delimiter pair a dialect declares reaches **its own** report, and one it does not
+/// declare reaches the catch-all.
+///
+/// **This is the only door onto `lossless_error_impls!`'s `unclosed` list, and it has to be a
+/// direct call rather than a parse.** `Parse` drops the typed payload at the materialization
+/// boundary — deliberately, so a `Parse` can outlive the source — so every parse-level assertion
+/// about an unterminated `[` can say no more than `has_errors()`. Task 6 measured that: swapping
+/// `"[]" => unclosed_list` for `"[]" => unclosed_object`, and replacing the catch-all arm with
+/// `unreachable!()`, both left the whole suite green.
+///
+/// The list is a **macro argument**, so a dialect states its pairs rather than inheriting a body,
+/// and GraphQLx will state a fourth (`<>`). A silent list is one a second dialect can get wrong in
+/// a way nothing reports.
+///
+/// The `<>` case is not synthetic: tokora ships `UnclosedAngle`, GraphQL's grammar opens no angle
+/// bracket and its list therefore omits the pair, so the catch-all is genuinely reachable here —
+/// and reaching it is what proves the arm produces an error instead of panicking.
+#[test]
+fn each_declared_delimiter_pair_reaches_its_own_report() {
+  use smear_parser::{
+    graphql::{
+      GraphQL,
+      error::{ErrorData, Unclosed as DialectUnclosed},
+      lossless::GraphqlLosslessErrors,
+    },
+    lexer::graphql::lossless::LosslessLexer,
+  };
+  use tokora::{
+    SimpleSpan,
+    emitter::FromUnclosed,
+    error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen},
+  };
+
+  type Errs = GraphqlLosslessErrors<&'static str>;
+  type Lx<'a> = LosslessLexer<'a, &'a str>;
+
+  let span = SimpleSpan::new(3, 4);
+
+  /// The container holds exactly one error; hand back the discriminant its data carries.
+  macro_rules! only_data {
+    ($err:expr) => {{
+      let errs: Errs = <Errs as FromUnclosed<'_, Lx<'_>, GraphQL>>::from_unclosed($err);
+      let mut it = errs.into_iter();
+      let first = it.next().expect("the conversion produced no error at all");
+      assert!(it.next().is_none(), "the conversion produced more than one");
+      first
+    }};
+  }
+
+  let bracket = only_data!(UnclosedBracket::<SimpleSpan, GraphQL>::bracket_of(span));
+  assert!(
+    matches!(bracket.data(), ErrorData::Unclosed(DialectUnclosed::List)),
+    "`[]` did not reach unclosed_list: {:?}",
+    bracket.data()
+  );
+
+  let brace = only_data!(UnclosedBrace::<SimpleSpan, GraphQL>::brace_of(span));
+  assert!(
+    matches!(brace.data(), ErrorData::Unclosed(DialectUnclosed::Object)),
+    "`{{}}` did not reach unclosed_object: {:?}",
+    brace.data()
+  );
+
+  let paren = only_data!(UnclosedParen::<SimpleSpan, GraphQL>::paren_of(span));
+  assert!(
+    matches!(
+      paren.data(),
+      ErrorData::Unclosed(DialectUnclosed::Parentheses)
+    ),
+    "`()` did not reach unclosed_parentheses: {:?}",
+    paren.data()
+  );
+
+  // The pair GraphQL does not declare. The catch-all must answer, and must answer with an error.
+  let angle = only_data!(UnclosedAngle::<SimpleSpan, GraphQL>::angle_of(span));
+  assert!(
+    matches!(angle.data(), ErrorData::Other(note) if note == "unclosed delimiter"),
+    "an undeclared pair did not reach the catch-all: {:?}",
+    angle.data()
+  );
+
+  // The span survives every arm — the diagnostic points at the opener, not at the end of input.
+  assert_eq!(bracket.span().start(), 3);
+}

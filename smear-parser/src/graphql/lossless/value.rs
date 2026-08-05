@@ -148,7 +148,11 @@ impl Constness {
   }
 }
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `$ Name`
   fn variable<'inp, Src, Ctx>(inp) {
     node(
@@ -379,6 +383,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one value production over a `&str` and hand back the tree it built, for
   /// `tests/lossless_value.rs`.
   mod test_support;

@@ -54,7 +54,11 @@ use super::{
   trivia::{eat_if, expect, peek_kind, try_eat},
 };
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `Name`
   ///
   /// # The trivia is committed before the node opens, and that is this production's own job
@@ -157,6 +161,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one type-reference production over a `&str` and hand back the tree it
   /// built, for `tests/lossless_ty_directive.rs`.
   mod test_support;

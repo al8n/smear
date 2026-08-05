@@ -63,7 +63,11 @@ use super::{
   value::{Constness, default_value, variable},
 };
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `Variable : Type DefaultValue? Directives[Const]?`
   ///
   /// **Precondition: the head is `$`.** [`variables_definition`] decides that.
@@ -253,6 +257,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one executable-definition production over a `&str` and hand back the tree
   /// it built, for `tests/lossless_selection.rs`.
   mod test_support;

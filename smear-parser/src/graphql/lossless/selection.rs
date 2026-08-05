@@ -79,7 +79,11 @@ use super::{
   value::Constness,
 };
 
+use crate::lossless::{lossless_drivers, lossless_production};
+
 lossless_production! {
+  dialect = graphql::lossless;
+
   /// `on NamedType` — the type condition of an inline fragment or a fragment definition.
   ///
   /// **Opens no node of its own**, the kind space having no `TypeCondition` image; the
@@ -262,6 +266,8 @@ lossless_production! {
 }
 
 lossless_drivers! {
+  dialect = graphql::lossless;
+
   /// Drivers that run one selection production over a `&str` and hand back the tree it built,
   /// for `tests/lossless_selection.rs`.
   mod test_support;
