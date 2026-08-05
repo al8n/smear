@@ -233,9 +233,13 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
 }
 
 pub mod coverage;
+pub mod directive;
+pub mod executable;
+pub mod generic;
 pub mod kind_map;
 pub mod recover;
 pub mod runner;
+pub mod selection;
 pub mod trivia;
 pub mod ty;
 pub mod value;

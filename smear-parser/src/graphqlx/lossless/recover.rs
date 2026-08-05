@@ -27,7 +27,7 @@
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{
   SimpleSpan,
-  error::{UnclosedAngle, UnclosedBrace, UnclosedBracket},
+  error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen},
   input::Balance,
 };
 
@@ -94,6 +94,55 @@ pub(crate) const TYPE_HEADS: &[Kind] = &[
 /// The token kinds a `Path` — and therefore a `TypePath` — may begin with.
 pub(crate) const PATH_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
 
+/// The token kinds an `Argument` may begin with.
+///
+/// An argument's key is a plain [`Name`](crate::graphqlx::kinds::SyntaxKind::Name), the same
+/// ruling [`OBJECT_FIELD_HEADS`] records: `graphqlx/syntactic/argument/mod.rs`'s `argument` is
+/// `take_argument_name then_ignore(colon) then(value)`, so only the value side widened.
+pub(crate) const ARGUMENT_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds a `Selection` may begin with.
+pub(crate) const SELECTION_HEADS: &[Kind] = &[Kind::Identifier, Kind::Spread];
+
+/// The token kinds that may follow a `...` — **four**, against GraphQL's three.
+///
+/// `PathSeparator` is the extra one and it is a whole arm rather than a wider name: a `...` before
+/// a `::` opens a fully qualified fragment spread (`graphqlx/syntactic/selection/mod.rs:427-435`).
+pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[
+  Kind::Identifier,
+  Kind::PathSeparator,
+  Kind::At,
+  Kind::LBrace,
+];
+
+/// The token kinds a `TypeCondition` may begin with.
+///
+/// `on` is an `Identifier` to the lexer, and the type after it is a
+/// [`TypePath`](crate::graphqlx::kinds::SyntaxKind::TypePath) rather than GraphQL's bare named
+/// type — so a leading `::` is a head here and is not one in GraphQL's set.
+pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
+
+/// The token kinds a `VariableDefinition` may begin with.
+///
+/// **Three, against GraphQL's one.** Divergence 12: a GraphQLx variable definition may carry a
+/// leading description (`graphqlx/syntactic/executable/mod.rs:343-346`), so the two string kinds
+/// are heads here and the `$` is only the most common one.
+pub(crate) const VARIABLE_DEFINITION_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Dollar];
+
+/// The token kinds an `ExecutableDefinition` may begin with: a description, the shorthand's `{`,
+/// or one of the four keyword spellings, all of which are `Identifier`s.
+pub(crate) const EXECUTABLE_DEFINITION_HEADS: &[Kind] = &[
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBrace,
+  Kind::Identifier,
+];
+
+/// The token kinds a bare `Name` position admits — an operation's name, a generic parameter, a
+/// fragment's name.
+pub(crate) const NAME_HEADS: &[Kind] = &[Kind::Identifier];
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -131,6 +180,15 @@ pub(crate) const fn starts_type(kind: Kind) -> bool {
     Kind::Identifier | Kind::PathSeparator | Kind::LBracket | Kind::LAngle
   )
 }
+
+// `starts_description` — the one two-kind test every described position makes. Generated from
+// Task 7's frozen macro rather than written out, so a dialect cannot forget `BlockString` in one
+// of the places it asks. It lives here beside `starts_value` and `starts_type` because it is the
+// same kind of thing: a head predicate over the lexer's vocabulary, consumed by a `match` guard.
+//
+// GraphQLx asks it in more places than GraphQL does — divergence 12 puts a description on a
+// variable definition and on an executable definition, neither of which GraphQL has.
+crate::lossless::description_head_predicate!(smear_lexer::graphqlx::lossless::LosslessTokenKind);
 
 pub(crate) use crate::lossless::recover::opener_span;
 
@@ -236,9 +294,11 @@ lossless_production! {
     crate::lossless::recover::unclosed(inp, UnclosedBrace::<SimpleSpan, GraphQLx>::brace_of(open))
   }
 
-  // `unclosed_parens` is deliberately absent until Task 11 writes `arguments`: this dialect's `()`
-  // pair is opened by no production yet, and a recovery helper with no caller is scaffolding whose
-  // only witness would be the `dead_code` lint it silences.
+  /// A parenthesised list — an argument list or a variables definition — ran to end of input
+  /// before its `)` arrived.
+  fn unclosed_parens<'inp, Src, Ctx>(inp, open: SimpleSpan) {
+    crate::lossless::recover::unclosed(inp, UnclosedParen::<SimpleSpan, GraphQLx>::paren_of(open))
+  }
 
   /// An angle-delimited shape — a set type, a map type or a generic list — ran to end of input
   /// before its `>` arrived.
