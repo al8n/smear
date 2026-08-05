@@ -3,8 +3,11 @@
 
 use tokora::{
   Source,
-  cst::{Cst, CstProfile, KindValidator, Sink, parse_lossless},
+  cst::{Cst, CstProfile, KindValidator, parse_lossless},
 };
+// `Sink` is named only by `LosslessSink`, which the drivers alone use.
+#[cfg(feature = "test-support")]
+use tokora::cst::Sink;
 
 use super::{GraphqlxLosslessLexer, GraphqlxLosslessSlice, GraphqlxLosslessToken};
 use crate::{graphqlx::kinds::SyntaxKind as K, lossless::KindSpace};
@@ -54,6 +57,10 @@ pub(crate) type LosslessEmitter<'inp> = tokora::emitter::Verbose<
 /// Named only as the emitter half of a driver's **context pair** — `Sink::new` is tokora-private,
 /// so the one way to mint one is [`parse_lossless`], which takes the source once and uses that
 /// same argument for the sink and the input.
+///
+/// Which is why it is gated with the drivers: the shipped [`parse_str`] path names
+/// [`LosslessCst`] and never this, so with `test-support` off it has no reference at all.
+#[cfg(feature = "test-support")]
 pub(crate) type LosslessSink<'inp> =
   Sink<'inp, GraphqlxLosslessLexer<'inp, str>, LosslessEmitter<'inp>>;
 
@@ -135,6 +142,11 @@ pub fn parse_str(src: &str) -> Parse {
 /// hands the sink a kind no production would ever construct. This module is that caller — a direct
 /// spend of the sink's own retro-wrap door, through the crate's real, shipped `profile()`, so the
 /// validator under test is the one every parse actually runs.
+///
+/// Behind `feature = "test-support"`, and hidden even then: both entry points exist to build a
+/// tree the grammar cannot produce, and one of them panics by design. `pub` is forced only
+/// because `tests/lossless_x_runner.rs` is a separate crate.
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support {
   use tokora::{InputRef, cache::DefaultCache};

@@ -248,6 +248,9 @@ lossless_production! {
   /// [`path`]'s `expect` returns `Err` on a head that is neither a name nor a `::`, which aborts
   /// every enclosing production. This is the door a *list* of paths uses, where one bad member
   /// must cost one `Error` node and not the list.
+  // No list production names it yet, so its driver is its only caller and the gate takes it —
+  // see `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn path_or_recover<'inp, Src, Ctx>(inp) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Identifier | Kind::PathSeparator) => path::<Src, Ctx>(inp),

@@ -334,6 +334,9 @@ lossless_production! {
   /// walk. This loop's terminating peek is also what crosses the trailing trivia, which therefore
   /// lands inside the document — a document *is* the whole file, so that is the right answer
   /// rather than a tolerated one.
+  // The executable-only root, off `parse_str`'s mixed-form path; its driver is its only caller
+  // and the gate takes it — see `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(
       K::ExecutableDocument.raw(),

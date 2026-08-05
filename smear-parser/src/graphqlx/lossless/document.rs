@@ -120,6 +120,9 @@ lossless_production! {
 
   /// One entry of an [`executable_document`](super::executable::executable_document): an import or
   /// a described executable definition.
+  // Reached only from `executable::executable_document`, itself reached only from a driver — see
+  // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn import_or_executable_definition<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -138,6 +141,9 @@ lossless_production! {
 
   /// One entry of a [`type_system_document`]: an import, an extension, or a described type-system
   /// definition.
+  // Reached only from `type_system_document`, itself reached only from a driver — see
+  // `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn import_or_type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -194,6 +200,9 @@ lossless_production! {
   /// [`document`]'s loop over the SDL-only dispatcher, written out rather than shared: a
   /// higher-ranked `fn` parameter would be the only way to abstract over the three dispatchers, and
   /// it buys eight lines at the cost of a signature no reader can check at a glance.
+  // The SDL-only root, off `parse_str`'s mixed-form path; its driver is its only caller and the
+  // gate takes it — see `lossless_drivers!`.
+  #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn type_system_document<'inp, Src, Ctx>(inp) {
     node(
       K::TypeSystemDocument.raw(),
