@@ -263,7 +263,11 @@ pub enum SyntaxKind {
   ObjectTypeDefinition,
   /// The `interface` form of the same shape.
   InterfaceTypeDefinition,
-  /// `union DefinitionName Directives? WhereClause? UnionMemberTypes?`.
+  /// `union DefinitionName Directives? UnionMemberTypes? WhereClause?`.
+  ///
+  /// The clause comes **after** the members and requires them —
+  /// `graphqlx/syntactic/definition/union.rs:87-95` parses `try_union_members` and then
+  /// `try_where_clause`, which is the reverse of every other `where` site.
   UnionTypeDefinition,
   /// `enum DefinitionName Directives? EnumValuesDefinition?`.
   EnumTypeDefinition,
@@ -302,7 +306,8 @@ pub enum SyntaxKind {
   ObjectTypeExtension,
   /// The `extend interface` form of the same shape.
   InterfaceTypeExtension,
-  /// `extend union ExtensionName Directives? WhereClause? UnionMemberTypes?`.
+  /// `extend union ExtensionName Directives? UnionMemberTypes? WhereClause?`, for the reason
+  /// [`UnionTypeDefinition`](Self::UnionTypeDefinition) records.
   UnionTypeExtension,
   /// `extend enum ExtensionName Directives? EnumValuesDefinition?`.
   EnumTypeExtension,
