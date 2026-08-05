@@ -262,8 +262,6 @@ pub enum LosslessTokenKind {
 
   /// Float literal token
   Float,
-  /// Boolean literal token
-  Boolean,
   /// Identifier token
   Identifier,
   /// Integer literal token
@@ -301,7 +299,6 @@ impl core::fmt::Display for LosslessTokenKind {
       Self::Pipe => f.write_str("|"),
       Self::Spread => f.write_str("..."),
       Self::Float => f.write_str("float"),
-      Self::Boolean => f.write_str("boolean"),
       Self::Identifier => f.write_str("identifier"),
       Self::Int => f.write_str("int"),
       Self::InlineString => f.write_str("string"),
@@ -314,6 +311,7 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::LitPlainStr;
   use tokora::token::IdentifierToken;
 
   #[test]
@@ -326,5 +324,71 @@ mod tests {
     assert!(!IdentifierToken::is_identifier(
       &LosslessToken::<&str>::LitInt("1")
     ));
+  }
+
+  /// Census: every declared [`LosslessTokenKind`] variant must be producible by some
+  /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
+  ///
+  /// `Boolean` used to be a counterexample: the kind existed with no `LosslessToken` variant
+  /// able to produce it (`true`/`false` lex as `Identifier`, correctly — booleans are `Name`
+  /// tokens lexically per the GraphQL spec, distinguished only at parse time), so it was a
+  /// kind nothing could ever emit.
+  ///
+  /// `census!` builds an exhaustive `match` — no wildcard arm — mapping each
+  /// `LosslessTokenKind` to a `LosslessToken` that produces it, from the same variant list it
+  /// uses to drive the round-trip assertions below. There is one list, not two kept in sync
+  /// by hand: add a `LosslessTokenKind` variant without adding a case here and the generated
+  /// `match` stops being exhaustive, which is a compile error naming the missing variant
+  /// rather than a runtime assertion that might simply never run.
+  #[test]
+  fn lossless_token_kind_census() {
+    macro_rules! census {
+      ($($variant:ident => $token:expr),+ $(,)?) => {
+        fn sample(kind: LosslessTokenKind) -> LosslessToken<&'static str> {
+          match kind {
+            $(LosslessTokenKind::$variant => $token,)+
+          }
+        }
+
+        $(
+          assert_eq!(
+            sample(LosslessTokenKind::$variant).kind(),
+            LosslessTokenKind::$variant,
+            "LosslessTokenKind::{} is declared but its sample token maps to a different kind",
+            stringify!($variant),
+          );
+        )+
+      };
+    }
+
+    census! {
+      Ampersand => LosslessToken::Ampersand,
+      At => LosslessToken::At,
+      Bom => LosslessToken::Bom("\u{FEFF}"),
+      RBrace => LosslessToken::RBrace,
+      LBrace => LosslessToken::LBrace,
+      RBracket => LosslessToken::RBracket,
+      LBracket => LosslessToken::LBracket,
+      RParen => LosslessToken::RParen,
+      LParen => LosslessToken::LParen,
+      Bang => LosslessToken::Bang,
+      Colon => LosslessToken::Colon,
+      Dollar => LosslessToken::Dollar,
+      Equal => LosslessToken::Equal,
+      Space => LosslessToken::Space,
+      Tab => LosslessToken::Tab,
+      CarriageReturn => LosslessToken::CarriageReturn,
+      Newline => LosslessToken::Newline,
+      CarriageReturnAndNewline => LosslessToken::CarriageReturnAndNewline,
+      Comma => LosslessToken::Comma,
+      Pipe => LosslessToken::Pipe,
+      Spread => LosslessToken::Spread,
+      Float => LosslessToken::LitFloat("1.0"),
+      Identifier => LosslessToken::Identifier("x"),
+      Int => LosslessToken::LitInt("1"),
+      InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainStr::new("\"s\""))),
+      BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainStr::new("\"\"\"b\"\"\""))),
+      Comment => LosslessToken::Comment("# c"),
+    }
   }
 }

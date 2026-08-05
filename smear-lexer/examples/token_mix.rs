@@ -53,7 +53,7 @@ fn classify(kind: LosslessTokenKind) -> Bucket {
 
     Spread => Bucket::Spread,
     Identifier => Bucket::Identifier,
-    Int | Float | Boolean => Bucket::Number,
+    Int | Float => Bucket::Number,
     InlineString => Bucket::InlineString,
     BlockString => Bucket::BlockString,
   }

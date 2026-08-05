@@ -186,7 +186,6 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
       LosslessTokenKind::Identifier => Expectation::Name,
       LosslessTokenKind::Int => Expectation::IntValue,
       LosslessTokenKind::Float => Expectation::FloatValue,
-      LosslessTokenKind::Boolean => Expectation::BooleanValue,
       LosslessTokenKind::InlineString => Expectation::InlineString,
       LosslessTokenKind::BlockString => Expectation::BlockString,
       LosslessTokenKind::Dollar => Expectation::Dollar,
