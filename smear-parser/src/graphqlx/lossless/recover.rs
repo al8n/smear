@@ -166,6 +166,18 @@ pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 /// three definition sites where a present `where` makes the block mandatory.
 pub(crate) const FIELDS_BLOCK_HEADS: &[Kind] = &[Kind::LBrace];
 
+/// The token kinds an import member may begin with — divergence 21: a name, or the wildcard `*`.
+pub(crate) const IMPORT_MEMBER_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk];
+
+/// The token kinds an import clause may begin with: the wildcard, or a braced list.
+pub(crate) const IMPORT_CLAUSE_HEADS: &[Kind] = &[Kind::Asterisk, Kind::LBrace];
+
+/// The one token kind an import's `from` source may be.
+///
+/// **Inline only.** `import_definition_after_keyword` calls `inline_string_value`, so a block
+/// string is a grammar error there even though the node above it is a `StringValue` either way.
+pub(crate) const IMPORT_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
+
 /// The `=` a union's members must open with — divergence 17's expectation, which is `Equal` and
 /// **not** `LBrace`: a union's `where` requires the members *before* it where an object's requires
 /// the block *after* it.
