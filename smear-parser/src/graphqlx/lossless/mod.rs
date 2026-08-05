@@ -232,6 +232,7 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
   }
 }
 
+pub mod ast;
 pub mod coverage;
 pub mod definition;
 pub mod directive;
