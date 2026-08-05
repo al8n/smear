@@ -7,7 +7,7 @@
 //!
 //! # What counts as trivia is the lexer's answer, not this module's
 //!
-//! The atoms cross whatever [`Token::is_trivia`](tokora::Token::is_trivia) admits. Which token
+//! The atoms cross whatever [`Token::is_trivia`] admits. Which token
 //! forms that is, is a **dialect** fact and is recorded in each dialect's own `trivia` module,
 //! beside the wrappers that pin the parameters; this module cannot name a token form and must
 //! not try.
@@ -107,7 +107,7 @@ where
 /// A dialect's `true`, `false`, `null`, `on`, `query`, `fragment` and the rest are **contextual
 /// keywords**: the lexer hands them back as ordinary identifier tokens, so a production that
 /// needs one has to read the *spelling*, which [`peek_kind`] cannot see.
-/// [`DowncastRef`](tokora::utils::DowncastRef) is that door — and naming its target here would
+/// [`DowncastRef`] is that door — and naming its target here would
 /// make this module name a concrete dialect type, which the Lego rule forbids. One atom over
 /// the type parameter serves every projection a dialect defines; the call site names the one
 /// it wants.

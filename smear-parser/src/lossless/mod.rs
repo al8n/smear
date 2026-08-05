@@ -21,10 +21,19 @@
 //! that decided it is in the design document; the short version is that a shared production needs
 //! ~26 trait members against a budget of 8, and no vocabulary change reaches that.
 
-/// The typed-accessor substrate: `ast_node!`'s helpers and the language-generic navigation types.
+// Each of the four carries its own `//!` header, and none of them carries an outer `///` here.
+// That is deliberate and it is a bug fix, not a style choice: when a module has doc fragments from
+// both places, rustdoc resolves the intra-doc links in *all* of them against the scope of the
+// first fragment — this file's — so `[`node`]` inside `coverage.rs` looked for `lossless::node`
+// and every such link silently broke. One fragment, one scope, links that resolve where they are
+// written.
+
 pub mod ast;
 
-/// The trivia-aware atom set: the only door a production peeks through.
+pub mod coverage;
+
+pub mod runner;
+
 pub mod trivia;
 
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and
