@@ -59,6 +59,10 @@ use super::{
 // projection normalize.
 // ---------------------------------------------------------------------------------------------
 
+/// The kind projection the atoms compare against, re-exported so `recover.rs`'s restart predicate
+/// can adapt a token to a kind without naming the projection twice.
+pub(crate) use crate::lossless::trivia::kind_of;
+
 /// [`crate::lossless::trivia::peek_kind`] over this dialect's input.
 #[inline]
 pub(crate) fn peek_kind<'inp, Src, Ctx>(
