@@ -1,0 +1,2 @@
+type Pair<K, V> where K: Node, V: ns::Serializable & Node { k: K, v: V }
+interface Holder<A, B> where A: Node B: Node<Int> { a: A, b: B }
