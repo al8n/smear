@@ -1,0 +1,3 @@
+extend interface I @d {
+  f: Int
+}

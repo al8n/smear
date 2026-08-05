@@ -1,0 +1,1 @@
+query { ... on ns::T<Int> @d { f } ... @e { g } ... { h } }

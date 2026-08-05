@@ -1,0 +1,1 @@
+union U<A> = X | Y where A: Node

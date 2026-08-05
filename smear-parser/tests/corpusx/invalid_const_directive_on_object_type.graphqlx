@@ -1,0 +1,1 @@
+type T @d(a: $v) { f: Int }

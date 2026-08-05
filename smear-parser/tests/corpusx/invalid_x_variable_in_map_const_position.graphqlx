@@ -1,0 +1,1 @@
+type T @d(m: map { $k => 1 }) { f: Int }

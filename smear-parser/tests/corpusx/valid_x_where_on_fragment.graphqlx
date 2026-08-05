@@ -1,0 +1,1 @@
+fragment F<T> on X where T: Node { g }

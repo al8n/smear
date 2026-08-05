@@ -1,0 +1,1 @@
+query Q<T> where T: Node { f }

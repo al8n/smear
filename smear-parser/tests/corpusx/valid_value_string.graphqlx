@@ -1,0 +1,3 @@
+{
+  f(empty: "", plain: "text", escaped: "quote \" backslash \\ unicode \u0041")
+}

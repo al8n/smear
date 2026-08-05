@@ -1,0 +1,3 @@
+{
+  f(empty: {}, flat: { k: 1, j: "s" }, nested: { outer: { inner: 2 } })
+}

@@ -1,0 +1,2 @@
+import { A, B as ns::C, * as w } from "m"
+type T { f: A }

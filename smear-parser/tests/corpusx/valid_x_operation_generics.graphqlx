@@ -1,0 +1,1 @@
+query Q<T = Int>($v: T) { f(a: $v) }

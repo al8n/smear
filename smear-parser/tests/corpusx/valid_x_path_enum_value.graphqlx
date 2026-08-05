@@ -1,0 +1,1 @@
+query { f(a: ::ns::Colour, b: Colour, c: ns::deep::Colour) }

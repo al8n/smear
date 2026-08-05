@@ -1,0 +1,3 @@
+import * from "n"
+import * as all from "o"
+type T { f: Int }

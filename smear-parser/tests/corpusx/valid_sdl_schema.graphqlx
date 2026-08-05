@@ -1,0 +1,5 @@
+schema @d {
+  query: Q
+  mutation: M
+  subscription: S
+}

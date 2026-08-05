@@ -1,0 +1,3 @@
+extend type T implements A @d {
+  f: Int
+}

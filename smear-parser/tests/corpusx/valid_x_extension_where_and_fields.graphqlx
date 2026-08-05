@@ -1,0 +1,1 @@
+extend type T<A> implements I where A: Node { f: A }

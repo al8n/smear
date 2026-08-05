@@ -1,0 +1,7 @@
+{
+  ...Frag @skip(if: true)
+}
+
+fragment Frag on T {
+  f
+}

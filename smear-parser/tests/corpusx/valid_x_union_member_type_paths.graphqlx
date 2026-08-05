@@ -1,0 +1,1 @@
+union U = ns::A<Int> | ::b::B
