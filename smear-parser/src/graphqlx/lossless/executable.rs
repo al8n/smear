@@ -49,13 +49,12 @@
 //! mark to the production it chose — which spends it, putting the description inside the
 //! definition it describes.
 //!
-//! # `executable_document` does not yet admit an import
+//! # `executable_document` loops over `document.rs`'s entry, not over `executable_definition`
 //!
-//! `graphqlx/syntactic/executable/mod.rs`'s document loops over
-//! `import_or_executable_definition`, and `import_definition` is Task 13's. The import arm joins
-//! at Task 14, which owns every `ImportOr*` dispatcher; until then this document is executable
-//! definitions only, and the gap is deliberate rather than overlooked — the same way
-//! `recover::unclosed_parens` was deliberately absent until this task's `arguments` needed it.
+//! `graphqlx/syntactic/executable/mod.rs`'s document admits an import at every position, and
+//! divergence 22 says that import may not be described. Both facts live in
+//! `document.rs`'s `import_or_executable_definition`, which is where the *other* two roots make
+//! the same decision; this document's loop reaches it rather than repeating either half.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
@@ -84,6 +83,20 @@ use super::{
   ty::type_ref,
   value::{Constness, default_value, variable},
 };
+
+/// Whether `keyword` opens an executable definition — the three operation spellings and
+/// `fragment`.
+///
+/// A free function rather than an arm inside the dispatcher, because `document.rs`'s mixed entry
+/// has to ask the same question *before* it can choose between the executable and the type-system
+/// dispatcher, and a question asked in two places is a question two places can answer differently.
+#[inline]
+pub(crate) fn starts_executable_keyword(keyword: Option<Keyword>) -> bool {
+  matches!(
+    keyword,
+    Some(Keyword::Query | Keyword::Mutation | Keyword::Subscription | Keyword::Fragment)
+  )
+}
 
 use crate::lossless::{lossless_drivers, lossless_production};
 
@@ -290,16 +303,13 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// Dispatch on the definition head, reading an optional leading description first. Opens **no**
-  /// node of its own; the chosen production spends the mark on its own.
-  fn executable_definition<'inp, Src, Ctx>(inp) {
-    // The head peek first, so the leading trivia it crosses is committed before the mark is
-    // minted and therefore lands outside whatever the mark eventually wraps.
-    let head = peek_kind::<Src, Ctx>(inp)?;
-    let mark = inp.cst_mark();
-    if starts_description(head) {
-      description::<Src, Ctx>(inp)?;
-    }
+  /// Dispatch on the definition head, with any description already committed and its `mark`
+  /// handed in. Opens **no** node of its own; the chosen production spends the mark on its own.
+  ///
+  /// **The description is the caller's**, and that is not an accident of layering: divergence 22
+  /// makes *whether* a description is allowed a property of the document root, so the three entry
+  /// dispatchers in `document.rs` read it and this production never does.
+  fn executable_definition_at<'inp, Src, Ctx>(inp, mark: EventMark) {
     match peek_kind::<Src, Ctx>(inp)? {
       // The shorthand operation, which has no keyword at all.
       Some(Kind::LBrace) => operation_definition::<Src, Ctx>(inp, mark),
@@ -332,7 +342,9 @@ lossless_production! {
           return recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_DEFINITION_HEADS);
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
-          executable_definition::<Src, Ctx>(inp)?;
+          if super::document::import_or_executable_definition::<Src, Ctx>(inp).is_err() {
+            recover::resync_to_definition::<Src, Ctx>(inp)?;
+          }
         }
         Ok(())
       },
