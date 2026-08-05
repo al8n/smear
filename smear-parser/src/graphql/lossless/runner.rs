@@ -66,11 +66,52 @@ pub(crate) type LosslessCst<'inp> =
 ///
 /// Shared by [`parse_str`] and by the per-production drivers under `test_support`, so the
 /// root kind, the fallible-materialization contract and the diagnostic projection are stated
-/// once. `finish` names the root kind — it is NOT profile data — and hands back the inner
-/// emitter, which is where the diagnostics live.
+/// once. The materialization door names the root kind — it is NOT profile data — and hands back
+/// the inner emitter, which is where the diagnostics live.
+///
+/// # Why the partial door
+///
+/// The door is [`Cst::finish_partial`], not [`Cst::finish`], and the difference is exactly two
+/// refusals: `finish` rejects an event stream that leaves a node open (`UnclosedNodes`) or leaves
+/// a source byte covered by neither a committed token nor a recorded lexer-error diagnostic
+/// (`UncoveredGap`); `finish_partial` closes the one and tiles the other as a `gap_kind` run.
+/// **Both of those are reachable from ordinary input**, so under `finish` they were a panic on a
+/// public entry point:
+///
+/// - The nesting budget is the **lexer's**, not the parser's. Every `{`, `[` and `(` steps the
+///   [`Limiter`](tokora::state::tracker::Limiter) carried in the Logos `Extras`, and that
+///   tracker's inherited ceiling is tokora's *general-purpose* **500**
+///   ([`RecursionLimiter::new`](tokora::state::recursion_tracker::RecursionLimiter)), not the
+///   parser-facing 64 — nothing in this crate descends through
+///   [`InputRef::descend`](tokora::InputRef::descend), so the parser-side limiter is never
+///   consulted at all.
+/// - The **501st** simultaneously-open bracket therefore fails its lex, and a resource-limit trip
+///   *latches a poison boundary*: the scanner refuses to rebuild a lexer past that offset. No
+///   token and no diagnostic can ever cover the tail, and [`document_entry`]'s `skip_while` drain
+///   cannot reach it either — that drain is the mechanism which otherwise guarantees coverage.
+/// - So `finish` reported `UncoveredGap` and [`parse_str`] panicked, at 501 open brackets, for
+///   input an IDE produces by typing. That was smear issue #57.
+///
+/// Under this door the same parse hands back a tree over every byte (`tree.text() == source`
+/// still holds, the un-lexable tail tiled as gaps) plus the limit trip already on the diagnostic
+/// channel, which is where a consumer routes on it.
+///
+/// Nothing else is relaxed. Balance underflow, close identity, retro-wrap integrity, kind
+/// hygiene, span discipline and the token-channel wall are enforced identically through both
+/// doors, so the panic below still guards a genuine sink bug — and it now names the
+/// [`FinishError`](tokora::cst::FinishError) it refused, because a message that dropped it made
+/// #57 diagnosable only by patching this line.
+///
+/// The widening costs nothing for input that already worked: gap **placement** differs between
+/// the two doors only for a run that trails no committed token, and only when the stream is
+/// unbalanced — a shape `finish` refuses outright rather than places differently.
+///
+/// [`document_entry`]: super::document::document_entry
 pub(crate) fn finish_root(cst: LosslessCst<'_>) -> Parse {
-  let (green, emitter) = cst.finish(K::Root.raw());
-  let green = green.expect("the GraphQL lossless sink emitted a malformed event stream");
+  // `finish_partial`, NOT `finish`. See this function's `Why the partial door` note.
+  let (green, emitter) = cst.finish_partial(K::Root.raw());
+  let green = green
+    .unwrap_or_else(|e| panic!("the GraphQL lossless sink emitted a malformed event stream: {e}"));
 
   // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
   // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
