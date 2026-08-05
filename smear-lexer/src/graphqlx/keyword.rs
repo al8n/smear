@@ -235,5 +235,133 @@ where
   }
 }
 
+/// Every contextual keyword this dialect declares, in declaration order.
+///
+/// An **array**, not a slice: the previous spelling here was `&[ContextualKeyword]`, whose length
+/// pins nothing, so a keyword inserted in the middle broke no test in either crate. The length is
+/// now a compile-time check, and `crate::keyword_prefix` compares the two dialects' lists against
+/// a third one written out by hand.
+#[cfg(test)]
+pub(crate) const KEYWORDS: [ContextualKeyword; 44] = [
+  ContextualKeyword::Type,
+  ContextualKeyword::Interface,
+  ContextualKeyword::Union,
+  ContextualKeyword::Enum,
+  ContextualKeyword::Input,
+  ContextualKeyword::Scalar,
+  ContextualKeyword::Extend,
+  ContextualKeyword::Schema,
+  ContextualKeyword::Directive,
+  ContextualKeyword::Fragment,
+  ContextualKeyword::Query,
+  ContextualKeyword::Mutation,
+  ContextualKeyword::Subscription,
+  ContextualKeyword::Implements,
+  ContextualKeyword::Repeatable,
+  ContextualKeyword::On,
+  ContextualKeyword::True,
+  ContextualKeyword::False,
+  ContextualKeyword::Null,
+  ContextualKeyword::QueryLocation,
+  ContextualKeyword::MutationLocation,
+  ContextualKeyword::SubscriptionLocation,
+  ContextualKeyword::FieldLocation,
+  ContextualKeyword::FragmentDefinitionLocation,
+  ContextualKeyword::FragmentSpreadLocation,
+  ContextualKeyword::InlineFragmentLocation,
+  ContextualKeyword::VariableDefinitionLocation,
+  ContextualKeyword::SchemaLocation,
+  ContextualKeyword::ScalarLocation,
+  ContextualKeyword::ObjectLocation,
+  ContextualKeyword::FieldDefinitionLocation,
+  ContextualKeyword::ArgumentDefinitionLocation,
+  ContextualKeyword::InterfaceLocation,
+  ContextualKeyword::UnionLocation,
+  ContextualKeyword::EnumLocation,
+  ContextualKeyword::EnumValueLocation,
+  ContextualKeyword::InputObjectLocation,
+  ContextualKeyword::InputFieldDefinitionLocation,
+  ContextualKeyword::Import,
+  ContextualKeyword::From,
+  ContextualKeyword::As,
+  ContextualKeyword::Where,
+  ContextualKeyword::Set,
+  ContextualKeyword::Map,
+];
+
+#[cfg(test)]
+impl ContextualKeyword {
+  /// Asserts that [`KEYWORDS`] lists **every** variant this enum declares.
+  ///
+  /// **The list's length pins nothing on its own.** `KEYWORDS` is hand-written, so a variant added
+  /// to the enum together with its `as_str` arm — which is what a real change looks like —
+  /// compiles, classifies, and leaves every count in `crate::keyword_prefix` agreeing with itself.
+  /// Task 7 measured exactly that: the mutation passed the whole suite.
+  ///
+  /// The `match` below is what closes it. It is exhaustive by construction, so the *next* variant
+  /// is an `E0004` here, pointing at the one file that has to learn about it. The body then checks
+  /// the weaker property the match cannot express — that the variant is actually in the array.
+  fn assert_listed(self) {
+    match self {
+      Self::Type
+      | Self::Interface
+      | Self::Union
+      | Self::Enum
+      | Self::Input
+      | Self::Scalar
+      | Self::Extend
+      | Self::Schema
+      | Self::Directive
+      | Self::Fragment
+      | Self::Query
+      | Self::Mutation
+      | Self::Subscription
+      | Self::Implements
+      | Self::Repeatable
+      | Self::On
+      | Self::True
+      | Self::False
+      | Self::Null
+      | Self::QueryLocation
+      | Self::MutationLocation
+      | Self::SubscriptionLocation
+      | Self::FieldLocation
+      | Self::FragmentDefinitionLocation
+      | Self::FragmentSpreadLocation
+      | Self::InlineFragmentLocation
+      | Self::VariableDefinitionLocation
+      | Self::SchemaLocation
+      | Self::ScalarLocation
+      | Self::ObjectLocation
+      | Self::FieldDefinitionLocation
+      | Self::ArgumentDefinitionLocation
+      | Self::InterfaceLocation
+      | Self::UnionLocation
+      | Self::EnumLocation
+      | Self::EnumValueLocation
+      | Self::InputObjectLocation
+      | Self::InputFieldDefinitionLocation
+      | Self::Import
+      | Self::From
+      | Self::As
+      | Self::Where
+      | Self::Set
+      | Self::Map => {}
+    }
+    assert!(
+      KEYWORDS.contains(&self),
+      "graphqlx's KEYWORDS is missing {self:?}"
+    );
+  }
+}
+
+#[cfg(test)]
+#[test]
+fn keywords_lists_every_variant() {
+  for keyword in KEYWORDS {
+    keyword.assert_listed();
+  }
+}
+
 #[cfg(test)]
 mod tests;

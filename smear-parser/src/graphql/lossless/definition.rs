@@ -78,49 +78,8 @@ use super::{
   value::{Constness, default_value, enum_value},
 };
 
-/// Whether `head` opens a [`description`] — the one two-kind test this file makes repeatedly,
-/// and which `document.rs`'s two dispatchers make once each.
-#[inline]
-pub(crate) fn starts_description(head: Option<Kind>) -> bool {
-  matches!(head, Some(Kind::InlineString | Kind::BlockString))
-}
-
-/// Whether `keyword` is one of the **nineteen** spellings `DirectiveLocation` admits: the eight
-/// of `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`.
-///
-/// The count is spelled out because it was wrong in prose — "eighteen" — from Task 8 until Task
-/// 11's gate report; the *membership* has always been right and identical to `syntactic/`'s
-/// `is_location_keyword`, so it was a miscount rather than a behaviour bug. The arms below are
-/// the authority, and `valid_sdl_directive_locations_every_spelling.graphql` exercises all
-/// nineteen.
-///
-/// The lexer already tells `QUERY` from `query` — they are different `ContextualKeyword`
-/// variants — so this is a membership test over the projection and never a string comparison.
-#[inline]
-fn is_directive_location(keyword: ContextualKeyword) -> bool {
-  matches!(
-    keyword,
-    ContextualKeyword::QueryLocation
-      | ContextualKeyword::MutationLocation
-      | ContextualKeyword::SubscriptionLocation
-      | ContextualKeyword::FieldLocation
-      | ContextualKeyword::FragmentDefinitionLocation
-      | ContextualKeyword::FragmentSpreadLocation
-      | ContextualKeyword::InlineFragmentLocation
-      | ContextualKeyword::VariableDefinitionLocation
-      | ContextualKeyword::SchemaLocation
-      | ContextualKeyword::ScalarLocation
-      | ContextualKeyword::ObjectLocation
-      | ContextualKeyword::FieldDefinitionLocation
-      | ContextualKeyword::ArgumentDefinitionLocation
-      | ContextualKeyword::InterfaceLocation
-      | ContextualKeyword::UnionLocation
-      | ContextualKeyword::EnumLocation
-      | ContextualKeyword::EnumValueLocation
-      | ContextualKeyword::InputObjectLocation
-      | ContextualKeyword::InputFieldDefinitionLocation
-  )
-}
+crate::lossless::description_head_predicate!(smear_lexer::graphql::lossless::LosslessTokenKind);
+crate::lossless::directive_location_predicate!(smear_lexer::graphql::ContextualKeyword);
 
 use crate::lossless::lossless_production;
 

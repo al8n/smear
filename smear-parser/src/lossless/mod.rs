@@ -47,7 +47,10 @@ pub mod runner;
 pub mod trivia;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
-pub(crate) use macros::{lossless_drivers, lossless_error_impls, lossless_production};
+pub(crate) use macros::{
+  description_head_predicate, directive_location_predicate, lossless_drivers, lossless_error_impls,
+  lossless_production,
+};
 
 /// What a dialect's syntax-kind space must provide for the shared runner, coverage counter and
 /// typed layer to work over it.
