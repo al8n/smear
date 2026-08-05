@@ -554,20 +554,34 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Const)?;
-        let members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
-        if members {
-          union_member_types::<Src, Ctx>(inp)?;
-        }
-        if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where) {
-          if !members {
-            recover::report_unexpected::<Src, Ctx>(inp, UNION_MEMBERS_HEADS)?;
-          }
-          optional_where_clause::<Src, Ctx>(inp)?;
-        }
-        Ok(())
+        constrained_union_members::<Src, Ctx>(inp)
       },
     )
     .parse_input(inp)
+  }
+
+  /// `UnionMemberTypes? WhereClause?`, where a present clause requires the **members before it** —
+  /// divergence 17, at both the definition site and Task 14's extension twin.
+  ///
+  /// The mirror image of [`constrained_fields`] in both respects: the clause comes *after* what it
+  /// constrains rather than before it, and the expectation is `Equal` rather than `LBrace`. The
+  /// syntactic parser guards the impossible fourth combination with an
+  /// `unreachable!("a where clause requires union members")` (`definition/union.rs:107`), which is
+  /// the tell that the constraint is real and not a tidy-up.
+  ///
+  /// Written once and reached by both sites for the reason [`constrained_fields`] records.
+  fn constrained_union_members<'inp, Src, Ctx>(inp) {
+    let members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
+    if members {
+      union_member_types::<Src, Ctx>(inp)?;
+    }
+    if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where) {
+      if !members {
+        recover::report_unexpected::<Src, Ctx>(inp, UNION_MEMBERS_HEADS)?;
+      }
+      optional_where_clause::<Src, Ctx>(inp)?;
+    }
+    Ok(())
   }
 
   /// `Description? enum DefinitionName Directives[Const]? EnumValuesDefinition?`
@@ -677,8 +691,8 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// Dispatch on a type-system definition's keyword, reading an optional leading description first
-  /// and spending the mark on the node it chooses. Opens **no** node of its own.
+  /// Dispatch on a type-system definition's keyword, reading an optional leading description
+  /// first. Opens **no** node of its own; the chosen production spends the mark on its own.
   fn type_system_definition<'inp, Src, Ctx>(inp) {
     // The head peek first, so the leading trivia it crosses is committed before the mark is minted
     // and therefore lands outside whatever the mark eventually wraps.
@@ -687,6 +701,16 @@ lossless_production! {
     if starts_description(head) {
       description::<Src, Ctx>(inp)?;
     }
+    type_system_definition_at::<Src, Ctx>(inp, mark)
+  }
+
+  /// [`type_system_definition`]'s keyword dispatch, with the description already committed and its
+  /// `mark` handed in.
+  ///
+  /// The split is what lets `document.rs`'s three entry dispatchers share this: each of them has
+  /// already read the description — it is the thing divergence 22 makes them branch on — and each
+  /// minted its own mark before it.
+  fn type_system_definition_at<'inp, Src, Ctx>(inp, mark: EventMark) {
     match peek_as::<Src, Ctx, Keyword>(inp)? {
       Some(Keyword::Scalar) => scalar_type_definition::<Src, Ctx>(inp, mark),
       Some(Keyword::Type) => object_type_definition::<Src, Ctx>(inp, mark),

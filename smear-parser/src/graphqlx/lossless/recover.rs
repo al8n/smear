@@ -33,7 +33,8 @@ use tokora::{
 
 use crate::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
 
-use super::trivia::kind_of;
+use super::{Keyword, trivia::kind_of};
+use crate::lossless::recover::keyword_of;
 
 /// The token kinds a `Value` may begin with — what an "expected a value" diagnostic names.
 ///
@@ -166,6 +167,39 @@ pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 /// three definition sites where a present `where` makes the block mandatory.
 pub(crate) const FIELDS_BLOCK_HEADS: &[Kind] = &[Kind::LBrace];
 
+/// The token kinds a mixed document entry may begin with: a description, an import, an extension,
+/// a definition keyword, or the shorthand operation's `{`.
+pub(crate) const DEFINITION_HEADS: &[Kind] = &[
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBrace,
+  Kind::Identifier,
+];
+
+/// The token kinds an executable-document entry may begin with.
+pub(crate) const EXECUTABLE_ENTRY_HEADS: &[Kind] = &[
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::LBrace,
+  Kind::Identifier,
+];
+
+/// The token kinds a type-system-document entry may begin with — no `{`, the shorthand operation
+/// not being a type-system definition.
+pub(crate) const TYPE_SYSTEM_ENTRY_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
+
+/// The token kinds a type-system extension's shape keyword may be.
+pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The token kinds an extension's tail may begin with — the "at least one component" report.
+///
+/// Every one of `syntactic/`'s seven extension tails ends in a `(None, None, …) => Err` arm, and a
+/// scalar extension goes further and requires its directives outright. A bare `extend type T`
+/// re-prints as valid text, so the verdict is the only witness the rule has.
+pub(crate) const EXTENSION_TAIL_HEADS: &[Kind] =
+  &[Kind::At, Kind::LBrace, Kind::Equal, Kind::Identifier];
+
 /// The token kinds an import member may begin with — divergence 21: a name, or the wildcard `*`.
 pub(crate) const IMPORT_MEMBER_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk];
 
@@ -287,6 +321,38 @@ fn is_sync_point(kind: Kind) -> bool {
 ///
 /// The `<>` row is the difference from GraphQL's classifier, and the module docs say why dropping
 /// it would break recovery for the whole generics area rather than merely coarsening it.
+/// Where a document loop is willing to restart after an entry failed: the head of another entry.
+///
+/// **Fourteen spellings against GraphQL's thirteen** — `import` is the extra one, and its absence
+/// would cost every import after a broken definition. `extend` is in the set for the reason
+/// GraphQL's is: an extension is an entry even though it is not a definition.
+#[inline]
+fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
+  match kind {
+    Kind::InlineString | Kind::BlockString => true,
+    Kind::Identifier => matches!(
+      keyword,
+      Some(
+        Keyword::Query
+          | Keyword::Mutation
+          | Keyword::Subscription
+          | Keyword::Fragment
+          | Keyword::Schema
+          | Keyword::Directive
+          | Keyword::Scalar
+          | Keyword::Type
+          | Keyword::Interface
+          | Keyword::Union
+          | Keyword::Enum
+          | Keyword::Input
+          | Keyword::Extend
+          | Keyword::Import
+      )
+    ),
+    _ => false,
+  }
+}
+
 #[inline]
 fn delimiters(kind: &Kind) -> Balance<u8> {
   match kind {
@@ -368,6 +434,20 @@ lossless_production! {
       expected,
       delimiters,
       |t| is_sync_point(kind_of(t)),
+      K::Error.raw(),
+    )
+  }
+
+  /// A document entry returned `Err`: skip its wreckage and stop **before** the next entry's head.
+  ///
+  /// [`crate::lossless::recover::resync_to`], which reports nothing — the failed entry's own
+  /// `expect` already emitted at the position the failure happened, and a second diagnostic here
+  /// would point at whatever the resync happens to start on.
+  fn resync_to_definition<'inp, Src, Ctx>(inp) {
+    crate::lossless::recover::resync_to(
+      inp,
+      delimiters,
+      |t| is_definition_start(kind_of(t), keyword_of(t)),
       K::Error.raw(),
     )
   }

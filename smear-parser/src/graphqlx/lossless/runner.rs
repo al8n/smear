@@ -90,11 +90,15 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLx
 
 /// Parse a `&str` as a GraphQLx document, losslessly.
 ///
-/// **Task 14 replaces the production this drives.** Until the document level exists, the parser
-/// argument is the private `drain_stub` below, so the tree is one flat run of correctly-imaged
-/// tokens under `Root` with no node structure at all. That is a real answer to the two questions
-/// this task can answer — does the sink accept this dialect's lexer, and does the mapper image
-/// every token — and it is not an answer to any question about the grammar.
+/// The production is `document.rs`'s `document_entry` — the mixed
+/// root, which admits imports, executable definitions, type-system definitions and extensions in
+/// any order, followed by a drain. The **entry** and not `document` itself: this function discards
+/// its parser's result, so an `Err` escaping the document production would leave the rest of the
+/// source uncommitted and `finish` would refuse it as a `FinishError::UncoveredGap`. The drain
+/// turns the one failure mode `parse_str` cannot report into a reportable parse.
+///
+/// The SDL-only root has no entry here; a schema-only consumer calls `document.rs`'s
+/// `type_system_document` directly.
 pub fn parse_str(src: &str) -> Parse {
   // `parse_lossless` is the only door that mints a `Sink`: it takes the source ONCE and uses
   // that one argument for both the sink and the input, so the buffer the tree's text comes from
@@ -116,42 +120,10 @@ pub fn parse_str(src: &str) -> Parse {
       LosslessEmitter::default(),
       profile::<str>(),
       tokora::cache::DefaultCache::<GraphqlxLosslessLexer<'_, str>>::default(),
-      drain_stub::<str, _>,
+      super::document::document_entry::<str, _>,
     );
 
   finish_root(cst)
-}
-
-/// Commit every token and produce no structure. **Task 14 replaces this with `document_entry`.**
-///
-/// # Why the stub consumes instead of doing nothing
-///
-/// The obvious stub — `Ok(())`, committing nothing — cannot produce a tree over a non-empty
-/// source, because gap tiling is *not* unconditional. `finish` tiles a gap only where a recorded
-/// **lexer-error** diagnostic explains it; a gap covered by neither a committed token nor such a
-/// diagnostic is the signature of a dropped committed token, and is refused as
-/// `FinishError::UncoveredGap`. A second wall, `StructureWithoutTokens`, refuses structure with
-/// zero committed tokens over a non-empty source outright. So a no-op yields
-/// `UncoveredGap { start: 0, end: len }`, not a tiled tree.
-///
-/// Committing the whole source instead makes the round-trip hold through the **token** channel,
-/// which is the stronger of the two guarantees: every byte reaches the tree as a real token with
-/// its real image, rather than as filler. What the tree does not yet carry is any node.
-fn drain_stub<'inp, Src, Ctx>(
-  inp: &mut super::GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
-) -> Result<(), super::GraphqlxLosslessError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  // `LogosLexer<'inp, T>` carries `T: FromLogos<'inp>` on its **struct definition**, so this bound
-  // is what makes the lexer alias nameable at all — a `Lexer<'inp>` bound alone leaves the type
-  // ill-formed. `syntactic/` never needs it because `SyntacticLexer` hides the `LogosLexer` behind
-  // its own alias over `Src`.
-  super::GraphqlxLosslessToken<'inp, Src>: tokora::lexer::FromLogos<'inp>,
-  super::GraphqlxLosslessLexer<'inp, Src>: tokora::Lexer<'inp>,
-  Ctx:
-    tokora::ParseContext<'inp, super::GraphqlxLosslessLexer<'inp, Src>, crate::graphqlx::GraphQLx>,
-{
-  inp.skip_while(|_| true)
 }
 
 /// Test-only scaffolding for probing the sink's own kind-validator door.
