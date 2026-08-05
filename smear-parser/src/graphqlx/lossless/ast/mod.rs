@@ -5,9 +5,17 @@
 //! [`cast::child`], [`cast::children`] and [`NodeChildren`] are bound on it rather than on
 //! tokora's parser-facing `Node`, so a wrapper whose entire job is `field.name()` never names the
 //! `Syntax` component model. Everything in this module is the **pinning of that shared layer to
-//! this dialect**, so a wrapper file's only dialect statement is its `lang =` line —
-//! [`crate::graphql::lossless::ast`] is the same module for the other dialect, and the two share
-//! every line of implementation and no line of type.
+//! this dialect**, so a wrapper file's only dialect statement is its `lang =` line — the GraphQL
+//! dialect has a module of the same name doing the same job, and the two share every line of
+//! implementation and no line of type.
+//!
+//! That sentence is deliberately not a link, and the omission is load-bearing. An intra-doc link to
+//! the other dialect's module is a **compile-time reference across the isolation boundary**: it
+//! resolves only when that dialect's feature is on, so
+//! `cargo doc --no-default-features --features rowan,graphqlx` fails on it under `-D warnings`.
+//! `tests/lossless_isolation.rs` is what keeps it out, and the type-level statement that the two
+//! trees cannot be crossed lives on [`graphqlx`](crate::graphqlx) at the crate root, which is the
+//! one module whose job is to name both dialects.
 //!
 //! # Three token getters, and why *this* grammar needs each
 //!
