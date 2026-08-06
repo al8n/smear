@@ -19,21 +19,28 @@
 //!    the variable rules — run every time, which is what the specification asks for: the same
 //!    fragment may be valid under one operation's variables and invalid under another's.
 //! 7. **A final pass over fragments no operation reached**, so their structure is validated too.
+//! 8. **Draft 5.3.2's merge engine**, last of all, over every selection set the document defines.
+//!    It is the only rule with a working set and the only one an attacker can make expensive, so
+//!    every cheap structural refusal — undefined spreads, fragment cycles — is already established
+//!    before it expands anything, and what it may spend is the caller's [`Budget`].
 //!
 //! # Nothing recurses on document shape
 //!
 //! Selection sets and value literals are both walked with explicit stacks living in the caller's
 //! [`Scratch`]. The frames are coordinates rather than references — a definition index plus the
 //! chain of child indices that reaches a level — which is what lets a stack that knows nothing
-//! about the document's source slice type replace recursion over an attacker-chosen shape.
+//! about the document's source slice type replace recursion over an attacker-chosen shape. Draft
+//! 5.3.2's two merge recursions and its value comparison are written the same way, for the same
+//! reason and with more at stake.
 
+mod merge;
 mod nodes;
 mod selections;
 mod values;
 
 use core::ops::ControlFlow;
 
-use tokora::span::AsSpan;
+use tokora::{SimpleSpan, span::AsSpan};
 
 use crate::parser::graphql::ast::{
   DescribedVariableDefinition, ExecutableDefinition, ExecutableDocument, Name, OperationDefinition,
@@ -64,6 +71,7 @@ use values::ValueLocation;
 pub struct Invalid {
   emitted: u32,
   stopped: bool,
+  budget: bool,
 }
 
 impl Invalid {
@@ -84,6 +92,23 @@ impl Invalid {
   pub const fn stopped(&self) -> bool {
     self.stopped
   }
+
+  /// Returns whether a [`Budget`] refused the document.
+  ///
+  /// True when draft 5.3.2's merge engine reached
+  /// [`Budget::merge_depth`](super::Budget::merge_depth) or
+  /// [`Budget::merge_work`](super::Budget::merge_work) — the diagnostic is
+  /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget) or
+  /// [`Rule::MergeWorkBudget`](super::Rule::MergeWorkBudget) and says which.
+  ///
+  /// When it is true the document is **invalid**, not "unvalidated": the engine refuses rather
+  /// than passing what it could not finish examining. What it does *not* mean is that the rest of
+  /// the document is clean — the merge engine stopped, so anything it had not reached is unknown,
+  /// exactly as [`Invalid::stopped`] means for the sink.
+  #[inline]
+  pub const fn budget_tripped(&self) -> bool {
+    self.budget
+  }
 }
 
 impl core::fmt::Display for Invalid {
@@ -92,6 +117,9 @@ impl core::fmt::Display for Invalid {
     write!(f, "{} validation error{plural}", self.emitted)?;
     if self.stopped {
       f.write_str(" (validation stopped early)")?;
+    }
+    if self.budget {
+      f.write_str(" (resource budget exceeded)")?;
     }
     Ok(())
   }
@@ -186,11 +214,6 @@ where
   S: AsRef<[u8]> + Clone,
   K: Sink<S>,
 {
-  // Draft 5.3.2's merge engine is the only reader of the budget, and it lands in its own wave so
-  // that its resource bound is designed rather than bolted on. The parameter is here now because
-  // it is part of the entry point's shape.
-  let _ = budget;
-
   scratch.reset();
   let mut validator = Validator {
     schema,
@@ -198,18 +221,32 @@ where
     scratch,
     sink,
     rules,
+    budget: *budget,
     scalars: Scalars::resolve(schema),
     variables: &[],
     in_operation: false,
     emitted: 0,
     stopped: false,
+    work: 0,
+    generation: 0,
+    tripped: false,
+    budget_tripped: false,
+    blame: SimpleSpan::const_new(0, 0),
   };
   let _ = validator.run();
-  let (emitted, stopped) = (validator.emitted, validator.stopped);
+  let (emitted, stopped, budget) = (
+    validator.emitted,
+    validator.stopped,
+    validator.budget_tripped,
+  );
   if emitted == 0 {
     Ok(())
   } else {
-    Err(Invalid { emitted, stopped })
+    Err(Invalid {
+      emitted,
+      stopped,
+      budget,
+    })
   }
 }
 
@@ -247,6 +284,7 @@ struct Validator<'a, 'd, S, K> {
   scratch: &'a mut Scratch,
   sink: &'a mut K,
   rules: RuleSet,
+  budget: Budget,
   scalars: Scalars,
   /// The variable definitions of the operation being walked; empty outside one.
   variables: &'d [DescribedVariableDefinition<S>],
@@ -255,6 +293,17 @@ struct Validator<'a, 'd, S, K> {
   in_operation: bool,
   emitted: u32,
   stopped: bool,
+  /// How much of the [`Budget`]'s work knob draft 5.3.2's engine has spent.
+  work: u32,
+  /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
+  generation: u32,
+  /// Whether a budget stopped the merge engine. Set even when the bound's own rule is switched
+  /// off: the bound holds either way, and only the diagnostic is optional.
+  tripped: bool,
+  /// Whether a budget diagnostic was actually emitted, which is what the verdict reports.
+  budget_tripped: bool,
+  /// The definition to blame for a budget diagnostic — the one being merged when the bound hit.
+  blame: SimpleSpan,
 }
 
 impl<'d, S, K> Validator<'_, 'd, S, K>
@@ -343,7 +392,12 @@ where
     self.check_fragments_used()?;
     self.check_subscriptions()?;
     self.walk_operations()?;
-    self.walk_unreached_fragments()
+    self.walk_unreached_fragments()?;
+    // Last, and deliberately so. Draft 5.3.2 is the only rule with a working set and the only one
+    // an attacker can make expensive, so every cheap structural refusal — undefined spreads,
+    // fragment cycles — is already established before it expands anything. Reordering this would
+    // change the threat model, not just the diagnostic order.
+    self.check_field_merging()
   }
 
   // -- 1. prep --------------------------------------------------------------------------------

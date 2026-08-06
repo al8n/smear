@@ -104,7 +104,7 @@ mod rule;
 mod scratch;
 mod sink;
 
-pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay};
+pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
 pub use executable::{Invalid, validate_executable, validate_executable_with};
 pub use rule::{Rule, RuleSet};
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};

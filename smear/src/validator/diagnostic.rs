@@ -45,8 +45,46 @@ pub enum Context {
     /// The type the position expects.
     expected: PackedType,
   },
-  /// A plain count — how many root fields a subscription collected, for instance.
+  /// A plain count — how many root fields a subscription collected, or the budget a document
+  /// exceeded.
   Count(u32),
+  /// Which of draft 5.3.2's three checks two selections sharing a response name failed.
+  Merge(MergeConflict),
+}
+
+/// Why two selections that share a response name could not be merged (draft 5.3.2).
+///
+/// The diagnostic already carries both selections' spans and the response name they collide on;
+/// this says which of `FieldsInSetCanMerge`'s three requirements the pair broke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MergeConflict {
+  /// The two selections name different fields, so the response key is ambiguous.
+  Fields,
+  /// The two selections name the same field with different arguments.
+  Arguments,
+  /// The two selections have response shapes that cannot be merged — differing list or non-null
+  /// wrapping, or two different leaf types.
+  Shapes,
+}
+
+impl MergeConflict {
+  /// Returns the phrase [`Diagnostic::display`] renders for the conflict.
+  #[inline]
+  pub const fn as_str(&self) -> &'static str {
+    match self {
+      Self::Fields => "they select different fields",
+      Self::Arguments => "they pass different arguments",
+      Self::Shapes => "their response shapes differ",
+    }
+  }
+}
+
+impl core::fmt::Display for MergeConflict {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.write_str(self.as_str())
+  }
 }
 
 /// One reason a document is invalid.
@@ -217,6 +255,7 @@ where
         f.write_str("` is expected")?;
       }
       Context::Count(count) => write!(f, ", found {count}")?,
+      Context::Merge(conflict) => write!(f, ", {conflict}")?,
     }
     write!(f, " ({}..{})", span.start(), span.end())
   }
