@@ -151,8 +151,9 @@ pub type GraphqlxLosslessErrorValue<S> =
 /// The error container the lossless driver pins for `Verbose`.
 ///
 /// Productions never name this: they name [`GraphqlxLosslessError`], which projects the error out
-/// of the parse context, and constrain it with `From<…>` bounds. Only [`runner::parse_str`] — the
-/// one place a concrete context is chosen — has to say which container that is.
+/// of the parse context, and constrain it with `From<…>` bounds. Only
+/// [`runner::parse_document`] — the one place a concrete context is chosen — has to say which
+/// container that is.
 pub type GraphqlxLosslessErrors<S> =
   DialectErrors<S, LosslessTokenKind, char, Expectation, LimitExceeded>;
 
@@ -250,8 +251,9 @@ pub mod ty;
 pub mod value;
 
 // The three document roots this suite parses, all at the same module level and all
-// `fn(&str) -> Parse`: the mixed one (`parse_str`), the SDL-only one and the executable-only one.
-// A consumer picks a root here, once, rather than parsing the mixed form and filtering the tree.
+// `fn(&str) -> Parse`: the mixed one (`parse_document`), the SDL-only one and the executable-only
+// one. A consumer picks a root here, once, rather than parsing the mixed form and filtering the
+// tree.
 pub use runner::{
-  Parse, parse_executable_document, parse_str, parse_type_system_document, profile,
+  Parse, parse_document, parse_executable_document, parse_type_system_document, profile,
 };

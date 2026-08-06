@@ -30,10 +30,10 @@
 //!
 //! # Why `document_entry` exists beside `document`
 //!
-//! [`super::parse_str`] discards its parser's result, so an `Err` escaping the document production
-//! would leave the rest of the source uncommitted and `finish` would refuse it as an
+//! [`super::parse_document`] discards its parser's result, so an `Err` escaping the document
+//! production would leave the rest of the source uncommitted and `finish` would refuse it as an
 //! `UncoveredGap`. The entry drains whatever an escape left behind, which turns the one failure
-//! mode `parse_str` cannot report into a reportable parse.
+//! mode `parse_document` cannot report into a reportable parse.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{ParseInput as _, cst::event::EventMark};
@@ -55,7 +55,7 @@ use super::{
   trivia::{peek_as, peek_kind},
 };
 
-use crate::lossless::{lossless_drivers, lossless_production};
+use crate::lossless::lossless_production;
 
 lossless_production! {
   dialect = graphqlx::lossless;
@@ -165,7 +165,7 @@ lossless_production! {
     }
   }
 
-  /// `ImportOrDefinitionOrExtension+` — the mixed root [`super::parse_str`] parses.
+  /// `ImportOrDefinitionOrExtension+` — the mixed root [`super::parse_document`] parses.
   ///
   /// The empty form is reported: `syntactic/` rejects an empty input, and gate 1 compares verdicts.
   /// A failed entry is caught and resynchronised past, which is the only place in this suite that
@@ -195,7 +195,7 @@ lossless_production! {
   /// higher-ranked `fn` parameter would be the only way to abstract over the three dispatchers, and
   /// it buys eight lines at the cost of a signature no reader can check at a glance.
   ///
-  /// The SDL-only root, off [`super::parse_str`]'s mixed-form path.
+  /// The SDL-only root, off [`super::parse_document`]'s mixed-form path.
   /// [`super::parse_type_system_document`] is its shipped entry point — the one a schema-only
   /// consumer calls so that an executable definition is rejected by the parser, at the parser's
   /// own position, rather than by hand afterwards.
@@ -217,7 +217,7 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// [`document`], then a drain — the production [`super::parse_str`] applies.
+  /// [`document`], then a drain — the production [`super::parse_document`] applies.
   ///
   /// See the module docs for why the drain is not optional.
   fn document_entry<'inp, Src, Ctx>(inp) {
@@ -236,16 +236,4 @@ lossless_production! {
     inp.skip_while(|_| true)?;
     out
   }
-}
-
-lossless_drivers! {
-  dialect = graphqlx::lossless;
-
-  /// Drivers that run one document-level production over a `&str` and hand back the tree it built,
-  /// for `tests/lossless_x_document.rs`.
-  mod test_support;
-
-  /// `super::import_or_executable_definition` over `src` — the executable-document entry, whose
-  /// loop Task 11's `executable_document` owns.
-  fn parse_import_or_executable_definition => import_or_executable_definition;
 }

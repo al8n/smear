@@ -74,7 +74,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 use smear_lexer::graphql::lossless::LosslessLexer;
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, parse_executable_document, parse_str, parse_type_system_document},
+  lossless::{Parse, parse_document, parse_executable_document, parse_type_system_document},
 };
 use tokora::Lexer as _;
 
@@ -135,15 +135,15 @@ const NOT_OPENED_BY_A_PRODUCTION: &[K] = &[
   K::Root,
 ];
 
-/// The two node kinds [`parse_str`] structurally cannot reach, and the reason each is out.
+/// The two node kinds [`parse_document`] structurally cannot reach, and the reason each is out.
 ///
-/// Both are **roots**, and a parse has exactly one. `parse_str` drives the mixed
+/// Both are **roots**, and a parse has exactly one. `parse_document` drives the mixed
 /// `Document`, so the SDL-only and the executable-only roots are reachable only through their own
 /// entries — which is a property of the suite's shape, not a corpus gap, and no entry could ever
 /// close it. The gate drives all three roots for that reason; this list is what keeps a *third*
 /// unreached kind from hiding behind the two that are explained.
 /// Listed in [`K::ALL`] declaration order, which is the order the check below reports.
-const UNREACHABLE_FROM_PARSE_STR: &[K] = &[K::ExecutableDocument, K::TypeSystemDocument];
+const UNREACHABLE_FROM_PARSE_DOCUMENT: &[K] = &[K::ExecutableDocument, K::TypeSystemDocument];
 
 /// Every `.graphql` file in the shared corpus, in a deterministic order.
 fn corpus_files() -> Vec<PathBuf> {
@@ -184,7 +184,7 @@ fn valid_corpus() -> Vec<(String, String)> {
 /// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.
 ///
 /// Measured with the **lexer**, not with the tree this gate is asserting about. Reading the
-/// boundaries off `parse_str`'s own tokens would make the padding a function of the artifact
+/// boundaries off `parse_document`'s own tokens would make the padding a function of the artifact
 /// under test, so a parser that lost a token would quietly stop being padded there.
 fn token_boundaries(src: &str) -> Vec<usize> {
   let mut lexer = LosslessLexer::<'_, &str>::new(src);
@@ -254,13 +254,13 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
       boundaries.len()
     );
 
-    let compact = parse_str(src);
+    let compact = parse_document(src);
     assert!(
       !compact.has_errors(),
       "{name}: the unpadded entry does not parse — this is a corpus fault, not an injection one"
     );
     let compact_shape = shape(&compact);
-    // The two roots `parse_str` cannot reach, over the unpadded bytes. Hoisted out of the form
+    // The two roots `parse_document` cannot reach, over the unpadded bytes. Hoisted out of the form
     // loop: their verdicts do not depend on which form is being injected, and re-deriving them
     // eight times would inflate every count in the coverage report by the same factor.
     let compact_sdl = parse_type_system_document(src).has_errors();
@@ -268,7 +268,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
 
     for (form, pad) in ALPHABET {
       let padded_src = inject(src, &boundaries, pad);
-      let padded = parse_str(&padded_src);
+      let padded = parse_document(&padded_src);
       assert!(
         !padded.has_errors(),
         "{name} padded with {form}: the parse reported an error, so some decision point looked \
@@ -282,7 +282,7 @@ fn trivia_injection_preserves_the_verdict_and_the_shape() {
       );
       padded_parses += 1;
 
-      // The same padded bytes through the two roots `parse_str` cannot reach, so the coverage
+      // The same padded bytes through the two roots `parse_document` cannot reach, so the coverage
       // claim below covers them too. Only the verdict is compared: an alternate root rejects most
       // of this corpus, and a *rejected* parse's shape is a function of where the recovery holes
       // fell, which trivia may legitimately move.
@@ -351,7 +351,7 @@ fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
     "reset left a count behind"
   );
 
-  let one = parse_str("type T { f: Int }");
+  let one = parse_document("type T { f: Int }");
   assert!(!one.has_errors());
   assert_eq!(
     coverage::hits_of(K::ObjectTypeDefinition),
@@ -364,7 +364,7 @@ fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
     "there is no enum in that source"
   );
 
-  let two = parse_str("type A { f: Int } type B { g: Int }");
+  let two = parse_document("type A { f: Int } type B { g: Int }");
   assert!(!two.has_errors());
   assert_eq!(
     coverage::hits_of(K::ObjectTypeDefinition),
@@ -381,7 +381,7 @@ fn the_hit_counter_distinguishes_a_reached_production_from_an_unreached_one() {
 
   // `hits()` is the whole vector and must agree with the per-kind door, or the report the gate
   // prints and the assertion the gate makes could disagree about the same run.
-  parse_str("enum E { A }");
+  parse_document("enum E { A }");
   let all = coverage::hits();
   assert_eq!(all.len(), K::ALL.len(), "the tally is indexed by raw kind");
   assert_eq!(
@@ -481,8 +481,8 @@ fn the_injection_and_the_shape_projection_are_both_live() {
   }
 
   assert_ne!(
-    shape(&parse_str("type T{a:Int}")),
-    shape(&parse_str("enum E{A}")),
+    shape(&parse_document("type T{a:Int}")),
+    shape(&parse_document("enum E{A}")),
     "the shape projection answers the same thing for two different trees"
   );
 }
@@ -565,20 +565,20 @@ fn the_corpus_supplies_no_carriage_return_tab_or_bom() {
   }
 }
 
-/// The two roots [`parse_str`] cannot reach are exactly the two named, and they are roots.
+/// The two roots [`parse_document`] cannot reach are exactly the two named, and they are roots.
 ///
-/// The coverage assertion drives three entry points to reach 59 kinds. That is only honest if the
-/// reason `parse_str` alone falls short is structural — a parse has one root — rather than a
-/// corpus gap somebody could have closed. So the claim is measured: over the whole valid corpus,
-/// `parse_str` opens every node kind except those two, and each of those two is opened by its own
-/// entry over the same bytes.
+/// The coverage assertion drives three entry points to reach 59 kinds. That is only honest if
+/// the reason `parse_document` alone falls short is structural — a parse has one root — rather
+/// than a corpus gap somebody could have closed. So the claim is measured: over the whole valid
+/// corpus, `parse_document` opens every node kind except those two, and each of those two is
+/// opened by its own entry over the same bytes.
 #[test]
-fn parse_str_reaches_every_node_kind_but_the_two_alternate_roots() {
+fn parse_document_reaches_every_node_kind_but_the_two_alternate_roots() {
   let mut seen: BTreeSet<K> = BTreeSet::new();
   let mut sdl_root = false;
   let mut executable_root = false;
   for (_name, src) in valid_corpus() {
-    seen.extend(shape(&parse_str(&src)));
+    seen.extend(shape(&parse_document(&src)));
     sdl_root |= shape(&parse_type_system_document(&src)).contains(&K::TypeSystemDocument);
     executable_root |= shape(&parse_executable_document(&src)).contains(&K::ExecutableDocument);
   }
@@ -588,9 +588,9 @@ fn parse_str_reaches_every_node_kind_but_the_two_alternate_roots() {
     .filter(|k| !seen.contains(k))
     .collect();
   assert_eq!(
-    missing, UNREACHABLE_FROM_PARSE_STR,
-    "`parse_str` over the valid corpus reaches all but {UNREACHABLE_FROM_PARSE_STR:?}; it now \
-     misses {missing:?} instead"
+    missing, UNREACHABLE_FROM_PARSE_DOCUMENT,
+    "`parse_document` over the valid corpus reaches all but \
+     {UNREACHABLE_FROM_PARSE_DOCUMENT:?}; it now misses {missing:?} instead"
   );
   assert!(sdl_root, "the SDL-only root never opened its own node");
   assert!(

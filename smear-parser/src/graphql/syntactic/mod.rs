@@ -74,7 +74,7 @@ pub use document::{definition, definition_or_extension, described_definition, do
 // [`document::document`], [`definition::type_system_document`],
 // [`executable::executable_document`] — but only the mixed one was hoisted here, so the two
 // alternates read as internals of the modules they happen to live in. They are the syntactic
-// counterparts of `lossless`'s `parse_str`, `parse_type_system_document` and
+// counterparts of `lossless`'s `parse_document`, `parse_type_system_document` and
 // `parse_executable_document`, and a consumer choosing a root should find all three in one place
 // (smear issue #67).
 //

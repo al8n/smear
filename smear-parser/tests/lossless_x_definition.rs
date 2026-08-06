@@ -1,7 +1,7 @@
 //! The GraphQLx SDL definition productions.
 //!
-//! **These tests drive the productions directly, not through `parse_str`**, for the reason
-//! `tests/lossless_x_value.rs` records: `parse_str` is still Task 9's drain-everything stub.
+//! **These tests drive the productions directly, not through `parse_document`**, for the reason
+//! `tests/lossless_x_value.rs` records: `parse_document` is still Task 9's drain-everything stub.
 //!
 //! Every test asserts the **node-kind pre-order** of a real parse, and several also assert a
 //! node's *extent*, because the defects this area is prone to change the tree's shape while

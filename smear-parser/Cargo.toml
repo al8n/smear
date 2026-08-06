@@ -35,7 +35,7 @@ rowan = ["dep:rowan", "tokora/rowan", "std"]
 lossless-coverage = ["rowan"]
 
 # Compiles the lossless suites' `test_support` scaffolding: the substrate's kind-space
-# conformance assertion, the two dialects' sink and trivia probes, and the 64 per-production
+# conformance assertion, the two dialects' sink and trivia probes, and the 63 per-production
 # `fn(&str) -> Parse` drivers `lossless_drivers!` generates. Every one of them is reachable only
 # from an integration test in `tests/`, which is a separate crate and therefore sees `pub` and
 # nothing else — so `#[cfg(test)]` and `pub(crate)` are both out of reach and a feature is the

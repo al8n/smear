@@ -4,7 +4,7 @@
 //! their verbatim round-trip, and the emptiness verdicts that must agree with `syntactic/`
 //! production by production.
 //!
-//! **These tests drive `parse_str`, not a per-production driver.** Task 8 replaces the
+//! **These tests drive `parse_document`, not a per-production driver.** Task 8 replaces the
 //! `document` stub with the real production, so the public entry point finally reaches every
 //! kind below — and asserting through it is strictly stronger than a driver would be, because
 //! it also pins the dispatch that chooses each production.
@@ -16,7 +16,7 @@
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, parse_str},
+  lossless::{Parse, parse_document},
 };
 
 /// The tree's node kinds in pre-order, ignoring tokens and trivia.
@@ -44,7 +44,7 @@ fn texts_of(parse: &Parse, kind: K) -> Vec<String> {
 
 #[test]
 fn a_description_lives_inside_the_definition_it_describes() {
-  let parse = parse_str("\"doc\" scalar S");
+  let parse = parse_document("\"doc\" scalar S");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -67,7 +67,7 @@ fn a_description_lives_inside_the_definition_it_describes() {
 
 #[test]
 fn a_block_string_is_a_description_too() {
-  let parse = parse_str("\"\"\"doc\"\"\" type T");
+  let parse = parse_document("\"\"\"doc\"\"\" type T");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -90,7 +90,7 @@ fn a_definition_does_not_start_at_the_trivia_before_its_description() {
   // recorded as a silent pass rather than glossed — because the loop's condition has already
   // crossed the trivia by the time either line runs. This assertion is still the one that would
   // catch a future caller reaching `definition` without peeking, which is why it stays.
-  let parse = parse_str("  # lead\n  \"doc\" scalar S");
+  let parse = parse_document("  # lead\n  \"doc\" scalar S");
   assert_eq!(
     texts_of(&parse, K::ScalarTypeDefinition),
     ["\"doc\" scalar S"]
@@ -99,7 +99,7 @@ fn a_definition_does_not_start_at_the_trivia_before_its_description() {
 
 #[test]
 fn no_description_means_no_description_node() {
-  let parse = parse_str("scalar S");
+  let parse = parse_document("scalar S");
   assert_eq!(
     kinds(&parse),
     vec![K::Root, K::Document, K::ScalarTypeDefinition]
@@ -111,7 +111,7 @@ fn no_description_means_no_description_node() {
 #[test]
 fn a_scalar_type_definition_is_its_keyword_name_and_directives() {
   assert_eq!(
-    kinds(&parse_str("scalar S @d")),
+    kinds(&parse_document("scalar S @d")),
     vec![
       K::Root,
       K::Document,
@@ -125,7 +125,7 @@ fn a_scalar_type_definition_is_its_keyword_name_and_directives() {
 #[test]
 fn an_object_type_definition_carries_every_component() {
   assert_eq!(
-    kinds(&parse_str(
+    kinds(&parse_document(
       "type T implements A & B @d { f(x: Int = 1 @e): String! @g }"
     )),
     vec![
@@ -157,7 +157,7 @@ fn an_object_type_definition_carries_every_component() {
 #[test]
 fn an_interface_type_definition_carries_every_component() {
   assert_eq!(
-    kinds(&parse_str("interface I implements A { f: Int }")),
+    kinds(&parse_document("interface I implements A { f: Int }")),
     vec![
       K::Root,
       K::Document,
@@ -175,7 +175,7 @@ fn an_interface_type_definition_carries_every_component() {
 fn a_union_type_definition_lists_its_members() {
   // A leading `|` is accepted — `syntactic/`'s `union_members_after_equal` takes an optional
   // one, and gate 1 compares verdicts input by input.
-  let parse = parse_str("union U = | A | B");
+  let parse = parse_document("union U = | A | B");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -193,7 +193,7 @@ fn a_union_type_definition_lists_its_members() {
 #[test]
 fn an_enum_type_definition_wraps_each_value() {
   assert_eq!(
-    kinds(&parse_str("enum E { \"doc\" A @d B }")),
+    kinds(&parse_document("enum E { \"doc\" A @d B }")),
     vec![
       K::Root,
       K::Document,
@@ -213,7 +213,7 @@ fn an_enum_type_definition_wraps_each_value() {
 #[test]
 fn an_input_object_type_definition_wraps_each_field() {
   assert_eq!(
-    kinds(&parse_str("input I { a: Int = 1 }")),
+    kinds(&parse_document("input I { a: Int = 1 }")),
     vec![
       K::Root,
       K::Document,
@@ -232,7 +232,7 @@ fn an_input_object_type_definition_wraps_each_field() {
 #[test]
 fn a_schema_definition_wraps_each_root_operation_type() {
   assert_eq!(
-    kinds(&parse_str("schema @d { query: Q mutation: M }")),
+    kinds(&parse_document("schema @d { query: Q mutation: M }")),
     vec![
       K::Root,
       K::Document,
@@ -265,14 +265,14 @@ fn a_root_operation_type_does_not_start_at_the_trivia_before_it() {
   // `named_type` now commits the leading trivia before it opens, so the guarantee is the
   // production's own rather than a precondition each caller has to remember.
   assert_eq!(
-    texts_of(&parse_str("schema { query: Q }"), K::NamedType),
+    texts_of(&parse_document("schema { query: Q }"), K::NamedType),
     ["Q"]
   );
   // A wider run with a comment in it, so this is an assertion about trivia and not about one
   // space.
   assert_eq!(
     texts_of(
-      &parse_str("schema {\n  query: # which\n    Q\n}"),
+      &parse_document("schema {\n  query: # which\n    Q\n}"),
       K::NamedType
     ),
     ["Q"]
@@ -280,14 +280,17 @@ fn a_root_operation_type_does_not_start_at_the_trivia_before_it() {
   // The control: the positions that always peeked answer the same before and after, so a green
   // here cannot come from a fix that simply moved the boundary everywhere.
   assert_eq!(
-    texts_of(&parse_str("type T implements  A { f:  Int }"), K::NamedType),
+    texts_of(
+      &parse_document("type T implements  A { f:  Int }"),
+      K::NamedType
+    ),
     ["A", "Int"]
   );
 }
 
 #[test]
 fn a_directive_definition_carries_its_arguments_and_locations() {
-  let parse = parse_str("directive @d(a: Int) repeatable on | FIELD | QUERY");
+  let parse = parse_document("directive @d(a: Int) repeatable on | FIELD | QUERY");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -310,7 +313,7 @@ fn a_directive_definition_carries_its_arguments_and_locations() {
 fn a_location_that_names_no_directive_location_is_reported() {
   // `syntactic/`'s `location` admits only the nineteen spelled locations and errors otherwise,
   // and gate 1 compares verdicts. The name is still consumed, so the tree keeps its shape.
-  let parse = parse_str("directive @d on NOPE");
+  let parse = parse_document("directive @d on NOPE");
   assert_eq!(
     kinds(&parse),
     vec![
@@ -335,18 +338,21 @@ fn an_undelimited_clause_ends_with_its_trailing_trivia_inside_it() {
   // past. Text fidelity is untouched; only `text_range` is one trivia run longer.
   assert_eq!(
     texts_of(
-      &parse_str("type T implements A\nscalar S"),
+      &parse_document("type T implements A\nscalar S"),
       K::ImplementsInterfaces
     ),
     ["implements A\n"]
   );
   assert_eq!(
-    texts_of(&parse_str("union U = A\nscalar S"), K::UnionMemberTypes),
+    texts_of(
+      &parse_document("union U = A\nscalar S"),
+      K::UnionMemberTypes
+    ),
     ["= A\n"]
   );
   assert_eq!(
     texts_of(
-      &parse_str("directive @d on FIELD\nscalar S"),
+      &parse_document("directive @d on FIELD\nscalar S"),
       K::DirectiveLocations
     ),
     ["FIELD\n"]
@@ -355,7 +361,7 @@ fn an_undelimited_clause_ends_with_its_trailing_trivia_inside_it() {
   // read.
   assert_eq!(
     texts_of(
-      &parse_str("type T { a: Int }\nscalar S"),
+      &parse_document("type T { a: Int }\nscalar S"),
       K::FieldsDefinition
     ),
     ["{ a: Int }"]
@@ -380,7 +386,7 @@ fn every_one_or_more_shape_reports_when_it_is_empty() {
     "union U =",           // UnionMemberTypes
     "directive @d on",     // DirectiveLocations
   ] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(
       parse.has_errors(),
       "{src:?} is empty where the grammar says one-or-more"
@@ -395,11 +401,11 @@ fn an_enum_value_may_not_be_true_false_or_null() {
   // consumed and still becomes an `EnumValue`, so the tree keeps the node a diagnostic points
   // at — the same trade `type_condition` makes for a missing `on`.
   for src in ["enum E { true }", "enum E { false }", "enum E { null }"] {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(parse.has_errors(), "{src:?} names a reserved value");
     assert_eq!(text(&parse), src);
   }
-  assert!(!parse_str("enum E { truthy }").has_errors());
+  assert!(!parse_document("enum E { truthy }").has_errors());
 }
 
 // ---- Trivia invariance ----------------------------------------------------------------------
@@ -409,19 +415,22 @@ fn trivia_does_not_change_a_definition_shape() {
   let compact = "type T implements A&B@d{f(x:Int=1):String!}";
   let padded = "  type T implements  A  &  B  @d  { # why\n f ( x : Int = 1 ) : String ! , }  ";
   assert_eq!(
-    kinds(&parse_str(compact)),
-    kinds(&parse_str(padded)),
+    kinds(&parse_document(compact)),
+    kinds(&parse_document(padded)),
     "the padded form must have the compact form's shape"
   );
-  assert_eq!(text(&parse_str(padded)), padded);
+  assert_eq!(text(&parse_document(padded)), padded);
 }
 
 #[test]
 fn trivia_does_not_change_a_schema_or_directive_definition_shape() {
   let compact = "schema{query:Q}directive@d(a:Int)repeatable on|FIELD";
   let padded = "  schema  { query : Q }  directive  @d ( a : Int ) repeatable  on | FIELD  ";
-  assert_eq!(kinds(&parse_str(compact)), kinds(&parse_str(padded)));
-  assert_eq!(text(&parse_str(padded)), padded);
+  assert_eq!(
+    kinds(&parse_document(compact)),
+    kinds(&parse_document(padded))
+  );
+  assert_eq!(text(&parse_document(padded)), padded);
 }
 
 // ---- Reachability and round-trip -------------------------------------------------------------
@@ -439,7 +448,7 @@ fn every_definition_kind_is_reachable() {
     "schema { query: Q }\n",
     "directive @dd(z: Int) repeatable on FIELD\n",
   );
-  let got = kinds(&parse_str(src));
+  let got = kinds(&parse_document(src));
   for want in [
     K::Description,
     K::InputValueDefinition,
@@ -470,10 +479,10 @@ fn every_definition_kind_is_reachable() {
     );
   }
   assert!(
-    !parse_str(src).has_errors(),
+    !parse_document(src).has_errors(),
     "the corpus must parse cleanly"
   );
-  assert_eq!(text(&parse_str(src)), src);
+  assert_eq!(text(&parse_document(src)), src);
 }
 
 #[test]
@@ -492,7 +501,7 @@ fn every_definition_form_round_trips_verbatim() {
     "  # only a comment\n",
   ] {
     assert_eq!(
-      text(&parse_str(src)),
+      text(&parse_document(src)),
       src,
       "{src:?} must round-trip verbatim"
     );

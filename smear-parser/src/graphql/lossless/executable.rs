@@ -239,7 +239,7 @@ lossless_production! {
   /// input errors"), and gate 1 compares verdicts. The node is opened either way, so a caller
   /// always finds a document to walk.
   ///
-  /// The executable-only root, off [`parse_str`](super::parse_str)'s mixed-form path.
+  /// The executable-only root, off [`parse_document`](super::parse_document)'s mixed-form path.
   /// [`parse_executable_document`](super::parse_executable_document) is its shipped entry point.
   fn executable_document<'inp, Src, Ctx>(inp) {
     node(

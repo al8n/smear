@@ -85,7 +85,9 @@ use std::path::PathBuf;
 
 use smear_parser::graphql::{
   kinds::SyntaxKind as K,
-  lossless::{Parse, SyntaxNode, parse_executable_document, parse_str, parse_type_system_document},
+  lossless::{
+    Parse, SyntaxNode, parse_document, parse_executable_document, parse_type_system_document,
+  },
 };
 
 /// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
@@ -140,7 +142,7 @@ fn corpus() -> Vec<(String, String)> {
 
 /// The tree's text, which is the claim under test.
 fn round_trip(src: &str) -> String {
-  parse_str(src).syntax().text().to_string()
+  parse_document(src).syntax().text().to_string()
 }
 
 /// The tree's text re-derived from its **tokens**, in document order.
@@ -182,7 +184,7 @@ fn every_corpus_entry_round_trips_byte_for_byte() {
   let mut accepted = 0usize;
   let mut rejected = 0usize;
   for (name, src) in &entries {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert_eq!(
       &parse.syntax().text().to_string(),
       src,
@@ -210,8 +212,8 @@ fn every_corpus_entry_round_trips_byte_for_byte() {
 
 /// The other two roots materialize their own trees, and each must round-trip too.
 ///
-/// [`parse_str`] is one entry point of three, and the other two are the reason this test exists
-/// rather than being folded into the loop above. [`parse_type_system_document`] and
+/// [`parse_document`] is one entry point of three, and the other two are the reason this test
+/// exists rather than being folded into the loop above. [`parse_type_system_document`] and
 /// [`parse_executable_document`] run the corpus through a production set that **rejects most of
 /// it**, so unlike `document` they routinely stop before the end of the source — which makes the
 /// drain in `type_system_document_entry` and `executable_document_entry` load-bearing where
@@ -261,7 +263,7 @@ fn every_byte_is_carried_by_a_token() {
   let mut total_gaps = 0usize;
 
   for (name, src) in corpus() {
-    let parse = parse_str(&src);
+    let parse = parse_document(&src);
     let syntax = parse.syntax();
 
     assert_eq!(
@@ -312,7 +314,7 @@ fn the_same_bytes_round_trip_through_two_different_trees() {
     parse.syntax().descendants().map(|n| n.kind()).collect()
   }
 
-  let mixed = parse_str(SRC);
+  let mixed = parse_document(SRC);
   let sdl = parse_type_system_document(SRC);
 
   assert_ne!(
@@ -380,7 +382,7 @@ fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
   const KEEPS_THE_NODE: &[&str] = &["type T { x: }", "type T { x: Int", "type T {}"];
 
   fn kinds_of(src: &str) -> Vec<K> {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants()
       .map(|n| n.kind())
@@ -392,7 +394,7 @@ fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
     assert_eq!(round_trip(src), src, "{src:?}: the text did not round-trip");
     // …and the parse is a failure, so gate 1 passes it without comment too.
     assert!(
-      parse_str(src).has_errors(),
+      parse_document(src).has_errors(),
       "{src:?} was supposed to be a failing parse"
     );
 
@@ -408,7 +410,7 @@ fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
   for src in KEEPS_THE_NODE.iter().copied() {
     assert_eq!(round_trip(src), src, "control {src:?} did not round-trip");
     assert!(
-      parse_str(src).has_errors(),
+      parse_document(src).has_errors(),
       "control {src:?} was supposed to be a failing parse"
     );
     let kinds = kinds_of(src);
@@ -478,7 +480,7 @@ fn bytes_the_corpus_does_not_contain_still_round_trip() {
   let mut accepted = 0usize;
   let mut rejected = 0usize;
   for (name, src) in CASES {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert_eq!(
       &parse.syntax().text().to_string(),
       src,
@@ -535,5 +537,5 @@ fn the_round_trip_comparison_is_not_vacuous() {
   // The bytes are the tree's, not the argument's: a passthrough would agree with `src` here and
   // disagree with the tokens, which is the pairing `every_byte_is_carried_by_a_token` holds over
   // the whole corpus. Repeated on one source so this test states the property it depends on.
-  assert_eq!(tokens_text(&parse_str(A).syntax()), A);
+  assert_eq!(tokens_text(&parse_document(A).syntax()), A);
 }

@@ -67,7 +67,7 @@ use smear_parser::graphqlx::{
       parse_definition_type_generics, parse_executable_definition_type_generics,
       parse_extension_name, parse_where_clause,
     },
-    parse_executable_document, parse_str, parse_type_system_document,
+    parse_document, parse_executable_document, parse_type_system_document,
     selection::test_support::parse_selection_set,
     ty::test_support::parse_type_ref,
     value::test_support::parse_value,
@@ -310,7 +310,7 @@ fn a_fields_own_name_is_not_its_alias() {
 
 #[test]
 fn an_operations_keyword_is_a_token_and_its_name_is_a_node() {
-  let parse = parse_str("query Q<T = Int>($v: [T!] = [1] @d) @e { f }");
+  let parse = parse_document("query Q<T = Int>($v: [T!] = [1] @d) @e { f }");
   assert!(
     !parse.has_errors(),
     "the operation fixture must parse clean"
@@ -346,7 +346,7 @@ fn an_operations_keyword_is_a_token_and_its_name_is_a_node() {
 
 #[test]
 fn a_fragments_two_generic_lists_are_a_sibling_and_a_child() {
-  let parse = parse_str("\"doc\" fragment <T> F<U> on X @d where A: B { f }");
+  let parse = parse_document("\"doc\" fragment <T> F<U> on X @d where A: B { f }");
   assert!(!parse.has_errors(), "the fragment fixture must parse clean");
   let root = parse.syntax();
 
@@ -391,8 +391,9 @@ fn a_fragments_two_generic_lists_are_a_sibling_and_a_child() {
 
 #[test]
 fn an_sdl_definitions_name_is_a_node_and_never_an_index() {
-  let parse =
-    parse_str("\"doc\" type T<A = Int> implements I & J @d where A: B { f(x: Int = 1): [T!]! @e }");
+  let parse = parse_document(
+    "\"doc\" type T<A = Int> implements I & J @d where A: B { f(x: Int = 1): [T!]! @e }",
+  );
   assert!(!parse.has_errors(), "the object fixture must parse clean");
   let root = parse.syntax();
 
@@ -451,7 +452,7 @@ fn an_sdl_definitions_name_is_a_node_and_never_an_index() {
 
 #[test]
 fn an_extensions_target_is_a_path_where_a_definitions_name_is_not() {
-  let parse = parse_str("extend type ns::T<A> implements I @d { f: Int }");
+  let parse = parse_document("extend type ns::T<A> implements I @d { f: Int }");
   assert!(
     !parse.has_errors(),
     "the extension fixture must parse clean"
@@ -486,7 +487,7 @@ fn an_extensions_target_is_a_path_where_a_definitions_name_is_not() {
 
   // The one extension whose directives the grammar makes mandatory, and which therefore has no
   // other tail to confuse the getter with.
-  let scalar_parse = parse_str("extend scalar S @d");
+  let scalar_parse = parse_document("extend scalar S @d");
   assert!(
     !scalar_parse.has_errors(),
     "the scalar fixture must parse clean"
@@ -566,7 +567,7 @@ fn the_three_generic_lists_are_told_apart_by_their_members() {
 
 #[test]
 fn an_import_clause_is_a_list_or_a_wildcard_and_never_both() {
-  let parse = parse_str("import { A as ns::B, * as w } from \"m\"");
+  let parse = parse_document("import { A as ns::B, * as w } from \"m\"");
   assert!(!parse.has_errors(), "the import fixture must parse clean");
   let root = parse.syntax();
 
@@ -594,7 +595,7 @@ fn an_import_clause_is_a_list_or_a_wildcard_and_never_both() {
   assert_eq!(node_text!(wildcard.alias()), Some("w ".to_string()));
 
   // The other clause form, where the wildcard is the whole clause.
-  let bare = parse_str("import * as w from \"m\"");
+  let bare = parse_document("import * as w from \"m\"");
   assert!(!bare.has_errors(), "the wildcard clause must parse clean");
   let bare_import: ImportDefinition = first(&bare.syntax());
   assert!(bare_import.import_list().is_none());
@@ -610,7 +611,7 @@ fn an_import_clause_is_a_list_or_a_wildcard_and_never_both() {
 
 #[test]
 fn a_document_sorts_its_entries_by_kind() {
-  let parse = parse_str(
+  let parse = parse_document(
     "import { A } from \"m\"\n\
      query Q { f }\n\
      fragment F on T { g }\n\
@@ -1054,11 +1055,11 @@ impl Registry {
 
   /// Parse one source through all three roots and probe every tree.
   ///
-  /// All three, because `parse_str` reaches 76 of the 78 wrappers structurally:
+  /// All three, because `parse_document` reaches 76 of the 78 wrappers structurally:
   /// [`ExecutableDocument`] and [`TypeSystemDocument`] are *roots*, and a parse has one. Driving
   /// the other two over the same bytes is what gate 3 does for the same reason.
   fn sweep_source(&mut self, src: &str) {
-    self.walk(&parse_str(src).syntax());
+    self.walk(&parse_document(src).syntax());
     self.walk(&parse_executable_document(src).syntax());
     self.walk(&parse_type_system_document(src).syntax());
   }
@@ -1930,7 +1931,7 @@ fn every_fixture_is_a_document_the_suite_accepts() {
   // subtrees it managed to build — so "the sweep is green" would then rest on trees nobody meant to
   // write. Each fixture is a document this suite accepts outright.
   for (name, src) in FIXTURES {
-    let parse = parse_str(src);
+    let parse = parse_document(src);
     assert!(
       !parse.has_errors(),
       "fixture `{name}` does not parse cleanly: {:?}",
@@ -2050,7 +2051,7 @@ fn a_hole_in_front_of_a_definitions_name_costs_the_whole_definition() {
   // is a foreign child sitting in front of the name, and recovery does not produce one: a
   // definition that fails before its body unwinds **past its own mark**, so the tree keeps sibling
   // `Error` nodes at document level and no definition node at all.
-  let lost = parse_str("type * T { f: Int }");
+  let lost = parse_document("type * T { f: Int }");
   assert!(lost.has_errors(), "the probe must be malformed");
   let root = lost.syntax();
   assert!(
@@ -2069,7 +2070,7 @@ fn a_hole_in_front_of_a_definitions_name_costs_the_whole_definition() {
   // the enclosing node, and the `Error` then lands in a list wrapper where a kind-blind rival can
   // see it. `VariablesDefinition` is where that happens, which is what
   // [`RECOVERY_FIXTURES`] is built out of.
-  let kept = parse_str("query Q(* $a: Int) { f }");
+  let kept = parse_document("query Q(* $a: Int) { f }");
   assert!(kept.has_errors(), "the contrast must be malformed too");
   let variables = kept
     .syntax()
@@ -2090,7 +2091,7 @@ fn every_recovery_fixture_really_is_malformed() {
   // [`UNDISCRIMINATED`] would grow entries with no explanation attached.
   for (name, src) in RECOVERY_FIXTURES {
     assert!(
-      parse_str(src).has_errors(),
+      parse_document(src).has_errors(),
       "recovery fixture `{name}` parses cleanly, so it no longer holds a recovery hole"
     );
   }

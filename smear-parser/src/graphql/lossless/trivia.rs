@@ -195,7 +195,7 @@ where
 ///
 /// **This module is where the atoms stop being generic.** The atoms above name only the
 /// projections; these drivers must choose a concrete source, emitter and context to build a
-/// `Sink` at all, exactly as [`super::runner::parse_str`] does.
+/// `Sink` at all, exactly as [`super::runner::parse_document`] does.
 ///
 /// Behind `feature = "test-support"`, and hidden even then. `pub` is forced only because
 /// `tests/lossless_trivia_atoms.rs` is a separate crate; the drivers themselves name this
@@ -227,7 +227,7 @@ pub mod test_support {
   ///
   /// Spelled out because a closure's parameter type is **not** inferred through a
   /// `ParseInput` bound — only through an `Fn` bound — so `|inp: &mut _|` leaves `L` and `Ctx`
-  /// unresolved and the body's first method call is the error site. `runner::parse_str` never
+  /// unresolved and the body's first method call is the error site. `runner::parse_document` never
   /// hits this: it applies a named function whose own signature pins both.
   type Emitter<'inp> = Verbose<GraphqlLosslessErrors<&'inp str>, SimpleSpan, GraphQL>;
   type TestSink<'inp> = Sink<'inp, GraphqlLosslessLexer<'inp, str>, Emitter<'inp>>;
@@ -292,7 +292,7 @@ pub mod test_support {
 
   /// `super::peek_kind` over `src`.
   ///
-  /// `::<str, _>` for the reason `runner::parse_str` spells out: `str` and `&str` both project
+  /// `::<str, _>` for the reason `runner::parse_document` spells out: `str` and `&str` both project
   /// `Slice<'inp> = &'inp str`, so the lexer type alone leaves an atom's `Src` genuinely
   /// ambiguous, and `str` is the one that matches `L::Source`.
   ///

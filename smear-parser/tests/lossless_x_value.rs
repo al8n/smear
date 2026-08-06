@@ -1,9 +1,9 @@
 //! The GraphQLx value and type-reference productions.
 //!
-//! **These tests drive the productions directly, not through `parse_str`.** `parse_str` is still
-//! Task 9's drain-everything stub, so nothing under it reaches a value production; written through
-//! it, every assertion here would compare two one-element `[Root]` trees and pass vacuously. That
-//! is the weak-assertion failure mode this plan has been bitten by before, and the
+//! **These tests drive the productions directly, not through `parse_document`.** `parse_document`
+//! is still Task 9's drain-everything stub, so nothing under it reaches a value production;
+//! written through it, every assertion here would compare two one-element `[Root]` trees and pass
+//! vacuously. That is the weak-assertion failure mode this plan has been bitten by before, and the
 //! `lossless_drivers!` block in each production file exists precisely so it cannot recur.
 //!
 //! Every test asserts the **node-kind pre-order** of a real parse rather than a verdict. A verdict

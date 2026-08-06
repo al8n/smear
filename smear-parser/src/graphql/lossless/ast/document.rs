@@ -132,7 +132,7 @@ ast_node!(
 ast_node!(
   lang = crate::graphql::kinds::GraphQLLang;
   /// A mixed executable-plus-type-system document — what
-  /// [`parse_str`](crate::graphql::lossless::parse_str) builds.
+  /// [`parse_document`](crate::graphql::lossless::parse_document) builds.
   Document => K::Document {
     /// Every operation the document defines, in order.
     operation_definitions: many OperationDefinition,
@@ -176,7 +176,7 @@ ast_node!(
   /// An SDL-only document root.
   ///
   /// [`Document`] without the two executable kinds, which is the whole difference between the
-  /// two roots. Not what [`parse_str`](crate::graphql::lossless::parse_str) builds — a
+  /// two roots. Not what [`parse_document`](crate::graphql::lossless::parse_document) builds — a
   /// schema-only consumer calls
   /// [`parse_type_system_document`](crate::graphql::lossless::parse_type_system_document), which
   /// reports an executable definition rather than admitting one.

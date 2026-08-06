@@ -16,7 +16,7 @@
 //! `GraphqlLosslessInput<'inp, '_, Src, Ctx>`, which expands through
 //! `GraphqlLosslessLexer<'inp, Src> = LosslessLexer<'inp, Src::Slice<'inp>>` — an associated-type
 //! projection, so knowing the input type does not recover `Src` (`str` and `&str` both project
-//! `&'inp str`, which is the concrete instance of the same ambiguity `runner::parse_str`
+//! `&'inp str`, which is the concrete instance of the same ambiguity `runner::parse_document`
 //! documents). Every call to an atom, a sibling production or a recovery helper therefore names
 //! both parameters explicitly. Dropping one is an `E0283`, not a silent mis-instantiation.
 //!

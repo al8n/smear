@@ -83,7 +83,7 @@ True by construction — the two dialects derive their kind spaces independently
 ```compile_fail
 # use smear_parser::{graphql, graphqlx};
 # use smear_parser::lossless::ast::CastNode;
-let parse = graphql::lossless::parse_str("type T { f: Int }");
+let parse = graphql::lossless::parse_document("type T { f: Int }");
 let node = parse.syntax();
 // error[E0308]: expected `SyntaxNode<GraphQLxLang>`, found `SyntaxNode<GraphQLLang>`
 let _ = graphqlx::lossless::ast::ObjectTypeDefinition::cast_node(node);

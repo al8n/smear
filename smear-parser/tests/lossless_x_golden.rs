@@ -100,7 +100,7 @@ use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf};
 use rowan::{NodeOrToken, WalkEvent};
 use smear_parser::graphqlx::{
   kinds::SyntaxKind as K,
-  lossless::{SyntaxNode, parse_str, parse_type_system_document},
+  lossless::{SyntaxNode, parse_document, parse_type_system_document},
 };
 
 /// The environment variable that turns a comparison run into a blessing run.
@@ -390,7 +390,7 @@ fn render(root: &SyntaxNode) -> String {
 
 /// The rendered tree for a source, through the ordinary mixed root.
 fn render_str(src: &str) -> String {
-  render(&parse_str(src).syntax())
+  render(&parse_document(src).syntax())
 }
 
 /// A unified diff of two rendered trees, as hunks with two lines of context.
@@ -709,7 +709,7 @@ fn the_golden_directory_holds_exactly_the_expected_files() {
 fn the_render_answers_differently_for_trees_that_text_cannot_separate() {
   const SRC: &str = "query Q { f }";
 
-  let mixed = parse_str(SRC);
+  let mixed = parse_document(SRC);
   let sdl = parse_type_system_document(SRC);
 
   assert_eq!(mixed.syntax().text().to_string(), SRC);
@@ -755,7 +755,7 @@ fn the_render_separates_the_two_readings_of_a_contextual_keyword() {
   const SET_LITERAL: &str = "{ f(a: set { 1 }) }";
 
   assert!(
-    !parse_str(ENUM_VALUE).has_errors() && !parse_str(SET_LITERAL).has_errors(),
+    !parse_document(ENUM_VALUE).has_errors() && !parse_document(SET_LITERAL).has_errors(),
     "both readings must be clean parses, or gate 1 separates them and this gate is not the only \
      witness"
   );
@@ -812,7 +812,7 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
   /// Does `src` put a token directly under `Root`? Only the gap can be there — every grammar token
   /// is committed inside `Document` — so this is "the gap escaped the tree".
   fn gap_at_root(src: &str) -> bool {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .children_with_tokens()
       .any(|element| element.as_token().is_some())
@@ -820,7 +820,7 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 
   /// The kind of the node each `Gap` in `src` is a child of, in source order.
   fn gap_parents(src: &str) -> Vec<K> {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants_with_tokens()
       .filter_map(|element| element.into_token())
@@ -831,7 +831,7 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 
   /// How many tokens the grammar committed, as opposed to the sink tiling them.
   fn committed_tokens(src: &str) -> usize {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants_with_tokens()
       .filter_map(|element| element.into_token())
@@ -922,7 +922,7 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
         .join(name),
     )
     .unwrap_or_else(|e| panic!("the corpus entry {name} is unreadable: {e}"));
-    let gap_owner = parse_str(&src)
+    let gap_owner = parse_document(&src)
       .syntax()
       .children_with_tokens()
       .filter_map(|element| element.into_token())
@@ -951,7 +951,7 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 #[test]
 fn only_the_recorded_nodes_open_on_their_leading_trivia() {
   fn pairings(src: &str) -> Vec<String> {
-    parse_str(src)
+    parse_document(src)
       .syntax()
       .descendants()
       .filter_map(|node| {

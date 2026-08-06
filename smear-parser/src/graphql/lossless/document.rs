@@ -34,7 +34,7 @@
 //! - **The remainder has to be committed.** `document_entry` drains whatever an escaping
 //!   `Err` left behind, because `Sink::finish` refuses any source byte that no committed token
 //!   covers and no lexer-error diagnostic explains (`FinishError::UncoveredGap`). The old
-//!   `parse_str` bound the driver's result to `_out` and drained nothing, so the first
+//!   `parse_document` bound the driver's result to `_out` and drained nothing, so the first
 //!   reachable `Err` would have been a panic in materialization rather than a reportable parse.
 //!
 //! # A document ends with its trailing trivia inside it
@@ -417,7 +417,7 @@ lossless_production! {
   /// higher-ranked `fn` parameter would be the only way to abstract over the two dispatchers,
   /// and it buys eight lines at the cost of a signature no reader can check at a glance.
   ///
-  /// Not reachable from [`parse_str`](super::parse_str), which parses the mixed form.
+  /// Not reachable from [`parse_document`](super::parse_document), which parses the mixed form.
   /// [`parse_type_system_document`](super::parse_type_system_document) is its shipped entry
   /// point — the one a schema-only consumer calls so that an executable definition is rejected
   /// by the parser, at the parser's own position, rather than by hand afterwards.
@@ -444,8 +444,8 @@ lossless_production! {
   /// [`Sink::finish`](tokora::cst::Sink::finish) refuses any source byte that no committed token
   /// covers and no lexer-error diagnostic explains, and an `Err` escaping [`document`] leaves
   /// the rest of the source uncommitted. Draining here turns that into a reportable parse rather
-  /// than a panic in [`parse_str`](super::parse_str) — the defect Task 5 recorded and could not
-  /// reach, `document` having been a stub.
+  /// than a panic in [`parse_document`](super::parse_document) — the defect Task 5 recorded and
+  /// could not reach, `document` having been a stub.
   fn document_entry<'inp, Src, Ctx>(inp) {
     let out = document::<Src, Ctx>(inp);
     inp.skip_while(|_| true)?;
