@@ -150,7 +150,7 @@ definition_parser!(
       .allow_leading()
       .at_least(1)
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)?;
     Ok(DirectiveLocations::new(span, locations))
   }

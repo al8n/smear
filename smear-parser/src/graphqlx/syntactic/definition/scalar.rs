@@ -15,11 +15,10 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = definition_name(inp)?;
   let directives = optional_const_directives(inp)?;
   Ok(ScalarTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     directives,
   ))

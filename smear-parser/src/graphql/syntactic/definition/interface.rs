@@ -15,7 +15,6 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = take_name(inp)?;
   let implements = match try_implements(inp)? {
     ParseAttempt::Accept(implements) => Some(implements),
@@ -27,7 +26,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(InterfaceTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     implements,
     directives,

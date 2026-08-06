@@ -26,7 +26,7 @@ use super::{
   unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, try_at, try_double_colon},
+  combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, try_at, try_double_colon},
   graphqlx::{
     GraphQLx,
     ast::{ConstDirective, ConstDirectives, Directive, Directives, TypePath},
@@ -90,20 +90,21 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let separator = try_double_colon(inp)?;
   let fully_qualified = matches!(&separator, ParseAttempt::Accept(_));
   let first = match try_name(inp)? {
     ParseAttempt::Accept(name) => name,
     ParseAttempt::Decline => return unexpected_here(inp, Expectation::Path),
   };
+  // Already the first token's start — `::` when the path is fully qualified, the leading segment
+  // otherwise — so this is `extent_start` by another route and does not need to peek again.
   let start = match separator {
     ParseAttempt::Accept(separator) => separator.span().start(),
     ParseAttempt::Decline => first.span().start(),
   };
   let path = path_after_first(start, first, fully_qualified, inp)?;
   let generics = try_type_generics(inp)?;
-  Ok(TypePath::new(inp.span_since(&cursor), path, generics))
+  Ok(TypePath::new(extent_since(inp, start), path, generics))
 }
 
 fn directive_after_at<'inp, Src, Ctx>(
@@ -121,7 +122,7 @@ where
 {
   take_directive_type_path
     .then(arguments)
-    .spanned()
+    .token_spanned()
     .map(
       |Spanned {
          span,
@@ -152,7 +153,7 @@ where
 {
   take_directive_type_path
     .then(const_arguments)
-    .spanned()
+    .token_spanned()
     .map(
       |Spanned {
          span,
@@ -265,7 +266,10 @@ directive_parser!(
   inp,
   Directives<GraphqlxSlice<'inp, Src>>;
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(Directives::new(SimpleSpan::new(start, start), Vec::new())),
@@ -285,7 +289,10 @@ directive_parser!(
   inp,
   ConstDirectives<GraphqlxSlice<'inp, Src>>;
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     match try_at(inp)? {
       ParseAttempt::Accept(at) => const_directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(ConstDirectives::new(

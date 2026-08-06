@@ -1,7 +1,7 @@
 //! SDL union type-definition parsing.
 
 use super::*;
-use crate::combinator::{pipe, try_pipe};
+use crate::combinator::{extent_end, pipe, try_pipe};
 
 fn take_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -90,7 +90,6 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = take_name(inp)?;
   let directives = optional_const_directives(inp)?;
   let member_types = match try_union_members(inp)? {
@@ -98,7 +97,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(UnionTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     directives,
     member_types,

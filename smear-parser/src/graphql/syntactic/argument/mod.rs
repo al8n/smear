@@ -24,7 +24,7 @@ use super::{
   value::{HeadKind, const_value, value, value_head_kind},
 };
 use crate::{
-  combinator::{ParseCtx, colon},
+  combinator::{ParseCtx, TokenSpannedExt, colon, extent_end},
   graphql::{
     GraphQL,
     ast::{Argument, ArgumentList, Arguments, ConstArgument, ConstArguments},
@@ -116,7 +116,7 @@ argument_parser!(
         })?;
         value(inp)
       })
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
       .parse_input(inp)
   }
@@ -151,7 +151,7 @@ argument_parser!(
         })?;
         const_value(inp)
       })
-      .spanned()
+      .token_spanned()
       .map(|Spanned { span, data: (name, value) }| ConstArgument::new(span, name, value))
       .parse_input(inp)
   }
@@ -201,7 +201,7 @@ argument_parser!(
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| ArgumentList::new(span, data))
   }
@@ -216,7 +216,7 @@ argument_parser!(
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| ArgumentList::new(span, data))
   }
@@ -234,7 +234,10 @@ argument_parser!(
   inp,
   Arguments<GraphqlSlice<'inp, Src>>,
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     committed_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)
@@ -258,7 +261,10 @@ argument_parser!(
   inp,
   ConstArguments<GraphqlSlice<'inp, Src>>,
   {
-    let start = *inp.offset();
+    // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
+    // token, so a caller that left a peek in the cache would anchor this absent collection past
+    // the token that follows it. See `crate::combinator::extent`.
+    let start = extent_end(inp);
     committed_const_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)

@@ -118,11 +118,11 @@ definition_parser!(
   Described<TypeSystemDefinition<GraphqlSlice<'inp, Src>>, GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    let cursor = *inp.cursor();
+    let node_start = extent_start(inp)?;
     let description = description(inp)?;
     let definition = type_system_definition(inp)?;
     Ok(Described::new(
-      inp.span_since(&cursor),
+      extent_since(inp, node_start),
       description,
       definition,
     ))
@@ -308,7 +308,7 @@ definition_parser!(
       .map(
         |definitions: Vec<TypeSystemDefinitionOrExtension<GraphqlSlice<'inp, Src>>>| definitions,
       )
-      .spanned()
+      .token_spanned()
       .parse_input(inp)?;
     Ok(TypeSystemDocument::new(span, definitions))
   }

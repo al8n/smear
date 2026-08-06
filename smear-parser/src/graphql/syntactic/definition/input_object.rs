@@ -16,7 +16,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| InputFieldsDefinition::new(span, data))
   }
@@ -48,7 +48,6 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
 {
-  let cursor = *inp.cursor();
   let name = take_name(inp)?;
   let directives = optional_const_directives(inp)?;
   let fields_definition = match try_input_fields_definition(inp)? {
@@ -56,7 +55,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(InputObjectTypeDefinition::new(
-    SimpleSpan::new(start, inp.span_since(&cursor).end()),
+    SimpleSpan::new(start, extent_end(inp)),
     name,
     directives,
     fields_definition,

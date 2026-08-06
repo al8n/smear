@@ -51,7 +51,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .spanned()
+      .token_spanned()
       .parse_input(inp)
       .map(|Spanned { span, data }| ArgumentsDefinition::new(span, data))
   }

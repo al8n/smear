@@ -22,7 +22,7 @@ use super::{
   unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, asterisk},
+  combinator::{ParseCtx, TokenSpannedExt, asterisk},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -262,7 +262,7 @@ import_parser!(
     .at_least(1)
     .delimited_by_braces()
     .collect_with(Vec::new())
-    .spanned()
+    .token_spanned()
     .parse_input(inp)
     .map(|Spanned { span, data }| ImportList::new(span, data))
   }

@@ -29,9 +29,17 @@
 //! cross-flavor comparison trait, so a dispatch can byte-compare a source slice
 //! against a spelling (`slice.equivalent("true")`) without an `AsRef<[u8]>`
 //! detour that pins the source representation.
+//!
+//! The **span-extent** vocabulary — [`extent_start`], [`extent_end`], [`extent_since`] and
+//! [`token_spanned`](TokenSpannedExt::token_spanned) — is the one place this layer does *not* take
+//! tokora's answer as given. A composite node's span is a fact about the tokens it contains, and
+//! tokora's `.spanned()` measures the lookahead position instead; the difference, and why it is
+//! invisible on compact input, is on [`extent_start`].
 
+mod extent;
 mod token;
 
+pub use extent::*;
 pub use token::*;
 pub use tokora::{
   ComposableEmitter, ComposableParseContext as ParseCtx, ErrorOf, SliceOf, utils::cmp::Equivalent,
