@@ -763,6 +763,70 @@ jobs:
     - name: cargo test --release --test byte_identity -- --include-ignored
       run: cargo test -p smear-apollo-bench --release --test byte_identity -- --include-ignored
 
+  # ── THE VALIDATOR DIFFERENTIAL ORACLE ───────────────────────────────────────────────────────
+  #
+  # Runs smear's draft §5 validator against `apollo-compiler` 1.32.0 verdict by verdict
+  # (`benchmarks/tests/validator_oracle.rs`, issue #85 G2). The committed corpus runs in the
+  # ordinary `test` job too, because `cargo test --all-features` covers every workspace member —
+  # this job exists for the two things that one cannot do.
+  #
+  # WHY A NAMED `--test` TARGET. Same reason as `byte-identity` above: a cargo target *filter* that
+  # matches nothing warns and exits 0, so a renamed or deleted gate would leave a green tick over
+  # no coverage. `--test validator_oracle` is a hard error if the target stops existing.
+  #
+  # WHY THE SECOND CHECKOUT. The committed corpus is self-contained on purpose — vendoring another
+  # project's hundred and sixty fixtures is a licensing and drift liability — but it is not the
+  # widest corpus available, and the difference is not academic. Perturbing draft 5.3.3 to
+  # implement only one of its two directions left the committed corpus green at the time and
+  # reddened three files in `apollo-rs`'s own `test_data`; the curated cases that now catch it were
+  # written *because* this lane found the hole. `SMEAR_APOLLO_RS_TEST_DATA` is the door, and the
+  # harness ingests the corpus by splitting each mixed file into its SDL and executable halves with
+  # apollo's own AST parser, so both implementations read the same two texts.
+  #
+  # WHY A PINNED SHA AND NOT `main`. A moving external corpus in a required gate is a gate that
+  # eventually gets switched off. `fa2b5fe8` is the `apollo-compiler@1.32.0` tag — the same release
+  # `benchmarks/Cargo.toml` pins with `=`, so the corpus and the oracle move together or not at
+  # all. Bumping one without the other is exactly the mistake the whitelist's re-verification test
+  # exists to catch, and this pin makes it impossible to make by accident.
+  #
+  # WHY A TARBALL INTO `$RUNNER_TEMP` AND NOT `actions/checkout` WITH A `path:`. `path:` must stay
+  # inside the workspace, which would put a foreign `Cargo.toml` tree inside this one's directory —
+  # the situation the root manifest's `exclude = ["legacy"]` entry exists to work around, and not
+  # one to reproduce for a directory nobody builds. `$RUNNER_TEMP` is outside the checkout, so
+  # cargo never sees it and nothing needs excluding.
+  validator-oracle:
+    name: validator-oracle
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Fetch apollo-rs's validation corpus at the pinned oracle release
+      run: |
+        mkdir -p "$RUNNER_TEMP/apollo-rs"
+        curl -sSfL https://github.com/apollographql/apollo-rs/archive/fa2b5fe840dd90d67b2ae2a6ed833a708eedb1ca.tar.gz \
+          | tar -xz -C "$RUNNER_TEMP/apollo-rs" --strip-components=1
+        # Fail here, loudly, rather than let the harness fall back to the committed corpus and
+        # report a green run over a lane that fetched nothing.
+        test -d "$RUNNER_TEMP/apollo-rs/crates/apollo-compiler/test_data/diagnostics"
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo build and registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-validator-oracle-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-validator-oracle-
+    - name: cargo test --test validator_oracle
+      env:
+        SMEAR_APOLLO_RS_TEST_DATA: ${{ runner.temp }}/apollo-rs/crates/apollo-compiler/test_data
+      # `--nocapture` because the report is the artifact: how many cases reached a comparison, what
+      # each whitelist class and each open gap accounted for. A green tick alone would not say
+      # whether the oracle checked five hundred documents or five.
+      run: cargo test -p smear-apollo-bench --test validator_oracle -- --nocapture
+
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never
   # created at all — it does not appear in the job list of #64's or #66's run. With the macOS

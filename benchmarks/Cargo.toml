@@ -6,13 +6,26 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Like-for-like benchmark: smear's GraphQL lossless CST parser vs apollo-parser"
+description = "Like-for-like comparison against the apollo-rs stack: the lossless CST parser vs apollo-parser, and the draft §5 validator against apollo-compiler as a differential oracle"
 publish = false
 
 # A workspace member rather than a dev-dependency of `smear`: a dev-dependency would compile
 # apollo into every `cargo test -p smear`. (It was also once the only way to inherit a root
 # `[patch.crates-io]` for an unpublished `tokora`; that patch went away when tokora 0.8.0 shipped,
 # so only the first reason is still live.)
+#
+# That reason got stronger when the validator oracle arrived. `apollo-compiler` is the oracle, and
+# it pulls in `ahash`, `ariadne`, `futures`, `indexmap`, `serde`, `serde_json_bytes`,
+# `typed-arena` and `triomphe` — none of which is anywhere else in this workspace's graph. As a
+# `smear` dev-dependency every one of them would compile on every `cargo test -p smear`, the inner
+# loop, to serve a gate that runs in one job. Here it costs the inner loop nothing, and the
+# published crate cannot reach it at all: this package is `publish = false` and nothing depends
+# on it.
+#
+# The second reason is that the oracle and the §5 benchmark want the same edge. The design spec's
+# G5 puts the validator benches "alongside the existing apollo-comparison harness" — that harness
+# is this package — so `apollo-compiler` had to land here regardless, and adding it to `smear`
+# too would only duplicate the edge.
 #
 # `apollo-parser` comes from the registry, not from the local `apollo-rs` checkout, so the
 # numbers describe what a real consumer gets and reproduce on any machine. 0.8.6 is both the
@@ -33,13 +46,26 @@ publish = false
 # second dialect would be compile time bought for nothing. (Before the merge this note also said
 # `graphqlx` "drags in `unstable`"; that marker feature gated no code and is gone (#83), which
 # removes a reason without touching the decision.)
+#   `validator` — the draft §5 rule engine the differential oracle exists to check. It implies
+#               `parser` and `graphql`, both of which are already on, so it adds the module and
+#               no dependency.
 smear = { path = "../smear", version = "0.0.0", default-features = false, features = [
   "std",
   "graphql",
   "rowan",
+  "validator",
 ] }
 tokora.workspace = true
 apollo-parser = "0.8.6"
+# The differential oracle. Pinned with `=` rather than a caret range because the whitelist in
+# `src/oracle/whitelist.rs` records four places where this exact release is *less* strict than the
+# specification, and an oracle whose gaps move underneath a whitelist silently blesses whatever
+# moved into them. A bump is a deliberate act that re-runs the re-verification the whitelist's
+# own tests perform.
+#
+# It resolves `apollo-parser` to 0.8.6 — the same version this package already names — so the
+# oracle adds no second copy of the parser and no second `rowan`.
+apollo-compiler = "=1.32.0"
 # Named directly only so `src/dump.rs` can spell `WalkEvent` and `NodeOrToken`, the two types
 # `SyntaxNode::preorder_with_tokens` yields. It must track whatever `smear` resolves, because
 # `dump::rows` walks a `smear::parser::graphql::lossless::SyntaxNode` and nothing else.
@@ -66,4 +92,9 @@ workspace = true
 [[bench]]
 name = "apollo_comparison"
 path = "benches/apollo_comparison.rs"
+harness = false
+
+[[bench]]
+name = "validator_comparison"
+path = "benches/validator_comparison.rs"
 harness = false
