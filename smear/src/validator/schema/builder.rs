@@ -43,7 +43,8 @@ use crate::parser::graphql::{
 
 use super::{
   builtin,
-  error::{SchemaError, SchemaErrorKind, SchemaErrors, owner_path},
+  error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
+  literal::{BuiltInScalar, LiteralShape},
   repr::{
     DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
     MAX_SYMBOLS, NameIndex, PackedType, Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags,
@@ -123,12 +124,95 @@ struct RawTypeRef {
   too_deep: bool,
 }
 
+/// A directive written on a type-system element, kept whole.
+///
+/// The definition it names may not have been read yet — it may not even be in this document — so
+/// nothing about a usage can be decided at ingest. What is only knowable *here* is the syntactic
+/// position, so [`RawDirectiveUse::location`] is recorded at ingest and everything else is
+/// deferred to [`SchemaBuilder::validate_directive_usages`].
+#[derive(Debug, Clone)]
+struct RawDirectiveUse {
+  name: Located,
+  /// The whole `@name(…)`, which is what a missing argument is blamed on: there is no argument to
+  /// point at.
+  span: SimpleSpan,
+  location: DirectiveLocation,
+  args: Vec<RawArgument>,
+}
+
+#[derive(Debug, Clone)]
+struct RawArgument {
+  name: Located,
+  value: RawValue,
+}
+
+/// A constant literal, reduced to what a type check reads, with the position to blame.
+#[derive(Debug, Clone)]
+struct RawValue {
+  span: SimpleSpan,
+  shape: RawShape,
+}
+
+/// The literal itself.
+///
+/// Only the two numeric arms keep their spelling — that is what the range checks read — and only
+/// the enum arm keeps its name. Everything else is decided by shape alone, so a `String`'s bytes
+/// are dropped rather than copied into the builder.
+#[derive(Debug, Clone)]
+enum RawShape {
+  Null,
+  Boolean,
+  Int(Box<[u8]>),
+  Float(Box<[u8]>),
+  String,
+  Enum(Box<[u8]>),
+  List(Vec<RawValue>),
+  Object(Vec<RawObjectField>),
+}
+
+impl RawShape {
+  /// The shape, as the coercion table names it.
+  const fn shape(&self) -> LiteralShape {
+    match self {
+      Self::Null => LiteralShape::Null,
+      Self::Boolean => LiteralShape::Boolean,
+      Self::Int(_) => LiteralShape::Int,
+      Self::Float(_) => LiteralShape::Float,
+      Self::String => LiteralShape::String,
+      Self::Enum(_) => LiteralShape::Enum,
+      Self::List(_) => LiteralShape::List,
+      Self::Object(_) => LiteralShape::Object,
+    }
+  }
+
+  /// The retained spelling the numeric ranges read, empty for every other shape.
+  fn spelling(&self) -> &[u8] {
+    match self {
+      Self::Int(bytes) | Self::Float(bytes) => bytes,
+      _ => &[],
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+struct RawObjectField {
+  name: Located,
+  value: RawValue,
+}
+
 #[derive(Debug, Clone)]
 struct RawInput {
   name: Located,
   ty: RawTypeRef,
   default: DefaultKind,
-  directives: Vec<Located>,
+  directives: Vec<RawDirectiveUse>,
+}
+
+impl RawInput {
+  /// Whether a value must be supplied for this input: non-null, with no default to fall back on.
+  fn is_required(&self) -> bool {
+    self.ty.packed.is_non_null() && !self.default.is_present()
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -136,12 +220,13 @@ struct RawField {
   name: Located,
   ty: RawTypeRef,
   args: Vec<RawInput>,
+  directives: Vec<RawDirectiveUse>,
 }
 
 #[derive(Debug, Clone)]
 struct RawEnumValue {
   name: Located,
-  directives: Vec<Located>,
+  directives: Vec<RawDirectiveUse>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,7 +242,7 @@ struct RawType {
   input_fields: Vec<RawInput>,
   members: Vec<Located>,
   enum_values: Vec<RawEnumValue>,
-  directives: Vec<Located>,
+  directives: Vec<RawDirectiveUse>,
   /// The interface closure, filled in during validation.
   closure: Vec<u32>,
 }
@@ -199,7 +284,7 @@ struct RawExtension {
   input_fields: Vec<RawInput>,
   members: Vec<Located>,
   enum_values: Vec<RawEnumValue>,
-  directives: Vec<Located>,
+  directives: Vec<RawDirectiveUse>,
   /// Root operations, for a `extend schema` rather than a type extension.
   roots: Vec<(RootOperation, Located)>,
 }
@@ -224,6 +309,11 @@ pub struct SchemaBuilder {
   directive_of_sym: Vec<u32>,
   roots: [Option<Located>; 3],
   schema_definition: Option<SimpleSpan>,
+  /// `SCHEMA`-location directives, from the `schema` definition and every `extend schema`.
+  ///
+  /// One list rather than one per definition, because apollo and the draft both treat the schema
+  /// and its extensions as a single location for the repeatability rule.
+  schema_directives: Vec<RawDirectiveUse>,
   extensions: Vec<RawExtension>,
   errors: Vec<SchemaError>,
   document: u32,
@@ -288,6 +378,22 @@ impl SchemaBuilder {
       SchemaError::new(kind, subject, at.span)
         .owned_by(owner)
         .in_document(at.document),
+    );
+  }
+
+  /// Reports at a position no interned name stands for — a literal, or a whole directive usage.
+  fn push_at(
+    &mut self,
+    kind: SchemaErrorKind,
+    subject: &str,
+    owner: String,
+    span: SimpleSpan,
+    document: u32,
+  ) {
+    self.errors.push(
+      SchemaError::new(kind, subject, span)
+        .owned_by(owner)
+        .in_document(document),
     );
   }
 
@@ -426,7 +532,7 @@ impl SchemaBuilder {
   {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Scalar, built_in);
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Scalar);
     raw
   }
 
@@ -437,7 +543,7 @@ impl SchemaBuilder {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Object, built_in);
     raw.implements = self.implements(def.implements());
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Object);
     raw.fields = self.fields(def.fields_definition());
     raw
   }
@@ -449,7 +555,7 @@ impl SchemaBuilder {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Interface, built_in);
     raw.implements = self.implements(def.implements());
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Interface);
     raw.fields = self.fields(def.fields_definition());
     raw
   }
@@ -460,7 +566,7 @@ impl SchemaBuilder {
   {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Union, built_in);
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Union);
     raw.members = self.members(def.member_types());
     raw
   }
@@ -471,7 +577,7 @@ impl SchemaBuilder {
   {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Enum, built_in);
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Enum);
     raw.enum_values = self.enum_values(def.enum_values_definition());
     raw
   }
@@ -482,7 +588,7 @@ impl SchemaBuilder {
   {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::InputObject, built_in);
-    raw.directives = self.directive_uses(def.directives());
+    raw.directives = self.directive_uses(def.directives(), DirectiveLocation::InputObject);
     raw.input_fields = self.input_fields(def.fields_definition());
     raw
   }
@@ -493,7 +599,10 @@ impl SchemaBuilder {
   {
     let name = self.located(def.name());
     let args = match def.arguments_definition() {
-      Some(arguments) => self.input_values(arguments.input_value_definitions()),
+      Some(arguments) => self.input_values(
+        arguments.input_value_definitions(),
+        DirectiveLocation::ArgumentDefinition,
+      ),
       None => Vec::new(),
     };
     let mut locations = DirectiveLocations::EMPTY;
@@ -541,6 +650,8 @@ impl SchemaBuilder {
       return;
     }
     self.schema_definition = Some(span);
+    let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
+    self.schema_directives.extend(directives);
     for root in def
       .root_operation_types_definition()
       .root_operation_type_definitions()
@@ -619,18 +730,85 @@ impl SchemaBuilder {
     }
   }
 
-  fn directive_uses<S>(&mut self, directives: Option<&ConstDirectives<S>>) -> Vec<Located>
+  /// Converts a directive list to owned form, tagging each usage with the position it was written
+  /// at.
+  ///
+  /// The location is the caller's to supply because it is the one fact the directive node does not
+  /// carry: `@d` is the same three tokens on an object type and on an enum value.
+  fn directive_uses<S>(
+    &mut self,
+    directives: Option<&ConstDirectives<S>>,
+    location: DirectiveLocation,
+  ) -> Vec<RawDirectiveUse>
   where
     S: AsRef<[u8]>,
   {
-    match directives {
-      None => Vec::new(),
-      Some(list) => list
-        .directives()
-        .iter()
-        .map(|directive| self.located(directive.name()))
-        .collect(),
-    }
+    let Some(list) = directives else {
+      return Vec::new();
+    };
+    list
+      .directives()
+      .iter()
+      .map(|directive| {
+        let name = self.located(directive.name());
+        let args = match directive.arguments() {
+          None => Vec::new(),
+          Some(arguments) => arguments
+            .arguments()
+            .iter()
+            .map(|argument| RawArgument {
+              name: self.located(argument.name()),
+              value: self.const_value(argument.value()),
+            })
+            .collect(),
+        };
+        RawDirectiveUse {
+          name,
+          span: *directive.span(),
+          location,
+          args,
+        }
+      })
+      .collect()
+  }
+
+  /// Reduces a constant literal to the shape and spelling a type check reads.
+  ///
+  /// Recursive, and bounded the same way [`SchemaBuilder::type_ref`] is: the AST handed in was
+  /// built by a recursive-descent parser and will be dropped recursively, so a literal deep enough
+  /// to overflow here could not have been parsed in the first place. That is not true of the type
+  /// *graph*, which is why the cycle walks in this file are iterative and this is not.
+  fn const_value<S>(&mut self, value: &ConstInputValue<S>) -> RawValue
+  where
+    S: AsRef<[u8]>,
+  {
+    let span = *value.as_span();
+    let shape = match value {
+      ConstInputValue::Null(_) => RawShape::Null,
+      ConstInputValue::Boolean(_) => RawShape::Boolean,
+      ConstInputValue::String(_) => RawShape::String,
+      ConstInputValue::Int(int) => RawShape::Int(int.source().as_ref().into()),
+      ConstInputValue::Float(float) => RawShape::Float(float.source().as_ref().into()),
+      ConstInputValue::Enum(member) => RawShape::Enum(member.source().as_ref().into()),
+      ConstInputValue::List(list) => RawShape::List(
+        list
+          .values()
+          .iter()
+          .map(|entry| self.const_value(entry))
+          .collect(),
+      ),
+      ConstInputValue::Object(object) => RawShape::Object(
+        object
+          .fields()
+          .iter()
+          .map(|field| RawObjectField {
+            name: self.located(field.name()),
+            value: self.const_value(field.value()),
+          })
+          .collect(),
+      ),
+    };
+    RawValue { span, shape }
   }
 
   fn fields<S>(&mut self, fields: Option<&FieldsDefinition<S>>) -> Vec<RawField>
@@ -647,10 +825,20 @@ impl SchemaBuilder {
         let name = self.located(field.name());
         let ty = self.type_ref(field.ty());
         let args = match field.arguments_definition() {
-          Some(arguments) => self.input_values(arguments.input_value_definitions()),
+          Some(arguments) => self.input_values(
+            arguments.input_value_definitions(),
+            DirectiveLocation::ArgumentDefinition,
+          ),
           None => Vec::new(),
         };
-        RawField { name, ty, args }
+        let directives =
+          self.directive_uses(field.directives(), DirectiveLocation::FieldDefinition);
+        RawField {
+          name,
+          ty,
+          args,
+          directives,
+        }
       })
       .collect()
   }
@@ -661,11 +849,23 @@ impl SchemaBuilder {
   {
     match fields {
       None => Vec::new(),
-      Some(fields) => self.input_values(fields.input_value_definitions()),
+      Some(fields) => self.input_values(
+        fields.input_value_definitions(),
+        DirectiveLocation::InputFieldDefinition,
+      ),
     }
   }
 
-  fn input_values<S>(&mut self, values: &[InputValueDefinition<S>]) -> Vec<RawInput>
+  /// One `InputValueDefinition` list, owned.
+  ///
+  /// `location` is what the same production is called in the two places it appears: an argument of
+  /// a field or a directive is an `ARGUMENT_DEFINITION`, a field of an input object is an
+  /// `INPUT_FIELD_DEFINITION`.
+  fn input_values<S>(
+    &mut self,
+    values: &[InputValueDefinition<S>],
+    location: DirectiveLocation,
+  ) -> Vec<RawInput>
   where
     S: AsRef<[u8]>,
   {
@@ -681,7 +881,7 @@ impl SchemaBuilder {
             _ => DefaultKind::NonNull,
           },
         };
-        let directives = self.directive_uses(value.directives());
+        let directives = self.directive_uses(value.directives(), location);
         RawInput {
           name,
           ty,
@@ -704,7 +904,7 @@ impl SchemaBuilder {
       .iter()
       .map(|value| {
         let name = self.located(value.value());
-        let directives = self.directive_uses(value.directives());
+        let directives = self.directive_uses(value.directives(), DirectiveLocation::EnumValue);
         RawEnumValue { name, directives }
       })
       .collect()
@@ -765,7 +965,7 @@ impl SchemaBuilder {
     let mut raw = RawExtension::default();
     match extension {
       TypeSystemExtension::Schema(schema) => {
-        raw.directives = self.directive_uses(schema.directives());
+        raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
         if let Some(roots) = schema.root_operation_types_definition() {
           for root in roots.root_operation_type_definitions() {
             let operation = map_operation(root.operation_type());
@@ -778,38 +978,38 @@ impl SchemaBuilder {
         TypeExtension::Scalar(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::Scalar);
-          raw.directives = self.directive_uses(Some(def.directives()));
+          raw.directives = self.directive_uses(Some(def.directives()), DirectiveLocation::Scalar);
         }
         TypeExtension::Object(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::Object);
           raw.implements = self.implements(def.implements());
-          raw.directives = self.directive_uses(def.directives());
+          raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Object);
           raw.fields = self.fields(def.fields_definition());
         }
         TypeExtension::Interface(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::Interface);
           raw.implements = self.implements(def.implements());
-          raw.directives = self.directive_uses(def.directives());
+          raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Interface);
           raw.fields = self.fields(def.fields_definition());
         }
         TypeExtension::Union(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::Union);
-          raw.directives = self.directive_uses(def.directives());
+          raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Union);
           raw.members = self.members(def.member_types());
         }
         TypeExtension::Enum(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::Enum);
-          raw.directives = self.directive_uses(def.directives());
+          raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Enum);
           raw.enum_values = self.enum_values(def.enum_values_definition());
         }
         TypeExtension::InputObject(def) => {
           raw.target = Some(self.located(def.name()));
           raw.kind = Some(TypeKind::InputObject);
-          raw.directives = self.directive_uses(def.directives());
+          raw.directives = self.directive_uses(def.directives(), DirectiveLocation::InputObject);
           raw.input_fields = self.input_fields(def.fields_definition());
         }
       },
@@ -821,7 +1021,9 @@ impl SchemaBuilder {
     let extensions = core::mem::take(&mut self.extensions);
     for extension in extensions {
       let Some(target) = extension.target else {
-        // `extend schema`.
+        // `extend schema`. Its directives join the schema definition's own list, because the two
+        // are one location: `schema @d` plus `extend schema @d` repeats a non-repeatable `@d`.
+        self.schema_directives.extend(extension.directives);
         for (operation, located) in extension.roots {
           self.set_root(operation, located);
         }
@@ -959,6 +1161,7 @@ impl SchemaBuilder {
     self.compute_closures();
     self.validate_types();
     self.validate_directive_definitions();
+    self.validate_directive_usages();
     self.validate_interface_implementations();
     self.validate_input_object_cycles();
     self.validate_directive_cycles();
@@ -1186,7 +1389,7 @@ impl SchemaBuilder {
     self.types[index]
       .directives
       .iter()
-      .any(|used| self.text(used.sym) == name)
+      .any(|used| self.text(used.name.sym) == name)
   }
 
   fn validate_fields(&mut self, index: usize, owner: &str) {
@@ -1494,6 +1697,318 @@ impl SchemaBuilder {
     }
   }
 
+  // -- validation: directive usages (draft §3.13, at a use site) ------------------------------
+
+  /// Every directive written on a type-system element, against the definition it names.
+  ///
+  /// This is the SDL half of six rules the executable side already runs per request — draft 5.7.1,
+  /// 5.7.2, 5.7.3, 5.4.1, 5.4.3 and 5.6.1 — and it asks them of the one place they would otherwise
+  /// never be asked. A server builds its schema once and then trusts it, so a directive misuse
+  /// that survives the build is never diagnosed at all.
+  ///
+  /// It runs after [`SchemaBuilder::resolve_type_refs`] because an argument's declared type has to
+  /// be resolved before a value can be checked against it, and after
+  /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
+  fn validate_directive_usages(&mut self) {
+    let schema_uses = self.schema_directives.clone();
+    self.check_directive_uses(&schema_uses, "schema");
+
+    for index in 0..self.types.len() {
+      let owner = self.text(self.types[index].name.sym).to_owned();
+
+      let uses = self.types[index].directives.clone();
+      self.check_directive_uses(&uses, &owner);
+
+      for field in 0..self.types[index].fields.len() {
+        let field_name = self
+          .text(self.types[index].fields[field].name.sym)
+          .to_owned();
+        let path = owner_path(&[&owner, &field_name]);
+        let uses = self.types[index].fields[field].directives.clone();
+        self.check_directive_uses(&uses, &path);
+
+        for arg in 0..self.types[index].fields[field].args.len() {
+          let arg_name = self
+            .text(self.types[index].fields[field].args[arg].name.sym)
+            .to_owned();
+          let path = owner_path(&[&owner, &field_name, &arg_name]);
+          let uses = self.types[index].fields[field].args[arg].directives.clone();
+          self.check_directive_uses(&uses, &path);
+        }
+      }
+
+      for field in 0..self.types[index].input_fields.len() {
+        let field_name = self
+          .text(self.types[index].input_fields[field].name.sym)
+          .to_owned();
+        let path = owner_path(&[&owner, &field_name]);
+        let uses = self.types[index].input_fields[field].directives.clone();
+        self.check_directive_uses(&uses, &path);
+      }
+
+      for value in 0..self.types[index].enum_values.len() {
+        let value_name = self
+          .text(self.types[index].enum_values[value].name.sym)
+          .to_owned();
+        let path = owner_path(&[&owner, &value_name]);
+        let uses = self.types[index].enum_values[value].directives.clone();
+        self.check_directive_uses(&uses, &path);
+      }
+    }
+
+    for index in 0..self.directives.len() {
+      let owner = self.text(self.directives[index].name.sym).to_owned();
+      for arg in 0..self.directives[index].args.len() {
+        let arg_name = self
+          .text(self.directives[index].args[arg].name.sym)
+          .to_owned();
+        let path = owner_path(&[&owner, &arg_name]);
+        let uses = self.directives[index].args[arg].directives.clone();
+        self.check_directive_uses(&uses, &path);
+      }
+    }
+  }
+
+  /// One element's directive list: defined, allowed here, not repeated, and correctly argued.
+  fn check_directive_uses(&mut self, uses: &[RawDirectiveUse], owner: &str) {
+    // Only a definition the schema knows can be known non-repeatable, so an undefined directive
+    // written twice is the undefined-directive mistake twice over and not also this one.
+    let mut seen: Vec<(Sym, SimpleSpan)> = Vec::new();
+
+    for used in uses {
+      let name = self.text(used.name.sym).to_owned();
+      let Some(definition) = self.directive_index(used.name.sym) else {
+        self.push_owned(
+          SchemaErrorKind::UndefinedDirective,
+          &name,
+          owner.to_owned(),
+          used.name,
+        );
+        continue;
+      };
+
+      if !self.directives[definition].repeatable {
+        match seen.iter().find(|(sym, _)| *sym == used.name.sym).copied() {
+          Some((_, first)) => self.push_related(
+            SchemaErrorKind::DuplicateDirectiveUse,
+            &name,
+            Some(owner.to_owned()),
+            used.name,
+            first,
+          ),
+          None => seen.push((used.name.sym, used.name.span)),
+        }
+      }
+
+      // The whole of the location rule: one shift and one `AND` against the word the definition
+      // was reduced to at ingest — the same `DirectiveLocations::contains` the executable rules
+      // call, so the two cannot answer differently.
+      if !self.directives[definition]
+        .locations
+        .contains(used.location)
+      {
+        self.push_owned(
+          SchemaErrorKind::UnsupportedDirectiveLocation,
+          &name,
+          owner.to_owned(),
+          used.name,
+        );
+      }
+
+      self.check_directive_arguments(used, definition, owner, &name);
+    }
+  }
+
+  /// One usage's arguments, against the ones its definition declares.
+  fn check_directive_arguments(
+    &mut self,
+    used: &RawDirectiveUse,
+    definition: usize,
+    owner: &str,
+    directive: &str,
+  ) {
+    let coordinate = directive_coordinate(owner, directive);
+    let declared = self.directives[definition].args.clone();
+
+    for argument in &used.args {
+      let name = self.text(argument.name.sym).to_owned();
+      let Some(expected) = declared.iter().find(|d| d.name.sym == argument.name.sym) else {
+        self.push_owned(
+          SchemaErrorKind::UndefinedDirectiveArgument,
+          &name,
+          coordinate.clone(),
+          argument.name,
+        );
+        continue;
+      };
+
+      // An explicit `null` for a required argument is the required-argument mistake, not a
+      // value-type one: one defect, one diagnostic, and it is the one that names the obligation.
+      if expected.is_required() && matches!(argument.value.shape, RawShape::Null) {
+        self.push_owned(
+          SchemaErrorKind::MissingRequiredDirectiveArgument,
+          &name,
+          coordinate.clone(),
+          argument.name,
+        );
+        continue;
+      }
+
+      self.check_const_value(
+        &argument.value,
+        expected.ty.packed,
+        &coordinate,
+        &name,
+        argument.name.document,
+      );
+    }
+
+    for expected in &declared {
+      if !expected.is_required() {
+        continue;
+      }
+      let supplied = used
+        .args
+        .iter()
+        .any(|argument| argument.name.sym == expected.name.sym);
+      if supplied {
+        continue;
+      }
+      // Nothing was written, so the usage itself is what the omission is blamed on.
+      let name = self.text(expected.name.sym).to_owned();
+      self.push_at(
+        SchemaErrorKind::MissingRequiredDirectiveArgument,
+        &name,
+        coordinate.clone(),
+        used.span,
+        used.name.document,
+      );
+    }
+  }
+
+  /// One constant literal against the type declared for its position.
+  ///
+  /// The decision procedure is draft 5.6.1's, and the coercion table it consults is the one the
+  /// executable rules consult: `null` only where the position is nullable, a non-list value
+  /// standing for the one-element list containing it at any depth, an enum literal that must name
+  /// a member, and a scalar that must be spelled the way its built-in says — with a custom scalar
+  /// accepting anything, because only the service knows how to read one.
+  ///
+  /// What it deliberately does not report is a mistake some *other* rule already owns: an
+  /// unresolved base type is the undefined-type refusal, and an output type in an input position
+  /// is the directive-argument-type refusal. Reporting either again would make one defect print
+  /// twice.
+  fn check_const_value(
+    &mut self,
+    value: &RawValue,
+    expected: PackedType,
+    owner: &str,
+    subject: &str,
+    document: u32,
+  ) {
+    if matches!(value.shape, RawShape::Null) {
+      if expected.is_non_null() {
+        self.push_at(
+          SchemaErrorKind::InvalidDirectiveArgumentValue,
+          subject,
+          owner.to_owned(),
+          value.span,
+          document,
+        );
+      }
+      return;
+    }
+
+    // Strip the outer non-null, then apply the singleton-to-list coercion: a non-list value in a
+    // list position is the one-element list containing it, at any depth.
+    let mut expected = expected.nullable();
+    while expected.is_list() && !matches!(value.shape, RawShape::List(_)) {
+      let Some(item) = expected.list_item() else {
+        break;
+      };
+      expected = item.nullable();
+    }
+
+    if expected.is_list() {
+      let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
+        return;
+      };
+      for entry in entries {
+        self.check_const_value(entry, item, owner, subject, document);
+      }
+      return;
+    }
+
+    let base = expected.base_id();
+    if base == UNRESOLVED {
+      return;
+    }
+    let base = base.get() as usize;
+
+    match self.types[base].kind {
+      TypeKind::InputObject => {
+        let RawShape::Object(fields) = &value.shape else {
+          self.push_at(
+            SchemaErrorKind::InvalidDirectiveArgumentValue,
+            subject,
+            owner.to_owned(),
+            value.span,
+            document,
+          );
+          return;
+        };
+        // A field the input object does not declare, and a required field left out, are draft
+        // 5.6.2's and 5.6.4's business; neither is one of the six checks this pass adds, so the
+        // walk descends into what *is* declared and says nothing about the rest.
+        let declared = self.types[base].input_fields.clone();
+        for field in fields {
+          let Some(expected) = declared.iter().find(|d| d.name.sym == field.name.sym) else {
+            continue;
+          };
+          self.check_const_value(&field.value, expected.ty.packed, owner, subject, document);
+        }
+      }
+      TypeKind::Enum => {
+        let member = match &value.shape {
+          RawShape::Enum(bytes) => self.interner.lookup(bytes).is_some_and(|sym| {
+            self.types[base]
+              .enum_values
+              .iter()
+              .any(|value| value.name.sym == sym)
+          }),
+          _ => false,
+        };
+        if !member {
+          self.push_at(
+            SchemaErrorKind::InvalidDirectiveArgumentValue,
+            subject,
+            owner.to_owned(),
+            value.span,
+            document,
+          );
+        }
+      }
+      TypeKind::Scalar => {
+        let name = self.text(self.types[base].name.sym).to_owned();
+        // A custom scalar accepts every literal, so only the five built-ins have anything to say.
+        let accepted = BuiltInScalar::from_name(name.as_bytes())
+          .is_none_or(|scalar| scalar.accepts(value.shape.shape(), value.shape.spelling()));
+        if !accepted {
+          self.push_at(
+            SchemaErrorKind::InvalidDirectiveArgumentValue,
+            subject,
+            owner.to_owned(),
+            value.span,
+            document,
+          );
+        }
+      }
+      // An object, interface or union declared as an argument type is already the
+      // `DirectiveArgumentTypeNotInputType` refusal; there is no value that would fit it.
+      TypeKind::Object | TypeKind::Interface | TypeKind::Union => {}
+    }
+  }
+
   /// Draft §3.6.1/§3.7.1: transitivity, covariance of field types, invariance of argument types.
   fn validate_interface_implementations(&mut self) {
     for index in 0..self.types.len() {
@@ -1796,9 +2311,9 @@ impl SchemaBuilder {
     }
   }
 
-  fn push_directive_uses(&self, uses: &[Located], pending: &mut Vec<usize>) {
+  fn push_directive_uses(&self, uses: &[RawDirectiveUse], pending: &mut Vec<usize>) {
     for used in uses {
-      if let Some(index) = self.directive_index(used.sym) {
+      if let Some(index) = self.directive_index(used.name.sym) {
         pending.push(index);
       }
     }
@@ -2016,7 +2531,7 @@ impl SchemaBuilder {
       if raw
         .directives
         .iter()
-        .any(|used| interner.text(used.sym) == "oneOf")
+        .any(|used| interner.text(used.name.sym) == "oneOf")
       {
         flags = flags.union(TypeFlags::ONE_OF);
       }

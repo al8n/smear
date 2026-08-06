@@ -155,6 +155,33 @@ pub enum SchemaErrorKind {
   /// A directive definition refers to itself, directly or through the types it names
   /// (draft §3.13.1).
   SelfReferentialDirective,
+
+  // -- §3.13 Directives, at a use site --------------------------------------------------------
+  //
+  // The six below are the *usage* rules, and they are the SDL half of checks the executable side
+  // already runs per request as draft 5.7.1, 5.7.2, 5.7.3, 5.4.1, 5.4.3 and 5.6.1. A type-system
+  // element is not a request, so nothing would otherwise ever ask these questions of an SDL: the
+  // build is the only place a malformed schema is refused.
+  /// A directive names no definition in the schema (draft §3.13).
+  UndefinedDirective,
+  /// A directive is used somewhere its definition does not list (draft §3.13).
+  UnsupportedDirectiveLocation,
+  /// A directive that is not `repeatable` is used twice in the same location (draft §3.13).
+  ///
+  /// A type and its extensions are one location: `type T @d` plus `extend type T @d` is a repeat,
+  /// which is what merging extensions before the check makes fall out.
+  DuplicateDirectiveUse,
+  /// A directive is given an argument its definition does not declare (draft §3.13).
+  UndefinedDirectiveArgument,
+  /// A directive omits a required argument, or passes it `null` (draft §3.13).
+  ///
+  /// Required means non-null with no default. An explicit `null` is reported here rather than as
+  /// [`InvalidDirectiveArgumentValue`](Self::InvalidDirectiveArgumentValue) so that one mistake
+  /// produces one diagnostic, and it is the one that names the obligation.
+  MissingRequiredDirectiveArgument,
+  /// A directive argument's value does not fit the type the definition declares for it
+  /// (draft §3.13, by way of §3.4's input coercion).
+  InvalidDirectiveArgumentValue,
 }
 
 impl SchemaErrorKind {
@@ -214,6 +241,12 @@ impl SchemaErrorKind {
     Self::ReservedDirectiveArgumentName,
     Self::DirectiveArgumentTypeNotInputType,
     Self::SelfReferentialDirective,
+    Self::UndefinedDirective,
+    Self::UnsupportedDirectiveLocation,
+    Self::DuplicateDirectiveUse,
+    Self::UndefinedDirectiveArgument,
+    Self::MissingRequiredDirectiveArgument,
+    Self::InvalidDirectiveArgumentValue,
   ];
 
   /// Returns the phrase this kind renders as, with no subject attached.
@@ -281,6 +314,14 @@ impl SchemaErrorKind {
       }
       Self::DirectiveArgumentTypeNotInputType => "directive argument type is not an input type",
       Self::SelfReferentialDirective => "directive definition refers to itself",
+      Self::UndefinedDirective => "undefined directive",
+      Self::UnsupportedDirectiveLocation => "directive is not allowed here",
+      Self::DuplicateDirectiveUse => "directive is not repeatable",
+      Self::UndefinedDirectiveArgument => "undefined directive argument",
+      Self::MissingRequiredDirectiveArgument => "required directive argument is missing",
+      Self::InvalidDirectiveArgumentValue => {
+        "directive argument value does not fit its declared type"
+      }
     }
   }
 }
@@ -484,5 +525,19 @@ pub(crate) fn owner_path(segments: &[&str]) -> String {
     }
     path.push_str(segment);
   }
+  path
+}
+
+/// The owner path of a directive *usage*: the element it sits on, then `@name`.
+///
+/// The `@` is what keeps `Query.@deprecated.reason` from reading as a field path, which matters
+/// because an argument of a directive on a field and an argument of the field itself would
+/// otherwise render identically.
+pub(crate) fn directive_coordinate(owner: &str, directive: &str) -> String {
+  let mut path = String::with_capacity(owner.len() + directive.len() + 2);
+  path.push_str(owner);
+  path.push('.');
+  path.push('@');
+  path.push_str(directive);
   path
 }
