@@ -115,6 +115,40 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
+# ── EVERY `run:` IN THIS FILE IS BASH ───────────────────────────────────────────────────────
+#
+# GitHub picks the shell from the HOST when a step does not say: `bash -e {0}` on ubuntu and
+# macOS, but `pwsh` on Windows. So a `run:` block is written once and parsed by two different
+# languages, and the ubuntu cell of a matrix cannot tell you that the windows cell will not
+# even lex. That is a build failure, not a Rust failure, and it happened: #84 added a two-pass
+# `cargo hack` invocation to `clippy` and `build` with a backslash line continuation — bash
+# syntax — and both `(windows-latest)` cells of run 31085548219 died before cargo started, with
+# `ParserError: ...ps1:19 | Missing expression after unary operator '--'`. PowerShell has no
+# `\` continuation, so it read `--exclude-features` as a unary minus applied to a minus.
+#
+# WHY THE FILE-WIDE DEFAULT RATHER THAN `shell: bash` ON THE TWO STEPS THAT BURNED. The
+# per-step form fixes those two and leaves the trap armed for the third: the next multi-line
+# `run:` added to any windows-hosted job here — a `\`, a `$(...)`, a heredoc, a `case` — fails
+# the same way, and the author gets the same unreadable ParserError. This file already carries
+# `ci/check_workflow_triggers.sh` because a CI invariant kept by discipline is a CI invariant
+# that goes stale. A default cannot go stale: a step has to opt OUT to get the old behaviour.
+#
+# AND WHY IT IS SAFE TO IMPOSE ON EVERY STEP. Checked, not assumed. Exactly one step in this
+# repository is written in PowerShell — `Use lld-link (Windows)` in the `test` job below, with
+# its `$env:GITHUB_ENV`, `Test-Path` and `&` call operator — and it declares `shell: pwsh`
+# itself. A step-level `shell:` overrides `defaults.run.shell`, so that step is untouched by
+# this block; it is also the reason the default is safe to state so broadly, and the reason to
+# keep its explicit `shell:` if it is ever edited.
+#
+# The one behaviour this DOES change on ubuntu: naming bash explicitly selects
+# `bash --noprofile --norc -eo pipefail {0}` where the host default was `bash -e {0}`, so
+# `pipefail` is now on everywhere. Audited across this file — the `docs` steps already `set -o
+# pipefail` themselves, nothing else in a `run:` block pipes anything, and the single
+# exception is the `msrv` job's `grep | sed`, guarded at that step with the note explaining it.
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
@@ -601,7 +635,12 @@ jobs:
     - name: Read declared MSRV from Cargo.toml
       id: msrv
       run: |
-        version=$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/^rust-version *= *"([^"]+)".*/\1/')
+        # `|| true` inside the group, and the same idiom for the same reason as the `docs` job's
+        # badge count below: `defaults.run.shell: bash` at the top of this file turns `pipefail`
+        # on, and `grep` exits 1 when it matches nothing. Without the guard a missing
+        # `rust-version` would kill the step at this line under `-e`, so the diagnostic three
+        # lines down — the one that names what is actually wrong — could never be reached.
+        version=$( { grep -m1 '^rust-version' Cargo.toml || true; } | sed -E 's/^rust-version *= *"([^"]+)".*/\1/')
         if [ -z "$version" ]; then
           echo "Error: could not read rust-version from Cargo.toml"
           exit 1

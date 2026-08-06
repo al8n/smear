@@ -75,6 +75,23 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
+# Every `run:` here is bash — the same block `ci.yml` carries, for the same reason, and read
+# that one for the full account. It is stated in this file even though nothing here runs on a
+# Windows host, because the two `cargo hack` steps below are the SAME two steps that took
+# `CI`'s `clippy (windows-latest)` and `build (windows-latest)` down in run 31085548219: they
+# carry a `\` line continuation, which PowerShell does not have. They only work today because
+# GitHub happens to pick bash for a macOS host. `test`'s `brew --prefix` step is the same bet
+# with `$(...)` and `test -x ... || { ...; exit 1; }`.
+#
+# That bet is on the runner, not on the source, and this repository has already paid for
+# fixing a defect only where it burned — see the sibling-drift note in
+# `ci/check_workflow_triggers.sh`. The moment a `windows-latest` entry joins one of these
+# single-entry `os` matrices, every one of those constructs is a ParserError. Stating the
+# default costs three lines and takes the whole class off the table in advance.
+defaults:
+  run:
+    shell: bash
+
 # Carried from `CI` verbatim: these are the same jobs, and `RUSTFLAGS` is what they compiled
 # with. `CI`'s `nightly` / `stable` entries are not carried — no step here, or there, reads them.
 env:
