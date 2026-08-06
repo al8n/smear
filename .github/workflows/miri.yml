@@ -74,13 +74,21 @@ name: Miri
 # and because they cost `CI` nothing from here; if the macOS budget ever has to shrink,
 # `x86_64-apple-darwin` is the cell to spend first.
 
-# Triggers and `paths-ignore` are deliberately identical to `.github/workflows/ci.yml` and
-# `.github/workflows/macos.yml`; read the comment there for why the ignore list carries no
-# blanket `**.md`.
+# `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
+# `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the
+# ignore list carries no blanket `**.md`. `schedule` is the one deliberate difference — see below.
+# `ci/check_workflow_triggers.sh` enforces that the `on.push.branches` lists stay identical across
+# every workflow that has one, because that is the part where a divergence is silent.
 on:
   push:
+    # `main` is the DEFAULT branch, `feat/tokora-0.8` is the TRUNK, and until those are the same
+    # branch both are needed: on 2026-08-06 `main` was 145 commits behind the trunk and not an
+    # ancestor of it, so a lane naming only `main` never ran for a merge. Kept identical to
+    # `ci.yml`'s list, whose comment carries the full reasoning and the note on why a literal name
+    # is unavoidable in an `on:` block (#74).
     branches:
       - main
+      - feat/tokora-0.8
     paths-ignore:
       - 'COPYRIGHT'
       - 'LICENSE-*'
@@ -95,19 +103,36 @@ on:
       - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
-  schedule: [cron: "0 1 */7 * *"]
+  # NO `schedule`, deliberately, and this is the one place these triggers differ from `CI`'s.
+  #
+  # It carried `[cron: "0 1 */7 * *"]` until #74, where it was pure decoration: a `schedule` runs
+  # only the DEFAULT branch's copy of a workflow, and this file does not exist on `main` at all,
+  # so the line had never fired once. Removing it costs nothing that was happening.
+  #
+  # It is not restored on the retarget that would make it fire. This is the lane with both
+  # problems the header describes — the macOS queue AND a 14h42m wall clock, 4h20m of it in a
+  # single cell — and #73 is already about how much of that spend re-proves nothing. A weekly run
+  # over unchanged source has strictly less to say than the push that produced the source: Miri
+  # findings are a function of the code and of the toolchain, and the toolchain here is pinned by
+  # `ci/miri_tb.sh` / `ci/miri_sb.sh`, not by the calendar. `push` and `pull_request` above cover
+  # every change.
 
 concurrency:
   # Same expression as `CI`'s and `macOS`'s, and `${{ github.workflow }}` leading it is what keeps
   # the three lanes independent: `CI-...`, `Miri-...` and `macOS-...` are different groups, so no
-  # lane can cancel another's run. One in-flight run per ref, except on `main`, where the group is
-  # keyed on the commit SHA so that every main commit gets its own group and its own verdict. Do
-  # NOT collapse that back to one group per ref: `cancel-in-progress: false` does not protect a
-  # main run on its own, because a run queued into a group that already has one in progress
-  # cancels whichever run was PENDING there regardless of that setting — and this workflow is
-  # precisely the one whose runs stay pending long enough for the next push to do it.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # lane can cancel another's run. One in-flight run per ref, except for a push — which
+  # `on.push.branches` above restricts to the integration branches — where the group is keyed on
+  # the commit SHA so that every commit landing on one gets its own group and its own verdict. Do
+  # NOT collapse that back to one group per ref: `cancel-in-progress: false` does not protect such
+  # a run on its own, because a run queued into a group that already has one in progress cancels
+  # whichever run was PENDING there regardless of that setting — and this workflow is precisely
+  # the one whose runs stay pending long enough for the next push to do it.
+  #
+  # Keyed on the EVENT rather than on `github.ref == 'refs/heads/main'`, which is what it said
+  # until #74; see `ci.yml`'s concurrency comment for why that literal was both wrong and the
+  # thing that would have quietly halved this fix.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # `RUSTFLAGS` is carried over from `CI` verbatim even though `ci/miri_tb.sh` and `ci/miri_sb.sh`
 # both set `MIRIFLAGS` before any `cargo miri test`: neither script touches `RUSTFLAGS`, so this

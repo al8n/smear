@@ -23,8 +23,28 @@ name: CI
 
 on:
   push:
+    # BOTH names are load-bearing. `main` is the repository's DEFAULT branch — it is what
+    # `schedule` runs, where a fresh clone lands, and where dependabot opens its pull requests.
+    # `feat/tokora-0.8` is the TRUNK — it is what every feature pull request is opened against and
+    # merged into. On 2026-08-06 `main` was 145 commits behind the trunk and not an ancestor of
+    # it, so those are two different branches and a post-merge lane naming only one of them
+    # watches the wrong ref. This list said `main` alone for the trunk's entire life: no merge
+    # into the trunk ever produced a run, and `gh run list --branch feat/tokora-0.8` returned
+    # nothing (#74).
+    #
+    # A literal name is forced here. `on:` is resolved before any context exists, so
+    # `${{ github.event.repository.default_branch }}` cannot be written in this block, and there
+    # is no glob to fall back on: the trunk has already been renamed twice — `refactor/main` ->
+    # `refactor/main-0.8` -> `feat/tokora-0.8` — with no common prefix. A literal list will
+    # therefore go stale again, and neither of those two renames deleted the branch it replaced,
+    # so a stale entry here stays resolvable and silent.
+    #
+    # `ci/check_workflow_triggers.sh`, run by the `triggers` job below, is what makes the next one
+    # loud. It does not ask what the trunk is called; it asks whether the branch this pull request
+    # is being merged INTO has a push lane, and fails when it does not.
     branches:
       - main
+      - feat/tokora-0.8
     # `**.md` used to sit in these lists. It cannot: `README.md`,
     # `smear-lexer/README.md` and `smear-parser/README.md` are `include_str!`-ed
     # into their crates' rustdoc, so editing one is a compile-time change to the
@@ -47,6 +67,25 @@ on:
       - 'legacy/**.md'
       - '**.txt'
   workflow_dispatch:
+  # KEPT here and DROPPED from `macos.yml` and `miri.yml` — the one deliberate difference between
+  # the three files' trigger blocks, and the reason `ci/check_workflow_triggers.sh` locks
+  # `on.push.branches` across them rather than the whole `on:` block. Two things before touching
+  # it.
+  #
+  # A `schedule` only ever runs the DEFAULT branch's copy of a workflow, against the default
+  # branch's ref. So while `main` is default and this file lives on the trunk, this line does
+  # nothing at all: the weekly run that does exist (30678206309, 2026-08-01, `failure`, 1h31m) is
+  # produced by `main`'s own pre-split `ci.yml`, and deleting this line would not stop a second of
+  # it. That is a change to `main`, or it is made moot by retargeting the default branch — either
+  # way it is not reachable from here. `macos.yml` and `miri.yml` do not exist on `main` at all,
+  # so their `schedule` lines were pure decoration.
+  #
+  # This line is therefore a decision about what happens the moment the default branch becomes the
+  # trunk. A weekly build of unchanged code earns its runner time on THIS lane — it is where a new
+  # nightly, a new clippy lint or a yanked dependency shows up between merges, for ~1h31m of
+  # ubuntu and windows time. It does not earn it on the other two, whose weekly cost would be a
+  # 6-9h macOS queue and a 14h wall clock to re-prove what the merge that produced the code
+  # already proved; see #73.
   schedule: [cron: "0 1 */7 * *"]
 
 concurrency:
@@ -55,16 +94,26 @@ concurrency:
   # that stopped this workflow concluding. One in-flight run per workflow per ref now, so a
   # branch's CI reflects its tip rather than a backlog of superseded commits.
   #
-  # `main` is the exception: the group is keyed on the commit SHA so that every main commit gets
-  # its own group and its own verdict. Do NOT collapse that back to one group per ref —
-  # `cancel-in-progress: false` does not protect a main run on its own, because a run queued
-  # into a group that already has one in progress cancels whichever run was PENDING there
-  # regardless of that setting.
+  # Integration branches are the exception: the group is keyed on the commit SHA so that every
+  # commit landing on one gets its own group and its own verdict. Do NOT collapse that back to one
+  # group per ref — `cancel-in-progress: false` does not protect such a run on its own, because a
+  # run queued into a group that already has one in progress cancels whichever run was PENDING
+  # there regardless of that setting.
+  #
+  # `github.event_name == 'push'` IS the integration-branch test, exactly, without naming a
+  # branch: `on.push.branches` above is the only way a push event reaches this workflow, so a push
+  # run is by construction a run on a branch in that list. This read `github.ref ==
+  # 'refs/heads/main'` until #74 — a third copy of a branch name that was already the wrong one.
+  # Adding the trunk to the push list while leaving it would have half-fixed the issue and hidden
+  # the other half: the trunk would have kept the cancelling behaviour, so with four merges in two
+  # hours a run WOULD have appeared for `feat/tokora-0.8` and then been cancelled by the next
+  # merge, which reads as `fail` in `gh pr checks` and is still no verdict. Keyed on the event it
+  # cannot drift at the next rename.
   #
   # `${{ github.workflow }}` leading the group is what keeps the three lanes apart: `CI-...`,
   # `Miri-...` and `macOS-...` are different groups, so no lane can cancel another's run.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -74,6 +123,33 @@ env:
   stable: stable
 
 jobs:
+  # Check that the post-merge lanes point at the branch merges actually go to
+  #
+  # A workflow cannot detect its own non-execution, which is why #74 survived the trunk's entire
+  # life: every lane listed `main`, every merge went to `feat/tokora-0.8`, and the only symptom was
+  # `gh run list --branch feat/tokora-0.8` printing nothing. The assertion has to be made by the
+  # runs that do happen. Ten seconds on ubuntu, in no `needs:` chain, so it blocks nothing and
+  # costs this lane's conclusion nothing; the four invariants are documented in the script.
+  triggers:
+    name: triggers
+    runs-on: ubuntu-latest
+    # Spelled out because the script's fourth invariant asks the API whether the base branch is
+    # itself the head of an open pull request — the test that tells a renamed trunk from a stacked
+    # PR. Without `pull-requests: read` that query can fail depending on the repository's default
+    # token permissions, and the script would then warn and skip rather than fail, which is the
+    # quiet outcome this whole job exists to prevent.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - uses: actions/checkout@v5
+    - name: Check workflow trigger coverage
+      env:
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        PR_BASE: ${{ github.base_ref }}
+        GH_TOKEN: ${{ github.token }}
+      run: bash ci/check_workflow_triggers.sh
+
   # Check formatting
   rustfmt:
     name: rustfmt
