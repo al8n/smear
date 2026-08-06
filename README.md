@@ -208,4 +208,4 @@ shall be dual licensed as above, without any additional terms or conditions.
 [CI-url]: https://github.com/al8n/smear/actions/workflows/ci.yml
 [codecov-url]: https://app.codecov.io/gh/al8n/smear
 [doc-url]: https://docs.rs/smear
-[crates-url]: https://crates.io/smear
+[crates-url]: https://crates.io/crates/smear

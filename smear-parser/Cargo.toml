@@ -100,3 +100,33 @@ name = "graphqlx"
 path = "benches/graphqlx.rs"
 harness = false
 required-features = ["graphqlx"]
+
+# See `smear/Cargo.toml` for why this block exists at all (#65). This is the crate where
+# `all-features` was genuinely in question, so the decision is recorded rather than assumed.
+#
+# The two dialects are not the tension they look like. `graphql` and `graphqlx` are BOTH in
+# `default`, so a page carrying both is the surface a reader gets from `cargo add smear-parser`,
+# not an exotic union nobody compiles. `rowan` has to be on for an unrelated reason: it gates the
+# whole lossless CST tower, a headline consumer feature that would otherwise be absent from the
+# page entirely.
+#
+# `test-support` is the entry that looks wrong and is not. Leaving it out would stop
+# `lossless::test_support` being compiled, and that module is documented ON PURPOSE — its own
+# header argues the case, `KindSpace` being a public unsealed extension point whose invariants are
+# stated in prose and enforced nowhere else — and it carries
+# `#[cfg_attr(docsrs, doc(cfg(feature = "test-support")))]`, a badge that renders only in a build
+# that enables the feature. Excluding it here would leave that attribute inert on docs.rs, which
+# is #65's own defect reproduced one level down inside its fix. It does not drag the 68
+# per-production drivers onto the page either: every `test_support` under a *dialect* is
+# `#[doc(hidden)]`, so the feature adds exactly one documented item.
+#
+# `lossless-coverage` is the one awkward inclusion — it exports six instrumentation items nobody
+# ships. The answer to that is the `doc(cfg)` badge now on them in `src/lossless/coverage.rs`,
+# NOT a hand-written `features = [...]`. A literal list documents the features somebody
+# remembered on the day they wrote it, and the next feature added to this manifest would be
+# missing from docs.rs with nothing anywhere reporting it — the same silence as #65, one release
+# later. Keeping `all-features` also keeps the CI leg and the published build the same command,
+# so the gate tests the configuration docs.rs actually runs.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

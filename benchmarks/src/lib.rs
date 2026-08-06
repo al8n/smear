@@ -14,7 +14,7 @@
 //! * the correctness gate itself — error-free parse, byte-exact round-trip, non-trivial node
 //!   counts — which decides which entries are eligible to be timed at all.
 //!
-//! Nothing here is timed. [`benches/apollo_comparison.rs`] does the timing and calls into this.
+//! Nothing here is timed. `benches/apollo_comparison.rs` does the timing and calls into this.
 
 use core::hint::black_box;
 
